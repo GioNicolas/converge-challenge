@@ -36,3 +36,8 @@ export function resolverAvaliacao(avaliacaoId: string): { kit: Kit; problema: Pr
 export function dadosPublicosDoProblema(problema: Problema): { titulo: string; enunciado: string } {
   return { titulo: problema.titulo, enunciado: problema.enunciado };
 }
+
+/** Carrega um kit pelo id do kit ("system_design") ou da avaliação ("demo", "demo-produto"...). */
+export function carregarKit(id: string): Kit | undefined {
+  return resolverAvaliacao(id)?.kit ?? obterKit(id);
+}

@@ -5,6 +5,7 @@ import {
   extrairIdsDoGrafo,
   filtrarResposta,
   motivoBloqueio,
+  motivoBloqueioPlin,
   podeAnalisar,
   podeLevantarPlin,
   statusPermitido,
@@ -54,16 +55,17 @@ describe("statusPermitido: matriz fase x status", () => {
 
 describe("podeAnalisar (portão de entrada)", () => {
   it("só nas fases que analisam", () => {
-    const analisam: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
+    const analisam: Fase[] = ["REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
     for (const fase of FASES) {
       assert.equal(podeAnalisar(estadoEm(fase), AGORA), analisam.includes(fase), fase);
     }
-    assert.equal(motivoBloqueio(estadoEm("REQUISITOS"), AGORA), "FASE_NAO_ANALISA");
+    assert.equal(motivoBloqueio(estadoEm("APRESENTACAO")), "FASE_NAO_ANALISA");
+    assert.equal(motivoBloqueio(estadoEm("REQUISITOS")), null);
   });
 
   it("não roda com o candidato no meio da resposta", () => {
     const e = estadoEm("APROFUNDAMENTO", { plin: "PERGUNTA_ATIVA" });
-    assert.equal(motivoBloqueio(e, AGORA), "CANDIDATO_RESPONDENDO");
+    assert.equal(motivoBloqueio(e), "CANDIDATO_RESPONDENDO");
   });
 
   it("uma dúvida pendente não bloqueia (a análise pode substituí-la ou cancelá-la)", () => {
@@ -71,26 +73,34 @@ describe("podeAnalisar (portão de entrada)", () => {
     assert.equal(podeAnalisar(e, AGORA), true);
   });
 
+  it("intervalo e limite NÃO bloqueiam a análise (só o plin)", () => {
+    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 1, ultimaPerguntaEm: AGORA - 1000 }), AGORA), true);
+    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), AGORA), true);
+    assert.equal(podeAnalisar(estadoEm("FECHAMENTO", { perguntasFeitas: 6, perguntaFinalFeita: true }), AGORA), true);
+  });
+});
+
+describe("motivoBloqueioPlin (intervalo e limite)", () => {
   it("intervalo de 60s desde a última pergunta", () => {
     const base = { perguntasFeitas: 1 };
-    assert.equal(motivoBloqueio(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 59_999 }), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
-    assert.equal(motivoBloqueio(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - MIN }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 59_999 }), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - MIN }), AGORA), null);
   });
 
   it("limite de 5 perguntas", () => {
-    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 4 }), AGORA), true);
-    assert.equal(motivoBloqueio(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), AGORA), "LIMITE_DE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 4 }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), AGORA), "LIMITE_DE_PERGUNTAS");
   });
 
   it("FECHAMENTO: uma pergunta final, mesmo após as 5 normais", () => {
-    assert.equal(podeAnalisar(estadoEm("FECHAMENTO", { perguntasFeitas: 5 }), AGORA), true);
-    assert.equal(motivoBloqueio(estadoEm("FECHAMENTO", { perguntasFeitas: 6, perguntaFinalFeita: true }), AGORA), "LIMITE_DE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("FECHAMENTO", { perguntasFeitas: 5 }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("FECHAMENTO", { perguntasFeitas: 6, perguntaFinalFeita: true }), AGORA), "LIMITE_DE_PERGUNTAS");
   });
 
   it("regras configuráveis", () => {
     const regras = { intervaloEntrePerguntasMs: 1000, maxPerguntas: 2, maxCaracteresNota: 40 };
-    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 2 }), AGORA, regras), false);
-    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 1, ultimaPerguntaEm: AGORA - 1000 }), AGORA, regras), true);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 2 }), AGORA, regras), "LIMITE_DE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 1, ultimaPerguntaEm: AGORA - 1000 }), AGORA, regras), null);
   });
 });
 
@@ -118,6 +128,15 @@ describe("filtrarResposta", () => {
     assert.equal(r.pergunta, null);
     assert.equal(r.nota, null);
     assert.deepEqual(r.elementos, []);
+    assert.deepEqual(r.observacoes, obs);
+  });
+
+  it("REQUISITOS: analisa, mas nunca vira plin; observações ficam", () => {
+    const obs = [{ criterio: "requisitos", sinal: "positivo" as const, espontaneo: true, evidencia: "perguntou a escala" }];
+    assert.equal(podeAnalisar(estadoEm("REQUISITOS"), AGORA), true);
+    assert.equal(podeLevantarPlin(estadoEm("REQUISITOS"), "duvida", AGORA), false);
+    const r = filtrarResposta(estadoEm("REQUISITOS"), resposta({ observacoes: obs }), IDS, AGORA);
+    assert.equal(r.status, "ok");
     assert.deepEqual(r.observacoes, obs);
   });
 

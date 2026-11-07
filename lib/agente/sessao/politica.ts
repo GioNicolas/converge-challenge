@@ -31,26 +31,48 @@ export function statusPermitido(fase: Fase, status: StatusAnalise): boolean {
   return PLINS_DA_FASE[fase]?.includes(status) ?? false;
 }
 
-export type MotivoBloqueio =
-  | "FASE_NAO_ANALISA"
-  | "CANDIDATO_RESPONDENDO"
+/** Fases em que o /analisar roda (colhe observações). Plin é outra conta: ver PLINS_DA_FASE. */
+const FASES_QUE_ANALISAM: Fase[] = ["REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
+
+export type MotivoBloqueio = "FASE_NAO_ANALISA" | "CANDIDATO_RESPONDENDO";
+
+export type MotivoBloqueioPlin =
+  | MotivoBloqueio
   | "LIMITE_DE_PERGUNTAS"
   | "INTERVALO_ENTRE_PERGUNTAS";
 
 /**
  * Por que a análise não deve rodar agora (null = pode rodar).
  *
- * Uma dúvida pendente NÃO bloqueia: a análise precisa continuar rodando para poder substituir a
- * pendente por uma mais nova ou cancelá-la com um `ok`.
+ * Só fase e candidato respondendo bloqueiam. O intervalo de 60s e o limite de perguntas NÃO
+ * bloqueiam a análise: o agente segue colhendo observações para o scorecard, mesmo quando não
+ * pode levantar um plin (ver `motivoBloqueioPlin`). Uma dúvida pendente também não bloqueia
+ * (é preciso poder substituí-la ou cancelá-la).
  */
-export function motivoBloqueio(
+export function motivoBloqueio(estado: EstadoSessao): MotivoBloqueio | null {
+  if (!FASES_QUE_ANALISAM.includes(estado.fase)) return "FASE_NAO_ANALISA";
+  // Candidato no meio da resposta: não se interrompe.
+  if (estado.plin === "PERGUNTA_ATIVA") return "CANDIDATO_RESPONDENDO";
+  return null;
+}
+
+/** A análise pode rodar agora? (`agora` e `regras` ficam na assinatura por compatibilidade.) */
+export function podeAnalisar(
+  estado: EstadoSessao,
+  _agora?: number,
+  _regras: Regras = REGRAS_PADRAO,
+): boolean {
+  return motivoBloqueio(estado) === null;
+}
+
+/** Por que um plin não pode ser levantado agora (null = pode). Inclui limite e intervalo. */
+export function motivoBloqueioPlin(
   estado: EstadoSessao,
   agora: number,
   regras: Regras = REGRAS_PADRAO,
-): MotivoBloqueio | null {
-  if (!(estado.fase in PLINS_DA_FASE)) return "FASE_NAO_ANALISA";
-  // Candidato no meio da resposta: não se interrompe.
-  if (estado.plin === "PERGUNTA_ATIVA") return "CANDIDATO_RESPONDENDO";
+): MotivoBloqueioPlin | null {
+  const base = motivoBloqueio(estado);
+  if (base) return base;
   if (estado.fase === "FECHAMENTO") {
     if (estado.perguntaFinalFeita) return "LIMITE_DE_PERGUNTAS";
   } else if (estado.perguntasFeitas >= regras.maxPerguntas) {
@@ -65,16 +87,7 @@ export function motivoBloqueio(
   return null;
 }
 
-/** A análise pode rodar agora? */
-export function podeAnalisar(
-  estado: EstadoSessao,
-  agora: number,
-  regras: Regras = REGRAS_PADRAO,
-): boolean {
-  return motivoBloqueio(estado, agora, regras) === null;
-}
-
-/** Uma resposta com este status pode virar plin agora? */
+/** Uma resposta com este status pode virar plin agora? (fase + intervalo + limite) */
 export function podeLevantarPlin(
   estado: EstadoSessao,
   status: StatusAnalise,
@@ -82,7 +95,7 @@ export function podeLevantarPlin(
   regras: Regras = REGRAS_PADRAO,
 ): boolean {
   if (status === "ok") return false;
-  return statusPermitido(estado.fase, status) && podeAnalisar(estado, agora, regras);
+  return statusPermitido(estado.fase, status) && motivoBloqueioPlin(estado, agora, regras) === null;
 }
 
 /** Extrai os ids curtos do grafo (linhas "- [e1] Postgres (elipse)" ou "- [s1] A → B"). */
