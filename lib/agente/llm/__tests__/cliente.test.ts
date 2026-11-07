@@ -220,3 +220,34 @@ describe("paraJsonSchema", () => {
     assert.deepEqual(s.properties.elementos, { type: "array", items: { type: "string" } });
   });
 });
+
+describe("criarClienteOpenRouter: modelo que exige raciocínio", () => {
+  const recusa = () =>
+    new Response(JSON.stringify({ error: { message: "Reasoning is mandatory for this endpoint and cannot be disabled." } }), { status: 400 });
+
+  it("refaz o pedido com raciocínio em esforço baixo e mais tokens, e lembra do modelo", async () => {
+    const { cliente, chamadas } = montar([recusa(), openaiOk({ ok: true, n: 1 }), openaiOk({ ok: true, n: 2 })]);
+    const r1 = await cliente.completarJson({ ...ARGS, modelo: "anthropic/exige-raciocinio", maxTokens: 800 });
+    assert.deepEqual(r1.dados, { ok: true, n: 1 });
+    assert.equal(chamadas.length, 2);
+    const c1 = JSON.parse(String(chamadas[0].init.body));
+    const c2 = JSON.parse(String(chamadas[1].init.body));
+    assert.deepEqual(c1.reasoning, { enabled: false });
+    assert.deepEqual(c2.reasoning, { effort: "low" });
+    assert.ok(c2.max_tokens >= 4000);
+
+    // Segunda chamada ao mesmo modelo já vai direto com raciocínio (sem a tentativa que falha).
+    await cliente.completarJson({ ...ARGS, modelo: "anthropic/exige-raciocinio", maxTokens: 800 });
+    assert.equal(chamadas.length, 3);
+    assert.deepEqual(JSON.parse(String(chamadas[2].init.body)).reasoning, { effort: "low" });
+  });
+
+  it("outros 400 continuam falhando, com a mensagem do provedor no erro", async () => {
+    const { cliente, chamadas } = montar([new Response(JSON.stringify({ error: { message: "Invalid schema: foo" } }), { status: 400 })]);
+    await assert.rejects(
+      cliente.completarJson({ ...ARGS, modelo: "anthropic/outro" }),
+      (e: unknown) => e instanceof ErroLlm && e.status === 400 && /Invalid schema: foo/.test(e.message) && !e.message.includes(CHAVE),
+    );
+    assert.equal(chamadas.length, 1);
+  });
+});

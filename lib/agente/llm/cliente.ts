@@ -104,6 +104,9 @@ async function detalheDoErro(res: Response): Promise<string> {
   }
 }
 
+/** Modelos que recusaram raciocínio desligado nesta instância do servidor. */
+const exigemRaciocinio = new Set<string>();
+
 export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmCliente {
   const chave = opcoes.apiKey ?? process.env.OPENROUTER_API_KEY;
   const modeloPadrao =
@@ -129,21 +132,27 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
       ];
       if (args.sistema.dinamico) sistema.push({ type: "text", text: args.sistema.dinamico });
 
-      const corpo = JSON.stringify({
-        model: modelo,
-        messages: [{ role: "system", content: sistema }, ...args.mensagens],
-        max_tokens: args.maxTokens ?? 800,
-        reasoning: { enabled: args.raciocinio ?? false },
-        // Sem `temperature`: os modelos Claude 5.x não aceitam o parâmetro e, com
-        // provider.require_parameters, o OpenRouter filtra todos os provedores (404).
-        stream: false,
-        response_format: {
-          type: "json_schema",
-          json_schema: { name: args.nomeSchema, strict: true, schema: paraJsonSchema(args.schema) },
-        },
-        // Só provedores que suportam saída estruturada.
-        provider: { require_parameters: true },
-      });
+      // Alguns modelos (ex.: Sonnet 5.5) recusam raciocínio desligado: "Reasoning is mandatory for
+      // this endpoint and cannot be disabled" (HTTP 400). Nesse caso o raciocínio entra em esforço
+      // baixo e o limite de tokens sobe (ele consome `max_tokens` antes da resposta). Lembramos por
+      // modelo para não repetir a tentativa que falha.
+      const montarCorpo = (raciocinioObrigatorio: boolean) =>
+        JSON.stringify({
+          model: modelo,
+          messages: [{ role: "system", content: sistema }, ...args.mensagens],
+          max_tokens: raciocinioObrigatorio ? Math.max(args.maxTokens ?? 800, 4000) : (args.maxTokens ?? 800),
+          reasoning: raciocinioObrigatorio ? { effort: "low" } : { enabled: args.raciocinio ?? false },
+          // Sem `temperature`: os modelos Claude 5.x não aceitam o parâmetro e, com
+          // provider.require_parameters, o OpenRouter filtra todos os provedores (404).
+          stream: false,
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: args.nomeSchema, strict: true, schema: paraJsonSchema(args.schema) },
+          },
+          // Só provedores que suportam saída estruturada.
+          provider: { require_parameters: true },
+        });
+      let corpo = montarCorpo(exigemRaciocinio.has(modelo) && !args.raciocinio);
 
       let ultimo: ErroLlm | null = null;
       for (let tentativa = 0; tentativa < 2; tentativa++) {
@@ -178,7 +187,14 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
 
         if (!res.ok) {
           log("llm_http", { modelo, status: res.status, tentativa, ms: Date.now() - inicio });
-          ultimo = new ErroLlm("http", `LLM respondeu HTTP ${res.status}${await detalheDoErro(res)}`, res.status);
+          const detalhe = await detalheDoErro(res);
+          ultimo = new ErroLlm("http", `LLM respondeu HTTP ${res.status}${detalhe}`, res.status);
+          if (res.status === 400 && /reasoning is mandatory/i.test(detalhe) && !exigemRaciocinio.has(modelo)) {
+            exigemRaciocinio.add(modelo);
+            corpo = montarCorpo(true);
+            log("llm_raciocinio_obrigatorio", { modelo });
+            continue;
+          }
           if (res.status === 429 || res.status >= 500) continue;
           throw ultimo;
         }
