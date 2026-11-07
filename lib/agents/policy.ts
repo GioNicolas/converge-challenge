@@ -2,7 +2,7 @@
  * Política determinística do agente: escolhe quando um blip aparece e qual dica está disponível.
  * O conteúdo das perguntas vem do Analyst (lib/agents/analyst.ts), menos a pergunta de abertura.
  */
-import { isCovered } from "@/lib/agents/coverage";
+import { isCovered, uncoveredCriteria } from "@/lib/agents/coverage";
 import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
 import type { QueuedQuestion, SessionState } from "@/lib/session/types";
@@ -31,11 +31,11 @@ const BLIP_EXPIRY_MS = 80_000;
 /** Nenhum blip do Analyst nos primeiros 45 s da sessão. */
 const WARMUP_MS = 45_000;
 /** Intervalo mínimo entre o createdAt do último blip e o próximo. */
-const MIN_GAP_BETWEEN_BLIPS_MS = 60_000;
+const MIN_GAP_BETWEEN_BLIPS_MS = 45_000;
 /** Intervalo mínimo depois que a última conversa terminou (vale pra toda pergunta). */
-const MIN_GAP_AFTER_CONVERSATION_MS = 30_000;
+const MIN_GAP_AFTER_CONVERSATION_MS = 20_000;
 /** Máximo de blips do Analyst por sessão (a abertura não conta). */
-const MAX_ANALYST_BLIPS = 8;
+const MAX_ANALYST_BLIPS = 10;
 /** Preferência da pergunta de foco da vaga na fila, para ela não ficar sempre atrás das perguntas sobre o código. */
 const FOCUS_QUESTION_BONUS = 0.1;
 /** Boost pro primeiro run com todos os casos passando: bom momento pra pergunta de complexidade. */
@@ -195,6 +195,14 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   }
 
   if (!isCandidateIdle(session, t)) return { reason: "esperando: candidato digitando" };
+  // Reta final: oferece uma vez a conversa de encerramento com o que ficou pendente.
+  const remaining = session.config.durationMin * 60_000 - t;
+  if (remaining <= CLOSING_BEFORE_END_MS && !session.queue.some((q) => q.kind === "encerramento")) {
+    const closing = startClosing(session, t);
+    if (closing) return { blip: closing, reason: `blip ${closing.id} (encerramento, faltam ${Math.ceil(remaining / 60_000)} min)` };
+  }
+  // O polling não decide no meio de uma análise: ela pode trazer a pergunta do momento (ex.: o run que acabou de passar).
+  if (session.analyst.state === "running") return { reason: "esperando: análise em andamento" };
 
   const analystBlips = session.blips.filter((b) => !session.queue.some((q) => q.id === b.id && q.kickoff)).length;
   // O limite não barra retorno de desafio nem critério da agenda ainda não explorado.
@@ -247,6 +255,58 @@ function agendaBoost(session: SessionState, q: QueuedQuestion, t: number): numbe
 function isFinalStretchForAgenda(session: SessionState, q: QueuedQuestion, t: number): boolean {
   if (q.criterionId === undefined || isCovered(session, q.criterionId)) return false;
   return session.config.durationMin * 60_000 - t <= FINAL_STRETCH_MS;
+}
+
+/** Perguntas preparadas que entram no encerramento, no máximo. */
+const CLOSING_MAX_QUESTIONS = 2;
+/** Faltando esse tempo, o agente oferece o encerramento sozinho (com o que ficou pendente), sem esperar o Finalizar. */
+const CLOSING_BEFORE_END_MS = 3 * 60_000;
+
+/**
+ * O candidato pediu para finalizar: junta o que ficou pendente (a pergunta do balão na tela, as melhores da
+ * fila e os critérios da vaga ainda não explorados) numa última conversa e devolve o balão dela, que a IDE
+ * abre direto. Sem nada pendente, devolve undefined e a sessão pode encerrar.
+ */
+export function startClosing(session: SessionState, t: number): Blip | undefined {
+  if (session.ended) return undefined;
+  // Encerramento já no balão (o oferecido no fim do tempo): o Finalizar abre esse mesmo.
+  const existing = session.queue.find((q) => q.kind === "encerramento" && q.status === "blipped");
+  if (existing) return session.blips.find((b) => b.id === existing.id);
+
+  const onScreen = session.pendingBlipId ? findBlipQuestion(session, session.pendingBlipId)?.question : undefined;
+  const fromQueue = session.queue
+    .filter((q) => q.status === "queued" && !q.kickoff && q !== onScreen && !isStale(session, q, t))
+    .sort((a, b) => b.priority - a.priority);
+  const pending = onScreen?.status === "blipped" && !onScreen.kickoff ? [onScreen, ...fromQueue] : fromQueue;
+  const prepared = pending.slice(0, CLOSING_MAX_QUESTIONS);
+  const askedCriteria = new Set(prepared.map((q) => q.criterionId));
+  const criteria = uncoveredCriteria(session)
+    .filter((id) => !askedCriteria.has(id))
+    .map((id) => session.config.criteria.find((c) => c.id === id)!)
+    .map((c) => `critério ${c.id} (${c.name}): ${c.description}`);
+  const topics = [
+    ...prepared.map((q) => `pergunta preparada${q.criterionId ? ` (critério ${q.criterionId})` : ""}: ${q.question}`),
+    ...criteria,
+  ];
+  if (topics.length === 0) return undefined;
+
+  // O que entrou no encerramento sai da fila; o balão que estava na tela vira esta conversa.
+  for (const q of prepared) q.status = "stale";
+  session.pendingBlipId = undefined;
+  const closing: QueuedQuestion = {
+    id: `q-${session.queue.length + 1}`,
+    question: prepared[0]?.question ?? "Antes de você encerrar, queria fechar uns pontos rápidos com você.",
+    followUpTopic: "os pontos que ficaram pendentes",
+    topicLabel: "uns pontos antes de encerrar",
+    priority: 1,
+    highlight: prepared[0]?.highlight,
+    createdAt: t,
+    status: "queued",
+    kind: "encerramento",
+    closingTopics: topics,
+  };
+  session.queue.push(closing);
+  return raise(session, closing, t);
 }
 
 /**
@@ -324,15 +384,17 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
 }
 
 /**
- * Pergunta que perdeu o sentido: a entrevista mudou de fase desde que ela foi criada, ela esperou demais, ou
- * as linhas grifadas mudaram. Retorno de desafio, pergunta de foco (de processo) e pergunta adiada pelo
- * candidato não envelhecem pela fase nem pelo tempo.
+ * Pergunta que perdeu o sentido: ela esperou demais, as linhas grifadas mudaram, ou nasceu num momento que
+ * já passou. Só duas fases "passam": quem saiu de depurando já não está olhando aquele teste falhando, e quem
+ * saiu de entendendo já tem código. Uma pergunta sobre o código feita escrevendo continua valendo depois que
+ * ele funciona (a checagem das linhas cuida de quando o trecho mudou). Retorno de desafio, pergunta de foco e
+ * pergunta adiada pelo candidato não envelhecem pelo tempo.
  */
 function isStale(session: SessionState, q: QueuedQuestion, t: number): boolean {
   const ageless = q.kind === "retorno" || q.focusArea !== undefined || q.snoozedUntil !== undefined;
   if (!ageless) {
-    if (q.fase !== undefined && q.fase !== faseDaEntrevista(session)) return true;
-    if (t - q.createdAt > QUESTION_MAX_AGE_MS) return true;
+    const momentPassed = (q.fase === "depurando" || q.fase === "entendendo") && q.fase !== faseDaEntrevista(session);
+    if (momentPassed || t - q.createdAt > QUESTION_MAX_AGE_MS) return true;
   }
   return linesChanged(session, q);
 }
@@ -372,6 +434,7 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
 function previewFor(q: QueuedQuestion): string {
   if (q.kickoff) return "Quando quiser, uma pergunta rápida";
   if (q.kind === "retorno") return "E aí, como foi o desafio?";
+  if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
 }
 

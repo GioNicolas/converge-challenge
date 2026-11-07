@@ -3,10 +3,21 @@ import { runAnalyst } from "@/lib/agents/analyst";
 import { startEvaluation } from "@/lib/agents/evaluator";
 import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { resolveConfig } from "@/lib/config/store";
-import { EventsResponse, SessionEvent } from "@/lib/contracts";
+import { EventsResponse, SessionEvent, type InterviewConfig } from "@/lib/contracts";
+import { problems } from "@/lib/problems";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
+import { hasProblem } from "@/problems";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * A questão que a IDE está mostrando vence a da config (o `?problema=` dos testes troca a questão na tela):
+ * senão o agente perguntaria sobre uma questão e o candidato veria outra.
+ */
+function withProblem(config: InterviewConfig, problemId: string): InterviewConfig {
+  if (problemId === config.problemId || !hasProblem(problemId)) return config;
+  return { ...config, problemId, difficulty: problems[problemId]?.difficulty };
+}
 
 // A conversa conta como gatilho quando termina (blip_closed), não a cada fala.
 const ANALYZED_TRIGGERS = new Set<SessionEvent["type"]>(["pause", "run", "paste", "blip_closed"]);
@@ -20,7 +31,7 @@ export async function POST(request: Request) {
   const event = parsed.data;
 
   // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started.
-  const config = event.type === "session_started" ? await resolveConfig(event.configId) : undefined;
+  const config = event.type === "session_started" ? withProblem(await resolveConfig(event.configId), event.problemId) : undefined;
   const session = getOrCreateSession(event.sessionId, config);
   appendEvent(session, event);
   if (event.type === "session_started") enqueueKickoff(session, event.t);

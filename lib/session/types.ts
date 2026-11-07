@@ -11,8 +11,9 @@ import type { LlmStatsSnapshot } from "@/lib/llm";
  * explicar: justificar uma decisão já tomada no código. sondar: perguntar direto sobre um critério
  * (complexidade, bordas) sem insinuar erro. desafio: pedir para melhorar ou resolver um cenário, só com
  * código funcionando. retorno: voltar a um desafio que o candidato topou ("e aí, como foi?").
+ * encerramento: a última conversa, quando o candidato pede para finalizar, com o que ficou pendente.
  */
-export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno";
+export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento";
 
 /** Como o candidato se saiu ao ser sondado num critério (ou se mostrou sozinho). */
 export type ProbeKind = "espontaneo" | "respondeu_bem" | "parcial" | "errou" | "nao_conseguiu" | "com_dica" | "recusou";
@@ -75,6 +76,8 @@ export interface QueuedQuestion {
   retried?: boolean;
   /** Fase da entrevista quando a pergunta foi criada: mudou de fase, a pergunta perde o sentido. */
   fase?: Fase;
+  /** Encerramento: o que ainda falta perguntar, na ordem (perguntas preparadas e critérios não explorados). */
+  closingTopics?: string[];
 }
 
 /** Observação pra rubrica, acumulada ao longo da sessão (o Evaluator lê tudo). */

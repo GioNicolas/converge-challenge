@@ -18,6 +18,7 @@ import PainelConversa, { LARGURA_PAINEL } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
+import { postEncerramento } from "./ide/api";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
@@ -52,6 +53,9 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
   const [firstRun, setFirstRun] = useState(true);
   const [problemaAberto, setProblemaAberto] = useState(true);
   const [confirmandoFim, setConfirmandoFim] = useState(false);
+  /** Pediu para finalizar e o agente abriu a última conversa: a sessão encerra quando ela fechar. */
+  const [finalizando, setFinalizando] = useState(false);
+  const encerramentoAbertoRef = useRef(false);
   // Microfone só estético por enquanto: mexe a onda da pílula, nada é transcrito nem analisado.
   const midia = useMidiaLocal();
 
@@ -85,11 +89,35 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
     return () => clearTimeout(id);
   }, [session.ended, session.sessionId, router]);
 
-  // A conversa fechou (por qualquer lado): o foco volta para o código.
+  // A conversa fechou (por qualquer lado): o foco volta para o código, ou, se era a do encerramento, a sessão acaba.
   const conversaAberta = chat.open;
+  const encerrar = session.endSession;
   useEffect(() => {
-    if (!conversaAberta) editorRef.current?.focus();
-  }, [conversaAberta]);
+    if (conversaAberta) {
+      if (finalizando) encerramentoAbertoRef.current = true;
+      return;
+    }
+    if (finalizando && encerramentoAbertoRef.current) encerrar("button");
+    else editorRef.current?.focus();
+  }, [conversaAberta, finalizando, encerrar]);
+
+  /** Confirmou que quer finalizar: se o agente ainda tem o que perguntar, abre a última conversa antes. */
+  async function finalizar() {
+    setConfirmandoFim(false);
+    if (session.sessionId === null || finalizando) return;
+    setFinalizando(true);
+    session.setIncomingBlip(null);
+    try {
+      const res = await postEncerramento(session.sessionId);
+      if (res.blip) {
+        void chat.openBlip(res.blip);
+        return;
+      }
+    } catch (err) {
+      console.error("POST /api/encerramento falhou", err);
+    }
+    session.endSession("button");
+  }
 
   /**
    * Envolve o executor: grifos e notas passam pelo mouse falso (em fila, na
@@ -211,7 +239,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
             <button
               type="button"
               onClick={() => setConfirmandoFim(true)}
-              disabled={session.ended}
+              disabled={session.ended || chat.open || finalizando}
               className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
             >
               <Flag size={16} strokeWidth={1.75} />
@@ -253,15 +281,13 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
           onEnviar={chat.send}
           onTentarDeNovo={chat.retry}
           onVoltar={chat.close}
+          rotuloVoltar={finalizando ? "Encerrar agora" : undefined}
         />
 
         <ConfirmarEncerrar
           aberto={confirmandoFim}
           onCancelar={() => setConfirmandoFim(false)}
-          onConfirmar={() => {
-            setConfirmandoFim(false);
-            session.endSession("button");
-          }}
+          onConfirmar={() => void finalizar()}
         />
 
 

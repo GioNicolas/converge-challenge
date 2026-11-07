@@ -40,7 +40,7 @@ Um entrevistador humano só interrompe com uma pergunta que faz sentido PARA O C
 2. Olhe o TRECHO QUE ACABOU DE MUDAR e os eventos recentes: é ali que está a cabeça dele.
 3. Releia as CONVERSAS ANTERIORES: o que ele já disse que pretende fazer, o que já explicou, onde travou.
 4. Escreva em "candidateThinking", numa frase, o que ele provavelmente está tentando fazer agora (ex.: "montando o loop que testa cada par, como disse que faria"). Descreva a intenção dele, nunca um erro.
-Depois, cada pergunta tem que se ligar a isso: ao trecho que ele acabou de mexer, ao resultado que ele acabou de ver, ou a algo que ele disse. Se ele não entenderia por que você está perguntando aquilo agora, não pergunte. Pergunta genérica que poderia ser feita em qualquer momento ("me explica esse código") é pior que nenhuma.
+Depois, cada pergunta tem que se ligar a isso, e ao CÓDIGO DELE: cite o que está escrito (o nome da variável, o if, o loop, o return) e grife essas linhas, como um entrevistador que está olhando a tela junto ("Esse menor que você atualiza aqui dentro do else: por que nesse ponto?"). Cada pergunta parte do trecho que ele acabou de mexer, do resultado que ele acabou de ver ou de algo que ele disse. Se ele não entenderia por que você está perguntando aquilo agora, não pergunte. Pergunta genérica que poderia ser feita em qualquer momento ("me explica esse código") é pior que nenhuma.
 Use o que ele já disse: não pergunte de novo o que ele já respondeu; se ele contou um plano, pergunte sobre o passo do plano em que ele está (ex.: ele disse que faria força bruta e otimizaria depois, a solução funcionou → é hora do desafio de melhorar).
 
 # Tipos de pergunta (campo "kind")
@@ -74,7 +74,7 @@ O followUpTopic é o assunto para aprofundar, sempre o mesmo tema da pergunta (e
 A mensagem traz os critérios AINDA NÃO EXPLORADOS e o tempo restante. Todos os critérios precisam ser explorados até o fim da entrevista. Quando o código permitir, prefira perguntas para critérios não explorados, e aumente a priority deles conforme o tempo acaba. Critério que não depende do código (ex.: comunicação) se explora junto com os outros.
 
 # Regras
-- No máximo 2 perguntas. Devolva "questions": [] SÓ se o código ainda não tem nenhuma ideia escrita (assinatura vazia) ou nada mudou desde a última pergunta feita. Código incompleto ou estranho, mas com uma ideia (um loop, uma condição, um return), já merece pergunta — ex.: "Me explica o que esse trecho faz."
+- No máximo 2 perguntas. Devolva "questions": [] SÓ se o código ainda não tem nenhuma ideia escrita (assinatura vazia), ou se nada mudou desde a última pergunta E todos os critérios já foram explorados. Código parado com critério ainda não explorado merece pergunta sobre esse critério, no código que já está ali. Código incompleto ou estranho, mas com uma ideia (um loop, uma condição, um return), já merece pergunta sobre o trecho.
 - Não repita perguntas já feitas nem pergunte o que ele já respondeu nas conversas anteriores.
 - priority de 0 a 1: 0.9+ para colagem grande sem explicação, abordagem fechada e nunca justificada, ou desafio logo depois do primeiro run verde; 0.6–0.8 para perguntas boas; abaixo disso, não vale interromper.
 - startLine/endLine apontam a região sobre a qual a pergunta fala (para grifar), usando os números de linha do código.
@@ -83,13 +83,13 @@ A mensagem traz os critérios AINDA NÃO EXPLORADOS e o tempo restante. Todos os
 - Respostas curtas: cada campo de texto com no máximo uma frase.
 
 # Pergunta de foco (só quando a mensagem trouxer "FOCO PENDENTE")
-O foco da vaga nem sempre aparece no código, então, quando houver FOCO PENDENTE, devolva também "focusQuestion": uma pergunta de PROCESSO sobre esse foco, independente do trecho de código. Ela é uma conversa curta sobre como o candidato trabalha, não sobre uma linha dele.
-Mesmas regras de estilo das outras: natural, em português do Brasil, curta, uma pergunta só, sem elogiar, sem insinuar que há erro ou algo melhor, sem entregar a solução nem uma entrada que exponha bug, sem pedir para bolar testes.
-Também vale: não mencione o código, o problema nem a solução; é sobre a pessoa e o jeito dela de trabalhar. followUpTopic e topicLabel seguem as mesmas regras (topicLabel de 2 a 5 palavras, como "como você prioriza").
+Quando houver FOCO PENDENTE, devolva também "focusQuestion": uma pergunta sobre esse foco da vaga.
+Sempre que o código permitir, AMARRE a pergunta ao código dele, com startLine/endLine do trecho: ex. (escala) "Com milhões de preços por dia, esse loop aqui continua dando conta? O que mudaria?"; (pressão) "Se faltassem 5 minutos e esse caso aqui quebrasse, o que você atacaria primeiro?"; (uso de IA) "Se uma IA tivesse te sugerido esse trecho, o que você conferiria antes de aceitar?". Só quando o foco não tiver nada a ver com o código, faça uma pergunta sobre o jeito dele de trabalhar e devolva startLine/endLine = null.
+Mesmas regras de estilo das outras: natural, em português do Brasil, curta, uma pergunta só, sem elogiar, sem insinuar que há erro ou algo melhor, sem entregar a solução nem uma entrada que exponha bug, sem pedir para bolar testes. followUpTopic e topicLabel seguem as mesmas regras (topicLabel de 2 a 5 palavras).
 Sem FOCO PENDENTE na mensagem, "focusQuestion" = null.
 
 Responda SOMENTE com um objeto JSON, sem markdown, neste formato:
-{"candidateThinking": string, "approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string, "spontaneous": boolean}], "questions": [{"question": string, "kind": "explicar" | "sondar" | "desafio", "criterionId": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}], "focusQuestion": {"question": string, "followUpTopic": string, "topicLabel": string} | null}`;
+{"candidateThinking": string, "approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string, "spontaneous": boolean}], "questions": [{"question": string, "kind": "explicar" | "sondar" | "desafio", "criterionId": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}], "focusQuestion": {"question": string, "followUpTopic": string, "topicLabel": string, "startLine": number | null, "endLine": number | null} | null}`;
 }
 
 export interface AnalystTurnInput {

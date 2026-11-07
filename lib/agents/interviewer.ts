@@ -4,7 +4,7 @@
  */
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
-import { recordOutcome } from "@/lib/agents/coverage";
+import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
@@ -46,8 +46,15 @@ export async function runInterviewerTurn(
     criterion: criterion ? `${criterion.id}: ${criterion.name} — ${criterion.description}` : undefined,
     probeGuide: criterion ? problem.private.probeGuides?.[criterion.id] : undefined,
     challengeSummary: checkIn?.challenge,
+    closingTopics: question?.closingTopics,
     questionHighlight: found?.question.highlight,
     availableHint: hint,
+    uncovered: uncoveredCriteria(session)
+      .filter((id) => id !== question?.criterionId)
+      .map((id) => {
+        const c = session.config.criteria.find((item) => item.id === id)!;
+        return `${c.id}: ${c.name} — ${c.description}`;
+      }),
     analystNotes: analystNotesOf(session),
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(

@@ -26,6 +26,8 @@ type Props = {
   onEnviar: (texto: string) => void;
   onTentarDeNovo: () => void;
   onVoltar: () => void;
+  /** Texto do botão de sair da conversa (padrão "Voltar a programar"; no encerramento, "Encerrar agora"). */
+  rotuloVoltar?: string;
 };
 
 const CURVA = [0.32, 0.72, 0, 1] as const; // --curva-suave
@@ -46,6 +48,7 @@ export default function PainelConversa({
   onEnviar,
   onTentarDeNovo,
   onVoltar,
+  rotuloVoltar = "Voltar a programar",
 }: Props) {
   const reduzir = useReducedMotion() ?? false;
   const lista = useRef<HTMLDivElement>(null);
@@ -153,7 +156,9 @@ export default function PainelConversa({
 
           <footer className="border-t border-borda p-3">
             {encerrada ? (
-              <p className="px-2 py-2 text-center text-sm text-texto-suave">Voltando para o código…</p>
+              <p className="px-2 py-2 text-center text-sm text-texto-suave">
+                {rotuloVoltar === "Voltar a programar" ? "Voltando para o código…" : "Encerrando…"}
+              </p>
             ) : (
               <>
                 <form onSubmit={enviar} className="flex items-end gap-2 rounded-[18px] bg-superficie px-3 py-2">
@@ -183,7 +188,7 @@ export default function PainelConversa({
                   className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-controle py-1.5 text-sm font-medium text-texto-suave transition-colors duration-150 hover:text-texto"
                 >
                   <ArrowLeft size={14} strokeWidth={1.75} />
-                  Voltar a programar
+                  {rotuloVoltar}
                 </button>
               </>
             )}

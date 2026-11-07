@@ -195,7 +195,9 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         .map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
     // Pergunta de foco: só vale se o código pediu (focoParaPedir) e o modelo devolveu; sem trecho de código.
     if (focoParaPedir && focusQuestion?.question.trim()) {
-      candidates.push({ question: { ...focusQuestion, priority: PRIORIDADE_FOCO }, focusArea: focoParaPedir });
+      const { startLine, endLine, ...rest } = focusQuestion;
+      const lines = startLine ? clampLines({ startLine, endLine: endLine ?? startLine }, lineCount) : undefined;
+      candidates.push({ question: { ...rest, priority: PRIORIDADE_FOCO }, lines, focusArea: focoParaPedir });
     }
     // O tema de aprofundamento também vai pro entrevistador, então passa pelo filtro junto.
     const verdicts = await Promise.all(
@@ -275,7 +277,7 @@ function deferPause(session: SessionState, book: AnalystBookkeeping, trigger: Pa
 }
 
 /** Mantém o grifo dentro das linhas do código e com endLine >= startLine. */
-function clampLines(question: AnalystQuestion, lineCount: number): LineRange {
+function clampLines(question: LineRange, lineCount: number): LineRange {
   const startLine = clamp(question.startLine, 1, lineCount);
   const endLine = clamp(question.endLine, startLine, lineCount);
   return { startLine, endLine };

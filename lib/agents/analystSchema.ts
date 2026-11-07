@@ -16,11 +16,13 @@ export const AnalystQuestion = z.object({
 });
 export type AnalystQuestion = z.infer<typeof AnalystQuestion>;
 
-/** Pergunta do foco da vaga: de processo, sobre como o candidato trabalha, sem ligação com uma linha do código. */
+/** Pergunta do foco da vaga (pressão, escala, uso de IA). Amarrada ao código quando dá: aí traz as linhas do trecho. */
 export const FocusQuestion = z.object({
   question: z.string(),
   followUpTopic: z.string(),
   topicLabel: z.string(),
+  startLine: z.number().int().min(1).nullable().optional(),
+  endLine: z.number().int().min(1).nullable().optional(),
 });
 export type FocusQuestion = z.infer<typeof FocusQuestion>;
 
