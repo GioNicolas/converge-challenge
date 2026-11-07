@@ -22,7 +22,7 @@ import RevisaoPlano from "./RevisaoPlano";
 import EntrevistaPronta from "./EntrevistaPronta";
 import Passos from "./Passos";
 
-type Etapa = "vaga" | "lendo" | "conversa" | "pronta";
+type Etapa = "vaga" | "lendo" | "conversa" | "plano" | "pronta";
 
 type Props = {
   /** Vaga já cadastrada no workspace: começa direto com o Totti lendo. */
@@ -110,7 +110,7 @@ export default function PreEntrevistaTotti({
 
   // Com o servidor real, a extração do rascunho roda em segundo plano: busca o estado de tempos em tempos.
   useEffect(() => {
-    if (!usarServidor() || etapa !== "conversa" || !estado?.id) return;
+    if (!usarServidor() || (etapa !== "conversa" && etapa !== "plano") || !estado?.id) return;
     const id = estado.id;
     const t = setInterval(async () => {
       try {
@@ -155,11 +155,12 @@ export default function PreEntrevistaTotti({
     if (total > 0) onProgresso?.(combinados, total);
   }, [combinados, total, onProgresso]);
   const tottiTerminou = estado?.planejamento.passo?.tipo === "encerrar";
+  const atualizando = !!estado?.status.extraindo;
 
   return (
     <main className="relative flex min-h-dvh flex-col">
       {/* Voltar, fora da conversa (lá o cabeçalho já tem a seta de voltar) */}
-      {onSair && etapa !== "conversa" && (
+      {onSair && etapa !== "conversa" && etapa !== "plano" && (
         <button
           onClick={onSair}
           aria-label="Voltar para as vagas"
@@ -189,9 +190,9 @@ export default function PreEntrevistaTotti({
           </motion.div>
         )}
 
-        {etapa === "conversa" && estado && (
+        {(etapa === "conversa" || etapa === "plano") && estado && (
           <motion.div
-            key="conversa"
+            key={etapa}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -201,8 +202,8 @@ export default function PreEntrevistaTotti({
             <header className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-1 rounded-padrao bg-superficie py-1.5 pr-4 pl-1.5">
                 <button
-                  onClick={onSair ?? novaEntrevista}
-                  aria-label={onSair ? "Voltar para as vagas" : "Começar de novo"}
+                  onClick={etapa === "plano" ? () => setEtapa("conversa") : (onSair ?? novaEntrevista)}
+                  aria-label={etapa === "plano" ? "Voltar à conversa" : onSair ? "Voltar para as vagas" : "Começar de novo"}
                   className="flex size-8 items-center justify-center rounded-controle text-texto-suave transition-colors hover:bg-fundo hover:text-texto"
                 >
                   <ArrowLeft size={16} />
@@ -213,22 +214,38 @@ export default function PreEntrevistaTotti({
                 </span>
               </div>
               <Passos atual={3} />
-              <button
-                onClick={() => setRevisando(true)}
-                className={`rounded-controle px-4 py-2.5 text-[14px] font-medium transition-colors duration-200 ${
-                  tottiTerminou
-                    ? "bg-texto text-texto-claro shadow-[0_0_0_4px_rgb(17_17_17/0.08)]"
-                    : "border border-texto/80 text-texto hover:bg-texto hover:text-texto-claro"
-                }`}
-              >
-                Revisar e confirmar
-              </button>
+              {etapa === "conversa" ? (
+                <button
+                  onClick={() => setEtapa("plano")}
+                  // O plano é montado pela extração em segundo plano: espera ela terminar para mostrar o plano completo.
+                  disabled={atualizando || pensando}
+                  className={`rounded-controle px-4 py-2.5 text-[14px] font-medium transition-colors duration-200 disabled:cursor-wait disabled:opacity-50 ${
+                    tottiTerminou
+                      ? "bg-texto text-texto-claro shadow-[0_0_0_4px_rgb(17_17_17/0.08)]"
+                      : "border border-texto/80 text-texto hover:bg-texto hover:text-texto-claro"
+                  }`}
+                >
+                  {atualizando || pensando ? "Atualizando o plano…" : "Concluir conversa"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setRevisando(true)}
+                  className="rounded-controle bg-texto px-4 py-2.5 text-[14px] font-medium text-texto-claro shadow-[0_0_0_4px_rgb(17_17_17/0.08)] transition-opacity hover:opacity-85"
+                >
+                  Revisar e confirmar
+                </button>
+              )}
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
-              <ConversaTotti transcricao={estado.transcricao} pensando={pensando} erro={erro} onEnviar={responder} />
-              <PlanoAoVivo estado={estado} />
-            </div>
+            {etapa === "conversa" ? (
+              <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col [&>section]:flex-1">
+                <ConversaTotti transcricao={estado.transcricao} pensando={pensando} erro={erro} onEnviar={responder} />
+              </div>
+            ) : (
+              <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col [&>section]:flex-1">
+                <PlanoAoVivo estado={estado} />
+              </div>
+            )}
           </motion.div>
         )}
 

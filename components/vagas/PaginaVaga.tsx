@@ -524,8 +524,9 @@ function useLink(vaga: VagaEmpresa) {
   useEffect(() => setOrigem(window.location.origin), []);
   const r = vaga.resumo;
   if (!r) return null;
-  const rota = r.formato === "system_design" ? "/entrevista/system-design" : "/entrevista";
-  return { rota, link: `${origem}${rota}?config=${encodeURIComponent(r.configId)}` };
+  // Mesmo caminho da pré-entrevista: "Antes de começar" com a vaga, depois a entrevista com a mesma config.
+  const rota = `/?config=${encodeURIComponent(r.configId)}`;
+  return { rota, link: `${origem}${rota}` };
 }
 
 function useCopiar() {
