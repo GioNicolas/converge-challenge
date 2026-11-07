@@ -1,78 +1,98 @@
-# Propostas de Diferenciais de Produto (Área de Tecnologia)
+# Propostas de Diferenciais de Produto — Entrevista Técnica (Tecnologia)
 
-Documento consolidado após 3 rodadas de auditoria contra concorrentes internacionais (**Mercor, micro1, Apriora/Alex, Ribbon, CodeSignal, HackerRank, Codility, Woven, Karat, Byteboard, Metaview e HelloInterview**) e validação direta contra a arquitetura existente no repositório.
-
----
-
-## As 5 Propostas Blindadas
-
-### 1. Incidente Consciente da Topologia (Chaos Injection Espacial sem Atropelar o Candidato)
-- **Onde o mercado para hoje:** No B2B (*CodeSignal, HackerRank*), o System Design é estático ou exige entrevistador humano. Mocks B2C (*HelloInterview*) fazem follow-ups orais e *Byteboard* usa código legado assíncrono — mas **nenhuma plataforma B2B age espacialmente sobre o diagrama vivo do candidato em tempo real**.
-- **Como funciona na ferramenta:**
-  1. **Respeito ao Fluxo Cognitivo (Zero "Jumpscare"):** Coerente com nossa regra anti-interrupção (`esperarCandidatoLivre()` + `Plin`), o incidente **nunca corta o candidato no meio de um traço**. Ele entra como marco natural da transição `ALTO_NIVEL → APROFUNDAMENTO`, levantando um **Plin de Incidente** para o candidato abrir quando concluir o pensamento atual.
-  2. **Adaptação à Topologia (`conversor.ts`):**
-     - *Sem redundância no grafo (ex.: `API → Redis → Postgres`):* A mão do agente (`coreografia.ts`) circula o `Redis`, anota `[QUEDA: 40 mil req/s]` no quadro e pergunta como proteger o Postgres da debandada de conexões (*thundering herd*).
-     - *Com redundância já desenhada por candidato sênior:* O agente reconhece a defesa e escala para falha de **2º nível** (*"Você já previu réplica no Redis: se o primário cair antes de replicar chaves de idempotência em voo, como sua API evita cobrança duplicada?"*).
-  3. **Critério Padronizado:** Avalia as 4 etapas formais de resposta a incidente (isolamento → detecção de cascata → contenção → degradação graciosa), não quem responde mais rápido no improviso.
+Mapeamento de **novas funcionalidades de produto** e **combinações estratégicas** para diferenciar nossa plataforma das soluções internacionais existentes (**Mercor, micro1, Apriora/Alex, Ribbon, CodeSignal, HackerRank, Codility, CoderPad, Karat, Byteboard, Woven, FloCareer, Equip, Canditech, DevSkiller e Intervue**).
 
 ---
 
-### 2. Sabatina por Contrato de Invariante (Anti-Cola e Anti-"Teleprompter Invisível", sem Spyware)
-- **Onde o mercado para hoje:** *CodeSignal, Codility e Filtered* punem colagens com *Suspicion Score* e tentam combater overlays invisíveis (*Cluely, Interview Coder, UltraCode*) instalando agentes invasivos no PC do candidato (o que afasta devs seniores). Já *HackerRank* e *Mercor* pedem apenas para *"explicar o código"*, permitindo que o candidato leia a tela em voz alta.
-- **Como funciona na ferramenta (Design Pedagógico em vez de Vigilância):**
-  1. **Duplo Gatilho (`detectKeyMoment` em `analyst.ts`):**
-     - *Gatilho Imediato:* Colagem externa relevante — ignora código que já estava no `codeHistory` da própria sessão (`Ctrl+X / Ctrl+V` de refatoração) e ignora boilerplate sem fluxo de controle (`if/for/while`/estruturas de dados).
-     - *Gatilho de Estabilização (Anti-Teleprompter):* Mesmo que o candidato digite tudo letra por letra lendo de uma segunda tela/overlay sem dar `Ctrl+V`, o **primeiro `run` com todos os testes visíveis passando** dispara a verificação sobre a implementação entregue.
-  2. **Pergunta de Invariante Neutro (Zero Acusação Alucinada):** Sem acusar bugs inexistentes (respeitando o isolamento de `suspiciousLines` em `prompts/interviewer.ts`), o agente grifa 2–3 linhas críticas (`highlight_range`) e cobra o contrato do código concreto (*"Nas linhas 14–18, qual condição garante que chaves repetidas não sobrescrevam o índice anterior?"*). Teleprompters genéricos travam em perguntas amarradas às linhas exatas do candidato.
-  3. **Domínio Auditável no Relatório:** Substitui o contador frio de `pastes` (`evaluator.ts`) pelo cruzamento `gatilho + probeOutcome`, atestando **Domínio sobre o Código Entregue**.
+## O Que Já É Commodity Lá Fora (Descartado como Diferencial Isolado)
+
+Antes das propostas, filtramos mecânicas que **já existem** nas plataformas gringas ou geram rejeição no público sênior:
+
+| Mecânica descartada | Quem já faz lá fora | Por que não diferencia sozinha |
+| :--- | :--- | :--- |
+| **Copilot passivo na IDE gravando prompts** | *CodeSignal (Cosmo), HackerRank (CodePair AI), CoderPad, Codility, Karat* | Ter chat/autocomplete de IA na IDE e salvar o log virou padrão de mercado entre 2025 e 2026. |
+| **Perguntas socráticas orais dinâmicas** | *Mercor, micro1 (Zara), Apriora (Alex), HackerRank (Chakra), FloCareer (NIVO), Equip* | Todas vendem follow-ups por voz baseados no currículo/resposta; isoladamente é vulnerável a colas de segunda tela (*Cluely, Interview Coder, StealthCoder*). |
+| **Certificados / Badges / "Tech Passport" no LinkedIn** | *micro1 (Certification), CodeSignal (Certified), HackerRank* | Rejeitado por desenvolvedores seniores e nocivo em SaaS B2B (estimula concorrentes a caçarem candidatos aprovados). |
+| **Calibração interna apenas por nota/percentil** | *CodeSignal, HackerRank, Karat* | Comparar números frios (*"time interno fez 840 vs. candidato 790"*) não explica divergências reais de arquitetura ou código. |
 
 ---
 
-### 3. Card de Trilha Cognitiva (3 Estados com Prova Visual e Diff Semântico)
-- **Onde o mercado para hoje:** *CodeSignal* exibe apenas player bruto de teclas (*Session Replay*); *Metaview/BrightHire* citam trechos de áudio de entrevistas humanas; *Karat* trata dicas apenas como perda de pontos (*Handholding*). Ninguém correlaciona **intervenção socrática ↔ evolução estrutural do artefato** lado a lado.
-- **Duas armadilhas evitadas:**
-  - Não medimos "segundos brutos até clicar" (que puniria o sênior que reflete 60s em silêncio antes de redesenhar certo).
-  - Não deixamos o card vazio quando um candidato excelente acerta tudo de primeira sem precisar corrigir rota.
-- **Como funciona no `Relatorio.tsx` (Renderização em 3 Estados):**
-  - **Estado A — Antecipação Autônoma (`espontaneo: true`):** Selo *"Arquitetura Defensiva Espontânea"*. Mostra `[Desenho Inicial já blindado] → [Estresse de 2º nível do Agente] → [Sustentação Técnica Firme]` (sinal Sênior/Staff com zero tutela).
-  - **Estado B — Inflexão Adaptativa:** Mostra lado a lado `[Miniatura Antes (gargalo)] → [Provocação Exata do Agente] → [Miniatura Depois + Diff Semântico (+Cache, +Fila)]`.
-  - **Estado C — Rigidez Técnica:** Mostra `[Miniatura Antes] → [Provocação / Dica] → [Manteve o gargalo sem convergir]`.
+## Os 6 Diferenciais de Produto Propostos
+
+### 1. Gerador de Desafios via Incidentes Reais (`Incident-to-Challenge`)
+Transforma problemas reais enfrentados pela engenharia da empresa em desafios práticos de Live Coding e System Design em menos de 60 segundos — eliminando algoritmos genéricos de *LeetCode* sem exigir 20 horas de um Staff Engineer criando provas.
+
+- **Como funciona no produto (3 modos de entrada com zero risco de compliance):**
+  1. **Dump de Thread / Post-Mortem com Sanitização Automática:** O Tech Lead cola a thread bruta do canal `#incidents` (Slack/Discord) ou um post-mortem; um filtro limpa automaticamente IPs, chaves, dados sensíveis e nomes internos antes de gerar um micro-cenário isolado e executável.
+  2. **Áudio de 60s ou 3 Tópicos (*Zero-Code* para Bancos e Fintechs):** Para empresas sob regras rígidas (SOC2, PCI-DSS, LGPD) que não podem subir código nem logs, o líder grava 1 minuto de áudio descrevendo a dinâmica da falha (*ex.: deadlock em débito concorrente após reprocessamento de fila*) e a plataforma sintetiza um caso limpo equivalente.
+  3. **Reversão de PR de Bugfix ou Arquétipo de Stack:** Converte um PR passado de `hotfix` em ambiente quebrado para debug, ou permite escolher em 3 cliques `Stack + Senioridade + Arquétipo Real de Falha` para startups novas sem histórico de incidentes.
+- **Diferença frente às gringas:** *CodeSignal, HackerRank e Equip* dependem de bancos genéricos ou prompts rasos sobre a descrição da vaga; *Byteboard, Woven e DevSkiller* usam cenários fixos de catálogo que não refletem a arquitetura real do cliente.
 
 ---
 
-### 4. Reverse Pitch com Grounding Estrito + Handoff Cirúrgico para o Tech Lead
-- **Onde o mercado para hoje:** Bots de triagem (*Mercor, micro1, Apriora, Ribbon*) fazem interrogatórios unilaterais que geram desistência de seniores e deixam um abismo entre a triagem automatizada e a entrevista final humana.
-- **Como funciona na ferramenta:**
-  1. **Mesa Invertida no `FECHAMENTO`:** Nos 2 minutos finais, o candidato pode sabatinar o agente sobre stack, arquitetura e rotina do time. O agente responde **estritamente** com o que foi documentado na pré-entrevista com o Totti, encaminhando salário, bônus e políticas de RH para a etapa humana (zero risco de promessa indevida).
-  2. **Sinal de Senioridade + Pauta Pronta (`briefing_para_proxima_etapa` / `nextSteps`):** O relatório classifica a maturidade das perguntas feitas pelo candidato e entrega o **Guia de Handoff do Tech Lead** — indicando exatamente quais 2 pontos ficaram parciais na triagem para o líder humano aprofundar sem repetir perguntas.
+### 2. Quadro de System Design com Telemetria & FinOps ao Vivo (`Chaos Canvas`)
+Tira o System Design do "papel que aceita tudo de graça" (*jogar Kafka, Multi-Region e 4 clusters de cache sem consequência*) e conecta o diagrama do candidato a um simulador analítico em tempo real de **Latência P99, Saturação de I/O e Custo Mensal Estimado de Cloud (AWS/GCP)**, somado à injeção ao vivo de quedas e picos de tráfego pelo agente.
+
+- **Como funciona no produto (UX Zero-Formulário):**
+  1. **Presets Topológicos Implícitos:** O candidato **não** perde tempo preenchendo formulários de instância (`t3.large`, IOPS, VPC). Os nós adicionados ao quadro assumem dimensionamento padrão automático proporcional à volumetria do enunciado (*ex.: 50 mil req/s*).
+  2. **Reação Topológica Instantânea:** O que altera P99, gargalo e fatura mensal são as conexões desenhadas (e eventuais *pills* rápidas de 1 clique `[Econômico | Padrão | Alta-Vazão]` ou comandos por voz como *"adiciona réplica de leitura"*). Ligar `Cliente → Banco` direto sob alta carga dispara alerta visual de exaustão de conexões; intercalar fila/cache recalcula latência e custo na hora.
+  3. **Injeção Espacial de Incidente:** Na metade da sessão, o agente derruba um nó/zona ou multiplica o tráfego diretamente sobre a topologia desenhada pelo candidato para avaliar contenção, degradação graciosa e consciência de custo.
+- **Diferença frente às gringas:** *CoderPad, HackerRank, CodeSignal e Intervue* oferecem quadros brancos estáticos e mudos; *Mercor, micro1 e Apriora* discutem arquitetura apenas no gogó, sem impacto mensurável de latência ou FinOps.
 
 ---
 
-### 5. Calibração Instantânea da Régua em 1,5s (Ponte Totti → Rubrica → Slack)
-- **Onde o mercado para hoje:** Em *HackerRank* e *TestGorilla*, calibrar a régua exige que engenheiros gastem horas testando a prova manualmente; no *CodeSignal*, depende de milhares de candidatos históricos.
-- **Como funciona para qualquer vaga (mesmo inédita):**
-  - Na pré-entrevista, o Totti traduz o alinhamento com a recrutadora nas **4 Áreas de Foco Estratégico** (`tecnico`, `pressao`, `escala_produto`, `uso_ia` em `contracts.ts` / `FocusPoint` em `job-posting.ts`), cujos pesos modulam os **4 Critérios Universais de Engenharia** (`entendimento_problema`, `estrutura_raciocinio`, `tradeoffs_priorizacao`, `comunicacao` em `gerador-kit.ts`) e os critérios específicos da vaga.
-  - Ao clicar em **"Simular Régua da Vaga"**, o sistema executa em **~1,5s** uma **projeção determinística** dessa matriz de pesos e travas sobre os perfis-âncora calibrados (`cenarios.ts`) e posta na thread de revisão do Tech Lead no Slack (`slack/notify.ts`):
-    > *"Com 40% em Pressão e 35% em Escala, esta régua aprova o Perfil-Âncora Sênior (3,6/4), deixa o Pleno em ressalva (2,5/4) e retém o Júnior (1,7/4). Aprovar régua e disparar convites?"*
+### 3. Copilot Adversário & Mudança de Requisito em Voo (`Adversarial Copilot & Live Pivot`)
+Em vez de proibir IA com spyware invasivo no computador do candidato ou dar um Copilot passivo que só ajuda, o produto avalia as duas competências mais críticas da engenharia moderna: **auditar código sutilmente falho gerado por IA** e **refatorar sob mudança real de regra de negócio**.
+
+- **Como funciona no produto:**
+  1. **Armadilha Controlada de Produção (UX Tri-Modal):** A plataforma apresenta sugestões plausíveis que compilam e passam no caminho feliz, mas escondem bugs reais de produção (*race condition*, *query N+1*, vazamento de conexão, falta de idempotência). Para garantir que até o candidato que programa 100% na mão seja avaliado sem forçá-lo a abrir um chat, a auditoria ocorre via:
+     - Módulo auxiliar pré-existente no projeto inicial marcado como gerado por IA; ou
+     - Sugestão inline proativa no editor com 1 clique (`[Aceitar | Rejeitar | Editar]`); ou
+     - Checagem natural por voz do agente pedindo parecer técnico sobre um snippet sugerido.
+  2. **Mudança de Requisito em Voo (`Live Requirement Pivot`):** No meio da implementação, o produto altera uma premissa de negócio (*ex.: de single-tenant para rate-limit por cliente ou cobrança idempotente*) e atualiza os testes automatizados ao vivo na IDE — medindo modularidade do código e neutralizando assistentes invisíveis de segunda tela.
+- **Diferença frente às gringas:** *CodeSignal (Cosmo), HackerRank, CoderPad e Karat* tratam o assistente na IDE apenas como co-autor benigno e gravam o histórico; nenhuma testa discernimento crítico contra alucinações sutis nem muta contratos de teste em tempo real.
 
 ---
 
-## Estratégia de Execução e Palco (180 Segundos vs. Q&A)
+### 4. Code Review por Voz com Roleplay Inverso (`Voice PR Review Roleplay`)
+Modo de avaliação onde o candidato não escreve código do zero: ele abre um Pull Request realista de 70–80 linhas cheio de armadilhas arquiteturais, falhas de segurança e gambiarras, enquanto **o agente de voz interpreta o desenvolvedor júnior/pleno autor da PR** pedindo revisão e defendendo suas escolhas.
 
-| Papel no Pitch | Combinação | Roteiro exato (sem estourar os 3 minutos) | Esforço no código |
+- **Como funciona no produto:**
+  1. **Defesa Ingênua Realista:** Quando o candidato aponta um problema no diff, o agente responde como um colega júnior (*"Coloquei esse `sleep(1000)` porque o webhook dava erro 429 quando mandava tudo junto, por que tirar?"*).
+  2. **Curva de Concessão Progressiva (Zero Frustração):** O agente nunca age como um "robô teimoso irritante": ele defende o atalho apenas uma vez e, assim que o candidato explica o trade-off correto (*ex.: fila com backoff exponencial*), concede na hora e pede orientação de implementação.
+  3. **Métricas Extraídas:** Precisão diagnóstica (bugs críticos vs. nitpicks cosméticos), visão de segurança/escala e **capacidade real de mentoria e liderança técnica** (firmeza técnica com clareza didática, sem rispidez).
+- **Diferença frente às gringas:** *Byteboard* e *Woven* têm revisões de PR, mas 100% assíncronas por texto estático; *Mercor, micro1, Apriora e FloCareer* usam voz apenas com a IA no papel de entrevistador-interrogador, nunca invertendo o papel para medir liderança técnica ao vivo.
+
+---
+
+### 5. Matriz Comparativa de Finalistas & Shadow Diff da Casa (`Shadow Architecture Diff`)
+Substitui relatórios PDF isolados de 20 páginas e notas abstratas por uma visão executiva de decisão rápida, ancorada na referência arquitetural da própria empresa.
+
+- **Como funciona no produto:**
+  1. **Gabarito Expresso de 5 Minutos (`Golden Blueprint`):** Sem precisar gravar uma entrevista inteira, o Staff Engineer ou Tech Lead da empresa arrasta em 3 a 5 minutos sua topologia de referência no quadro e fixa como padrão da vaga.
+  2. **Shadow Architecture & FinOps Diff:** O relatório sobrepõe visualmente as decisões de cada candidato contra o desenho da casa (*"Referência interna usou fila SQS + DLQ a ~US$ 1,2 mil/mês; candidato usou lock pessimista direto no banco a ~US$ 3,8 mil/mês"*).
+  3. **Matriz Lado a Lado + Clipes Sincronizados de 30s:** Tela única comparando os finalistas da vaga com miniatura da arquitetura, custo mensal estimado, resiliência P99 e um player sincronizado de 30 segundos mostrando exatamente como cada finalista reagiu ao mesmo incidente.
+- **Diferença frente às gringas:** *CodeSignal e HackerRank* comparam percentis numéricos; ATSs (*Greenhouse, Ashby, Lever*) mostram estrelas de 1 a 5 e textos soltos. Ninguém cruza diff topológico + custo de nuvem contra o arquiteto da casa com clipes sincronizados de crise.
+
+---
+
+### 6. Dossiê de Handoff Anti-Redundância & Debrief Factual Privado
+Fecha as duas pontas quebradas entre a triagem por IA, o líder técnico humano e o candidato.
+
+- **Como funciona no produto:**
+  1. **Para o Tech Lead (`Handoff Anti-Redundância`):** Gera um guia enxuto de 1 página para a entrevista final humana dividido em: *(a) Competências 100% comprovadas na prática — NÃO perca tempo perguntando novamente*, *(b) Pontos exatos de hesitação no código/quadro* e *(c) 3 perguntas cirúrgicas de aprofundamento com o que esperar na resposta*.
+  2. **Para o Candidato (`Debrief Técnico Factual` + Garantia Zero-Treino):** Encerra o "buraco negro" dos bots de recrutamento entregando ao candidato um diagnóstico privado, construtivo e **estritamente circunscrito a fatos técnicos observados no artefato** (*ex.: modelagem transacional sólida; sob pico de 50 mil req/s faltou proteção contra cache stampede*), sem qualquer juízo subjetivo ou comportamental (zero risco jurídico trabalhista) e com selo explícito de que voz e código não treinam modelos externos.
+- **Diferença frente às gringas:** Ataca diretamente a maior rejeição de engenheiros no Reddit e Hacker News contra *Mercor, micro1 e Apriora* (sensação de coleta obscura de dados, falta total de retorno técnico e entrevistas humanas que repetem tudo do zero).
+
+---
+
+## Combinações de Produto (Suítes e Fluxos Combinados)
+
+As 6 funcionalidades foram desenhadas como blocos modulares que se multiplicam quando combinados por perfil de vaga:
+
+| Combinação / Suíte | Módulos Combinados | Público / Vagas-Alvo | Como a experiência completa funciona na prática |
 | :--- | :--- | :--- | :--- |
-| **1. Fio Condutor Oficial de Palco (180s)** — *Combo Campeão (5 + 1 + 3 + Handoff)* | **Do Alinhamento Blindado ao Caos Auditável** | **0:00–0:40:** Totti fecha a vaga com a recrutadora e posta a Calibração Instantânea (1,5s) aprovada no Slack.<br>**0:40–1:55:** No Excalidraw (já aberto com seed inicial `Cliente → API` para não perder tempo desenhando do zero), o candidato conecta `Redis → Postgres`; na transição para Aprofundamento, a mão do agente anota o `Incidente Consciente da Topologia` e o candidato adapta.<br>**1:55–3:00:** Abre o `Relatorio.tsx` exibindo o **Card de Trilha Cognitiva** (`Antes → Incidente → Depois` com fotos reais), o Handoff do Tech Lead e a aprovação indo para o Slack. | **Baixo–Médio** (reaproveita `coreografia.ts`, `conversor.ts`, `Relatorio.tsx`, `cenarios.ts` e `slack/notify.ts`, com gatilho determinístico para zero risco de rede). |
-| **2. Carta na Manga de Arquitetura Dual (Slide + Q&A)** — *Combo Live Coding (2 + 3)* | **Sabatina de Invariante na Era de Código Assistido** | Em 1 frase no pitch (e pronta na aba `/entrevista` para o Q&A): *"Quando o Totti recomenda Live Coding em vez de System Design, a mesma filosofia atua: zero spyware invasivo, Sabatina de Invariante no código colado ou recém-passado e o mesmo Card de Trilha Cognitiva no final."* | **Baixo** (`analyst.ts` já tem `detectKeyMoment` para `paste` e primeiro `run` verde + grifo no Monaco; falta só o filtro de `codeHistory`/complexidade). |
-
----
-
-## Defesa Rápida para as 4 Perguntas Mais Difíceis da Banca (Q&A)
-
-1. **"Se o incidente muda conforme o desenho, como garantir isonomia jurídica entre candidatos?"**
-   A prova estática só mede quem decorou o problema antes. Nossa isonomia está na **Rubrica Invariante de Resiliência** (isolamento, cascata, contenção e degradação graciosa) aplicada igual para todos, somada a **100% de prova material auditável** (foto do quadro + fala com timestamp exato) para decisão final sempre humana no Slack.
-2. **"E se o candidato usar overlays invisíveis como Cluely / Interview Coder sem dar Ctrl+V?"**
-   Em vez de entrar na corrida perdida de instalar spyware invasivo na máquina do candidato, vencemos por **design pedagógico**: overlays invisíveis não conseguem redesenhar um incidente espacial injetado na topologia própria do candidato no Excalidraw, nem sustentar perguntas de invariante amarradas às linhas específicas que ele acabou de escrever.
-3. **"Qual o custo de IA e latência por entrevista em escala B2B?"**
-   Em vez de mandar screenshots contínuos para modelos de visão caros, o `conversor.ts` traduz o Excalidraw em grafo textual determinístico + diff (~US$ 0,0012 e ~2,8s por análise ao vivo), rodando o modelo pesado de scorecard apenas **1 vez de forma assíncrona** ao encerrar — mantendo o custo total na casa de centavos por entrevista.
-4. **"A mão desenhando incidente não parece 'gamificado' demais para um engenheiro sênior?"**
-   O que repele seniores é webcam policialesca e bot que interrompe o raciocínio. Um agente que espera o dev terminar de desenhar (`Plin`), discute *thundering herd* e replicação sobre a arquitetura dele e abre os minutos finais para responder sobre os desafios reais do time trata o candidato como engenheiro sênior, não como suspeito.
+| **1. Suíte de Arquitetura Viva & Resiliência FinOps** | **#1** (`Incident-to-Challenge`) + **#2** (`Chaos Canvas`) + **#5** (`Shadow Diff & Matriz`) | *Senior / Staff Engineers, Arquitetos de Software, SREs e Cloud* | O Tech Lead cria o caso em 60s a partir de um incidente real da empresa (**#1**). Na sala, o candidato projeta a solução no quadro com P99 e fatura AWS/GCP reagindo ao vivo e enfrenta queda de nós (**#2**). No fechamento da vaga, o comitê compara as topologias, custos e clipes de 30s dos finalistas lado a lado contra o desenho do Staff da casa (**#5**). |
+| **2. Loop de Engenharia AI-Native (Pós-Copilot)** | **#1** (`Incident-to-Challenge`) + **#3** (`Adversarial Copilot & Live Pivot`) + **#6** (`Handoff & Debrief`) | *Engenheiros Backend, Frontend e Fullstack (Pleno e Sênior)* | O desafio nasce de um bug/incidente real da stack do time (**#1**). Na IDE, o candidato tem seu senso crítico testado contra sugestões de IA com armadilhas sutis de concorrência e precisa refatorar quando a regra de negócio muda em voo (**#3**). Aprovados chegam ao Tech Lead com pauta cirúrgica sem perguntas repetidas, e reprovados recebem diagnóstico técnico factual (**#6**). |
+| **3. Loop de Liderança Técnica & Mentoria** | **#4** (`Voice PR Review Roleplay`) + **#5** (`Matriz de Clipes 30s`) + **#6** (`Handoff Anti-Redundância`) | *Tech Leads, Staff Engineers e Engineering Managers Hands-on* | Em vez de codar algoritmos do zero, o candidato revisa uma PR crítica conversando por voz com a IA no papel do autor júnior (**#4**). A liderança compara em 2 minutos os clipes de como cada finalista mentorou e rebateu falhas de segurança (**#5**) e recebe o briefing pronto para a conversa executiva final (**#6**). |
+| **4. Motor Enterprise Ponta a Ponta** | **Todos os módulos (`#1` a `#6`)** configuráveis por trilha | *Bancos, Fintechs, E-commerces e Scale-ups em contratação contínua* | Padroniza todo o funil técnico da empresa: criação instantânea de vagas sem expor código proprietário (**#1**), avaliação prática adaptada à vaga via código pós-Copilot (**#3**), revisão por voz (**#4**) ou arquitetura com FinOps (**#2**), decisão em comitê em 10 minutos (**#5**) e experiência transparente para Tech Leads e candidatos (**#6**). |
