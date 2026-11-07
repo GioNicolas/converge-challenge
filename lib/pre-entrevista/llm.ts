@@ -100,8 +100,11 @@ async function tentarAlvo(
   const chave = process.env[CHAVES[alvo.provedor]];
   if (!chave) throw new FalhaRecuperavel(`${CHAVES[alvo.provedor]} não definida`);
 
+  const limite = alvo.timeoutMs ?? o.timeoutMs;
   for (let tentativa = 0; ; tentativa++) {
     let res: Response;
+    let corpo: string;
+    // Cabeçalhos e corpo entram no mesmo try: o timeout pode disparar durante a leitura do corpo.
     try {
       res = await fetch(URLS[alvo.provedor], {
         method: "POST",
@@ -113,26 +116,31 @@ async function tentarAlvo(
           temperature: o.temperature,
           ...alvo.extraBody,
         }),
-        signal: AbortSignal.timeout(alvo.timeoutMs ?? o.timeoutMs),
+        signal: AbortSignal.timeout(limite),
       });
+      if (res.status === 503 && tentativa < ESPERAS_503_MS.length) {
+        await esperar(ESPERAS_503_MS[tentativa]);
+        continue;
+      }
+      corpo = await res.text();
     } catch (err) {
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-        throw new FalhaRecuperavel(`sem resposta em ${alvo.timeoutMs ?? o.timeoutMs} ms`);
+        throw new FalhaRecuperavel(`sem resposta completa em ${limite} ms`);
       }
-      // Erro de rede (fetch lança TypeError).
+      // Erro de rede ou corpo interrompido (fetch e o stream lançam TypeError).
       throw new FalhaRecuperavel(`erro de rede: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    if (res.status === 503 && tentativa < ESPERAS_503_MS.length) {
-      await esperar(ESPERAS_503_MS[tentativa]);
-      continue;
-    }
-    const corpo = res.ok ? "" : await res.text();
     if (res.status === 429 || res.status >= 500) throw new FalhaRecuperavel(`HTTP ${res.status}: ${corpo.slice(0, 300)}`);
     // 4xx que não seja 429 é erro nosso (request malformado, chave, modelo): não adianta trocar de provedor.
     if (!res.ok) throw new Error(`${alvo.provedor} HTTP ${res.status} (${alvo.model}): ${corpo.slice(0, 500)}`);
 
-    const json = (await res.json()) as RespostaChat;
+    let json: RespostaChat;
+    try {
+      json = JSON.parse(corpo) as RespostaChat;
+    } catch {
+      throw new FalhaRecuperavel(`corpo não é JSON válido (${corpo.length} caracteres)`);
+    }
     const escolha = json.choices?.[0];
     const content = escolha?.message?.content?.trim() ?? "";
     if (!content) {

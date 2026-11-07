@@ -4,29 +4,33 @@
  * O store fica em `globalThis` para sobreviver ao hot reload do `next dev`. Não é banco: se o
  * servidor reiniciar, as sessões somem. Só as configs finais também vão para `data/configs/`.
  *
- * Extração em segundo plano: a cada fala da recrutadora roda `extrair` + `avaliarCobertura`.
- * Se chegar fala nova durante uma rodada, nada roda em paralelo: ao terminar, roda uma rodada
- * extra com a transcrição mais recente (as falas acumuladas viram uma rodada só).
+ * Cada fala da recrutadora passa pelo turno (`turno.ts`): cobertura síncrona, planejador, fala da Totti.
+ * A extração lenta (`extrair` + cobertura) roda depois, em segundo plano. Se chegar fala nova durante
+ * uma rodada, nada roda em paralelo: ao terminar, roda uma rodada extra com a transcrição mais recente
+ * (as falas acumuladas viram uma rodada só).
  */
 import { randomUUID } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { InterviewConfig } from "@/lib/contracts";
+import { InterviewConfig, type FocusArea } from "@/lib/contracts";
 import type { Classificacao, Vaga } from "./classificador";
-import { aplicarCobertura, avaliarCobertura, topicosDo } from "./cobertura";
+import { aplicarCobertura, areasEmJogo, avaliarCobertura, mesclarCobertura, topicosDo, ultimaFalaDoAgente } from "./cobertura";
 import { ErroExtracao, extrair } from "./extrator";
 import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
+import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
 import { criarRascunho, type Rascunho, type Turno } from "./rascunho";
 
 export interface Sessao {
   id: string;
   criadaEm: number;
   vaga: Vaga;
-  /** Classificação do Jev, guardada para a abertura do agente e para a tela. */
+  /** Classificação do Jev, guardada para a abertura da Totti e para a tela. */
   classificacao: Classificacao;
   rascunho: Rascunho;
   transcricao: Turno[];
+  /** Sinais e contadores do planejador (ver `planejador.ts`). */
+  plano: PlanoEstado;
   logs: EventoLog[];
   status: { extraindo: boolean; versaoExtraida: number };
   configFinal?: InterviewConfig;
@@ -40,9 +44,18 @@ export interface EstadoSessao {
   classificacao: Omit<Classificacao, "request" | "answers">;
   transcricao: Turno[];
   rascunho: Rascunho;
-  topicos: Array<{ id: string; pergunta: string; sugestao: string; cobertura: number; coberto: boolean }>;
-  /** Ids dos tópicos ainda não cobertos, na ordem de prioridade. */
+  topicos: Array<{ id: string; pergunta: string; cobertura: number; coberto: boolean; opcional: boolean }>;
+  /** Ids dos tópicos obrigatórios das áreas em jogo ainda não cobertos. */
   faltando: string[];
+  /** O que o planejador decidiu por último e o que isso significa agora. */
+  planejamento: {
+    passo?: Passo;
+    descricaoPasso?: string;
+    emJogo: FocusArea[];
+    sinais: Record<string, number>;
+    perguntasPorTopico: Record<string, number>;
+    resumos: number;
+  };
   status: Sessao["status"];
   logs: EventoLog[];
   configFinal?: InterviewConfig;
@@ -88,7 +101,7 @@ export function liberar(id: string): void {
 
 /** Cria a sessão com o rascunho inicial (tudo pendente) e grava os dois primeiros eventos. */
 export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number): Sessao {
-  // Com cobertura vazia, todos os tópicos entram em `pendencias`.
+  // Com cobertura vazia, todos os tópicos obrigatórios das áreas do foco entram em `pendencias`.
   const rascunho = aplicarCobertura(criarRascunho(vaga, classificacao), {});
   const sessao: Sessao = {
     id: randomUUID(),
@@ -97,6 +110,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     classificacao,
     rascunho,
     transcricao: [],
+    plano: planoInicial(),
     logs: [],
     status: { extraindo: false, versaoExtraida: 0 },
   };
@@ -145,7 +159,7 @@ export function registrarFala(
   registrarEvento(sessao, evento);
 }
 
-/** Tira a última fala da transcrição (usado quando a resposta do agente falha, para a recrutadora reenviar). */
+/** Tira a última fala da transcrição (usado quando a resposta da Totti falha, para a recrutadora reenviar). */
 export function desfazerUltimaFala(sessao: Sessao): void {
   sessao.transcricao.pop();
 }
@@ -208,15 +222,16 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     }
 
     etapa = "cobertura";
-    const cob = await avaliarCobertura(ext.rascunho, transcricao);
+    const cob = await avaliarCobertura(ext.rascunho, transcricao, { ultimaFalaAgente: ultimaFalaDoAgente(transcricao) });
     const faltando = cob.faltando.map((t) => t.id);
     registrarEvento(sessao, {
       tipo: "cobertura",
-      resumo: `faltando: ${faltando.join(", ") || "nada"}`,
+      resumo: `segundo plano | faltando: ${faltando.join(", ") || "nada"}`,
       ms: cob.ms,
       provedor: "typesafe",
       model: cob.model,
       dados: {
+        origem: "segundo_plano",
         versaoTranscricao,
         request: cob.request,
         answers: cob.answers,
@@ -226,9 +241,12 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
       },
     });
 
-    const novo = aplicarCobertura(ext.rascunho, cob.cobertura);
-    sessao.rascunho = novo;
+    // A cobertura síncrona (do turno) pode ter subido enquanto esta rodada rodava: mescla, sem perder nada.
+    // Os sinais não entram aqui: quem decide o passo é a leitura do turno, que tem a transcrição mais recente.
+    const cobertura = mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura);
+    const novo = aplicarCobertura(ext.rascunho, cobertura, areasEmJogo(ext.rascunho.focus, sessao.plano.sinais));
     const mudancas = diff(antes, novo);
+    sessao.rascunho = novo;
     registrarEvento(sessao, {
       tipo: "rascunho_atualizado",
       resumo: resumoDiff(mudancas),
@@ -276,6 +294,15 @@ export function agendarExtracao(sessao: Sessao): void {
   void rodarExtracao(sessao);
 }
 
+/** Roda a extração e espera ela terminar. Usado pelo simulador, que não tem segundo plano. */
+export async function extrairAgora(sessao: Sessao): Promise<void> {
+  if (sessao.status.extraindo) {
+    await aguardarExtracao(sessao);
+    return;
+  }
+  await rodarExtracao(sessao);
+}
+
 /** Espera a extração em curso terminar (com limite). Usado antes de finalizar. */
 export async function aguardarExtracao(sessao: Sessao, limiteMs = 60_000): Promise<void> {
   const fim = Date.now() + limiteMs;
@@ -285,7 +312,8 @@ export async function aguardarExtracao(sessao: Sessao, limiteMs = 60_000): Promi
 }
 
 export function estadoDaSessao(sessao: Sessao): EstadoSessao {
-  const { classificacao } = sessao;
+  const { classificacao, plano } = sessao;
+  const emJogo = areasEmJogo(sessao.rascunho.focus, plano.sinais);
   return {
     id: sessao.id,
     criadaEm: sessao.criadaEm,
@@ -304,11 +332,19 @@ export function estadoDaSessao(sessao: Sessao): EstadoSessao {
     topicos: topicosDo(sessao.rascunho).map((t) => ({
       id: t.id,
       pergunta: t.pergunta,
-      sugestao: t.sugestao,
       cobertura: sessao.rascunho.cobertura[t.id] ?? 0,
       coberto: !sessao.rascunho.pendencias.includes(t.id),
+      opcional: t.opcional === true,
     })),
     faltando: sessao.rascunho.pendencias,
+    planejamento: {
+      passo: plano.ultimoPasso,
+      descricaoPasso: plano.ultimoPasso ? descreverPasso(plano.ultimoPasso) : undefined,
+      emJogo,
+      sinais: plano.sinais,
+      perguntasPorTopico: plano.perguntasPorTopico,
+      resumos: plano.resumos,
+    },
     status: sessao.status,
     logs: sessao.logs,
     configFinal: sessao.configFinal,

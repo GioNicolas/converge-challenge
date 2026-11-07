@@ -14,7 +14,7 @@ import { criteriosIniciais, PROBLEMA_PADRAO } from "./catalogo";
 export type Turno = { role: "recrutadora" | "agente"; text: string };
 
 /** Duração padrão quando a recrutadora não disse nada. */
-const DURACAO_PADRAO: Record<InterviewMode, number> = {
+export const DURACAO_PADRAO: Record<InterviewMode, number> = {
   live_coding: 30,
   system_design: 45,
 };

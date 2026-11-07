@@ -1,23 +1,43 @@
 /**
- * Cobertura: o que a conversa já deixou claro e o que ainda falta perguntar.
+ * Cobertura e sinais: o que a conversa já deixou claro e o que a recrutadora quer avaliar.
  *
- * O Jev responde, em uma chamada, sim/não para cada tópico (é ou não é coberto
- * na transcrição). Tópico com probabilidade de "sim" de pelo menos 0,6 está coberto.
- * O agente de voz usa `sugestao` para perguntar o que falta.
+ * O Jev responde, em uma chamada, uma pergunta de sim/não por item (`noul` = probabilidade de sim).
+ *  - Tópicos (`topicosDo`) são cumulativos: uma vez cobertos (probabilidade de pelo menos 0,6), seguem cobertos.
+ *  - Sinais (`sinaisDo`) valem a leitura do turno atual, porque a recrutadora pode mudar de ideia:
+ *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
+ * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo da Totti.
  */
 import { noul } from "@typesafe-ai/sdk";
-import type { FocusArea } from "@/lib/contracts";
+import { FocusArea } from "@/lib/contracts";
 import { jev } from "./jev";
 import type { Rascunho, Turno } from "./rascunho";
 
-export interface Topico {
+/** Probabilidade a partir da qual um tópico está coberto e um sinal conta como verdadeiro. */
+export const LIMIAR = 0.6;
+
+export const AREAS = FocusArea.options;
+
+/** Nome da área do jeito que a Totti fala. Nunca os rótulos internos. */
+export const NOME_AREA_FALA: Record<FocusArea, string> = {
+  tecnico: "algoritmos e código",
+  pressao: "lidar com pressão",
+  escala_produto: "escalabilidade",
+  uso_ia: "uso de IA",
+};
+
+export interface Pergunta {
   id: string;
   /** Pergunta de sim/não que o Jev responde sobre a transcrição. */
   pergunta: string;
-  /** Como o agente de voz pergunta, em pt-BR, uma pergunta só. */
-  sugestao: string;
   sinal_sim: string;
   sinal_nao: string;
+}
+
+export interface Topico extends Pergunta {
+  /** Área a que o tópico pertence (só os `criterio_<area>`). */
+  area?: FocusArea;
+  /** Não bloqueia o resumo: se ela falar, entra; se não, o resumo usa o padrão. */
+  opcional?: boolean;
 }
 
 /** Pergunta/resposta crua do Jev, guardada no log para reproduzir a avaliação. */
@@ -31,142 +51,203 @@ export interface ChamadaJev {
 }
 
 export interface Cobertura extends ChamadaJev {
-  /** Probabilidade de cada tópico estar coberto, por id. */
+  /** Probabilidade acumulada de cada tópico estar coberto, por id. */
   cobertura: Record<string, number>;
-  /** Tópicos ainda não cobertos, na ordem de prioridade. */
+  /** Sinais deste turno (quer/dispensa por área, resposta vaga, aprovação do resumo), por id. */
+  sinais: Record<string, number>;
+  /** Tópicos obrigatórios das áreas em jogo que ainda não estão cobertos. */
   faltando: Topico[];
   ms: number;
 }
 
-const LIMIAR_COBERTURA = 0.6;
-
-const NOME_AREA: Record<FocusArea, string> = {
-  tecnico: "domínio técnico",
-  pressao: "pressão e adaptação",
-  escala_produto: "escala e produto",
-  uso_ia: "uso de IA",
-};
-
-const DESCRICAO_MODO = {
-  live_coding: "live coding, com código na IDE",
-  system_design: "system design, desenhando a arquitetura num quadro",
-};
+export interface ContextoCobertura {
+  /** Última fala da Totti, para os sinais que dependem do que foi perguntado (resposta vaga, aprovação do resumo). */
+  ultimaFalaAgente?: string;
+}
 
 const TAREFA_COBERTURA =
-  "Você verifica quais tópicos de uma pré-entrevista já foram respondidos na transcrição. " +
-  "Responda sim só se a recrutadora falou sobre o tópico (não o agente, que apenas perguntou). " +
-  "Se ela respondeu de forma parcial ou vaga, responda não.";
+  "Você lê uma conversa de pré-entrevista e responde perguntas de sim/não sobre o que a recrutadora disse. " +
+  "As falas da recrutadora são a resposta; as falas do agente só mostram o que foi perguntado. " +
+  "Se a resposta dela for parcial ou vaga, responda não, exceto quando a pergunta pedir só uma concordância geral.";
 
-/**
- * Lista de tópicos a partir do rascunho, na ordem de prioridade:
- * confirmações → bom/ruim por área (área de maior peso primeiro) → eliminatórios → duração → tom → dicas.
- */
+/** Exemplos concretos de comportamento observável, por área. Usados nas regras de sim/não. */
+const EXEMPLOS_CRITERIO: Record<FocusArea, string> = {
+  tecnico:
+    "'ruim é não tratar lista vazia e só perceber quando alguém aponta'; 'bom é escolher a estrutura de dados certa e explicar a escolha'",
+  pressao: "'bom é continuar explicando o raciocínio quando o requisito muda'; 'ruim é travar ou desistir quando algo muda no meio'",
+  escala_produto:
+    "'bom é resolver com solução simples e complexidade baixa'; 'ruim é complexidade muito alta que fica ruim com muitos dados'",
+  uso_ia: "'bom é revisar o código gerado e achar um problema antes de rodar'; 'ruim é colar a resposta sem entender'",
+};
+
+const EXEMPLOS_QUER: Record<FocusArea, string> = {
+  tecnico: "'implementar bem os algoritmos', 'código limpo e testado', 'saber estrutura de dados'",
+  pressao: "'quero ver como ele lida com prazo curto', 'ambiente acelerado, com prioridade mudando toda semana'",
+  escala_produto: "'escalabilidade', 'algoritmo que aguente volume', 'soluções simples com complexidade baixa'",
+  uso_ia: "'IA', 'Copilot', 'Cursor', 'revisar o que a IA gera'",
+};
+
+const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
+  tecnico: "'isso não é tão importante pra gente', 'pode diminuir a parte de algoritmo'",
+  pressao: "'coloca menos pressão', 'pressão eu tiraria', 'não precisa ser muito rigoroso com prazo'",
+  escala_produto: "'escala não é prioridade agora', 'pode tirar a parte de escalabilidade'",
+  uso_ia: "'pode tirar IA', 'uso de IA não pesa tanto'",
+};
+
+function criterioDaArea(area: FocusArea): Topico {
+  const nome = NOME_AREA_FALA[area];
+  return {
+    id: `criterio_${area}`,
+    area,
+    pergunta: `A recrutadora descreveu pelo menos um comportamento concreto e observável, bom ou ruim, SOBRE ${nome}?`,
+    sinal_sim:
+      `Sim se o comportamento descrito é sobre ${nome}: algo que se vê na entrevista, bom ou ruim, nessa área. Basta um lado. ` +
+      `Exemplos: ${EXEMPLOS_CRITERIO[area]}. Falar de outra área não conta: por exemplo, falar de algoritmos ou de escala não serve para ${nome}.`,
+    sinal_nao:
+      `Não se ela foi genérica, ou só disse que a área é importante, ou o comportamento que descreveu é de outra área, sem nada observável em ${nome}. ` +
+      "Exemplos de genérico: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', 'implementar bem os algoritmos'.",
+  };
+}
+
+function quererDaArea(area: FocusArea): Pergunta {
+  const nome = NOME_AREA_FALA[area];
+  return {
+    id: `quer_${area}`,
+    pergunta: `Considerando a conversa inteira, a recrutadora quer avaliar ${nome}?`,
+    sinal_sim: `Sim se ela disse que quer avaliar ou priorizar ${nome}, mesmo com outras palavras. Exemplos: ${EXEMPLOS_QUER[area]}.`,
+    sinal_nao: `Não se ela não pediu isso. Citar a área de passagem, sem querer avaliá-la, não conta.`,
+  };
+}
+
+function dispensaDaArea(area: FocusArea): Pergunta {
+  const nome = NOME_AREA_FALA[area];
+  return {
+    id: `dispensa_${area}`,
+    pergunta: `A recrutadora disse que ${nome} não importa para a avaliação, ou que pode tirar ou diminuir essa área?`,
+    sinal_sim: `Sim se ela disse que a área não é prioridade ou que pode tirar ou diminuir. Exemplos: ${EXEMPLOS_DISPENSA[area]}.`,
+    sinal_nao:
+      `Não se ela não disse que ${nome} perde importância. Se ela só falou de outra área (ex.: 'foco em escalabilidade'), ` +
+      "isso não tira as outras do foco.",
+  };
+}
+
+/** Tópicos de cobertura, na ordem: confirmação inicial → critério por área (área do foco primeiro) → opcionais. */
 export function topicosDo(r: Rascunho): Topico[] {
-  const porPeso = [...r.focus].sort((a, b) => b.weight - a.weight);
-  const nomesFoco = porPeso.map((f) => NOME_AREA[f.area]).join(", ");
-
-  const topicos: Topico[] = [
+  const doFoco = [...r.focus].sort((a, b) => b.weight - a.weight).map((f) => f.area);
+  const areas = [...new Set([...doFoco, ...AREAS])];
+  return [
     {
-      id: "confirmou_modo",
-      pergunta: `A recrutadora confirmou ou corrigiu o formato da entrevista (${DESCRICAO_MODO[r.mode]})?`,
-      sugestao: `Pelo que vi da vaga, eu faria uma entrevista de ${DESCRICAO_MODO[r.mode]}. Faz sentido pra você?`,
-      sinal_sim: "Ela concordou com o formato sugerido ou disse outro formato.",
-      sinal_nao: "O formato nunca foi discutido.",
+      id: "confirmou_inicio",
+      pergunta: "A recrutadora respondeu à proposta do agente (formato, senioridade e foco) concordando ou corrigindo algum dos três?",
+      sinal_sim:
+        "Sim se ela concordou com a proposta (ex.: 'faz sentido', 'pode ser', 'confere', 'isso, pleno') " +
+        "ou corrigiu algum dos três (ex.: 'pode continuar pela de live coding', 'tava pensando em focar mais em algoritmos', 'é sênior, não pleno').",
+      sinal_nao:
+        "Não se a resposta não fala de formato, senioridade nem foco (ex.: só cumprimenta ou pergunta outra coisa sobre a vaga), " +
+        "e não há nenhuma concordância nem correção.",
     },
-    {
-      id: "confirmou_senioridade",
-      pergunta: `A recrutadora confirmou ou corrigiu a senioridade da vaga (${r.seniority})?`,
-      sugestao: `Essa vaga é de nível ${r.seniority}, né? Confere?`,
-      sinal_sim: "Ela confirmou ou corrigiu a senioridade.",
-      sinal_nao: "A senioridade nunca foi confirmada nem corrigida.",
-    },
-    {
-      id: "confirmou_focos",
-      pergunta: `A recrutadora confirmou ou corrigiu as áreas de foco da avaliação (${nomesFoco})?`,
-      sugestao: `Pra avaliação, eu daria mais peso a ${nomesFoco}. Acha que está certo?`,
-      sinal_sim: "Ela concordou com as áreas de foco ou pediu mudanças nelas.",
-      sinal_nao: "O foco da avaliação nunca foi discutido.",
-    },
-  ];
-
-  for (const { area } of porPeso) {
-    const nome = NOME_AREA[area];
-    topicos.push(
-      {
-        id: `bom_${area}`,
-        pergunta: `A recrutadora descreveu como seria um candidato excelente em ${nome}, com comportamentos observáveis?`,
-        sugestao: `Em ${nome}, o que faria um candidato se destacar pra você?`,
-        sinal_sim: `Ela descreveu sinais concretos de um candidato excelente em ${nome}.`,
-        sinal_nao: `Ela não descreveu isso, ou falou de forma genérica, sem comportamento observável em ${nome}.`,
-      },
-      {
-        id: `ruim_${area}`,
-        pergunta: `A recrutadora disse o que faria descartar alguém, ou red flags, em ${nome}?`,
-        sugestao: `E em ${nome}, o que te faria descartar um candidato?`,
-        sinal_sim: `Ela deu exemplos do que seria um sinal ruim ou uma red flag em ${nome}.`,
-        sinal_nao: `Ela não disse o que seria ruim em ${nome}.`,
-      },
-    );
-  }
-
-  topicos.push(
+    ...areas.map(criterioDaArea),
     {
       id: "eliminatorios",
-      pergunta: "A recrutadora disse algo que reprova o candidato sozinho, independentemente do resto (eliminatório)?",
-      sugestao: "Tem algo que seria eliminatório, que reprova o candidato sozinho?",
-      sinal_sim: "Ela citou um ponto eliminatório específico.",
-      sinal_nao: "Ela não citou nenhum ponto eliminatório.",
+      opcional: true,
+      pergunta: "A recrutadora disse que algo reprova o candidato sozinho, sem depender do resto (eliminatório)?",
+      sinal_sim:
+        "Sim se ela citou um ponto eliminatório de forma explícita: usou 'eliminatório', 'reprovo', 'desclassifica', " +
+        "ou disse que um comportamento específico reprova direto (ex.: 'se não considerar falha de rede, eliminatório').",
+      sinal_nao:
+        "Não se ela não citou nenhum ponto que reprove sozinho. Um critério de nota (ex.: 'código confuso é ruim') não é eliminatório.",
     },
     {
-      id: "duracao",
-      pergunta: "A recrutadora disse quanto tempo a entrevista deve durar?",
-      sugestao: "Quanto tempo você quer reservar pra entrevista?",
-      sinal_sim: "Ela disse uma duração em minutos.",
-      sinal_nao: "A duração nunca foi mencionada.",
+      id: "logistica",
+      opcional: true,
+      pergunta: "A recrutadora falou de duração da entrevista, de tom ou de dicas para o candidato?",
+      sinal_sim:
+        "Sim se ela disse uma duração em minutos (ex.: 'uns 40 minutos'), um tom (ex.: 'mais amigável', 'mais desafiadora') " +
+        "ou se pode haver dicas (ex.: 'dica leve se travar', 'sem dicas, que se vire').",
+      sinal_nao: "Não se ela não falou de duração, tom nem dicas.",
     },
-    {
-      id: "tom",
-      pergunta: "A recrutadora disse que tom a entrevista deve ter, mais amigável ou mais pressionada?",
-      sugestao: "Você prefere uma conversa mais amigável, ou que pressione mais o candidato?",
-      sinal_sim: "Ela descreveu o tom da entrevista.",
-      sinal_nao: "O tom da entrevista nunca foi mencionado.",
-    },
-    {
-      id: "dicas",
-      pergunta: "A recrutadora disse se o agente pode dar dicas ao candidato durante a entrevista, e em que situação?",
-      sugestao: "Posso dar dicas se ele travar, ou prefere que ele se vire sozinho?",
-      sinal_sim: "Ela disse se pode haver dicas e em que condições.",
-      sinal_nao: "A política de dicas nunca foi discutida.",
-    },
-  );
+  ];
+}
 
-  return topicos;
+/** Sinais do turno: quer/dispensa por área, resposta vaga e aprovação do resumo. */
+function sinaisDo(): Pergunta[] {
+  return [
+    ...AREAS.map(quererDaArea),
+    ...AREAS.map(dispensaDaArea),
+    {
+      id: "resposta_vaga",
+      pergunta: "A última fala da recrutadora foi genérica, sem nenhum comportamento observável, como resposta à última fala do agente?",
+      sinal_sim:
+        "Sim se ela respondeu de forma vaga: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', " +
+        "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
+      sinal_nao:
+        "Não se ela deu um comportamento concreto ('ruim é colar o código sem entender'), escolheu entre opções concretas, ou respondeu outra coisa.",
+    },
+    {
+      id: "aprovou_resumo",
+      pergunta: "A última fala da recrutadora aprova o resumo que o agente acabou de fazer e autoriza finalizar?",
+      sinal_sim: "Sim se ela concordou em finalizar: 'pode finalizar', 'tá bom', 'beleza, pode', 'confirmo', 'perfeito'.",
+      sinal_nao: "Não se ela pediu mudança ('muda o tom', 'tira pressão', 'espera'), fez pergunta ou respondeu outra coisa.",
+    },
+  ];
+}
+
+/** Última fala do agente na transcrição, se houver. */
+export function ultimaFalaDoAgente(transcricao: Turno[]): string | undefined {
+  return transcricao.filter((t) => t.role === "agente").at(-1)?.text;
+}
+
+/** Junta duas leituras de cobertura: para cada tópico vale o maior valor. Só sobe. Função pura. */
+export function mesclarCobertura(anterior: Record<string, number>, nova: Record<string, number>): Record<string, number> {
+  const resultado = { ...anterior };
+  for (const [id, p] of Object.entries(nova)) resultado[id] = Math.max(anterior[id] ?? 0, p);
+  return resultado;
 }
 
 /**
- * Chama o Jev para os tópicos atuais. A cobertura é monotônica: para cada tópico, vale o
- * máximo entre a probabilidade anterior (`r.cobertura`) e a nova. Não muta `r`.
+ * Áreas "em jogo" agora: as do foco do rascunho, mais as que ela quer avaliar, menos as que ela dispensou.
+ * Usa os sinais mais recentes, então vale antes de o extrator (lento) atualizar o rascunho. Função pura.
  */
-export async function avaliarCobertura(r: Rascunho, transcricao: Turno[]): Promise<Cobertura> {
+export function areasEmJogo(focus: Array<{ area: FocusArea }>, sinais: Record<string, number>): FocusArea[] {
+  const sinal = (id: string) => sinais[id] ?? 0;
+  const noFoco = focus.map((f) => f.area);
+  const pedidas = AREAS.filter((a) => sinal(`quer_${a}`) >= LIMIAR);
+  const dispensadas = new Set(AREAS.filter((a) => sinal(`dispensa_${a}`) >= LIMIAR));
+  return [...new Set<FocusArea>([...noFoco, ...pedidas])].filter((a) => !dispensadas.has(a));
+}
+
+function faltandoDo(topicos: Topico[], cobertura: Record<string, number>, emJogo: FocusArea[]): Topico[] {
+  return topicos.filter((t) => !t.opcional && (t.area === undefined || emJogo.includes(t.area)) && (cobertura[t.id] ?? 0) < LIMIAR);
+}
+
+/**
+ * Chama o Jev para os tópicos e os sinais. A cobertura é cumulativa (`mesclarCobertura`);
+ * os sinais são a leitura deste turno. Não muta `r`.
+ */
+export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contexto: ContextoCobertura = {}): Promise<Cobertura> {
   const topicos = topicosDo(r);
+  const sinais = sinaisDo();
   const inicio = Date.now();
 
   const request = {
     state: {
       tarefa: TAREFA_COBERTURA,
       rascunho_atual: { mode: r.mode, seniority: r.seniority, focus: r.focus },
+      ultima_fala_do_agente: contexto.ultimaFalaAgente ?? "(nenhuma)",
       transcricao,
     },
-    questions: Object.fromEntries(topicos.map((t) => [t.id, noul(t.pergunta, { true: t.sinal_sim, false: t.sinal_nao })])),
+    questions: Object.fromEntries([...topicos, ...sinais].map((p) => [p.id, noul(p.pergunta, { true: p.sinal_sim, false: p.sinal_nao })])),
   };
   const { answers, model, usage } = await jev().systemOne(request);
 
-  const cobertura: Record<string, number> = { ...r.cobertura };
-  for (const t of topicos) cobertura[t.id] = Math.max(r.cobertura[t.id] ?? 0, answers[t.id].noul);
+  const cobertura = mesclarCobertura(r.cobertura, Object.fromEntries(topicos.map((t) => [t.id, answers[t.id].noul])));
+  const sinaisDoTurno: Record<string, number> = Object.fromEntries(sinais.map((s) => [s.id, answers[s.id].noul]));
+  const emJogo = areasEmJogo(r.focus, sinaisDoTurno);
 
   return {
     cobertura,
-    faltando: topicos.filter((t) => cobertura[t.id] < LIMIAR_COBERTURA),
+    sinais: sinaisDoTurno,
+    faltando: faltandoDo(topicos, cobertura, emJogo),
     ms: Date.now() - inicio,
     request,
     answers,
@@ -175,10 +256,11 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[]): Promi
   };
 }
 
-/** Grava a cobertura no rascunho e recalcula `pendencias`. Função pura. */
-export function aplicarCobertura(r: Rascunho, cobertura: Record<string, number>): Rascunho {
-  const pendencias = topicosDo(r)
-    .filter((t) => (cobertura[t.id] ?? 0) < LIMIAR_COBERTURA)
-    .map((t) => t.id);
+/**
+ * Grava a cobertura no rascunho e recalcula `pendencias` (só as áreas em jogo, sem os opcionais).
+ * Sem `emJogo`, vale o foco do rascunho. Função pura.
+ */
+export function aplicarCobertura(r: Rascunho, cobertura: Record<string, number>, emJogo = areasEmJogo(r.focus, {})): Rascunho {
+  const pendencias = faltandoDo(topicosDo(r), cobertura, emJogo).map((t) => t.id);
   return { ...r, cobertura, pendencias };
 }

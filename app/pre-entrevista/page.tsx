@@ -15,6 +15,7 @@ const TIPOS: TipoEvento[] = [
   "fala_agente",
   "extracao",
   "cobertura",
+  "plano",
   "rascunho_atualizado",
   "finalizacao",
   "erro",
@@ -28,6 +29,7 @@ const COR_TIPO: Record<TipoEvento, string> = {
   fala_agente: "bg-indigo-100 text-indigo-800",
   extracao: "bg-amber-100 text-amber-900",
   cobertura: "bg-cyan-100 text-cyan-900",
+  plano: "bg-fuchsia-100 text-fuchsia-900",
   rascunho_atualizado: "bg-violet-100 text-violet-800",
   finalizacao: "bg-teal-100 text-teal-800",
   erro: "bg-red-100 text-red-800",
@@ -267,7 +269,7 @@ export default function PaginaPreEntrevista() {
         <main className="mx-auto max-w-2xl">
           <h1 className="text-2xl font-semibold">Pré-entrevista</h1>
           <p className="mt-1 text-sm text-neutral-600">
-            Cole a vaga. A Nara classifica o formato e a senioridade e conversa com você para montar a entrevista.
+            Cole a vaga. A Totti classifica o formato e a senioridade e conversa com você para montar a entrevista.
           </p>
           <form onSubmit={criarSessao} className="mt-6 space-y-4 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
             <label className="block">
@@ -326,7 +328,7 @@ export default function PaginaPreEntrevista() {
   // Sessão: conversa, rascunho ao vivo e logs
   // ---------------------------------------------------------------------------
   const r = estado.rascunho;
-  const proximo = estado.faltando[0] ? estado.topicos.find((t) => t.id === estado.faltando[0]) : undefined;
+  const encerrando = estado.planejamento.passo?.tipo === "encerrar";
   const logsFiltrados = estado.logs.filter((l) => filtro === "todos" || l.tipo === filtro);
 
   return (
@@ -339,7 +341,10 @@ export default function PaginaPreEntrevista() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={abrirRevisao} className="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white">
+          <button
+            onClick={abrirRevisao}
+            className={`rounded px-3 py-2 text-sm font-medium text-white ${encerrando ? "bg-emerald-700 ring-2 ring-emerald-300" : "bg-neutral-900"}`}
+          >
             Revisar e confirmar
           </button>
           <button onClick={novaSessao} className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm font-medium">
@@ -356,11 +361,11 @@ export default function PaginaPreEntrevista() {
           <div ref={listaConversaRef} className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
             {estado.transcricao.map((t, i) => (
               <div key={i} className={`rounded px-3 py-2 text-sm ${t.role === "agente" ? "bg-indigo-50" : "bg-emerald-50"}`}>
-                <p className="text-xs font-semibold text-neutral-500">{t.role === "agente" ? "Nara" : "Recrutadora"}</p>
+                <p className="text-xs font-semibold text-neutral-500">{t.role === "agente" ? "Totti" : "Recrutadora"}</p>
                 <p className="whitespace-pre-wrap">{t.text}</p>
               </div>
             ))}
-            {enviando && <p className="text-sm italic text-neutral-500">Nara está digitando…</p>}
+            {enviando && <p className="text-sm italic text-neutral-500">Totti está digitando…</p>}
           </div>
           <div className="mt-3 flex gap-2">
             <textarea
@@ -369,7 +374,7 @@ export default function PaginaPreEntrevista() {
               onKeyDown={teclaNaFala}
               disabled={enviando}
               rows={2}
-              placeholder="Responda à Nara (Enter envia, Shift+Enter quebra linha)"
+              placeholder="Responda à Totti (Enter envia, Shift+Enter quebra linha)"
               className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
             />
             <button
@@ -447,10 +452,28 @@ export default function PaginaPreEntrevista() {
               ))}
             </tbody>
           </table>
-          <p className="text-sm">
-            <span className="text-neutral-500">Próximo: </span>
-            {proximo ? <span>{proximo.sugestao}</span> : <span>nada pendente; falta só finalizar</span>}
-          </p>
+          <div className="mb-3 space-y-1 rounded border border-fuchsia-200 bg-fuchsia-50 p-2 text-xs">
+            <p>
+              <span className="font-semibold text-neutral-600">Passo atual: </span>
+              <span className="font-mono">{estado.planejamento.descricaoPasso ?? "(nenhum ainda)"}</span>
+            </p>
+            <p>
+              <span className="font-semibold text-neutral-600">Em jogo: </span>
+              <span className="font-mono">{estado.planejamento.emJogo.join(", ") || "nenhuma"}</span>
+            </p>
+            <p>
+              <span className="font-semibold text-neutral-600">Perguntas por tópico: </span>
+              <span className="font-mono">
+                {Object.entries(estado.planejamento.perguntasPorTopico)
+                  .map(([id, n]) => `${id}=${n}`)
+                  .join("  ") || "nenhuma"}
+              </span>
+            </p>
+            <p>
+              <span className="font-semibold text-neutral-600">Resumos: </span>
+              <span className="font-mono">{estado.planejamento.resumos}</span>
+            </p>
+          </div>
 
           {final && (
             <div className="mt-4 rounded border border-neutral-200 p-3 text-sm">

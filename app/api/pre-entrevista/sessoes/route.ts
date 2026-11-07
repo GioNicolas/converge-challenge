@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
-import { aberturaDoAgente } from "@/lib/pre-entrevista/conversa";
-import { criarSessao, estadoDaSessao, registrarFala } from "@/lib/pre-entrevista/sessoes";
+import { criarSessao, estadoDaSessao } from "@/lib/pre-entrevista/sessoes";
+import { abrirConversa } from "@/lib/pre-entrevista/turno";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ const Corpo = z.object({
   context: z.string().trim().optional(),
 });
 
-/** Cria a sessão: classifica a vaga (Jev), monta o rascunho e registra a abertura do agente. */
+/** Cria a sessão: classifica a vaga (Jev), monta o rascunho e registra a abertura da Totti. */
 export async function POST(req: Request) {
   const lido = Corpo.safeParse(await req.json().catch(() => null));
   if (!lido.success) {
@@ -39,6 +39,6 @@ export async function POST(req: Request) {
   }
 
   const sessao = criarSessao(vaga, classificacao, criadaEm);
-  registrarFala(sessao, { role: "agente", text: aberturaDoAgente(sessao) }, { dados: { origem: "abertura_sem_llm" } });
+  abrirConversa(sessao);
   return NextResponse.json(estadoDaSessao(sessao), { status: 201 });
 }

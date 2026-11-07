@@ -30,8 +30,8 @@ export function alvosDoExtrator(): Alvo[] {
       timeoutMs: 15000,
     },
   ];
-  const fallback = process.env.EXTRACTOR_FALLBACK_MODEL;
-  if (fallback) alvos.push({ provedor: "openrouter", model: fallback });
+  const fallback = process.env.EXTRACTOR_FALLBACK_MODEL || "google/gemini-2.5-flash-lite";
+  alvos.push({ provedor: "openrouter", model: fallback });
   return alvos;
 }
 
@@ -65,16 +65,21 @@ Regras:
    - Parta dos critérios do catálogo que forem enviados e personalize a description com o que ela disse.
    - description sempre em comportamento observável, no formato "Bom: ... Ruim: ...", com 1 a 3 frases curtas em português.
      Evite termos vagos como "boa comunicação" ou "bom conhecimento"; diga o que se vê na entrevista.
+   - Se ela descreveu só o lado bom (ou só o ruim), deduza o outro lado como o oposto razoável. Escreva sempre os dois lados.
    - Se ela pediu algo que o catálogo não cobre, adicione um critério novo com id em snake_case.
    - Se ela tirou uma área do foco, remova os critérios dessa área.
    - Critério do catálogo sobre o qual ela não falou fica como está.
    - weight é maior que 0; use valores maiores para o que ela disse que pesa mais (base 1).
    - focus de cada critério deve ser uma das áreas do foco.
 5. focus: lista de { area, weight } com as áreas de foco. Os pesos devem somar 1 (aproxime; o código renormaliza).
+   - Se ela disse para tirar uma área, remova-a do foco.
+   - Se ela disse que uma área pesa menos, pode diminuir ou não importa muito, mantenha a área com cerca da metade do peso anterior.
+   - Área nova que ela pediu entra no foco, com pelo menos um critério personalizado com o que ela disse.
 6. recruiterNotes: texto curto em frases curtas. NÃO repita o que já tem campo próprio (modo, senioridade, foco,
    duração, critérios). Guarde só tom, política de dicas, contexto do time/empresa e eliminatórios.
    Devolva o texto COMPLETO, acumulando o que já está em recruiterNotes com o que ela acrescentou.
 7. confirmado: marque true só para mode, seniority ou focus que ela confirmou ou corrigiu explicitamente nesta conversa.
+   Um "sim" a uma proposta que cobre formato, senioridade e foco de uma vez conta para os três.
 8. durationMin: inteiro, em minutos, só se ela disse.
 9. problemId: só se ela pediu um problema específico. Caso contrário, não envie.
 

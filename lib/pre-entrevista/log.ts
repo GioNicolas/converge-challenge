@@ -15,6 +15,7 @@ export type TipoEvento =
   | "fala_agente"
   | "extracao"
   | "cobertura"
+  | "plano"
   | "rascunho_atualizado"
   | "finalizacao"
   | "erro"
