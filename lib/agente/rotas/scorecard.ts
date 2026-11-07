@@ -5,6 +5,7 @@
 // O scorecard é do recrutador, não do candidato: em produção só sai com o header x-api-key
 // (AVALIACOES_API_SECRET). Em dev (NODE_ENV != production ou AGENTE_DEV=1) sai direto, para a página de teste.
 import { timingSafeEqual } from "node:crypto";
+import { ErroLlm } from "../llm/cliente";
 import { resolverAvaliacao } from "../kits";
 import { gerarScorecard, gerarScorecardFalso, type Scorecard } from "../scorecard";
 import { criteriosSemEvidencia, transicionar } from "../sessao/estado";
@@ -75,7 +76,9 @@ export async function finalizarHandler(req: Request, { params }: ParamsId): Prom
       } catch (e) {
         // Só o nome do erro vai ao log: nada de prompt, conversa ou chave.
         console.warn("[agente] scorecard_falhou", { sessao_id: id, erro: e instanceof Error ? e.name : "desconhecido" });
-        return { falha: "Não foi possível gerar o scorecard agora. Tente de novo em instantes.", status: 502 };
+        return { falha: e instanceof ErroLlm && e.codigo === "timeout"
+          ? "O scorecard excedeu o prazo de geração. Nenhum relatório foi salvo; tente finalizar novamente."
+          : "Não foi possível gerar o scorecard agora. Tente de novo em instantes.", status: 502 };
       }
     })().finally(() => {
       emAndamento.delete(id);

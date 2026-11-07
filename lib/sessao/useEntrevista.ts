@@ -397,8 +397,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     const { texto } = conversor.current.converter(quadro.api.getSceneElements());
     enviar({ tipo: "PLIN_DEMO", resposta: duvidaDeDemonstracao(texto) });
   }, [enviar, quadro]);
-  const terminarResposta = useCallback(() => {
-    registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero });
+  const terminarResposta = useCallback((texto?: unknown) => {
+    registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero, quem: "candidato", ...(typeof texto === "string" && texto.trim() ? { texto: texto.trim() } : {}) });
     enviar({ tipo: "RESPOSTA_TERMINOU" });
     // A resposta pode mudar a avaliação: analisa de novo logo depois que o servidor souber dela.
     void descarregarJa().then(() => gatilho.current?.dispararAgora());

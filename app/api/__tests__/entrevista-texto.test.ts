@@ -239,7 +239,7 @@ describe("finalizar", () => {
     const ch = llm.chamadas[0];
     assert.equal(ch.raciocinio, true);
     assert.equal(ch.maxTokens, 6000);
-    assert.equal(ch.timeoutMs, 120_000);
+    assert.equal(ch.timeoutMs, 45_000);
     assert.ok(ch.modelo);
     // guardas no caminho real: nota_geral recomputada e fala validada contra a conversa
     assert.equal(a.corpo.nota_geral, 3);
@@ -266,6 +266,28 @@ describe("finalizar", () => {
 
   it("sessão inexistente: 404", async () => {
     assert.equal((await finalizarPost(post("/api/sessoes/nada/finalizar", {}), params("nada"))).status, 404);
+  });
+
+  it("timeout encerra a chamada, não salva relatório e permite nova tentativa", async () => {
+    const anterior = process.env.AGENTE_TIMEOUT_SCORECARD_MS;
+    process.env.AGENTE_TIMEOUT_SCORECARD_MS = "5";
+    let sinal: AbortSignal | undefined;
+    try {
+      const { id } = await novaSessao();
+      const llm: LlmCliente = { completarJson: args => { sinal = args.sinal; return new Promise(() => {}); } };
+      definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: false });
+      const resposta = await ler(await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id)));
+      assert.equal(resposta.status, 502);
+      assert.match(resposta.corpo.erro, /excedeu o prazo/);
+      assert.equal(sinal?.aborted, true);
+      assert.equal(await repo.obterScorecard(id), null);
+      assert.equal((await repo.obter(id))?.estado.fase, "ENCERRADA");
+      definirContextoParaTestes({ repositorio: repo, llm: criarClienteFalso([saidaLlm()]), agora: () => relogio, fake: false });
+      assert.equal((await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id))).status, 200);
+    } finally {
+      if (anterior === undefined) delete process.env.AGENTE_TIMEOUT_SCORECARD_MS;
+      else process.env.AGENTE_TIMEOUT_SCORECARD_MS = anterior;
+    }
   });
 });
 

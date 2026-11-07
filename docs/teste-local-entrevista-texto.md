@@ -74,3 +74,21 @@ Valores estimados do pedido original; não foram medidos aqui.
 ## Testes automáticos
 
 `npm run test:entrevista-texto` (diff do grafo, guardas do scorecard, entrevista completa pelos handlers com LLM falso, finalizar idempotente, visão de estado e gating de produção).
+
+## Guardas do scorecard
+
+Só falas do candidato podem ser citadas como prova. Falas do entrevistador e eventos sem autor são contexto; `resposta` legado sem `quem` continua significando resposta do candidato. Eventos de resposta sem texto apenas sinalizam fim de resposta: nunca geram uma transcrição fictícia.
+
+O quadro aceita texto opcional em `terminarResposta(texto)` e registra `{ numero, quem: "candidato", texto }` quando há uma string não vazia. O botão e o detector de fim de fala continuam podendo chamá-lo sem texto. A captura/transcrição de áudio permanece uma integração separada.
+
+O `/analisar` guarda no estado interno de cada observação nova o snapshot recebido (`desenho: { horario, grafo }`). Essa associação é feita pelo servidor e não aceita o evento `analise` do navegador como livro de provas. No scorecard, uma observação só pode aparecer como `texto` de evidência visual no mesmo critério e snapshot. Isso registra uma interpretação do entrevistador sobre um desenho real; não a transforma em fala do candidato. Observações antigas sem vínculo não são ancoradas retroativamente por proximidade.
+
+Referências visuais usam IDs que coexistem no snapshot. Horários arredondados têm tolerância de 1,5 segundo e são substituídos pelo horário real mais próximo. Referências de imagem aceitas: número, `imagem N (data opcional)`, `/imagens/N` ou URL relativa da própria sessão. Um snapshot vazio não prova desenho. Critérios explicitamente orais na rubrica não recebem prova exclusivamente visual.
+
+Notas fora dos inteiros de 1 a 4 viram `null`, com ajuste registrado. A média usa as notas não nulas. Recomendação: média menor que 2 = `nao_avancar`; de 2 até menos de 3 = `avancar_com_ressalvas`; a partir de 3 = `avancar`. Cobertura parcial impede avanço sem ressalvas; menos da metade coberta (ou nenhuma nota) = `evidencia_insuficiente`. Um nível que exige espontaneidade não é comprovado apenas por observações explicitamente provocadas. Mudanças de evidência invalidam os resumos livres potencialmente apoiados na prova descartada.
+
+A duração curta não impõe nota 1 nem reprovação automática: o que decide é a cobertura por provas. Sem desenho, falas reais ainda podem sustentar critérios. Sem fala, o desenho e as observações ancoradas podem sustentar critérios visuais, mas não comunicação oral. O modo falso usa somente observações ancoradas; repetição de observação não aumenta a nota.
+
+O prompt é específico do kit (inclusive `demo-produto`), mantém os dados da sessão na mensagem de usuário como JSON e trata instruções no grafo, conversa e observações como dados não confiáveis. A linha do tempo preserva o começo e prioriza o fim ao atingir 40 mil caracteres. As guardas verificam proveniência e consistência estrutural; a pertinência semântica da nota e da interpretação da observação ainda requer avaliação do modelo e revisão humana.
+
+Prazo da geração: `AGENTE_TIMEOUT_SCORECARD_MS`, padrão `45000`, valores inteiros entre `1` e `50000`; inválidos voltam ao padrão. A rota reserva `maxDuration = 60`. Timeout devolve 502 explícito, aborta a chamada e não salva relatório; repetir `/finalizar` tenta novamente na mesma sessão encerrada. Relatório já salvo continua idempotente.

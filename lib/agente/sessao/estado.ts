@@ -38,7 +38,12 @@ export type PerguntaFeita = {
   feitaEm: number;
 };
 
-export type ObservacaoRegistrada = Observacao & { em: number; fase: Fase };
+export type ObservacaoRegistrada = Observacao & {
+  em: number;
+  fase: Fase;
+  /** Snapshot recebido pelo /analisar. Só o servidor preenche; nunca vem de eventos do navegador. */
+  desenho?: { horario: string; grafo: string };
+};
 
 /** Quantas observações de cada sinal já existem para um critério da rubrica. */
 export type EvidenciaDoCriterio = { positivo: number; negativo: number; neutro: number };

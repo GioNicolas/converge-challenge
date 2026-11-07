@@ -5,7 +5,7 @@
 // faltam provas. A recomendação é só sugestão: quem decide é o humano.
 import { z } from "zod";
 import type { EventoArmazenado } from "./armazenamento/repositorio";
-import type { LlmCliente } from "./llm/cliente";
+import { ErroLlm, type LlmCliente } from "./llm/cliente";
 import type { Criterio, Kit, Problema } from "./kits/tipos";
 import {
   montarSistemaDinamicoScorecard,
@@ -16,7 +16,11 @@ import type { EstadoSessao } from "./sessao/estado";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 
 export const MODELO_FINAL_PADRAO = "anthropic/claude-opus-5.5";
-export const TIMEOUT_SCORECARD_MS = 120_000;
+export const TIMEOUT_SCORECARD_MS = 45_000;
+export function timeoutScorecardMs(): number {
+  const valor = Number(process.env.AGENTE_TIMEOUT_SCORECARD_MS);
+  return Number.isInteger(valor) && valor > 0 && valor <= 50_000 ? valor : TIMEOUT_SCORECARD_MS;
+}
 export const MAX_TOKENS_SCORECARD = 6000;
 export const SEM_EVIDENCIA = "Sem evidência suficiente para atribuir nota a este critério.";
 
@@ -96,6 +100,8 @@ export type FontesDeProva = {
   horariosDeDesenho: Set<number>;
   imagens: ImagemRef[];
   grafoFinal: string;
+  desenhos: { horario: string; ids: Set<string>; grafo: string }[];
+  observacoes: EstadoSessao["observacoes"];
 };
 
 const dadosComo = (d: unknown): Record<string, unknown> =>
@@ -106,18 +112,37 @@ export function extrairFontes(estado: EstadoSessao, eventos: EventoArmazenado[],
   const idsDeDesenho = new Map<string, string>();
   const horariosDeDesenho = new Set<number>();
   let grafoFinal = "";
-  for (const e of eventos) {
+  let horarioFinal = -Infinity;
+  const desenhos: FontesDeProva["desenhos"] = [];
+  const adicionarDesenho = (horario: string, grafo: string) => {
+    if (!Number.isFinite(Date.parse(horario))) return;
+    if (Date.parse(horario) >= horarioFinal) {
+      horarioFinal = Date.parse(horario);
+      grafoFinal = grafo;
+    }
+    const ids = extrairIdsDoGrafo(grafo);
+    // Um grafo vazio não prova que algo foi desenhado.
+    if (ids.size === 0) return;
+    desenhos.push({ horario, ids, grafo });
+    horariosDeDesenho.add(Date.parse(horario));
+    for (const id of ids) if (!idsDeDesenho.has(id)) idsDeDesenho.set(id, horario);
+  };
+  for (const e of [...eventos].sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario))) {
     const d = dadosComo(e.dados);
     if (e.tipo === "desenho" && typeof d.grafo === "string") {
-      grafoFinal = d.grafo;
-      horariosDeDesenho.add(Date.parse(e.horario));
-      for (const id of extrairIdsDoGrafo(d.grafo)) if (!idsDeDesenho.has(id)) idsDeDesenho.set(id, e.horario);
-    } else if ((e.tipo === "fala" || e.tipo === "resposta") && typeof d.texto === "string" && d.texto) {
+      adicionarDesenho(e.horario, d.grafo);
+    } else if ((e.tipo === "fala" && d.quem === "candidato" || e.tipo === "resposta" && (d.quem === undefined || d.quem === "candidato")) && typeof d.texto === "string" && d.texto.trim() && d.texto !== "(respondeu)") {
       falas.push({ horario: e.horario, texto: d.texto });
     }
   }
-  for (const f of estado.conversa) falas.push({ horario: new Date(f.em).toISOString(), texto: f.texto });
-  return { falas, idsDeDesenho, horariosDeDesenho, imagens, grafoFinal };
+  for (const f of estado.conversa) {
+    if (f.quem === "candidato" && f.texto.trim() && f.texto !== "(respondeu)") {
+      falas.push({ horario: new Date(f.em).toISOString(), texto: f.texto });
+    }
+  }
+  for (const o of estado.observacoes) if (o.desenho) adicionarDesenho(o.desenho.horario, o.desenho.grafo);
+  desenhos.sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
+  return { falas, idsDeDesenho, horariosDeDesenho, imagens, grafoFinal, desenhos, observacoes: estado.observacoes };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -134,24 +159,33 @@ export function normalizar(s: string): string {
     .trim();
 }
 
-/** A citação existe numa fala? "..." separa trechos; cada trecho (>= 4 caracteres) precisa existir. */
+/** Todos os trechos, inclusive negações curtas, precisam existir na ordem em UMA fala. */
 export function citacaoExiste(citacao: string, falas: { texto: string }[]): { horario?: number; ok: boolean; indice: number } {
   const trechos = citacao
     .split(/\.{3}|…/)
     .map(normalizar)
-    .filter((t) => t.length >= 4);
-  if (trechos.length === 0) return { ok: false, indice: -1 };
+    .filter(Boolean);
+  if (trechos.join("").length < 4) return { ok: false, indice: -1 };
   const normalizadas = falas.map((f) => normalizar(f.texto));
-  const indice = normalizadas.findIndex((n) => trechos.every((t) => n.includes(t)));
+  const indice = normalizadas.findIndex((n) => {
+    let inicio = 0;
+    const fala = ` ${n} `;
+    return trechos.every(t => {
+      const posicao = fala.indexOf(` ${t} `, inicio);
+      if (posicao < 0) return false;
+      inicio = posicao + t.length + 1;
+      return true;
+    });
+  });
   if (indice >= 0) return { ok: true, indice };
-  // Trechos podem estar em falas diferentes do mesmo texto corrido.
-  const tudo = normalizadas.join(" ");
-  return trechos.every((t) => tudo.includes(t)) ? { ok: true, indice: 0 } : { ok: false, indice: -1 };
+  return { ok: false, indice: -1 };
 }
 
 function imagemValida(valor: string | null | undefined, imagens: ImagemRef[], sessaoId: string): string | null {
   if (!valor) return null;
-  const m = valor.match(/(\d+)(?!.*\d)/);
+  const m = valor.trim().match(/^(\d+)$/) ?? valor.trim().match(/^imagem\s+(\d+)\b/i)
+    ?? valor.trim().match(/^\/imagens\/(\d+)$/)
+    ?? valor.trim().match(new RegExp(`^/api/sessoes/${encodeURIComponent(sessaoId).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/imagens/(\\d+)$`));
   if (!m) return null;
   const n = Number(m[1]);
   return imagens.some((i) => i.numero === n) ? `/api/sessoes/${encodeURIComponent(sessaoId)}/imagens/${n}` : null;
@@ -161,20 +195,52 @@ export type ParametrosGuardas = {
   sessaoId: string;
   candidatoId: string;
   problemaId: string;
-  rubrica: Pick<Criterio, "id">[];
+  rubrica: (Pick<Criterio, "id"> & Partial<Pick<Criterio, "niveis" | "nome">>)[];
   fontes: FontesDeProva;
   origem: "llm" | "fake";
   agora?: () => Date;
 };
 
 const arred1 = (n: number) => Math.round(n * 10) / 10;
+export const JANELA_DESENHO_MS = 1500;
+
+function validarDesenho(e: SaidaScorecardLlm["criterios"][number]["evidencias"][number], criterio: string, p: ParametrosGuardas): Evidencia | null {
+  const { fontes } = p;
+  const imagem = imagemValida(e.imagem, fontes.imagens, p.sessaoId);
+  const refImagem = imagem ? fontes.imagens.find(i => imagem.endsWith(`/imagens/${i.numero}`)) : undefined;
+  const desejado = Date.parse(e.horario);
+  const compativeis = fontes.desenhos.filter(d => !e.texto || fontes.observacoes.some(o => o.criterio === criterio
+    && o.evidencia === e.texto && o.desenho?.horario === d.horario && o.desenho.grafo === d.grafo));
+  const proximos = [...compativeis].sort((a, b) => Math.abs(Date.parse(a.horario) - desejado) - Math.abs(Date.parse(b.horario) - desejado));
+  let desenho = proximos.find(d => Math.abs(Date.parse(d.horario) - desejado) <= JANELA_DESENHO_MS);
+  const ids = [...new Set(e.elementos)];
+  // IDs têm que coexistir no MESMO snapshot. Nunca junte versões distintas do quadro.
+  if (!desenho && ids.length) desenho = compativeis.find(d => ids.every(id => d.ids.has(id)));
+  if (!desenho && refImagem) desenho = compativeis.find(d => Math.abs(Date.parse(d.horario) - Date.parse(refImagem.horario)) <= JANELA_DESENHO_MS);
+  if (!desenho && !refImagem) return null;
+  const elementos = desenho ? ids.filter(id => desenho.ids.has(id)) : [];
+  if (ids.length && elementos.length === 0) return null;
+  // Texto de desenho só entra quando copiado de uma observação deste critério,
+  // registrada no servidor sobre este snapshot. Nunca promove fala do entrevistador a prova.
+  const observacao = e.texto && desenho ? fontes.observacoes.find(o => o.criterio === criterio && o.desenho
+    && o.desenho.horario === desenho.horario && o.desenho.grafo === desenho.grafo
+    && o.evidencia === e.texto) : undefined;
+  if (e.texto && !observacao) return null;
+  const imagemCoerente = refImagem && (!desenho || Math.abs(Date.parse(refImagem.horario) - Date.parse(desenho.horario)) <= JANELA_DESENHO_MS);
+  return {
+    tipo: "desenho", horario: desenho?.horario ?? refImagem!.horario,
+    ...(elementos.length ? { elementos } : {}),
+    ...(observacao ? { texto: observacao.evidencia } : {}),
+    ...(imagemCoerente && imagem ? { imagem } : {}),
+  };
+}
 
 export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): Scorecard {
   const ajustes: string[] = [];
   const { fontes } = p;
   const vistos = new Set<string>();
 
-  const criterios: CriterioAvaliado[] = p.rubrica.map(({ id }) => {
+  const criterios: CriterioAvaliado[] = p.rubrica.map(({ id, niveis, nome }) => {
     const candidatos = saida.criterios.filter((c) => c.criterio === id);
     if (candidatos.length > 1) ajustes.push(`critério ${id} repetido: usei o primeiro`);
     const c = candidatos[0];
@@ -195,31 +261,40 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
         const origem = fontes.falas[r.indice];
         evidencias.push({ tipo: "fala", horario: origem?.horario ?? e.horario, texto: e.texto });
       } else {
-        const elementos = [...new Set(e.elementos)].filter((x) => fontes.idsDeDesenho.has(x));
-        const horarioOk = fontes.horariosDeDesenho.has(Date.parse(e.horario));
-        const imagem = imagemValida(e.imagem, fontes.imagens, p.sessaoId);
-        if (e.elementos.length !== elementos.length) ajustes.push(`ids inexistentes removidos em ${id}`);
-        if (elementos.length === 0 && !horarioOk && !imagem) {
+        if (nome && /\b(oral|verbal|respostas|plins)\b/.test(normalizar(nome))) {
+          ajustes.push(`evidência de desenho descartada em ${id}: rubrica exige fala`);
+          continue;
+        }
+        const validada = validarDesenho(e, id, p);
+        if (!validada) {
           ajustes.push(`evidência de desenho descartada em ${id}: sem id nem horário válido`);
           continue;
         }
-        const horario = horarioOk ? e.horario : (fontes.idsDeDesenho.get(elementos[0] ?? "") ?? e.horario);
-        evidencias.push({
-          tipo: "desenho",
-          horario,
-          ...(elementos.length ? { elementos } : {}),
-          ...(imagem ? { imagem } : {}),
-        });
+        if (e.elementos.length !== (validada.elementos?.length ?? 0)) ajustes.push(`ids inexistentes removidos em ${id}`);
+        if (e.horario !== validada.horario) ajustes.push(`horário de desenho corrigido em ${id}`);
+        if (e.imagem && !validada.imagem) ajustes.push(`imagem inválida ou de outro horário removida em ${id}`);
+        evidencias.push(validada);
       }
     }
 
-    let nota: number | null = c.nota === null || !Number.isFinite(c.nota) ? null : Math.min(4, Math.max(1, Math.round(c.nota)));
+    let nota: number | null = c.nota !== null && Number.isInteger(c.nota) && c.nota >= 1 && c.nota <= 4 ? c.nota : null;
+    if (c.nota !== null && nota === null) ajustes.push(`nota de ${id} removida: deve ser inteira entre 1 e 4`);
     let justificativa = c.justificativa.trim();
+    const observacoesCitadas = fontes.observacoes.filter(o => o.criterio === id && o.desenho
+      && evidencias.some(e => e.tipo === "desenho" && (!e.texto || e.texto === o.evidencia) && e.horario === o.desenho?.horario));
+    if (nota === 4 && niveis && /espontan|antecip/.test(normalizar(niveis[4]))
+      && !observacoesCitadas.some(o => o.espontaneo)
+      && evidencias.every(e => e.tipo === "desenho")) {
+      nota = 3;
+      justificativa = "As referências visuais não têm registro de iniciativa espontânea que comprove o nível 4.";
+      ajustes.push(`nota de ${id} limitada a 3: evidência visual não comprova espontaneidade`);
+    }
     if (nota !== null && evidencias.length === 0) {
       ajustes.push(`nota de ${id} removida: sem evidência`);
       nota = null;
     }
     if (nota === null) justificativa = SEM_EVIDENCIA;
+    else if (evidencias.length < c.evidencias.length) justificativa = "Avaliação limitada às referências verificadas abaixo; a justificativa original foi removida após descarte de evidências.";
     return { criterio: id, nota, justificativa, evidencias };
   });
 
@@ -229,18 +304,25 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
 
   const notas = criterios.map((c) => c.nota).filter((n): n is number => n !== null);
   const notaGeral = notas.length ? arred1(notas.reduce((a, b) => a + b, 0) / notas.length) : null;
-  const insuficiente = notas.length * 2 < criterios.length;
+  const insuficiente = notas.length === 0 || notas.length * 2 < criterios.length;
   if (insuficiente) ajustes.push("menos da metade dos critérios com evidência: recomendação neutra");
+  let recomendacao: Recomendacao = insuficiente ? "evidencia_insuficiente"
+    : notaGeral! < 2 ? "nao_avancar" : notaGeral! < 3 ? "avancar_com_ressalvas" : "avancar";
+  // Cobertura parcial não permite avanço sem ressalvas.
+  if (recomendacao === "avancar" && notas.length < criterios.length) recomendacao = "avancar_com_ressalvas";
+  if (recomendacao !== saida.recomendacao) ajustes.push(`recomendação corrigida de ${saida.recomendacao} para ${recomendacao}: média e cobertura da rubrica`);
+  const corrigiuCriterios = ajustes.some(a => !a.startsWith("recomendação") && !a.startsWith("menos da metade"));
+  const reverResumo = corrigiuCriterios || insuficiente || notas.length < criterios.length;
 
   return {
     candidato_id: p.candidatoId,
     problema_id: p.problemaId,
     nota_geral: notaGeral,
-    recomendacao: insuficiente ? "evidencia_insuficiente" : saida.recomendacao,
+    recomendacao,
     criterios,
-    pontos_fortes: saida.pontos_fortes,
-    pontos_a_aprofundar: saida.pontos_a_aprofundar,
-    briefing_para_proxima_etapa: saida.briefing_para_proxima_etapa,
+    pontos_fortes: reverResumo ? [] : saida.pontos_fortes,
+    pontos_a_aprofundar: reverResumo ? criterios.filter(c => c.nota === null || c.nota < 3).map(c => `Aprofundar ${c.criterio}.`) : saida.pontos_a_aprofundar,
+    briefing_para_proxima_etapa: reverResumo ? "Revisar as evidências por critério e aprofundar os pontos sem cobertura antes de decidir." : saida.briefing_para_proxima_etapa,
     gerado_em: (p.agora?.() ?? new Date()).toISOString(),
     origem: p.origem,
     ajustes,
@@ -284,15 +366,17 @@ function resumoDoEvento(e: EventoArmazenado): string {
 
 export function montarEntradaDoPrompt(entrada: EntradaScorecard, fontes: FontesDeProva) {
   const eventos = [...entrada.eventos].sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
-  const linhaDoTempo = cortar(
-    eventos.map((e) => `${e.horario} | ${e.tipo} | ${resumoDoEvento(e)}`).join("\n"),
-    40_000,
-  );
-  const conversa = entrada.estado.conversa
+  const completa = eventos.map((e) => `${e.horario} | ${e.tipo} | ${resumoDoEvento(e)}`).join("\n");
+  const linhaDoTempo = completa.length <= 40_000 ? completa
+    : completa.slice(0, 8000) + "\n[miolo omitido por tamanho; fim preservado]\n" + completa.slice(-31_900);
+  const conversaCompleta = entrada.estado.conversa
     .map((f) => `${new Date(f.em).toISOString()} ${f.quem === "agente" ? "Entrevistador" : "Candidato"}: ${f.texto}`)
     .join("\n");
+  const conversa = conversaCompleta.length <= 20_000 ? conversaCompleta : "[início omitido]\n" + conversaCompleta.slice(-19_950);
   const observacoes = entrada.estado.observacoes
-    .map((o) => `- ${o.criterio} ${o.sinal}${o.espontaneo ? " (espontâneo)" : ""} [${o.fase}]: ${o.evidencia}`)
+    .map((o) => `- ${JSON.stringify({ criterio: o.criterio, sinal: o.sinal, espontaneo: o.espontaneo,
+      horario: new Date(o.em).toISOString(), fase: o.fase, evidencia: o.evidencia,
+      desenho: o.desenho ? { horario: o.desenho.horario, elementos: [...extrairIdsDoGrafo(o.desenho.grafo)] } : null })}`)
     .join("\n");
   const imagens = entrada.imagens.map((i) => `- imagem ${i.numero} (${i.horario})`).join("\n");
   return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(fontes.grafoFinal, 20_000), imagens };
@@ -308,51 +392,57 @@ export type DepsScorecard = {
 
 export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorecard): Promise<Scorecard> {
   const fontes = extrairFontes(entrada.estado, entrada.eventos, entrada.imagens);
-  const r = await deps.llm.completarJson({
-    sistema: {
-      estatico: montarSistemaEstaticoScorecard(deps.kit, deps.problema),
-      dinamico: montarSistemaDinamicoScorecard(montarEntradaDoPrompt(entrada, fontes)),
-    },
-    mensagens: [{ role: "user", content: "Escreva o scorecard desta entrevista." }],
-    schema: EsquemaSaidaScorecardLlm,
-    nomeSchema: NOME_SCHEMA_SCORECARD,
-    modelo: deps.modelo ?? (process.env.AGENTE_MODELO_FINAL || MODELO_FINAL_PADRAO),
-    maxTokens: MAX_TOKENS_SCORECARD,
-    raciocinio: true,
-    timeoutMs: TIMEOUT_SCORECARD_MS,
+  const timeoutMs = timeoutScorecardMs();
+  const controle = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const prazo = new Promise<never>((_, rejeitar) => {
+    timer = setTimeout(() => {
+      controle.abort();
+      rejeitar(new ErroLlm("timeout", "Prazo do scorecard excedido"));
+    }, timeoutMs);
   });
-  return aplicarGuardas(r.dados, {
-    sessaoId: entrada.sessaoId,
-    candidatoId: entrada.candidatoId,
-    problemaId: deps.problema.id,
-    rubrica: deps.kit.criterios,
-    fontes,
-    origem: "llm",
-    agora: deps.agora,
-  });
+  try {
+    const r = await Promise.race([prazo, deps.llm.completarJson({
+      sistema: { estatico: montarSistemaEstaticoScorecard(deps.kit, deps.problema) },
+      mensagens: [{ role: "user", content: montarSistemaDinamicoScorecard(montarEntradaDoPrompt(entrada, fontes)) + "\nEscreva o scorecard desta entrevista conforme as regras do sistema." }],
+      schema: EsquemaSaidaScorecardLlm,
+      nomeSchema: NOME_SCHEMA_SCORECARD,
+      modelo: deps.modelo ?? (process.env.AGENTE_MODELO_FINAL || MODELO_FINAL_PADRAO),
+      maxTokens: MAX_TOKENS_SCORECARD,
+      raciocinio: true,
+      timeoutMs,
+      sinal: controle.signal,
+    })]);
+    return aplicarGuardas(r.dados, {
+      sessaoId: entrada.sessaoId,
+      candidatoId: entrada.candidatoId,
+      problemaId: deps.problema.id,
+      rubrica: deps.kit.criterios,
+      fontes,
+      origem: "llm",
+      agora: deps.agora,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Scorecard determinístico (AGENTE_FAKE=1): monta a saída a partir do livro de observações e passa pelas mesmas guardas. */
 export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: EntradaScorecard): Scorecard {
   const fontes = extrairFontes(entrada.estado, entrada.eventos, entrada.imagens);
-  const ultimaFala = [...entrada.estado.conversa].reverse().find((f) => f.quem === "candidato");
-  const primeiroId = [...fontes.idsDeDesenho.keys()][0];
-  const horarioDesenho = primeiroId ? fontes.idsDeDesenho.get(primeiroId) : undefined;
 
   const criterios = deps.kit.criterios.map((c) => {
-    const obs = entrada.estado.observacoes.filter((o) => o.criterio === c.id);
+    const obs = entrada.estado.observacoes.filter((o) => o.criterio === c.id && o.desenho && extrairIdsDoGrafo(o.desenho.grafo).size > 0);
     if (obs.length === 0) return { criterio: c.id, nota: null, justificativa: "Sem observações.", evidencias: [] };
-    const saldo = obs.filter((o) => o.sinal === "positivo").length - obs.filter((o) => o.sinal === "negativo").length;
+    const positivos = obs.some(o => o.sinal === "positivo");
+    const negativos = obs.some(o => o.sinal === "negativo");
     const evidencias: SaidaScorecardLlm["criterios"][number]["evidencias"] = [];
-    if (ultimaFala) {
-      evidencias.push({ tipo: "fala", horario: new Date(ultimaFala.em).toISOString(), texto: ultimaFala.texto.slice(0, 80), elementos: [], imagem: null });
-    }
-    if (primeiroId && horarioDesenho) {
-      evidencias.push({ tipo: "desenho", horario: horarioDesenho, texto: null, elementos: [primeiroId], imagem: null });
-    }
+    for (const o of obs) evidencias.push({ tipo: "desenho", horario: o.desenho!.horario,
+      texto: o.evidencia, elementos: [...extrairIdsDoGrafo(o.desenho!.grafo)], imagem: null });
     return {
       criterio: c.id,
-      nota: Math.min(4, Math.max(1, 2 + saldo)),
+      // Repetir a mesma observação não aumenta nota; neutro não autoriza nota.
+      nota: positivos ? negativos ? 2 : 3 : negativos ? 1 : null,
       justificativa: `[fake] ${obs.map((o) => `${o.sinal}: ${o.evidencia}`).join("; ")}`,
       evidencias,
     };
@@ -361,8 +451,8 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     nota_geral: null,
     recomendacao: "avancar_com_ressalvas",
     criterios,
-    pontos_fortes: entrada.estado.observacoes.filter((o) => o.sinal === "positivo").map((o) => o.evidencia).slice(0, 3),
-    pontos_a_aprofundar: entrada.estado.observacoes.filter((o) => o.sinal === "negativo").map((o) => o.evidencia).slice(0, 3),
+    pontos_fortes: criterios.filter(c => c.nota !== null && c.nota >= 3).map(c => c.justificativa).slice(0, 3),
+    pontos_a_aprofundar: criterios.filter(c => c.nota !== null && c.nota < 3).map(c => c.justificativa).slice(0, 3),
     briefing_para_proxima_etapa: "[fake] Scorecard determinístico construído do livro de observações.",
   };
   return aplicarGuardas(saida, {
