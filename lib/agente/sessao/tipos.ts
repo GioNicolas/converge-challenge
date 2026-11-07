@@ -33,6 +33,10 @@ export const EsquemaPedidoAnalise = z.object({
   conversa_recente: z.array(EsquemaFalaRecente),
   perguntas_feitas: z.number().int().min(0),
   imagem_url: z.string().nullable(),
+  /** Segundos desde a última atividade do candidato (mexer no desenho ou falar). Ausente = desconhecido. */
+  parado_ha_s: z.number().min(0).max(86_400).optional(),
+  /** Requisitos já combinados e escritos no quadro. */
+  requisitos: z.array(z.string().max(200)).max(30).optional(),
 });
 export type PedidoAnalise = z.infer<typeof EsquemaPedidoAnalise>;
 
@@ -58,5 +62,11 @@ export const EsquemaRespostaAnalise = z.object({
   elementos: z.array(z.string()).default([]),
   degrau: z.number().nullable().default(null),
   observacoes: z.array(EsquemaObservacao).default([]),
+  /**
+   * O candidato já mostrou o suficiente nesta fase e pode seguir para a próxima. Só vale em
+   * ALTO_NIVEL (o servidor zera nas outras fases); o quadro avança para APROFUNDAMENTO.
+   * Ausente = false.
+   */
+  avancar_fase: z.boolean().optional(),
 });
 export type RespostaAnalise = z.infer<typeof EsquemaRespostaAnalise>;

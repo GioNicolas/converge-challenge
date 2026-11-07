@@ -1,7 +1,7 @@
 // Análise do desenho (o "/analisar"): portão de entrada -> prompt -> LLM -> guardas -> máquina de estados.
 // Nunca lança por causa do LLM: em erro/timeout devolve `ok` (o quadro descarta análises lentas de
 // qualquer jeito). Só metadados vão para o log (nada de grafo, fala ou chave).
-import { eQuaseDuplicada, sobreposicao, LIMIAR_DUPLICADA, temLinguagemAvaliativa } from "./guardas";
+import { eQuaseDuplicada, sobreposicao, LIMIAR_DUPLICADA } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import { montarPromptAvaliador, NOME_SCHEMA_ANALISE } from "./prompts/avaliador";
@@ -103,13 +103,9 @@ export async function analisar(
   let resposta: RespostaAnalise = bruta;
 
   if (resposta.status !== "ok") {
-    const textos = [resposta.pergunta ?? "", resposta.nota ?? ""];
     const pendente = estado.perguntaPendente;
 
-    if (textos.some(temLinguagemAvaliativa)) {
-      ajustes.push("linguagem_avaliativa");
-      resposta = { ...resposta, status: "ok" };
-    } else if (
+    if (
       pendente?.pergunta &&
       resposta.pergunta &&
       sobreposicao(resposta.pergunta, pendente.pergunta) >= LIMIAR_DUPLICADA
@@ -144,6 +140,7 @@ export async function analisar(
     sessao_id: pedido.sessao_id,
     fase: estado.fase,
     status: filtrada.status,
+    avancar_fase: filtrada.avancar_fase === true,
     ajustes,
     ms,
   });

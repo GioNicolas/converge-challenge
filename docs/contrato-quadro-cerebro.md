@@ -29,6 +29,7 @@ Resposta:
 - `area` aparece no cartão de início ("Entrevista de system design"). É multiárea: "marketing", "design de produto"...
 - `tempos` em **segundos** por fase. As chaves possíveis são `AGUARDANDO`, `APRESENTACAO`, `REQUISITOS`, `ALTO_NIVEL`, `APROFUNDAMENTO`, `FECHAMENTO` e `ENCERRADA`. Fase sem tempo não acaba sozinha.
 - O agente escreve `titulo` e `enunciado` no quadro e lê em voz alta.
+- `apresentacao` e `despedida` (opcionais, `string | null`): falas escritas pelo cérebro (uma chamada ao modelo ao criar a sessão). O agente fala `apresentacao` **antes** do título e do enunciado, e `despedida` ao encerrar (botão ou fim do tempo). `null`/ausente: o quadro não fala nada (vai direto ao desafio / encerra em silêncio). A criação pode demorar 1 a 2 s a mais por causa dessa chamada (prazo de 6 s; em erro vira `null`).
 
 ## 2. `POST /api/sessoes/:id/analisar` (o coração)
 
@@ -87,6 +88,8 @@ Resposta:
 | `degrau` | Degrau da escada de ajuda (1, 2, 3) ou `null`. Só vai para a linha do tempo. |
 | `observacoes` | Vão para a linha do tempo (`tipo: "analise"`), para o scorecard. `sinal`: `positivo`, `negativo` ou `neutro`. |
 
+**Campo `avancar_fase` (opcional, padrão `false`):** o cérebro sinaliza que o candidato já mostrou o suficiente do `ALTO_NIVEL`. O servidor só deixa `true` nessa fase. O quadro, ao receber `true` em `ALTO_NIVEL` (com pelo menos 30 s na fase e sem pergunta ativa), vai para `APROFUNDAMENTO` e dispara uma nova análise. O tempo da fase continua valendo como teto. Pode vir junto com `status: "ok"`.
+
 O quadro cuida sozinho de: 60s entre perguntas, máximo de 5, uma dúvida nova substituir a pendente e um `ok` cancelar a pendente. O cérebro **não precisa** controlar isso, mas recebe `perguntas_feitas` para calibrar.
 
 ## 3. `POST /api/sessoes/:id/perguntar` (o candidato fala com o agente)
@@ -97,7 +100,7 @@ Resposta:
 ```json
 { "responder": true, "texto": "Uns 4 mil acessos por segundo, com picos de 40 mil.", "requisito": "Leitura: ~4 mil/s (picos de 40 mil)" }
 ```
-- `responder: false` para falas que não pedem resposta ("ok", "hmm", "deixa eu ver").
+- `responder: false` para falas que não pedem resposta (confirmações, pensar em voz alta). É o modelo que decide, pelo contexto.
 - `requisito` (ou `null`): o item que o agente **escreve no quadro** abaixo do enunciado, com um check. Só o que foi combinado, nunca a ficha inteira.
 - *O quadro ainda não chama esta rota: depende da transcrição da fala do candidato (`/api/stt-token`).*
 

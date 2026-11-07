@@ -1,6 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
-import { eEnchimento, limitarFrases, temLinguagemAvaliativa } from "./guardas";
+import { limitarFrases } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import {
@@ -34,6 +34,8 @@ export type ResultadoPerguntar = {
   responder: boolean;
   texto: string;
   requisito: string | null;
+  /** O candidato disse que terminou ("pronto"): o quadro avança/reanalisa. */
+  concluiu: boolean;
   estado: EstadoSessao;
 };
 
@@ -53,9 +55,7 @@ export async function perguntar(
     { tipo: "CANDIDATO_FALOU", texto: entrada.texto, fimDeResposta: false },
     agora,
   ).estado;
-  const mudo = (): ResultadoPerguntar => ({ responder: false, texto: "", requisito: null, estado: comFala });
-
-  if (eEnchimento(entrada.texto)) return mudo();
+  const mudo = (): ResultadoPerguntar => ({ responder: false, texto: "", requisito: null, concluiu: false, estado: comFala });
 
   let saida;
   try {
@@ -81,17 +81,16 @@ export async function perguntar(
     return mudo();
   }
 
+  // Se o candidato terminou é o modelo quem interpreta; o código não procura palavras.
+  const concluiu = saida.concluiu === true;
+  const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu });
   const texto = limitarFrases(saida.texto, 2);
-  if (!saida.responder || !texto) return mudo();
-  if (temLinguagemAvaliativa(texto)) {
-    log("perguntar_ajuste", { sessao_id: entrada.sessao_id, ajuste: "linguagem_avaliativa" });
-    return mudo();
-  }
+  if (!saida.responder || !texto) return mudoOuConcluiu();
   const requisito = saida.requisito?.trim()
     ? saida.requisito.trim().slice(0, MAX_CARACTERES_REQUISITO)
     : null;
   const repetido = requisito !== null && (entrada.requisitosAtuais ?? []).includes(requisito);
 
   const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto }, agora).estado;
-  return { responder: true, texto, requisito: repetido ? null : requisito, estado: final };
+  return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, estado: final };
 }

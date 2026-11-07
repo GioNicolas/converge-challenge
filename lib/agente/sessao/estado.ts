@@ -281,7 +281,8 @@ export function transicionar(
           plin: "PERGUNTA_ATIVA",
           perguntaAtiva: pergunta,
           perguntaPendente: null,
-          perguntasFeitas: pergunta.numero,
+          // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
+          perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : pergunta.numero,
           perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
           ultimaPerguntaEm: agora,
           perguntas: [...estado.perguntas, pergunta],

@@ -1,3 +1,4 @@
+import { LIMITE_SILENCIO_S } from "../../sessao/politica";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../../kits/system-design";
@@ -52,7 +53,7 @@ describe("bloco estático", () => {
   it("traz os princípios, a tabela de ações e as regras de saída", () => {
     for (const trecho of [
       "O candidato conduz", "Não valide nem corrija", "espontaneo", "Escada de ajuda", "degrau",
-      "\"ok\"", "\"duvida\"", "\"redirecionar\"", "\"dica\"", "40 caracteres", "UMA pergunta por vez",
+      "\"ok\"", "\"duvida\"", "\"redirecionar\"", "\"dica\"", "40 caracteres", "UMA pergunta concreta",
       "1 ou 2 áreas", "justo e igual",
     ]) {
       assert.ok(e.toLowerCase().includes(trecho.toLowerCase()), `faltou: ${trecho}`);
@@ -105,7 +106,24 @@ describe("bloco dinâmico", () => {
   it("lista os status permitidos pela fase", () => {
     assert.ok(d.includes("Status permitidos agora: ok, duvida, redirecionar, dica"));
     const alto = montarPromptAvaliador(kitDemo, problema, { ...estado, fase: "ALTO_NIVEL" }, pedido(), AGORA).sistema.dinamico;
-    assert.ok(alto.includes("Status permitidos agora: ok, redirecionar"));
+    assert.ok(alto.includes("Status permitidos agora: ok, duvida, redirecionar, dica"));
+    const requisitos = montarPromptAvaliador(kitDemo, problema, { ...estado, fase: "REQUISITOS" }, pedido(), AGORA).sistema.dinamico;
+    assert.ok(requisitos.includes("Status permitidos agora: ok, duvida") && !requisitos.includes("Status permitidos agora: ok, duvida, redirecionar"));
+  });
+
+  it("mostra o tempo parado e os requisitos combinados, e o limite de silêncio vem da constante", () => {
+    const din = montarPromptAvaliador(
+      kitDemo,
+      problema,
+      estado,
+      { ...pedido(), parado_ha_s: 12, requisitos: ["Leitura: ~4 mil/s", "Retenção: 5 anos"] },
+      AGORA,
+    ).sistema;
+    assert.ok(din.dinamico.includes("sem mexer no desenho nem falar há: 12 s"));
+    assert.ok(din.dinamico.includes("Leitura: ~4 mil/s | Retenção: 5 anos"));
+    assert.ok(din.estatico.includes(`${LIMITE_SILENCIO_S} segundos`));
+    const sem = montarPromptAvaliador(kitDemo, problema, estado, pedido(), AGORA).sistema.dinamico;
+    assert.ok(sem.includes("tempo desconhecido") && sem.includes("Requisitos já combinados no quadro: (nenhum)"));
   });
 
   it("avisa quando o plin está bloqueado por intervalo (mas a análise continua)", () => {

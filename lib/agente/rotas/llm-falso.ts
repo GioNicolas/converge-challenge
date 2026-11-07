@@ -6,6 +6,7 @@
 // Perguntar: se a fala tem "?", responde com um texto genérico e um requisito fixo; senão fica quieto.
 // Nada daqui lê a ficha do problema.
 import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "../llm/cliente";
+import { NOME_SCHEMA_ABERTURA } from "../prompts/abertura";
 import { NOME_SCHEMA_ANALISE } from "../prompts/avaliador";
 import { NOME_SCHEMA_PERGUNTAR } from "../prompts/entrevistador";
 import { respostaFalsaDeKit } from "../kits/falso";
@@ -22,6 +23,9 @@ export function criarLlmFalsoDeterministico(): LlmCliente {
       let saida: unknown;
       if (args.nomeSchema === NOME_SCHEMA_ANALISE) {
         const m = texto.match(/^- \[([^\]]+)\]\s+Postgres/im);
+        // Prontidão de mentira: em ALTO_NIVEL, com 3+ componentes e alguma conexão no desenho.
+        const componentes = (texto.match(/^- \[[rel]\d+\]/gim) ?? []).length;
+        const avancar_fase = /^Fase: ALTO_NIVEL/m.test(texto) && componentes >= 3 && /^- \[s\d+\]/im.test(texto);
         saida = m
           ? {
               status: "duvida",
@@ -32,8 +36,14 @@ export function criarLlmFalsoDeterministico(): LlmCliente {
               observacoes: [
                 { criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único sem cache" },
               ],
+              avancar_fase,
             }
-          : { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+          : { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], avancar_fase };
+      } else if (args.nomeSchema === NOME_SCHEMA_ABERTURA) {
+        saida = {
+          apresentacao: "Olá, tudo bem? Vamos já iniciar a sua entrevista.",
+          despedida: "Obrigado pela conversa. A pessoa responsável vai analisar o que você fez e dar retorno.",
+        };
       } else if (args.nomeSchema === NOME_SCHEMA_PERGUNTAR) {
         const fala = args.mensagens[args.mensagens.length - 1]?.content ?? "";
         saida = fala.includes("?")

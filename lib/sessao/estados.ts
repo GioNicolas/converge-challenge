@@ -36,6 +36,8 @@ export type EventoEntrevista =
   | { tipo: "PLIN_DEMO"; resposta: RespostaAnalise }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "RESPOSTA_TERMINOU" }
+  /** O candidato disse "pronto"/"terminei" no alto nível: segue para o aprofundamento sem esperar. */
+  | { tipo: "CANDIDATO_CONCLUIU" }
   | { tipo: "ENCERRAR" };
 
 export type Regras = {
@@ -48,6 +50,9 @@ export const REGRAS_PADRAO: Regras = {
   maxPerguntas: 5,
 };
 
+/** Tempo mínimo em ALTO_NIVEL antes de aceitar o sinal de prontidão do cérebro. */
+export const MIN_ALTO_NIVEL_MS = 30_000;
+
 const PROXIMA_FASE: Partial<Record<Fase, Fase>> = {
   APRESENTACAO: "REQUISITOS",
   REQUISITOS: "ALTO_NIVEL",
@@ -57,11 +62,12 @@ const PROXIMA_FASE: Partial<Record<Fase, Fase>> = {
 };
 
 /**
- * Que tipos de plin cada fase aceita. Requisitos não tem plin da análise.
+ * Que tipos de plin cada fase aceita. Requisitos só aceita `duvida` (o convite para quem fica em silêncio no começo).
  * O fechamento aceita uma única dúvida: a pergunta de encerramento ("o que mudaria com mais tempo?").
  */
 const PLINS_DA_FASE: Partial<Record<Fase, RespostaAnalise["status"][]>> = {
-  ALTO_NIVEL: ["redirecionar"],
+  REQUISITOS: ["duvida"],
+  ALTO_NIVEL: ["duvida", "redirecionar", "dica"],
   APROFUNDAMENTO: ["duvida", "dica", "redirecionar"],
   FECHAMENTO: ["duvida"],
 };
@@ -82,7 +88,7 @@ export function estadoInicial(): EstadoEntrevista {
 
 /** Vale a pena rodar uma análise agora? (Analisar não é interromper: só decide se pode virar plin depois.) */
 export function podeAnalisar(estado: EstadoEntrevista) {
-  const fasesQueAnalisam: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
+  const fasesQueAnalisam: Fase[] = ["REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
   return fasesQueAnalisam.includes(estado.fase) && estado.plin !== "PERGUNTA_ATIVA";
 }
 
@@ -142,16 +148,31 @@ export function transicionar(
 
     case "ANALISE_RECEBIDA": {
       const { resposta } = evento;
+      let novo = estado;
       if (aceitaPlin(estado, resposta, agora, regras)) {
         // Uma dúvida nova substitui a pendente: a mais recente é a mais relevante.
-        return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta, pendenteDeDemo: false };
-      }
-      if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo) {
+        novo = { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta, pendenteDeDemo: false };
+      } else if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo) {
         // O candidato resolveu sozinho antes de clicar: a dúvida pendente perdeu o sentido.
-        return { ...estado, plin: "LIVRE", perguntaPendente: null };
+        novo = { ...estado, plin: "LIVRE", perguntaPendente: null };
       }
-      return estado;
+      // O cérebro sinalizou que o alto nível está feito: avança sem esperar o relógio (que vira só o teto).
+      if (
+        resposta.avancar_fase === true &&
+        estado.fase === "ALTO_NIVEL" &&
+        estado.plin !== "PERGUNTA_ATIVA" &&
+        estado.faseIniciadaEm !== null &&
+        agora - estado.faseIniciadaEm >= MIN_ALTO_NIVEL_MS
+      ) {
+        novo = mudarFase(novo, "APROFUNDAMENTO", agora);
+      }
+      return novo;
     }
+
+    case "CANDIDATO_CONCLUIU":
+      return estado.fase === "ALTO_NIVEL" && estado.plin !== "PERGUNTA_ATIVA"
+        ? mudarFase(estado, "APROFUNDAMENTO", agora)
+        : estado;
 
     case "PLIN_DEMO":
       if (estado.fase === "AGUARDANDO" || estado.plin === "PERGUNTA_ATIVA") return estado;
@@ -165,7 +186,8 @@ export function transicionar(
         plin: "PERGUNTA_ATIVA",
         perguntaAtiva: { ...estado.perguntaPendente, numero },
         perguntaPendente: null,
-        perguntasFeitas: numero,
+        // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
+        perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : numero,
         perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
       };
     }

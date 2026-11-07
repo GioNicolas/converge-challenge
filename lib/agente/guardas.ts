@@ -1,17 +1,5 @@
-// Guardas determinísticas aplicadas à saída do LLM (não dependem do modelo obedecer ao prompt).
-
-const PALAVRAS_AVALIATIVAS = [
-  "correto",
-  "correta",
-  "errado",
-  "errada",
-  "otimo",
-  "otima",
-  "excelente",
-  "perfeito",
-  "perfeita",
-  "parabens",
-];
+// Guardas estruturais aplicadas à saída do LLM (formato e repetição). NÃO há listas de palavras aqui:
+// o que o candidato quis dizer, e o que o agente pode ou não dizer, é decidido no prompt.
 
 export function normalizar(texto: string): string {
   return texto
@@ -21,12 +9,6 @@ export function normalizar(texto: string): string {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-/** A fala contém linguagem de validação/elogio ("correto", "ótimo", "parabéns"...)? */
-export function temLinguagemAvaliativa(texto: string): boolean {
-  const palavras = new Set(normalizar(texto).split(" "));
-  return PALAVRAS_AVALIATIVAS.some((p) => palavras.has(p));
 }
 
 const STOPWORDS = new Set(
@@ -71,31 +53,4 @@ export function limitarFrases(texto: string, n: number): string {
     .map((f) => f.trim())
     .join(" ")
     .trim();
-}
-
-const FALAS_SEM_RESPOSTA = new Set([
-  "ok",
-  "okay",
-  "hmm",
-  "hum",
-  "ahn",
-  "ta",
-  "entendi",
-  "certo",
-  "beleza",
-  "sim",
-  "uhum",
-  "deixa eu ver",
-  "deixa eu pensar",
-  "um segundo",
-  "pera ai",
-  "ok entendi",
-  "ok deixa eu ver",
-  "hmm deixa eu ver",
-]);
-
-/** Fala que claramente não pede resposta (evita gastar uma chamada ao LLM). */
-export function eEnchimento(texto: string): boolean {
-  const n = normalizar(texto);
-  return n === "" || FALAS_SEM_RESPOSTA.has(n);
 }

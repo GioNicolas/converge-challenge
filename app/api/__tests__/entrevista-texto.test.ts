@@ -120,14 +120,14 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     assert.equal(p.corpo.responder, true);
     assert.ok(p.corpo.requisito);
 
-    // Primeiro desenho: sai de REQUISITOS. Em ALTO_NIVEL a dúvida é rebaixada (só `redirecionar` vira plin).
+    // Primeiro desenho: sai de REQUISITOS. Em ALTO_NIVEL a dúvida vale (o modelo decide quando falar).
     const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
     await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
     const alto = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0);
     respostas.push(alto);
-    assert.equal(alto.status, "ok");
-    assert.equal((await estado(id)).plinPendente, false);
-    assert.ok((await estado(id)).observacoes >= 1, "observações são colhidas mesmo sem plin");
+    assert.equal(alto.status, "duvida");
+    assert.equal((await estado(id)).plinPendente, true);
+    assert.ok((await estado(id)).observacoes >= 1, "observações são colhidas junto com o plin");
 
     // APROFUNDAMENTO: a dúvida aparece, pendente.
     await eventos(id, [{ tipo: "fase", dados: { fase: "APROFUNDAMENTO" } }]);
@@ -235,8 +235,10 @@ describe("finalizar", () => {
     assert.equal(a.status, 200);
     assert.deepEqual(a.corpo, b.corpo);
     assert.deepEqual(a.corpo, c.corpo);
-    assert.equal(llm.chamadas.length, 1);
-    const ch = llm.chamadas[0];
+    // A criação da sessão faz a chamada da abertura (apresentação e despedida); o scorecard é uma só.
+    const finais = llm.chamadas.filter((x) => x.nomeSchema !== "abertura_entrevista");
+    assert.equal(finais.length, 1);
+    const ch = finais[0];
     assert.equal(ch.raciocinio, true);
     assert.equal(ch.maxTokens, 6000);
     assert.equal(ch.timeoutMs, 120_000);

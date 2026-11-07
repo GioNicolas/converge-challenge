@@ -5,6 +5,7 @@
 // ficha, sinais, armadilhas, rubrica ou diagnóstico sai daqui; o log leva só ids e metadados.
 import { z } from "zod";
 import { ErroLimite } from "../armazenamento";
+import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import { perguntar } from "../perguntar";
@@ -65,12 +66,22 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
     candidatoId: corpo.dados.candidato_id,
     estado: comeco.estado,
   });
-  console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id });
+  // Apresentação e despedida escritas pelo modelo (1 chamada). Sem LLM ou em erro: null, e o quadro não fala.
+  const abertura = ctx.llm
+    ? await comPrazo(
+        gerarAbertura({ llm: ctx.llm, kit, problema }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
+        PRAZO_ABERTURA_MS,
+        null,
+      )
+    : null;
+  console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id, abertura: abertura !== null });
   return json({
     sessao_id: sessao.id,
     area: kit.area,
     problema: dadosPublicosDoProblema(problema),
     tempos: sessao.estado.tempos,
+    apresentacao: abertura?.apresentacao ?? null,
+    despedida: abertura?.despedida ?? null,
   });
 }
 
@@ -187,7 +198,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
 
   const agora = ctx.agora();
   const { fase, texto } = corpo.dados;
-  let resposta = { responder: false, texto: "", requisito: null as string | null };
+  let resposta = { responder: false, texto: "", requisito: null as string | null, concluiu: false };
 
   if (ctx.llm) {
     const estado = sincronizarFase(sessao.estado, fase, agora);
@@ -202,7 +213,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       PRAZO_ANALISE_MS,
       null,
     );
-    if (r) resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito };
+    if (r) resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu };
   }
 
   // Reaplica as falas sobre o estado mais recente (eventos podem ter mexido nele no meio do caminho).
@@ -213,7 +224,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   await ctx.repositorio.salvarEstado(id, novo);
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder });
 
-  return json({ responder: resposta.responder, texto: resposta.texto, requisito: resposta.requisito });
+  return json({ responder: resposta.responder, texto: resposta.texto, requisito: resposta.requisito, concluiu: resposta.concluiu });
 }
 
 // ---------------------------------------------------------------------------------------------

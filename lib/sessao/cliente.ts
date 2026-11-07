@@ -23,6 +23,10 @@ export type Sessao = {
   problema: { titulo: string; enunciado: string };
   /** Duração de cada fase, em segundos. */
   tempos: Partial<Record<Fase, number>>;
+  /** Fala de abertura, escrita pelo cérebro. Ausente/null: o agente vai direto ao desafio. */
+  apresentacao?: string | null;
+  /** Fala de despedida, dita ao encerrar. Ausente/null: sem despedida falada. */
+  despedida?: string | null;
 };
 
 // --- Contrato com o /analisar (divisão de tarefas, seção 4.1 e 4.2) ---
@@ -42,6 +46,10 @@ export type PedidoAnalise = {
   conversa_recente: FalaRecente[];
   perguntas_feitas: number;
   imagem_url: string | null;
+  /** Segundos desde a última atividade do candidato (desenho ou fala). */
+  parado_ha_s?: number;
+  /** Requisitos já combinados no quadro. */
+  requisitos?: string[];
 };
 
 export type Observacao = {
@@ -61,6 +69,8 @@ export type RespostaAnalise = {
   elementos: string[];
   degrau: number | null;
   observacoes: Observacao[];
+  /** O cérebro acha que o candidato já mostrou o suficiente do alto nível: segue para o aprofundamento. */
+  avancar_fase?: boolean;
 };
 
 /** Valida a resposta do /analisar. Fora do formato → a análise é descartada (o gatilho tenta de novo depois). */
@@ -80,6 +90,7 @@ const EsquemaResposta = z.object({
       }),
     )
     .default([]),
+  avancar_fase: z.boolean().default(false),
 });
 
 export function validarResposta(dados: unknown): RespostaAnalise {

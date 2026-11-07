@@ -4,6 +4,9 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
+import type { MensagemConversa } from "@/components/PainelConversa";
+import { perguntar } from "@/lib/sessao/servidor";
+import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import {
   analisar,
   calar,
@@ -34,7 +37,12 @@ import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff"
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
-const TRAVADO_MS = 2 * 60_000;
+/** Silêncio total (sem desenhar nem falar) que dispara uma análise para o agente poder quebrá-lo. Provisório. Igual a LIMITE_SILENCIO_S no servidor. */
+const SILENCIO_MS = 8_000;
+/** Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. Provisório. Igual a LIMITE_SILENCIO_INICIAL_S no servidor. */
+const SILENCIO_INICIAL_MS = 15_000;
+/** Se o silêncio continua depois de uma análise, volta a perguntar ao modelo a cada tanto. */
+const REPETIR_SILENCIO_MS = 30_000;
 /** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
 const COR_ENUNCIADO = "#1e1e1e";
 
@@ -123,6 +131,10 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const conversor = useRef(criarConversor());
   const ultimoInstantaneo = useRef<Instantaneo | null>(null);
   const conversa = useRef<FalaRecente[]>([]);
+  /** Última vez que o candidato mexeu no desenho ou falou (vai ao /analisar como `parado_ha_s`). */
+  const ultimaAtividade = useRef(Date.now());
+  /** Requisitos já combinados (vão ao /analisar para a análise não inventar contexto). */
+  const requisitosCombinados = useRef<string[]>([]);
   const gatilho = useRef<Gatilho | null>(null);
   const linhaDoTempo = useRef<ReturnType<typeof criarLinhaDoTempo> | null>(null);
   const registrar = useCallback(
@@ -177,6 +189,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
           conversa_recente: conversa.current.slice(-6),
           perguntas_feitas: estadoAtual.current.perguntasFeitas,
           imagem_url: null,
+          parado_ha_s: Math.round((Date.now() - ultimaAtividade.current) / 1000),
+          requisitos: requisitosCombinados.current.slice(-30),
         };
         console.log("[análise] pedido", pedido);
         if (mudancas) {
@@ -252,6 +266,12 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     let cancelado = false;
     (async () => {
       const { titulo, enunciado } = sessao.problema;
+      // O agente se apresenta antes de passar o desafio (a fala vem do cérebro; sem ela, vai direto ao desafio).
+      if (sessao.apresentacao) {
+        conversa.current.push({ quem: "agente", texto: sessao.apresentacao });
+        await dizer(sessao.apresentacao);
+        if (cancelado) return;
+      }
       const fala = dizer(`${titulo}. ${enunciado}`);
       await quadro.agente.escrever({
         id: "agente-enunciado-titulo",
@@ -318,17 +338,44 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     };
   }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar]);
 
-  // Candidato travado (~2 min sem mexer no desenho): força uma análise, que pode virar uma dica (escada de ajuda).
-  const ultimaMudanca = useRef(Date.now());
+  // Despedida: ao encerrar (botão ou fim do tempo) o agente se despede, uma vez.
+  const despedidaDita = useRef(false);
+  useEffect(() => {
+    if (estado.fase !== "ENCERRADA" || despedidaDita.current || !sessao?.despedida) return;
+    despedidaDita.current = true;
+    conversa.current.push({ quem: "agente", texto: sessao.despedida });
+    void dizer(sessao.despedida);
+  }, [estado.fase, sessao, dizer]);
+
+  // Ao entrar no aprofundamento (por prontidão ou pelo tempo), analisa de novo na hora: é aqui que o plin é liberado.
+  useEffect(() => {
+    if (estado.fase !== "APROFUNDAMENTO") return;
+    const t = setTimeout(() => gatilho.current?.dispararAgora(), 500);
+    return () => clearTimeout(t);
+  }, [estado.fase]);
+
+  // O silêncio inicial conta a partir do começo de REQUISITOS (depois de o agente se apresentar e passar o desafio).
+  useEffect(() => {
+    if (estado.fase !== "REQUISITOS") return;
+    ultimaAtividade.current = Date.now();
+    ultimoDisparoParado.current = 0;
+  }, [estado.fase]);
+
+  // Silêncio total do candidato (sem desenhar nem falar): força uma análise, e o modelo decide se quebra o silêncio.
+  const ultimoDisparoParado = useRef(Date.now());
   useEffect(() => {
     const id = setInterval(() => {
       const e = estadoAtual.current;
-      const fasesComDica = e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO";
-      if (fasesComDica && e.plin === "LIVRE" && Date.now() - ultimaMudanca.current > TRAVADO_MS) {
-        ultimaMudanca.current = Date.now();
+      const fasesComSilencio = e.fase === "REQUISITOS" || e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO";
+      const referencia = Math.max(ultimaAtividade.current, ultimoDisparoParado.current);
+      // Primeira vez: SILENCIO_MS depois da última atividade. Se o silêncio continua, só volta a cada REPETIR_SILENCIO_MS.
+      const primeiro = e.fase === "REQUISITOS" ? SILENCIO_INICIAL_MS : SILENCIO_MS;
+      const limite = ultimoDisparoParado.current > ultimaAtividade.current ? REPETIR_SILENCIO_MS : primeiro;
+      if (fasesComSilencio && e.plin === "LIVRE" && Date.now() - referencia > limite) {
+        ultimoDisparoParado.current = Date.now();
         gatilho.current?.dispararAgora();
       }
-    }, 5000);
+    }, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -351,7 +398,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const salvar = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
-    ultimaMudanca.current = Date.now();
+    ultimaAtividade.current = Date.now();
     enviar({ tipo: "CANDIDATO_DESENHOU" });
     gatilho.current?.mudou();
     if (salvar.current) clearTimeout(salvar.current);
@@ -384,6 +431,62 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     // A resposta pode mudar a avaliação: analisa de novo logo depois.
     setTimeout(() => gatilho.current?.dispararAgora(), 0);
   }, [enviar, registrar]);
+
+  // Conversa por texto (enquanto não há voz do candidato): as falas digitadas e as respostas do /perguntar.
+  const [mensagens, setMensagens] = useState<MensagemConversa[]>([]);
+  const contadorDeMensagens = useRef(0);
+  /**
+   * Fala do candidato por texto. Com uma pergunta (plin) ativa, conta como a resposta a ela;
+   * senão vai para o /perguntar e a resposta do agente é mostrada e falada.
+   * Lança erro se o servidor falhar (nada é registrado, para o texto poder ser reenviado).
+   * Devolve o requisito combinado, se houver, para quem escreve no quadro.
+   */
+  const enviarTexto = useCallback(
+    async (bruto: string): Promise<{ requisito: string | null }> => {
+      const texto = limparTextoDigitado(bruto);
+      const atual = estadoAtual.current;
+      if (!texto || !sessao || atual.fase === "AGUARDANDO" || atual.fase === "ENCERRADA") return { requisito: null };
+      const nova = (quem: MensagemConversa["quem"], t: string): MensagemConversa => ({
+        id: `texto-${++contadorDeMensagens.current}-${quem}`,
+        quem,
+        texto: t,
+        horario: Date.now(),
+      });
+      ultimaAtividade.current = Date.now();
+      const registrarFalaDoCandidato = () => {
+        conversa.current.push({ quem: "candidato", texto });
+        registrar("fala", { quem: "candidato", texto });
+        return nova("candidato", texto);
+      };
+
+      if (atual.plin === "PERGUNTA_ATIVA") {
+        setMensagens((m) => [...m, registrarFalaDoCandidato()]);
+        terminarResposta();
+        return { requisito: null };
+      }
+
+      const r = await perguntar(sessao.sessao_id, atual.fase, texto);
+      const novas = [registrarFalaDoCandidato()];
+      if (r.responder && r.texto) {
+        conversa.current.push({ quem: "agente", texto: r.texto });
+        novas.push(nova("agente", r.texto));
+        void dizer(r.texto); // registra a fala do agente na linha do tempo
+      }
+      setMensagens((m) => [...m, ...novas]);
+      if (r.responder && r.requisito && !requisitosCombinados.current.includes(r.requisito)) {
+        requisitosCombinados.current.push(r.requisito);
+      }
+      if (r.concluiu) {
+        // "Pronto": no alto nível segue para o aprofundamento (que já reanalisa); nas outras fases só reanalisa.
+        if (atual.fase === "ALTO_NIVEL") enviar({ tipo: "CANDIDATO_CONCLUIU" });
+        else if (atual.fase === "APROFUNDAMENTO" || atual.fase === "FECHAMENTO") {
+          setTimeout(() => gatilho.current?.dispararAgora(), 0);
+        }
+      }
+      return { requisito: r.responder ? r.requisito : null };
+    },
+    [sessao, registrar, dizer, terminarResposta, enviar],
+  );
   const encerrar = useCallback(() => {
     silenciar();
     enviar({ tipo: "ENCERRAR" });
@@ -404,6 +507,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     clicarPlin,
     perguntaDemo,
     terminarResposta,
+    mensagens,
+    enviarTexto,
     encerrar,
   };
 }

@@ -45,8 +45,43 @@ test("tempo da fase acabando avança até encerrar", () => {
   assert.equal(e.fase, "ENCERRADA");
 });
 
-test("requisitos não analisa; pergunta ativa também não", () => {
-  assert.equal(podeAnalisar({ ...estadoInicial(), fase: "REQUISITOS" }), false);
+test("sinal de prontidão do cérebro avança o alto nível para o aprofundamento", () => {
+  const altoNivel: EstadoEntrevista = { ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: 0 };
+  const pronto: RespostaAnalise = { ...ok, avancar_fase: true };
+  // Cedo demais (menos de 30 s na fase): ignora.
+  assert.equal(transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: pronto }, 10_000).fase, "ALTO_NIVEL");
+  // Passado o mínimo: avança e marca o início da nova fase.
+  const e = transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: pronto }, 45_000);
+  assert.equal(e.fase, "APROFUNDAMENTO");
+  assert.equal(e.faseIniciadaEm, 45_000);
+  // Sem o sinal, não avança.
+  assert.equal(transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: ok }, 45_000).fase, "ALTO_NIVEL");
+});
+
+test("sinal de prontidão não vale fora do alto nível nem com o candidato respondendo", () => {
+  const pronto: RespostaAnalise = { ...ok, avancar_fase: true };
+  assert.equal(transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: pronto }, 90_000).fase, "APROFUNDAMENTO");
+  const requisitos: EstadoEntrevista = { ...estadoInicial(), fase: "REQUISITOS", faseIniciadaEm: 0 };
+  assert.equal(transicionar(requisitos, { tipo: "ANALISE_RECEBIDA", resposta: pronto }, 90_000).fase, "REQUISITOS");
+  const respondendo: EstadoEntrevista = { ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: 0, plin: "PERGUNTA_ATIVA" };
+  assert.equal(transicionar(respondendo, { tipo: "ANALISE_RECEBIDA", resposta: pronto }, 90_000).fase, "ALTO_NIVEL");
+});
+
+test("candidato concluiu no alto nível vai ao aprofundamento, sem mínimo de tempo", () => {
+  const altoNivel: EstadoEntrevista = { ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: 0 };
+  const e = transicionar(altoNivel, { tipo: "CANDIDATO_CONCLUIU" }, 1_000);
+  assert.equal(e.fase, "APROFUNDAMENTO");
+  assert.equal(e.faseIniciadaEm, 1_000);
+  // Nas outras fases, ou respondendo a um plin, não muda nada.
+  assert.equal(transicionar(noAprofundamento(), { tipo: "CANDIDATO_CONCLUIU" }, 1_000).fase, "APROFUNDAMENTO");
+  const requisitos: EstadoEntrevista = { ...estadoInicial(), fase: "REQUISITOS", faseIniciadaEm: 0 };
+  assert.equal(transicionar(requisitos, { tipo: "CANDIDATO_CONCLUIU" }, 1_000).fase, "REQUISITOS");
+  assert.equal(transicionar({ ...altoNivel, plin: "PERGUNTA_ATIVA" }, { tipo: "CANDIDATO_CONCLUIU" }, 1_000).fase, "ALTO_NIVEL");
+});
+
+test("requisitos analisa (silêncio inicial); apresentação e pergunta ativa não", () => {
+  assert.equal(podeAnalisar({ ...estadoInicial(), fase: "REQUISITOS" }), true);
+  assert.equal(podeAnalisar({ ...estadoInicial(), fase: "APRESENTACAO" }), false);
   assert.equal(podeAnalisar(noAprofundamento()), true);
   assert.equal(podeAnalisar({ ...noAprofundamento(), plin: "PERGUNTA_ATIVA" }), false);
 });
@@ -120,9 +155,16 @@ test("pergunta feita no aprofundamento não conta como a final", () => {
   assert.equal(e.perguntaFinalFeita, false);
 });
 
-test("visão geral só aceita redirecionar", () => {
+test("em requisitos só a dúvida vale e não gasta a cota; em alto nível dúvida e redirecionar valem", () => {
+  const requisitos = { ...estadoInicial(), fase: "REQUISITOS" as const };
+  const convite = transicionar(requisitos, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
+  assert.equal(convite.plin, "PLIN_PENDENTE");
+  assert.equal(transicionar(requisitos, { tipo: "ANALISE_RECEBIDA", resposta: { ...duvida, status: "redirecionar" } }, 0).plin, "LIVRE");
+  const clicado = transicionar(convite, { tipo: "PLIN_CLICADO" }, 1);
+  assert.equal(clicado.plin, "PERGUNTA_ATIVA");
+  assert.equal(clicado.perguntasFeitas, 0);
   const altoNivel = { ...estadoInicial(), fase: "ALTO_NIVEL" as const };
-  assert.equal(transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "LIVRE");
+  assert.equal(transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "PLIN_PENDENTE");
   const redirecionar = { ...duvida, status: "redirecionar" as const };
   assert.equal(
     transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: redirecionar }, 0).plin,

@@ -204,9 +204,9 @@ describe("ciclo do plin", () => {
   });
 
   it("status que a fase não aceita não vira pendente", () => {
-    const e = aplicar(emFase("ALTO_NIVEL"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "duvida" }) });
+    const e = aplicar(emFase("REQUISITOS"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "dica" }) });
     assert.equal(e.plin, "LIVRE");
-    const ok = aplicar(emFase("ALTO_NIVEL"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "redirecionar" }) });
+    const ok = aplicar(emFase("ALTO_NIVEL"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "duvida" }) });
     assert.equal(ok.plin, "PLIN_PENDENTE");
   });
 

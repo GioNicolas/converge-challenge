@@ -38,8 +38,8 @@ describe("statusPermitido: matriz fase x status", () => {
   const esperado: Record<Fase, Record<string, boolean>> = {
     AGUARDANDO: { ok: true, duvida: false, redirecionar: false, dica: false },
     APRESENTACAO: { ok: true, duvida: false, redirecionar: false, dica: false },
-    REQUISITOS: { ok: true, duvida: false, redirecionar: false, dica: false },
-    ALTO_NIVEL: { ok: true, duvida: false, redirecionar: true, dica: false },
+    REQUISITOS: { ok: true, duvida: true, redirecionar: false, dica: false },
+    ALTO_NIVEL: { ok: true, duvida: true, redirecionar: true, dica: true },
     APROFUNDAMENTO: { ok: true, duvida: true, redirecionar: true, dica: true },
     FECHAMENTO: { ok: true, duvida: true, redirecionar: false, dica: false },
     ENCERRADA: { ok: true, duvida: false, redirecionar: false, dica: false },
@@ -107,7 +107,8 @@ describe("motivoBloqueioPlin (intervalo e limite)", () => {
 describe("podeLevantarPlin", () => {
   it("combina status da fase com o portão", () => {
     assert.equal(podeLevantarPlin(estadoEm("APROFUNDAMENTO"), "dica", AGORA), true);
-    assert.equal(podeLevantarPlin(estadoEm("ALTO_NIVEL"), "dica", AGORA), false);
+    assert.equal(podeLevantarPlin(estadoEm("ALTO_NIVEL"), "dica", AGORA), true);
+    assert.equal(podeLevantarPlin(estadoEm("REQUISITOS"), "dica", AGORA), false);
     assert.equal(podeLevantarPlin(estadoEm("APROFUNDAMENTO"), "ok", AGORA), false);
     assert.equal(podeLevantarPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), "duvida", AGORA), false);
   });
@@ -118,12 +119,25 @@ describe("filtrarResposta", () => {
 
   it("deixa passar uma resposta válida", () => {
     const r = filtrarResposta(e, resposta(), IDS, AGORA);
-    assert.deepEqual(r, resposta());
+    assert.deepEqual(r, { ...resposta(), avancar_fase: false });
+  });
+
+  it("avancar_fase só vale em ALTO_NIVEL, mesmo quando o plin é rebaixado", () => {
+    const pronto = resposta({ status: "ok", pergunta: null, nota: null, elementos: [], avancar_fase: true });
+    assert.equal(filtrarResposta(estadoEm("ALTO_NIVEL"), pronto, IDS, AGORA).avancar_fase, true);
+    for (const fase of ["REQUISITOS", "APROFUNDAMENTO", "FECHAMENTO"] as const) {
+      assert.equal(filtrarResposta(estadoEm(fase), pronto, IDS, AGORA).avancar_fase, false);
+    }
+    // Pergunta que a política barra (aqui, limite de perguntas) vira ok, mas o sinal de prontidão continua.
+    const comDuvida = resposta({ status: "duvida", avancar_fase: true });
+    const r = filtrarResposta(estadoEm("ALTO_NIVEL", { perguntasFeitas: 5 }), comDuvida, IDS, AGORA);
+    assert.equal(r.status, "ok");
+    assert.equal(r.avancar_fase, true);
   });
 
   it("rebaixa para ok o status que a fase não permite, mantendo observações", () => {
     const obs = [{ criterio: "dados", sinal: "negativo" as const, espontaneo: false, evidencia: "x" }];
-    const r = filtrarResposta(estadoEm("ALTO_NIVEL"), resposta({ status: "duvida", observacoes: obs }), IDS, AGORA);
+    const r = filtrarResposta(estadoEm("REQUISITOS"), resposta({ status: "dica", observacoes: obs }), IDS, AGORA);
     assert.equal(r.status, "ok");
     assert.equal(r.pergunta, null);
     assert.equal(r.nota, null);
@@ -131,11 +145,12 @@ describe("filtrarResposta", () => {
     assert.deepEqual(r.observacoes, obs);
   });
 
-  it("REQUISITOS: analisa, mas nunca vira plin; observações ficam", () => {
+  it("REQUISITOS: analisa; só `duvida` (convite) vira plin; outros status e observações ficam como ok", () => {
     const obs = [{ criterio: "requisitos", sinal: "positivo" as const, espontaneo: true, evidencia: "perguntou a escala" }];
     assert.equal(podeAnalisar(estadoEm("REQUISITOS"), AGORA), true);
-    assert.equal(podeLevantarPlin(estadoEm("REQUISITOS"), "duvida", AGORA), false);
-    const r = filtrarResposta(estadoEm("REQUISITOS"), resposta({ observacoes: obs }), IDS, AGORA);
+    assert.equal(podeLevantarPlin(estadoEm("REQUISITOS"), "duvida", AGORA), true);
+    assert.equal(podeLevantarPlin(estadoEm("REQUISITOS"), "redirecionar", AGORA), false);
+    const r = filtrarResposta(estadoEm("REQUISITOS"), resposta({ status: "redirecionar", observacoes: obs }), IDS, AGORA);
     assert.equal(r.status, "ok");
     assert.deepEqual(r.observacoes, obs);
   });

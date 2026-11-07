@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { analisar, type DepsAnalisar } from "../analisar";
-import { eQuaseDuplicada, eEnchimento, limitarFrases, temLinguagemAvaliativa } from "../guardas";
+import { eQuaseDuplicada, limitarFrases } from "../guardas";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
 import { estadoInicial, transicionar, type EstadoSessao } from "../sessao/estado";
@@ -71,7 +71,7 @@ describe("analisar", () => {
     const json = JSON.stringify(r.resposta);
     for (const f of problema.ficha) assert.ok(!json.includes(f.resposta));
     for (const c of kitDemo.criterios) for (const n of [1, 2, 3, 4] as const) assert.ok(!json.includes(c.niveis[n]));
-    assert.deepEqual(Object.keys(r.resposta).sort(), ["degrau", "elementos", "nota", "observacoes", "pergunta", "status"]);
+    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "pergunta", "status"]);
   });
 
   it("ok cancela a dúvida pendente", async () => {
@@ -84,7 +84,8 @@ describe("analisar", () => {
   });
 
   it("status não permitido na fase é rebaixado para ok, mantendo observações", async () => {
-    const r = await analisar(deps(criarClienteFalso([duvida()])), estadoEm("ALTO_NIVEL"), pedido("ALTO_NIVEL"), AGORA);
+    // Em REQUISITOS só `duvida` vale (convite do silêncio inicial); `dica` é barrada.
+    const r = await analisar(deps(criarClienteFalso([duvida({ status: "dica" })])), estadoEm("REQUISITOS"), pedido("REQUISITOS"), AGORA);
     assert.equal(r.resposta.status, "ok");
     assert.equal(r.resposta.pergunta, null);
     assert.equal(r.resposta.observacoes.length, 1);
@@ -93,8 +94,17 @@ describe("analisar", () => {
     assert.ok(r.diagnostico.ajustes.includes("rebaixada_pela_politica"));
   });
 
-  it("REQUISITOS: a análise roda e colhe observações, sem plin", async () => {
-    const obs: RespostaAnalise = duvida({ observacoes: [{ criterio: "requisitos", sinal: "positivo", espontaneo: true, evidencia: "perguntou a escala" }] });
+  it("REQUISITOS: o convite (duvida) vira plin e não gasta a cota de perguntas", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida({ elementos: [] })])), estadoEm("REQUISITOS"), pedido("REQUISITOS"), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    const clicado = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, AGORA + 1).estado;
+    assert.equal(clicado.plin, "PERGUNTA_ATIVA");
+    assert.equal(clicado.perguntasFeitas, 0);
+  });
+
+  it("REQUISITOS: a análise roda e colhe observações; só `duvida` (convite) vira plin", async () => {
+    const obs: RespostaAnalise = duvida({ status: "redirecionar", observacoes: [{ criterio: "requisitos", sinal: "positivo", espontaneo: true, evidencia: "perguntou a escala" }] });
     const r = await analisar(deps(criarClienteFalso([obs])), estadoEm("REQUISITOS"), pedido("REQUISITOS"), AGORA);
     assert.equal(r.diagnostico.origem, "llm");
     assert.equal(r.resposta.status, "ok");
@@ -140,14 +150,6 @@ describe("analisar", () => {
     assert.equal(r.estado.plin, "PLIN_PENDENTE");
   });
 
-  it("linguagem avaliativa na pergunta: rebaixa para ok", async () => {
-    for (const p of ["Ótimo, e se o cache cair?", "Isso está correto. E a réplica?", "Parabéns pelo desenho, e o gargalo?"]) {
-      const r = await analisar(deps(criarClienteFalso([duvida({ pergunta: p })])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
-      assert.equal(r.resposta.status, "ok", p);
-      assert.equal(r.resposta.pergunta, null);
-      assert.ok(r.diagnostico.ajustes.includes("linguagem_avaliativa"));
-    }
-  });
 
   it("erro do LLM (timeout, inválido, qualquer) devolve ok sem lançar e sem mudar o estado", async () => {
     logs.length = 0;
@@ -165,21 +167,13 @@ describe("analisar", () => {
 });
 
 describe("guardas", () => {
-  it("linguagem avaliativa", () => {
-    assert.equal(temLinguagemAvaliativa("Excelente escolha"), true);
-    assert.equal(temLinguagemAvaliativa("Está errado?"), true);
-    assert.equal(temLinguagemAvaliativa("Por que Postgres aqui?"), false);
-    assert.equal(temLinguagemAvaliativa("O incorreto? "), false);
-  });
   it("duplicadas por sobreposição de tokens", () => {
     const a = "Onde está o gargalo com leitura cem vezes maior que a escrita?";
     assert.equal(eQuaseDuplicada("Qual o gargalo com a leitura cem vezes maior que escrita?", [a]), true);
     assert.equal(eQuaseDuplicada("O que acontece se o cache cair?", [a]), false);
     assert.equal(eQuaseDuplicada("E o cache?", ["E o cache?"]), true);
   });
-  it("enchimento e limite de frases", () => {
-    for (const f of ["ok", "Hmm...", "Deixa eu ver", "Entendi!"]) assert.equal(eEnchimento(f), true, f);
-    assert.equal(eEnchimento("Quantos acessos por segundo?"), false);
+  it("limite de frases", () => {
     assert.equal(limitarFrases("Um. Dois! Três?", 2), "Um. Dois!");
   });
 });

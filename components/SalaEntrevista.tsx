@@ -12,7 +12,7 @@ import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import ConfirmarEncerrar from "@/components/ConfirmarEncerrar";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
-import type { Fase } from "@/lib/sessao/cliente";
+import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
@@ -85,7 +85,10 @@ function useDemoRequisitos() {
     });
   }
 
-  return { requisitos, mensagens, encenar, encenando, acabou: passo >= ROTEIRO_DEMO.length };
+  /** Requisito combinado fora do roteiro (ex.: vindo do /perguntar): entra na lista e é escrito no quadro. */
+  const combinar = useCallback((texto: string) => setRequisitos((r) => adicionar(r, texto)), []);
+
+  return { requisitos, mensagens, encenar, combinar, encenando, acabou: passo >= ROTEIRO_DEMO.length };
 }
 
 const NOME_DA_FASE: Record<Fase, string> = {
@@ -154,6 +157,19 @@ export default function SalaEntrevista() {
     await midia.pedir();
     entrevista.comecar();
   }
+
+  // Conversa por texto: só com servidor real e entrevista em andamento. Demo e digitadas aparecem juntas, por horário.
+  const podeDigitar = usarServidor() && sessao !== null && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA";
+  const mensagensDaConversa = [...demo.mensagens, ...entrevista.mensagens].sort((a, b) => a.horario - b.horario);
+  const { enviarTexto } = entrevista;
+  const { combinar } = demo;
+  const enviarDigitado = useCallback(
+    async (texto: string) => {
+      const { requisito } = await enviarTexto(texto);
+      if (requisito) combinar(requisito);
+    },
+    [enviarTexto, combinar],
+  );
 
   const pronto = quadro !== null && sessao !== null;
   const mostrarCartao = estado.fase === "AGUARDANDO" || estado.fase === "ENCERRADA";
@@ -229,7 +245,8 @@ export default function SalaEntrevista() {
       <PainelConversa
         aberto={conversaAberta}
         onFechar={fecharConversa}
-        mensagens={demo.mensagens}
+        mensagens={mensagensDaConversa}
+        onEnviar={podeDigitar ? enviarDigitado : undefined}
         onVerNoQuadro={(id) => console.debug("[conversa] ver no quadro", id)}
       />
 

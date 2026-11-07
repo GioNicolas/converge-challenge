@@ -69,12 +69,30 @@ afterEach(() => definirContextoParaTestes(null));
 describe("POST /api/sessoes", () => {
   it("cria a sessão com o formato do contrato e só dados públicos do problema", async () => {
     const { corpo, sessao_id } = await novaSessao();
-    assert.deepEqual(Object.keys(corpo).sort(), ["area", "problema", "sessao_id", "tempos"]);
+    assert.deepEqual(Object.keys(corpo).sort(), ["apresentacao", "area", "despedida", "problema", "sessao_id", "tempos"]);
     assert.deepEqual(Object.keys(corpo.problema as object).sort(), ["enunciado", "titulo"]);
     assert.match(sessao_id, /^[0-9a-f-]{36}$/);
     assert.equal(corpo.area, "system design");
     assert.ok((corpo.tempos as Record<string, number>).REQUISITOS > 0);
     assert.equal((await repo.obter(sessao_id))?.estado.fase, "APRESENTACAO");
+  });
+  it("a abertura (apresentação e despedida) vem do modelo; sem LLM ou com erro vem null", async () => {
+    const { corpo } = await novaSessao();
+    assert.equal(typeof corpo.apresentacao, "string");
+    assert.equal(typeof corpo.despedida, "string");
+    assert.ok((corpo.apresentacao as string).length > 0);
+
+    definirContextoParaTestes({ repositorio: repo, llm: null, agora: () => relogio });
+    const semLlm = (await novaSessao()).corpo;
+    assert.equal(semLlm.apresentacao, null);
+    assert.equal(semLlm.despedida, null);
+
+    const quebrado = criarClienteFalso([new Error("fora do ar")]);
+    definirContextoParaTestes({ repositorio: repo, llm: quebrado, agora: () => relogio });
+    const comErro = (await novaSessao()).corpo;
+    assert.equal(comErro.apresentacao, null);
+    assert.equal(comErro.despedida, null);
+    assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura");
   });
   it("avaliação desconhecida: 404 {erro}", async () => {
     const r = await criar(post("/api/sessoes", { avaliacao_id: "nao-existe", candidato_id: "c" }));
@@ -185,7 +203,7 @@ describe("POST /api/sessoes/[id]/perguntar", () => {
     );
     assert.equal(r.status, 200);
     const c = await r.json();
-    assert.deepEqual(Object.keys(c).sort(), ["requisito", "responder", "texto"]);
+    assert.deepEqual(Object.keys(c).sort(), ["concluiu", "requisito", "responder", "texto"]);
     assert.equal(c.responder, true);
     const e = (await repo.obter(sessao_id))!.estado;
     assert.equal(e.fase, "REQUISITOS");
@@ -196,7 +214,7 @@ describe("POST /api/sessoes/[id]/perguntar", () => {
     const c = await (
       await perguntarPost(post("/x", { sessao_id, fase: "REQUISITOS", texto: "hmm deixa eu ver" }), params(sessao_id))
     ).json();
-    assert.deepEqual(c, { responder: false, texto: "", requisito: null });
+    assert.deepEqual(c, { responder: false, texto: "", requisito: null, concluiu: false });
   });
   it("404 e 400", async () => {
     const { sessao_id } = await novaSessao();

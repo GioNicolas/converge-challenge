@@ -13,9 +13,11 @@ const EsquemaSessao: z.ZodType<Sessao> = z.object({
     z.enum(["AGUARDANDO", "APRESENTACAO", "REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO", "ENCERRADA"]),
     z.number().finite().nonnegative(),
   ),
+  apresentacao: z.string().nullable().optional(),
+  despedida: z.string().nullable().optional(),
 });
 
-const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable() });
+const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false) });
 const EsquemaAlinhamento: z.ZodType<Alinhamento> = z.object({
   characters: z.array(z.string()),
   character_start_times_seconds: z.array(z.number().finite().nonnegative()),
@@ -111,7 +113,7 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   }
 }
 
-export async function perguntar(sessaoId: string, fase: string, texto: string): Promise<{ responder: boolean; texto: string; requisito: string | null }> {
+export async function perguntar(sessaoId: string, fase: string, texto: string): Promise<{ responder: boolean; texto: string; requisito: string | null; concluiu?: boolean }> {
   const rota = rotaDaSessao(sessaoId, "perguntar");
   const dados = await lerJson(rota, jsonPost({ sessao_id: sessaoId, fase, texto }));
   return validar(rota, dados, EsquemaPergunta);

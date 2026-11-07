@@ -65,7 +65,7 @@ pedido do quadro --> analisar() --> podeAnalisar? --(não)--> ok
                         |
                  llm.completarJson  (OpenRouter, JSON schema estrito; erro/timeout --> ok)
                         |
-        guardas: linguagem avaliativa, pergunta repetida --> ok
+        guardas: pergunta repetida --> ok
                         |
         filtrarResposta (política) --> transicionar(ANALISE_RECEBIDA) --> { resposta, estado, efeitos }
 
@@ -74,7 +74,7 @@ fala do candidato --> perguntar() --> só pela ficha --> { responder, texto, req
 
 - `llm/cliente.ts`: `LlmCliente.completarJson`, `criarClienteOpenRouter()` (fetch puro, timeout de 8s = prazo do quadro, 1 retry em 5xx/429 só se sobrar tempo, saída validada pelo Zod, erro tipado `ErroLlm`), `criarClienteFalso()` para testes. `llm/jsonschema.ts` converte Zod 3 em JSON Schema (sem dependência nova).
 - `prompts/avaliador.ts`: o prompt da análise (10 princípios, tabela de ações, notação do grafo, rubrica, regras de saída). `prompts/entrevistador.ts`: o do `perguntar`.
-- `guardas.ts`: linguagem avaliativa ("correto", "errado", "ótimo", "excelente", "perfeito", "parabéns"), pergunta quase repetida (sobreposição de tokens >= 0.7), fala de enchimento.
+- `guardas.ts`: só guardas estruturais (pergunta quase repetida por sobreposição de tokens >= 0.7, corte de frases). Nenhuma lista de palavras: o que o candidato quis dizer e o que o agente pode dizer ficam nos prompts.
 - `analisar.ts`, `perguntar.ts`: as duas funções públicas. Não lançam por causa do LLM; log só com metadados.
 - `kits/demo.ts`: kit de demonstração (system design, encurtador de URL). `kits/index.ts`: `carregarKit(id)`.
 
@@ -108,3 +108,18 @@ Comandos: `/grafo scripts/exemplos/encurtador-ruim.txt` (carrega o desenho e rod
 - Scorecard final (modelo `AGENTE_MODELO_FINAL`).
 - Voz (ElevenLabs, STT) e `/falar`.
 - Quadro de requisitos persistido no estado (hoje `perguntar` recebe `requisitosAtuais` de quem chama).
+
+## Quando o agente fala (regra explícita)
+
+O agente tem dois canais, com regras diferentes. Nenhum deles fala "por conta própria": toda fala nasce de um destes gatilhos.
+
+| Gatilho | Quem decide falar | Regra |
+|---|---|---|
+| Candidato fala (`/perguntar`) | O modelo | Responde só pela ficha. Falas sem pedido de resposta ficam em silêncio, por interpretação do contexto. |
+| Candidato indica que terminou (qualquer palavra) | O modelo interpreta (`concluiu` na saída do `/perguntar`) | O código **não procura palavras**. Quando `concluiu` é true, o prompt manda responder com uma frase neutra. No quadro: em `ALTO_NIVEL` vai para `APROFUNDAMENTO` (`CANDIDATO_CONCLUIU`); em `APROFUNDAMENTO`/`FECHAMENTO` reanalisa. Em seguida a análise decide se há pergunta. |
+| Desenho muda, pausa de ~3,5 s, ou fim de resposta (`/analisar`) | O modelo, dentro da política | `ok` (silêncio) é o padrão. Plin só nos status que a fase permite (`politica.ts`), com 60 s entre perguntas e no máximo 5. |
+| Silêncio total no começo (REQUISITOS): 15 s sem falar, sem escrever na conversa e sem desenhar | O modelo, dentro da política | Só `duvida`, escrita pelo modelo ("quando quiser, conte como está pensando em abordar o problema", sem texto fixo). Não gasta a cota de 5 perguntas. Repete a cada 30 s se o silêncio continuar. |
+| Silêncio total depois (ALTO_NIVEL e APROFUNDAMENTO): 8 s | O modelo, dentro da política | Mesma análise; `duvida`, `redirecionar` ou `dica`. Provisório: `SILENCIO_MS` (quadro) e `LIMITE_SILENCIO_S` (servidor). |
+| `avancar_fase` na análise | O modelo (sinal) + quadro (30 s mínimos) | Só em `ALTO_NIVEL`: vai para `APROFUNDAMENTO` e reanalisa. |
+
+Resumindo: **responder** a uma fala do candidato é decisão do modelo (por interpretação, não por lista de palavras); **perguntar** por iniciativa é sempre decisão da análise, sob a política da fase.

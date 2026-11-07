@@ -11,6 +11,17 @@ export type Regras = {
   maxCaracteresNota: number;
 };
 
+/**
+ * Silêncio total do candidato (sem mexer no desenho nem falar) a partir do qual o agente pode quebrá-lo.
+ * Provisório, para os testes. O quadro usa o mesmo valor em `useEntrevista.ts` (SILENCIO_MS).
+ */
+export const LIMITE_SILENCIO_S = 8;
+/**
+ * Idem para o começo (fase REQUISITOS): sem falar, sem escrever na conversa e sem desenhar nada.
+ * Provisório. O quadro usa o mesmo valor em `useEntrevista.ts` (SILENCIO_INICIAL_MS).
+ */
+export const LIMITE_SILENCIO_INICIAL_S = 15;
+
 export const REGRAS_PADRAO: Regras = {
   intervaloEntrePerguntasMs: 60_000,
   maxPerguntas: 5,
@@ -19,8 +30,10 @@ export const REGRAS_PADRAO: Regras = {
 
 /** Que tipos de plin cada fase aceita. `ok` é sempre permitido (silêncio). */
 const PLINS_DA_FASE: Partial<Record<Fase, StatusAnalise[]>> = {
-  // REQUISITOS: nenhum plin (o candidato ainda está combinando o problema).
-  ALTO_NIVEL: ["redirecionar"],
+  // REQUISITOS: só `duvida`, para o convite de quem fica em silêncio total no começo (não conta na cota; ver estado.ts).
+  REQUISITOS: ["duvida"],
+  // ALTO_NIVEL: o modelo decide (pelo tempo parado, ver prompt) se quebra o silêncio; o padrão continua "ok".
+  ALTO_NIVEL: ["duvida", "redirecionar", "dica"],
   APROFUNDAMENTO: ["duvida", "redirecionar", "dica"],
   // FECHAMENTO: uma única pergunta final (o limite de "uma" fica em `motivoBloqueio`).
   FECHAMENTO: ["duvida"],
@@ -126,6 +139,18 @@ export function filtrarResposta(
   idsDoGrafo: ReadonlySet<string>,
   agora: number,
   regras: Regras = REGRAS_PADRAO,
+): RespostaAnalise {
+  const filtrada = filtrarPlin(estado, resposta, idsDoGrafo, agora, regras);
+  // O sinal de prontidão independe do plin, mas só vale em ALTO_NIVEL.
+  return { ...filtrada, avancar_fase: resposta.avancar_fase === true && estado.fase === "ALTO_NIVEL" };
+}
+
+function filtrarPlin(
+  estado: EstadoSessao,
+  resposta: RespostaAnalise,
+  idsDoGrafo: ReadonlySet<string>,
+  agora: number,
+  regras: Regras,
 ): RespostaAnalise {
   if (resposta.status === "ok") return silenciar(resposta);
   const pergunta = resposta.pergunta?.trim();
