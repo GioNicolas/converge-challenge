@@ -145,7 +145,7 @@ export default function SalaEntrevista() {
   function aoQuadroPronto(q: Quadro) {
     setQuadro(q);
     // Só para depurar no console do navegador durante o desenvolvimento.
-    if (process.env.NODE_ENV === "development") {
+    if (process.env.NODE_ENV === "development" || process.env.NEXT_PUBLIC_E2E === "1") {
       (window as unknown as { quadro: Quadro }).quadro = q;
     }
   }
@@ -168,6 +168,7 @@ export default function SalaEntrevista() {
           duvidaPendente={estado.plin === "PLIN_PENDENTE"}
           respondendo={estado.plin === "PERGUNTA_ATIVA"}
           encerrada={estado.fase === "ENCERRADA"}
+          marcadores={{ fase: estado.fase, plin: estado.plin }}
           iniciadaEm={entrevista.iniciadaEm}
           midia={midia}
           agenteFalando={entrevista.agenteFalando}

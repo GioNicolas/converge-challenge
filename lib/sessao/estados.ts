@@ -15,6 +15,8 @@ export type EstadoEntrevista = {
   plin: CicloPlin;
   /** A dúvida esperando o clique do candidato. */
   perguntaPendente: RespostaAnalise | null;
+  /** A dúvida pendente veio do botão de demonstração (um "ok" da análise não a cancela). */
+  pendenteDeDemo: boolean;
   /** A pergunta que o candidato está respondendo. */
   perguntaAtiva: PerguntaAtiva | null;
   perguntasFeitas: number;
@@ -64,6 +66,7 @@ export function estadoInicial(): EstadoEntrevista {
     faseIniciadaEm: null,
     plin: "LIVRE",
     perguntaPendente: null,
+    pendenteDeDemo: false,
     perguntaAtiva: null,
     perguntasFeitas: 0,
     ultimaRespostaEm: null,
@@ -132,9 +135,9 @@ export function transicionar(
       const { resposta } = evento;
       if (aceitaPlin(estado, resposta, agora, regras)) {
         // Uma dúvida nova substitui a pendente: a mais recente é a mais relevante.
-        return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta };
+        return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta, pendenteDeDemo: false };
       }
-      if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE") {
+      if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo) {
         // O candidato resolveu sozinho antes de clicar: a dúvida pendente perdeu o sentido.
         return { ...estado, plin: "LIVRE", perguntaPendente: null };
       }
@@ -143,7 +146,7 @@ export function transicionar(
 
     case "PLIN_DEMO":
       if (estado.fase === "AGUARDANDO" || estado.plin === "PERGUNTA_ATIVA") return estado;
-      return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: evento.resposta };
+      return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: evento.resposta, pendenteDeDemo: true };
 
     case "PLIN_CLICADO": {
       if (estado.plin !== "PLIN_PENDENTE" || !estado.perguntaPendente) return estado;

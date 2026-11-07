@@ -45,6 +45,8 @@ type Props = {
   respondendo: boolean;
   /** A entrevista acabou (para o tempo e some o botão de encerrar). */
   encerrada: boolean;
+  /** Marcadores para testes automáticos (viram data-fase e data-plin), sem efeito visual. */
+  marcadores?: { fase?: string; plin?: string };
   iniciadaEm: number | null;
   midia: ReturnType<typeof useMidiaLocal>;
   agenteFalando: boolean;
@@ -58,6 +60,7 @@ export default function JanelaChamada({
   duvidaPendente,
   respondendo,
   encerrada,
+  marcadores,
   iniciadaEm,
   midia,
   agenteFalando,
@@ -151,6 +154,8 @@ export default function JanelaChamada({
     <motion.div
       ref={caixa}
       data-janela-chamada
+      data-fase={marcadores?.fase}
+      data-plin={marcadores?.plin}
       drag
       dragControls={controles}
       dragListener={false}

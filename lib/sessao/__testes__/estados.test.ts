@@ -111,6 +111,11 @@ test("plin de demonstração ignora fase, intervalo e limite, mas não atropela 
   assert.equal(transicionar(estadoInicial(), { tipo: "PLIN_DEMO", resposta: duvida }, 1).plin, "LIVRE");
 });
 
+test("um 'ok' da análise não cancela a pergunta de demonstração", () => {
+  const demo = transicionar(noAprofundamento(), { tipo: "PLIN_DEMO", resposta: duvida }, 0);
+  assert.equal(transicionar(demo, { tipo: "ANALISE_RECEBIDA", resposta: ok }, 1).plin, "PLIN_PENDENTE");
+});
+
 test("encerrada ignora tudo", () => {
   const fim = transicionar(noAprofundamento(), { tipo: "ENCERRAR" }, 0);
   assert.equal(fim.fase, "ENCERRADA");
