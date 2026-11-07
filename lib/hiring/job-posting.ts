@@ -16,7 +16,7 @@ import { z } from "zod";
  */
 export const InterviewTool = z.enum([
   "code_editor", // Monaco + execução de testes (live coding)
-  "whiteboard", // Excalidraw (system design, diagramas)
+  "whiteboard", // Excalidraw (system design, fluxos, cronogramas, layouts, diagramas)
 ]);
 export type InterviewTool = z.infer<typeof InterviewTool>;
 
