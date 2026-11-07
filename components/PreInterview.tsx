@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { Clock, Code2, Lightbulb, Mic, MessageSquare, Play } from "lucide-react";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
+import type { InterviewConfig } from "@/lib/contracts";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
 import { DIFFICULTIES, difficultyForSeniority } from "@/lib/problems";
 import { curvaSuave, duracao } from "@/lib/design/motion";
@@ -32,10 +33,11 @@ const PASSOS = [
   },
 ];
 
-export default function PreInterview() {
+/** `vaga`: config da vaga (saída da pré-entrevista da recrutadora); sem ela, a padrão. */
+export default function PreInterview({ vaga = DEFAULT_CONFIG }: { vaga?: InterviewConfig }) {
   const router = useRouter();
-  const { roleTitle, durationMin, languages } = DEFAULT_CONFIG;
-  const nivel = DIFFICULTIES.find((d) => d.id === (DEFAULT_CONFIG.difficulty ?? difficultyForSeniority(DEFAULT_CONFIG.seniority)))?.label;
+  const { roleTitle, durationMin, languages } = vaga;
+  const nivel = DIFFICULTIES.find((d) => d.id === (vaga.difficulty ?? difficultyForSeniority(vaga.seniority)))?.label;
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6 py-12">
@@ -103,7 +105,7 @@ export default function PreInterview() {
           </button>
           <button
             type="button"
-            onClick={() => router.push("/entrevista")}
+            onClick={() => router.push(`/entrevista?config=${encodeURIComponent(vaga.id)}`)}
             className="inline-flex items-center justify-center gap-2 rounded-controle bg-marca px-6 py-3 text-corpo font-semibold text-texto-claro transition-all duration-rapida ease-suave hover:brightness-110 active:scale-[0.98]"
           >
             <Play size={16} strokeWidth={1.75} /> Estou pronto(a), iniciar

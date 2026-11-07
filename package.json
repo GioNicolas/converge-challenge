@@ -15,12 +15,12 @@
     "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts"
   },
   "dependencies": {
-    "@typesafe-ai/sdk": "^0.7.0",
     "@elevenlabs/client": "^1.35.0",
     "@monaco-editor/react": "^4.7.0",
     "lucide-react": "^1.70.0",
     "monaco-editor": "^0.57.0",
     "motion": "^14.10.1",
+    "@typesafe-ai/sdk": "^0.7.0",
     "next": "15.5.4",
     "pyodide": "^0.26.4",
     "react": "19.1.0",

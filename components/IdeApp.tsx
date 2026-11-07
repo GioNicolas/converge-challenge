@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { Download, Flag, MessageSquare, Mic, MicOff, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
-import type { EditorCommand } from "@/lib/contracts";
+import type { EditorCommand, InterviewConfig } from "@/lib/contracts";
 import { entrada } from "@/lib/design/motion";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
@@ -28,7 +28,6 @@ import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
 import { VOICE_AVAILABLE, useVoice } from "./useVoice";
 
-const DURATION_MS = DEFAULT_CONFIG.durationMin * 60_000;
 const CAPTION_MS = 8000;
 const CHARS_POR_SEGUNDO = 18; // ritmo da legenda quando a voz não informa o progresso
 
@@ -52,16 +51,23 @@ function useFalaProgressiva(texto: string | null): FalaNaTela | null {
  * A IDE não tem inteligência: mostra, captura e obedece (docs/contexto-pessoa-a-ide.md).
  * Eventos vão para /api/events; comandos do agente chegam pelo chat ou pela voz.
  */
-export default function IdeApp({ problemId }: { problemId?: string }) {
+/** `vaga`: o que a IDE usa da config da vaga (padrão: DEFAULT_CONFIG). */
+export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty">;
+
+export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId?: string; vaga?: VagaIDE }) {
+  const DURATION_MS = vaga.durationMin * 60_000;
   const router = useRouter();
   // A questão vem da config da vaga (nível definido pelo agente); `problemId` só sobrescreve em testes.
-  const problem = problemId ? getProblem(problemId) : resolveProblem(DEFAULT_CONFIG);
-  const session = useSession(problem.id);
+  const problem = problemId ? getProblem(problemId) : resolveProblem(vaga);
+  // Abre na primeira linguagem da vaga que a questão tem (a recrutadora pode ter restringido, ex.: só C++).
+  const initialLanguage = vaga.languages.find((l) => l in problem.starters) ?? vaga.languages[0];
+  const session = useSession(problem.id, vaga.id, vaga.durationMin, initialLanguage);
   const capture = useCodeCapture({
     sendEvent: session.sendEvent,
     nowT: session.nowT,
     endedRef: session.endedRef,
     starters: problem.starters,
+    initialLanguage,
   });
 
   const [run, setRun] = useState<RunState>({ status: "idle" });
@@ -282,7 +288,7 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
               aria-label="Linguagem"
               className="vidro rounded-full px-3 py-2 font-medium shadow-cartao outline-none"
             >
-              {DEFAULT_CONFIG.languages.map((l) => (
+              {vaga.languages.map((l) => (
                 <option key={l} value={l}>
                   {LANGUAGE_LABELS[l] ?? l}
                 </option>

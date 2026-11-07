@@ -14,14 +14,16 @@ interface CaptureDeps {
   endedRef: { current: boolean };
   /** Código inicial por linguagem do problema atual. */
   starters: Record<string, string>;
+  /** Linguagem com que a IDE abre (a primeira da vaga). */
+  initialLanguage?: string;
 }
 
 /**
  * Captura de código: snapshot (debounce + throttle), pause, paste, language e run.
  */
-export function useCodeCapture({ sendEvent, nowT, endedRef, starters: STARTERS }: CaptureDeps) {
-  const [language, setLanguage] = useState<string>(INITIAL_LANGUAGE);
-  const [code, setCode] = useState<string>(STARTERS[INITIAL_LANGUAGE] ?? "");
+export function useCodeCapture({ sendEvent, nowT, endedRef, starters: STARTERS, initialLanguage = INITIAL_LANGUAGE }: CaptureDeps) {
+  const [language, setLanguage] = useState<string>(initialLanguage);
+  const [code, setCode] = useState<string>(STARTERS[initialLanguage] ?? "");
 
   const codeRef = useRef(code);
   const langRef = useRef(language);

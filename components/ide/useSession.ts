@@ -16,7 +16,6 @@ export interface LogEntry {
   failed: boolean;
 }
 
-const DURATION_MS = DEFAULT_CONFIG.durationMin * 60_000;
 const LOG_LIMIT = 200;
 /** Com o candidato parado, o blip só aparece por polling: a cada 3 s. */
 const PENDING_POLL_MS = 3000;
@@ -24,7 +23,13 @@ const PENDING_POLL_MS = 3000;
 /**
  * Sessão: id, relógio (t), cronômetro, fim de sessão e o único ponto de envio (sendEvent).
  */
-export function useSession(problemId: string = DEFAULT_CONFIG.problemId) {
+export function useSession(
+  problemId: string = DEFAULT_CONFIG.problemId,
+  configId: string = DEFAULT_CONFIG.id,
+  durationMin: number = DEFAULT_CONFIG.durationMin,
+  initialLanguage: string = INITIAL_LANGUAGE,
+) {
+  const durationMs = durationMin * 60_000;
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [ended, setEnded] = useState(false);
@@ -93,11 +98,11 @@ export function useSession(problemId: string = DEFAULT_CONFIG.problemId) {
     setSessionId(id);
     void sendEvent({
       type: "session_started",
-      configId: DEFAULT_CONFIG.id,
+      configId,
       problemId,
-      language: INITIAL_LANGUAGE,
+      language: initialLanguage,
     });
-  }, [sendEvent, problemId]);
+  }, [sendEvent, problemId, configId, initialLanguage]);
 
   // Polling de blip (GET /api/blip/pending): mostra o balão mesmo sem evento novo do candidato.
   useEffect(() => {
@@ -123,10 +128,10 @@ export function useSession(problemId: string = DEFAULT_CONFIG.problemId) {
     const id = setInterval(() => {
       const elapsed = nowT();
       setElapsedMs(elapsed);
-      if (elapsed >= DURATION_MS) endSession("timeout");
+      if (elapsed >= durationMs) endSession("timeout");
     }, 1000);
     return () => clearInterval(id);
-  }, [nowT, endSession]);
+  }, [nowT, endSession, durationMs]);
 
   return {
     sessionId,
