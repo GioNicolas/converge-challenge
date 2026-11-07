@@ -38,8 +38,15 @@ export function warmUp() {
  * Roda o código contra os testes públicos do problema. Nunca rejeita:
  * erro fatal (sintaxe, função inexistente, timeout) vira `stderr`.
  */
-export function runCode(code: string, problem: PublicProblem, language = "python"): Promise<RunResult> {
-  if (language === "c" || language === "cpp") return runNative(code, problem, language);
+export type Progresso = (feitos: number, passaram: number) => void;
+
+export function runCode(
+  code: string,
+  problem: PublicProblem,
+  language = "python",
+  onProgress?: Progresso,
+): Promise<RunResult> {
+  if (language === "c" || language === "cpp") return runNative(code, problem, language, onProgress);
   const started = performance.now();
   const id = ++seq;
   const w = getWorker();
@@ -55,6 +62,7 @@ export function runCode(code: string, problem: PublicProblem, language = "python
 
     w.onmessage = (e: MessageEvent) => {
       if (e.data.id !== id) return;
+      if (e.data.progress) return onProgress?.(e.data.done, e.data.passed);
       clearTimeout(timer);
       if (!e.data.ok) return fail(e.data.error);
       const { data, stdout } = e.data;
@@ -103,7 +111,12 @@ export function runCode(code: string, problem: PublicProblem, language = "python
 }
 
 /** C/C++: compila e roda no servidor local (app/api/run). */
-async function runNative(code: string, problem: PublicProblem, language: string): Promise<RunResult> {
+async function runNative(
+  code: string,
+  problem: PublicProblem,
+  language: string,
+  onProgress?: Progresso,
+): Promise<RunResult> {
   const started = performance.now();
   const fail = (stderr: string): RunResult => ({
     passed: 0,
@@ -124,7 +137,27 @@ async function runNative(code: string, problem: PublicProblem, language: string)
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       return fail(j.error ?? `Falha ao executar (${res.status}).`);
     }
-    return (await res.json()) as RunResult;
+    // A rota responde em NDJSON: uma linha {progress} por caso e, no fim, {result}.
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let final: RunResult | null = null;
+    const lerLinha = (linha: string) => {
+      if (!linha.trim()) return;
+      const m = JSON.parse(linha) as { progress?: [number, number]; result?: RunResult };
+      if (m.progress) onProgress?.(m.progress[0], m.progress[1]);
+      if (m.result) final = m.result;
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const linhas = buf.split("\n");
+      buf = linhas.pop() ?? "";
+      linhas.forEach(lerLinha);
+    }
+    lerLinha(buf);
+    return final ?? fail("Resposta incompleta do servidor.");
   } catch (e) {
     return fail(e instanceof Error ? e.message : "Falha de rede ao executar.");
   }
