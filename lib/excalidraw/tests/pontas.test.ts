@@ -9,7 +9,9 @@ import type { ExcalidrawElement } from "../tipos";
 const cena = pontas as unknown as readonly ExcalidrawElement[];
 
 function alterar(elementos: readonly ExcalidrawElement[], id: string, campos: Partial<ExcalidrawElement>) {
-  return elementos.map((e) => e.id === id ? { ...e, ...campos } as ExcalidrawElement : e);
+  // Editar um texto no Excalidraw muda os dois campos.
+  const comOriginal = "text" in campos ? { ...campos, originalText: campos.text } : campos;
+  return elementos.map((e) => e.id === id ? { ...e, ...comOriginal } as ExcalidrawElement : e);
 }
 
 function so(id: string) {
@@ -75,7 +77,7 @@ test("diff: redesenhar ao contrário e mover a ponta para o começo dá a mesma 
 test("diff: inverter e renomear o rótulo saem em linhas separadas", () => {
   const conversor = criarConversor();
   const comRotulo = [...so("so-no-fim"), {
-    ...cena.find((e) => e.id === "nome-api")!, id: "rotulo", text: "chama", containerId: "so-no-fim",
+    ...cena.find((e) => e.id === "nome-api")!, id: "rotulo", text: "chama", originalText: "chama", containerId: "so-no-fim",
   } as ExcalidrawElement];
   const antes = conversor.converter(comRotulo).instantaneo;
   const agora = conversor.converter(alterar(

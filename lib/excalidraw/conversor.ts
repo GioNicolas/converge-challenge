@@ -18,6 +18,14 @@ type Linha = Extract<ExcalidrawElement, { type: "arrow" | "line" }>;
 type Texto = Extract<ExcalidrawElement, { type: "text" }>;
 type Ponto = readonly [number, number];
 
+/**
+ * O que o candidato digitou. `text` vem com as quebras que o Excalidraw põe para caber na forma
+ * ("Postgres" numa elipse estreita vira "Postgr\nes"); `originalText` não.
+ */
+function textoDigitado(elemento: Texto): string {
+  return normalizarTexto(elemento.originalText || elemento.text);
+}
+
 function ehCaixa(elemento: ExcalidrawElement): elemento is Caixa {
   return elemento.type in tiposEmPortugues;
 }
@@ -151,7 +159,7 @@ export function criarConversor(): {
     for (const e of visiveis) {
       if (e.type !== "text" || !e.containerId) continue;
       const lista = textos.get(e.containerId) ?? [];
-      lista.push(normalizarTexto(e.text));
+      lista.push(textoDigitado(e));
       textos.set(e.containerId, lista);
     }
     const vinculados = new Set([...textos].filter(([, lista]) => lista.some(Boolean)).map(([real]) => real));
@@ -161,7 +169,7 @@ export function criarConversor(): {
     const absorvidos = new Map<string, string>();
     const dentroDe = new Map<string, string>();
     for (const texto of soltos) {
-      if (!normalizarTexto(texto.text)) continue;
+      if (!textoDigitado(texto)) continue;
       const ponto = centro(texto);
       const recipiente = caixas.filter((c) => contemTexto(c, ponto)).reduce<Caixa | undefined>((menor, c) =>
         !menor || areaDaForma(c) < areaDaForma(menor) ? c : menor, undefined);
@@ -183,7 +191,7 @@ export function criarConversor(): {
     }
     for (const texto of soltos) {
       const destino = absorvidos.get(texto.id);
-      if (destino) textos.set(destino, [...(textos.get(destino) ?? []), normalizarTexto(texto.text)]);
+      if (destino) textos.set(destino, [...(textos.get(destino) ?? []), textoDigitado(texto)]);
     }
     const representados = visiveis.filter((e) => e.type !== "text" || (!e.containerId && !absorvidos.has(e.id)));
     const ids = new Map(representados.map((e) => [e.id, atribuirId(e)]));
@@ -220,7 +228,7 @@ export function criarConversor(): {
       };
     });
     const anotacoes = soltos.filter((e) => !absorvidos.has(e.id)).map((e) => ({
-      id: id(e.id), texto: normalizarTexto(e.text), dentroDe: dentroDe.has(e.id) ? id(dentroDe.get(e.id)!) : null,
+      id: id(e.id), texto: textoDigitado(e), dentroDe: dentroDe.has(e.id) ? id(dentroDe.get(e.id)!) : null,
     }));
     const secoes: Secao[] = [];
     const grupos = new Set<string>();
