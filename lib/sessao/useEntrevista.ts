@@ -30,6 +30,8 @@ import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff"
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
+const TRAVADO_MS = 2 * 60_000;
+
 function redutor(estado: EstadoEntrevista, acao: Acao) {
   return transicionar(estado, acao.evento, acao.agora);
 }
@@ -125,7 +127,9 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         return pedido;
       },
       analisar,
-      aoResultado: (resposta) => {
+      aoResultado: (bruta) => {
+        // IDs que não existem no quadro (o modelo inventou ou o candidato apagou) são ignorados.
+        const resposta = { ...bruta, elementos: bruta.elementos.filter((c) => conversor.current.idReal(c)) };
         console.log("[análise] resposta", resposta);
         registrar("analise", resposta);
         enviar({ tipo: "ANALISE_RECEBIDA", resposta });
@@ -209,11 +213,53 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     };
   }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar]);
 
+  // Candidato travado (~2 min sem mexer no desenho): força uma análise, que pode virar uma dica (escada de ajuda).
+  const ultimaMudanca = useRef(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => {
+      const e = estadoAtual.current;
+      const fasesComDica = e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO";
+      if (fasesComDica && e.plin === "LIVRE" && Date.now() - ultimaMudanca.current > TRAVADO_MS) {
+        ultimaMudanca.current = Date.now();
+        gatilho.current?.dispararAgora();
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // O desenho do candidato fica salvo no navegador: se a página recarregar, ele volta.
+  const chaveDoDesenho = sessao ? `quadro:${sessao.sessao_id}` : null;
+  useEffect(() => {
+    if (!quadro || !chaveDoDesenho) return;
+    try {
+      const salvo = localStorage.getItem(chaveDoDesenho);
+      const elementos = salvo ? JSON.parse(salvo) : null;
+      if (Array.isArray(elementos) && elementos.length > 0 && quadro.api.getSceneElements().length === 0) {
+        quadro.api.updateScene({ elements: elementos, captureUpdate: "NEVER" });
+        quadro.api.scrollToContent(undefined, { fitToContent: false, animate: true });
+      }
+    } catch {
+      // Desenho salvo inválido ou armazenamento bloqueado: segue com o quadro vazio.
+    }
+  }, [quadro, chaveDoDesenho]);
+
+  const salvar = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
+    ultimaMudanca.current = Date.now();
     enviar({ tipo: "CANDIDATO_DESENHOU" });
     gatilho.current?.mudou();
-  }, [enviar]);
+    if (salvar.current) clearTimeout(salvar.current);
+    salvar.current = setTimeout(() => {
+      if (!quadro || !chaveDoDesenho) return;
+      try {
+        const doCandidato = quadro.api.getSceneElements().filter((e) => e.customData?.autor !== "agente");
+        localStorage.setItem(chaveDoDesenho, JSON.stringify(doCandidato));
+      } catch {
+        // Sem espaço ou armazenamento bloqueado: não salvar não atrapalha a entrevista.
+      }
+    }, 800);
+  }, [enviar, quadro, chaveDoDesenho]);
 
   const [iniciadaEm, setIniciadaEm] = useState<number | null>(null);
   const comecar = useCallback(() => {
@@ -230,7 +276,11 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const encerrar = useCallback(() => {
     silenciar();
     enviar({ tipo: "ENCERRAR" });
-  }, [enviar, silenciar]);
+    // Entrevista encerrada: o desenho salvo localmente não é mais necessário (a prova fica no servidor).
+    try {
+      if (chaveDoDesenho) localStorage.removeItem(chaveDoDesenho);
+    } catch {}
+  }, [enviar, silenciar, chaveDoDesenho]);
 
   return {
     sessao,

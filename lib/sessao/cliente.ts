@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Único ponto de acesso do quadro ao servidor.
 // Enquanto as rotas /api/* não existem, devolve dados de mentira e usa a voz do navegador.
 // Para ligar no servidor real, troque só o corpo destas funções.
@@ -57,6 +59,33 @@ export type RespostaAnalise = {
   degrau: number | null;
   observacoes: Observacao[];
 };
+
+/** Valida a resposta do /analisar. Fora do formato → a análise é descartada (o gatilho tenta de novo depois). */
+const EsquemaResposta = z.object({
+  status: z.enum(["ok", "duvida", "redirecionar", "dica"]),
+  pergunta: z.string().nullable().default(null),
+  nota: z.string().nullable().default(null),
+  elementos: z.array(z.string()).default([]),
+  degrau: z.number().nullable().default(null),
+  observacoes: z
+    .array(
+      z.object({
+        criterio: z.string(),
+        sinal: z.enum(["positivo", "negativo", "neutro"]),
+        espontaneo: z.boolean(),
+        evidencia: z.string(),
+      }),
+    )
+    .default([]),
+});
+
+export function validarResposta(dados: unknown): RespostaAnalise {
+  const r = EsquemaResposta.parse(dados);
+  // Sem pergunta não há o que perguntar: vira "ok".
+  if (r.status !== "ok" && !r.pergunta?.trim()) return { ...r, status: "ok" };
+  // A nota é curta (~40 caracteres); se vier sem, usa a pergunta.
+  return { ...r, nota: (r.nota?.trim() || r.pergunta || "").slice(0, 60) || null };
+}
 
 // Só o enunciado vem ao navegador: a ficha de requisitos e a rubrica ficam no servidor.
 export async function criarSessao(): Promise<Sessao> {
@@ -120,7 +149,7 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   });
   const base = RESPOSTAS_DE_MENTIRA[proximaResposta++ % RESPOSTAS_DE_MENTIRA.length];
   const alvo = ultimoComponente(pedido.grafo);
-  return { ...base, elementos: base.status !== "ok" && alvo ? [alvo] : [] };
+  return validarResposta({ ...base, elementos: base.status !== "ok" && alvo ? [alvo] : [] });
 }
 
 // --- Linha do tempo (POST /api/sessoes/:id/eventos), de mentira por enquanto ---

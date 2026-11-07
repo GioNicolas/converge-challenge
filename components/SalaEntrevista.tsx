@@ -11,6 +11,7 @@ import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
+import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 
 const Canvas = dynamic(() => import("@/components/Canvas"), {
@@ -24,6 +25,14 @@ export default function SalaEntrevista() {
   const entrevista = useEntrevista(quadro, cursor);
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
+
+  // A resposta a um plin termina sozinha quando o candidato fala e depois fica em silêncio.
+  useFimPorSilencio({
+    ativo: estado.plin === "PERGUNTA_ATIVA",
+    agenteFalando: entrevista.agenteFalando,
+    volume: midia.volume,
+    aoTerminar: entrevista.terminarResposta,
+  });
 
   function aoMudarDesenho(elementos: NonDeletedExcalidrawElement[]) {
     if (process.env.NODE_ENV === "development") {
