@@ -1,8 +1,11 @@
 import { z } from "zod";
+import type { MarcaDeFala } from "../presenca/vozSincronizada";
 
 // Único ponto de acesso do quadro ao servidor.
-// Enquanto as rotas /api/* não existem, devolve dados de mentira e usa a voz do navegador.
-// Para ligar no servidor real, troque só o corpo destas funções.
+// O modo de demonstração continua sendo o padrão.
+export function usarServidor(): boolean {
+  return process.env.NEXT_PUBLIC_USAR_SERVIDOR === "1";
+}
 
 export type Fase =
   | "AGUARDANDO"
@@ -89,6 +92,13 @@ export function validarResposta(dados: unknown): RespostaAnalise {
 
 // Só o enunciado vem ao navegador: a ficha de requisitos e a rubrica ficam no servidor.
 export async function criarSessao(): Promise<Sessao> {
+  if (usarServidor()) {
+    const servidor = await import("./servidor");
+    return servidor.criarSessao({
+      avaliacaoId: process.env.NEXT_PUBLIC_AVALIACAO_ID || "demo",
+      candidatoId: process.env.NEXT_PUBLIC_CANDIDATO_ID || "demo",
+    });
+  }
   return {
     sessao_id: "sessao-de-mentira",
     area: "system design",
@@ -149,6 +159,7 @@ function ultimoComponente(grafo: string) {
 }
 
 export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promise<RespostaAnalise> {
+  if (usarServidor()) return (await import("./servidor")).analisar(pedido, sinal);
   await new Promise((resolver, rejeitar) => {
     const t = setTimeout(resolver, 800 + Math.random() * 700);
     sinal.addEventListener("abort", () => {
@@ -161,53 +172,112 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   return validarResposta({ ...base, elementos: base.status !== "ok" && alvo ? [alvo] : [] });
 }
 
-// --- Linha do tempo (POST /api/sessoes/:id/eventos), de mentira por enquanto ---
+// --- Linha do tempo (POST /api/sessoes/:id/eventos) ---
 
 export async function enviarEventos(sessaoId: string, lote: { horario: string; tipo: string; dados: unknown }[]) {
+  if (usarServidor()) return (await import("./servidor")).enviarEventos(sessaoId, lote);
   console.debug(`[linha do tempo] ${sessaoId}: ${lote.length} evento(s)`, lote);
 }
 
-// --- Voz provisória: a síntese do próprio navegador (depois vira o /falar da ElevenLabs) ---
+// --- Síntese do navegador: demonstração e fallback do áudio remoto ---
 
 /**
  * Fala o texto. `aoProgresso(n)` recebe quantos caracteres já foram falados (para a legenda andar junto).
  * Se a voz falhar, resolve mesmo assim: a pergunta continua escrita na legenda e no quadro.
  */
-export function falar(texto: string, aoProgresso?: (caracteres: number) => void): Promise<void> {
+function falarNoNavegador(texto: string, aoProgresso: (caracteres: number) => void, sinal: AbortSignal): Promise<void> {
   return new Promise((resolver) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      aoProgresso?.(texto.length);
-      return resolver();
-    }
-    const fala = new SpeechSynthesisUtterance(texto);
-    fala.lang = "pt-BR";
-    fala.rate = 1.05;
-    const voz = speechSynthesis.getVoices().find((v) => v.lang.startsWith("pt"));
-    if (voz) fala.voice = voz;
-
-    // Nem toda voz avisa as palavras (onboundary): até o primeiro aviso, estima pelo tempo (~15 caracteres/s).
-    let comAviso = false;
-    const inicio = performance.now();
-    const estimativa = setInterval(() => {
-      if (!comAviso) aoProgresso?.(Math.min(texto.length, Math.round(((performance.now() - inicio) / 1000) * 15)));
-    }, 80);
-    fala.onboundary = (e) => {
-      comAviso = true;
-      const fimDaPalavra = texto.indexOf(" ", e.charIndex + 1);
-      aoProgresso?.(fimDaPalavra === -1 ? texto.length : fimDaPalavra);
-    };
-    const terminar = () => {
-      clearInterval(estimativa);
-      aoProgresso?.(texto.length);
+    let terminou = false;
+    let estimativa: ReturnType<typeof setInterval> | undefined;
+    let fala: SpeechSynthesisUtterance | undefined;
+    const terminar = (completar = true) => {
+      if (terminou) return;
+      terminou = true;
+      if (estimativa !== undefined) clearInterval(estimativa);
+      sinal.removeEventListener("abort", cancelar);
+      if (fala) fala.onend = fala.onerror = fala.onboundary = null;
+      if (completar && !sinal.aborted) aoProgresso(texto.length);
       resolver();
     };
-    fala.onend = terminar;
-    fala.onerror = terminar;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(fala);
+    const cancelar = () => terminar(false);
+    if (sinal.aborted) return terminar(false);
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return terminar();
+    let comAviso = false;
+    const inicio = performance.now();
+    try {
+      fala = new SpeechSynthesisUtterance(texto);
+      fala.lang = "pt-BR";
+      fala.rate = 1.05;
+      const voz = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith("pt"));
+      if (voz) fala.voice = voz;
+      estimativa = setInterval(() => {
+        if (!comAviso) aoProgresso(Math.min(texto.length, Math.round(((performance.now() - inicio) / 1000) * 15)));
+      }, 80);
+      fala.onboundary = (e) => {
+        comAviso = true;
+        const fimDaPalavra = texto.indexOf(" ", e.charIndex + 1);
+        aoProgresso(fimDaPalavra === -1 ? texto.length : fimDaPalavra);
+      };
+      fala.onend = () => terminar();
+      fala.onerror = () => terminar();
+      sinal.addEventListener("abort", cancelar, { once: true });
+      window.speechSynthesis.speak(fala);
+    } catch {
+      terminar();
+    }
   });
 }
 
+let controleDaVoz: AbortController | null = null;
+
+/** A assinatura usada pelo quadro permanece a mesma nos dois modos. */
+export function falar(texto: string, aoProgresso?: (caracteres: number) => void): Promise<void> {
+  return falarComMarcas(texto, [], aoProgresso);
+}
+
+export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoProgresso?: (caracteres: number) => void): Promise<void> {
+  calar();
+  const controle = new AbortController();
+  controleDaVoz = controle;
+  const disparadas = new Set<number>();
+  const marcasUnicas = marcas.map((m, indice) => ({ ...m, aoChegar: () => {
+    if (controle.signal.aborted || disparadas.has(indice)) return;
+    disparadas.add(indice);
+    m.aoChegar();
+  } }));
+  const progresso = (n: number) => {
+    if (!controle.signal.aborted && controleDaVoz === controle) aoProgresso?.(Math.min(texto.length, n));
+  };
+  try {
+    if (usarServidor()) {
+      try {
+        const servidor = await import("./servidor");
+        const voz = await servidor.sintetizarFala(texto, controle.signal);
+        if (controle.signal.aborted) return;
+        const { tocarComAlinhamento } = await import("../presenca/vozSincronizada");
+        await tocarComAlinhamento(voz.audio, voz.alinhamento, { aoProgresso: progresso, marcas: marcasUnicas, sinal: controle.signal });
+        progresso(texto.length);
+        return;
+      } catch (erro) {
+        if (controle.signal.aborted) return;
+        console.warn("[voz] usando síntese do navegador:", erro);
+      }
+    }
+    if (!controle.signal.aborted) {
+      marcasUnicas.forEach((m) => m.aoChegar());
+      await falarNoNavegador(texto, progresso, controle.signal);
+    }
+  } catch {
+    progresso(texto.length);
+  } finally {
+    if (controleDaVoz === controle) controleDaVoz = null;
+  }
+}
+
 export function calar() {
-  if (typeof window !== "undefined" && "speechSynthesis" in window) speechSynthesis.cancel();
+  controleDaVoz?.abort();
+  controleDaVoz = null;
+  try {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+  } catch {}
 }
