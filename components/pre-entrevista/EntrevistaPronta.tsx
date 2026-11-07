@@ -14,8 +14,9 @@ type Props = { config: InterviewConfig; onNova: () => void; rotuloNova?: string 
 
 export default function EntrevistaPronta({ config, onNova, rotuloNova = "Nova entrevista" }: Props) {
   const [copiado, setCopiado] = useState(false);
-  const rota = config.mode === "system_design" ? "/entrevista/system-design" : "/entrevista";
-  const link = `${typeof window === "undefined" ? "" : window.location.origin}${rota}?config=${encodeURIComponent(config.id)}`;
+  // O candidato entra pela tela "Antes de começar", que mostra a vaga e leva à entrevista com a mesma config.
+  const rota = `/?config=${encodeURIComponent(config.id)}`;
+  const link = `${typeof window === "undefined" ? "" : window.location.origin}${rota}`;
   const foco = [...config.focus].sort((a, b) => b.weight - a.weight);
 
   async function copiar() {

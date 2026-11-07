@@ -1,14 +1,12 @@
 "use client";
 
 // O plano da entrevista se montando enquanto o recrutador conversa com o Totti.
-// No topo, o mapa da entrevista: o centro e os assuntos em volta, que acendem quando são combinados.
-// Embaixo, seções numeradas. O que o Totti sugeriu leva o rótulo "Sugerido"; o que foi confirmado,
+// Seções numeradas. O que o Totti sugeriu leva o rótulo "Sugerido"; o que foi confirmado,
 // "Confirmado" em azul. Toda mudança acende em azul, para ficar claro o que ele entendeu.
 import { AnimatePresence, motion } from "motion/react";
 import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
 import { curvaSuave } from "@/lib/design/motion";
 import { DESCRICAO_FORMATO, NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
-import Check from "./Check";
 
 /** Acende em azul sempre que `chave` muda. */
 function Marcador({ chave, children, className }: { chave: string; children: React.ReactNode; className?: string }) {
@@ -47,51 +45,6 @@ function Secao({ numero, titulo, extra, children }: { numero: number; titulo: st
   );
 }
 
-/** O mapa: o centro e os assuntos em volta, ligados por linhas pontilhadas. */
-function Mapa({ topicos }: { topicos: EstadoSessao["topicos"] }) {
-  const n = topicos.length;
-  const pontos = topicos.map((t, i) => {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    return { ...t, x: 50 + 37 * Math.cos(a), y: 50 + 34 * Math.sin(a) };
-  });
-  return (
-    <div className="relative h-[230px] w-full">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
-        {pontos.map((p) => (
-          <line
-            key={p.id}
-            x1="50"
-            y1="50"
-            x2={p.x}
-            y2={p.y}
-            stroke="var(--texto)"
-            strokeOpacity={p.coberto ? 0.55 : 0.18}
-            strokeWidth="1"
-            strokeDasharray="2 3"
-            vectorEffect="non-scaling-stroke"
-            className="transition-[stroke-opacity] duration-500"
-          />
-        ))}
-      </svg>
-      <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-controle border border-marca bg-marca px-2.5 py-1 text-[13px] text-texto-claro">
-        Entrevista
-      </span>
-      {pontos.map((p) => (
-        <span
-          key={p.id}
-          className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-controle border bg-superficie px-2 py-1 text-[12.5px] whitespace-nowrap transition-colors duration-300 ${
-            p.coberto ? "border-texto/70 text-texto" : "border-dashed border-texto/25 text-texto-suave"
-          }`}
-          style={{ left: `${p.x}%`, top: `${p.y}%` }}
-        >
-          {p.coberto && <Check tamanho={12} />}
-          {p.pergunta}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 export default function PlanoAoVivo({ estado }: { estado: EstadoSessao }) {
   const r = estado.rascunho;
   const foco = [...r.focus].sort((a, b) => b.weight - a.weight);
@@ -114,10 +67,6 @@ export default function PlanoAoVivo({ estado }: { estado: EstadoSessao }) {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div className="border-t border-borda bg-fundo/50 px-4 py-2">
-          <Mapa topicos={estado.topicos} />
-        </div>
-
         <Secao numero={1} titulo="Formato" extra={<Estado confirmado={r.confirmado.mode && r.confirmado.seniority} />}>
           <Marcador chave={`${r.mode}${r.seniority}${r.confirmado.mode}${r.confirmado.seniority}`} className="-m-1.5 rounded-controle p-1.5">
             <p className="text-[22px] leading-tight font-normal tracking-[-0.015em] text-texto">
