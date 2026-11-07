@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import VidroLiquido from "@/components/agente/VidroLiquido";
-import OndaDeVoz from "@/components/agente/OndaDeVoz";
+import OndaDeVoz from "@/components/quadro/OndaDeVoz";
 import AvatarChamada from "@/components/agente/AvatarChamada";
 import OndaSiri from "@/components/agente/OndaSiri";
 import type { EstadoAgente } from "@/lib/presenca/energia";
@@ -60,7 +60,7 @@ function useMicrofone(ligado: boolean) {
   return volume;
 }
 
-export default function ComparacaoAgente() {
+function ComparacaoAgenteInterno() {
   const [estado, setEstado] = useState<EstadoAgente>("falando");
   const [micLigado, setMicLigado] = useState(false);
   const [simulado, setSimulado] = useState(0.3);
@@ -168,5 +168,14 @@ export default function ComparacaoAgente() {
         </div>
       </div>
     </main>
+  );
+}
+
+// Página do quadro: tema claro (o resto do app é escuro); ver app/globals.css.
+export default function ComparacaoAgente() {
+  return (
+    <div className="tema-quadro-pagina contents">
+      <ComparacaoAgenteInterno />
+    </div>
   );
 }

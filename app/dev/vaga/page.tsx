@@ -82,7 +82,7 @@ function PlanoVista({ plano }: { plano: InterviewPlan }) {
   );
 }
 
-export default function PaginaVaga() {
+function PaginaVagaInterno() {
   const [estado, setEstado] = useState<Estado | null>(null);
   const [descricao, setDescricao] = useState("");
   const [indiceExemplo, setIndiceExemplo] = useState(() => Math.floor(Math.random() * 10));
@@ -253,5 +253,14 @@ export default function PaginaVaga() {
         )}
       </div>
     </main>
+  );
+}
+
+// Página do quadro: tema claro (o resto do app é escuro); ver app/globals.css.
+export default function PaginaVaga() {
+  return (
+    <div className="tema-quadro-pagina contents">
+      <PaginaVagaInterno />
+    </div>
   );
 }

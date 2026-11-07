@@ -49,3 +49,13 @@ next-env.d.ts
 /playwright/.cache/
 # kits gerados localmente (scripts/gerar-kit.ts)
 /kits-gerados/
+
+# vendor copiado por scripts/copy-vendor.mjs
+/public/pyodide/
+/public/monaco/
+
+# configs geradas pela pré-entrevista
+/data/
+
+# saídas de scripts/simulate.ts
+sim-runs/

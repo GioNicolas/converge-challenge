@@ -2,10 +2,12 @@ import { sendEmail } from "@/lib/email/send";
 import { InterviewInviteEmail } from "@/lib/email/templates/InterviewInvite";
 import { InterviewRescheduleEmail } from "@/lib/email/templates/InterviewReschedule";
 import { InterviewFeedbackEmail } from "@/lib/email/templates/InterviewFeedback";
+import { TriagemConviteEmail } from "@/lib/email/templates/TriagemConvite";
 import {
   InterviewInvitePayload,
   InterviewReschedulePayload,
   InterviewFeedbackPayload,
+  TriagemConvitePayload,
 } from "@/lib/email/types";
 import type { EmailSendResult } from "@/lib/email/types";
 
@@ -36,6 +38,16 @@ export async function sendInterviewFeedback(input: unknown): Promise<EmailSendRe
     subject: `Feedback da sua entrevista — ${payload.roleTitle}`,
     template: InterviewFeedbackEmail(payload),
     templateName: "feedback",
+  });
+}
+
+export async function sendTriagemConvite(input: unknown): Promise<EmailSendResult> {
+  const payload = TriagemConvitePayload.parse(input);
+  return sendEmail({
+    to: payload.to,
+    subject: `Você avançou para a triagem técnica: ${payload.roleTitle}`,
+    template: TriagemConviteEmail(payload),
+    templateName: "triagem",
   });
 }
 

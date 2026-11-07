@@ -48,3 +48,18 @@ export type InterviewFeedbackPayload = z.infer<typeof InterviewFeedbackPayload>;
 export type EmailSendResult =
   | { status: "sent"; id: string }
   | { status: "simulated"; reason: string };
+
+/**
+ * Convite pra triagem técnica (pré-entrevista aprovada). O email NÃO carrega o problema,
+ * os critérios nem o foco: só o formato, a duração e o link pra escolher o horário.
+ */
+export const TriagemConvitePayload = z.object({
+  ...candidate,
+  roleTitle,
+  mode: z.enum(["live_coding", "system_design"]),
+  durationMin: z.number().int().positive().max(480),
+  languages: z.array(z.string()).default([]),
+  /** Página pública de agendamento (link pessoal do candidato). */
+  scheduleUrl: z.string().url().max(2048),
+});
+export type TriagemConvitePayload = z.infer<typeof TriagemConvitePayload>;

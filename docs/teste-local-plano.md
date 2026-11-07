@@ -1,5 +1,7 @@
 # Teste local: da vaga ao plano de entrevista (`/dev/vaga`)
 
+> **Atualização (junção com a `main`):** o cérebro do quadro passou a usar o `lib/llm` (o mesmo cliente do agente de live coding: Featherless primária, OpenRouter de reserva, por papel). O modelo de cada chamada agora vem das variáveis `ANALYST_MODEL`, `INTERVIEWER_MODEL` e `EVALUATOR_MODEL` (e as `*_FALLBACK_MODEL`), e as chaves são `FEATHERLESS_API_KEY` e `OPENROUTER_API_KEY`. As variáveis `AGENTE_MODELO_AO_VIVO`, `AGENTE_MODELO_FINAL` e `AGENTE_MODELO_PLANEJAMENTO` **não têm mais efeito**, e os modelos e custos citados abaixo (Haiku e Opus) são do cliente anterior. Ver `lib/agente/llm/principal.ts`.
+
 Ferramenta de desenvolvimento, não faz parte do produto. Fluxo: colar uma vaga, conversar com o
 agente para definir o plano, aprovar (gera o kit) e abrir a entrevista.
 

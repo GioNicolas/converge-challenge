@@ -1,5 +1,7 @@
 # Teste local: entrevista completa por texto
 
+> **Atualização (junção com a `main`):** o cérebro do quadro passou a usar o `lib/llm` (o mesmo cliente do agente de live coding: Featherless primária, OpenRouter de reserva, por papel). O modelo de cada chamada agora vem das variáveis `ANALYST_MODEL`, `INTERVIEWER_MODEL` e `EVALUATOR_MODEL` (e as `*_FALLBACK_MODEL`), e as chaves são `FEATHERLESS_API_KEY` e `OPENROUTER_API_KEY`. As variáveis `AGENTE_MODELO_AO_VIVO`, `AGENTE_MODELO_FINAL` e `AGENTE_MODELO_PLANEJAMENTO` **não têm mais efeito**, e os modelos e custos citados abaixo (Haiku e Opus) são do cliente anterior. Ver `lib/agente/llm/principal.ts`.
+
 Página `/dev/entrevista-texto` para rodar uma entrevista inteira, só com texto, contra o cérebro real (as mesmas rotas HTTP que o quadro do Excalidraw usa). Você faz o papel do candidato: o "quadro" é uma caixa de texto com o grafo, a conversa é um chat e, no fim, aparece o **scorecard**.
 
 > Status de verificação: com `AGENTE_FAKE=1` tudo foi testado (testes automáticos e rotas via `next start`). **O caminho com modelo real (Haiku na análise, Opus no scorecard) NÃO foi verificado**: nenhuma chamada real foi feita. Quem for usar a chave deve rodar o roteiro abaixo uma vez e conferir a qualidade. A renderização no navegador também não foi conferida visualmente (só `next build` e os testes dos handlers).

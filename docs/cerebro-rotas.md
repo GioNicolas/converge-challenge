@@ -1,5 +1,7 @@
 # Cérebro como rotas HTTP
 
+> **Atualização (junção com a `main`):** o cérebro do quadro passou a usar o `lib/llm` (o mesmo cliente do agente de live coding: Featherless primária, OpenRouter de reserva, por papel). O modelo de cada chamada agora vem das variáveis `ANALYST_MODEL`, `INTERVIEWER_MODEL` e `EVALUATOR_MODEL` (e as `*_FALLBACK_MODEL`), e as chaves são `FEATHERLESS_API_KEY` e `OPENROUTER_API_KEY`. As variáveis `AGENTE_MODELO_AO_VIVO`, `AGENTE_MODELO_FINAL` e `AGENTE_MODELO_PLANEJAMENTO` **não têm mais efeito**, e os modelos e custos citados abaixo (Haiku e Opus) são do cliente anterior. Ver `lib/agente/llm/principal.ts`.
+
 As rotas abaixo expõem o cérebro de texto (`lib/agente`) no formato de `docs/contrato-quadro-cerebro.md`. O quadro valida as respostas e rejeita outro formato, então não mude os campos sem combinar com o Giorgio.
 
 ## Como rodar

@@ -25,7 +25,16 @@ function podeVer(chave: string | undefined): boolean {
 
 type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ chave?: string }> };
 
-export default async function Page({ params, searchParams }: Props) {
+// O relatório usa o tema claro (o resto do app é escuro); ver app/globals.css.
+export default function Page(props: Props) {
+  return (
+    <div className="tema-quadro-pagina contents">
+      <Conteudo {...props} />
+    </div>
+  );
+}
+
+async function Conteudo({ params, searchParams }: Props) {
   const [{ id }, { chave }] = await Promise.all([params, searchParams]);
   if (!podeVer(chave) || id.length > 80) notFound();
   if (id === "exemplo" && devHabilitado()) return <Relatorio r={RELATORIO_EXEMPLO} />;

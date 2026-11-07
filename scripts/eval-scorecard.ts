@@ -1,4 +1,4 @@
-import { criarClienteOpenRouter } from "../lib/agente/llm/cliente";
+import { criarClientePrincipal } from "../lib/agente/llm/principal";
 import { CENARIOS_SCORECARD, executarCenarioScorecard } from "../lib/dev/scorecard/cenarios";
 
 async function main() {
@@ -10,7 +10,7 @@ async function main() {
   const filtro = process.argv.find(a => a.startsWith("--filtro="))?.slice(9);
   const cenarios = CENARIOS_SCORECARD.filter(c => !filtro || c.id.includes(filtro));
   if (!cenarios.length) throw new Error("Nenhum cenário corresponde ao filtro");
-  const llm = criarClienteOpenRouter();
+  const llm = criarClientePrincipal();
   let falhas = 0;
   for (const c of cenarios) {
     try {

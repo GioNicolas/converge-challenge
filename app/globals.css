@@ -1,46 +1,44 @@
 @import "tailwindcss";
 
 /*
-  Tokens de design: a única fonte de cores, fontes, raios, sombras e animação.
-  Direção: clean, no estilo Apple, com animações fluidas.
-  Componentes usam só estas classes (bg-superficie, text-texto-suave, ease-suave...),
-  nunca valores soltos. Para mudar a identidade visual, mude aqui.
-*/
+ * Tokens de design — fonte da verdade: docs/design.md (§3 a §7).
+ * Componentes usam SÓ classes de token (bg-superficie, text-texto-suave,
+ * rounded-padrao, shadow-flutuante, ease-suave...). Mudou a identidade?
+ * Muda só este arquivo. Modo escuro é o padrão (prioridade do projeto).
+ * `color-scheme: dark` deixa scrollbars e inputs nativos escuros.
+ */
+
 :root {
-  /* Fundo e superfícies */
-  --fundo: #f5f5f7;
-  --superficie: #ffffff;
-  --superficie-2: #f0f0f2;
-  --vidro: rgb(255 255 255 / 0.72);
-  --vidro-escuro: rgb(28 28 30 / 0.72);
-  --borda: rgb(0 0 0 / 0.08);
-
-  /* Texto */
-  --texto: #1d1d1f;
-  --texto-suave: #6e6e73;
-  --texto-claro: #f5f5f7;
-
-  /* Marca e agente */
-  --marca: #0071e3;
-  --marca-suave: #e8f1fc;
-  --agente: #0071e3;
-
-  /* Estados */
-  --sucesso: #34c759;
+  color-scheme: dark;
+  /* Paleta (§3) */
+  --fundo: #0b0b0d;
+  --superficie: #1c1c1e;
+  --superficie-2: #2c2c2e;
+  --vidro: rgb(44 44 46 / 0.72);
+  --vidro-escuro: rgb(0 0 0 / 0.65);
+  --borda: rgb(255 255 255 / 0.1);
+  --texto: #f5f5f7;
+  --texto-suave: #98989d;
+  --texto-claro: #ffffff;
+  --marca: #0a84ff; /* também é a cor do agente */
+  --marca-suave: rgb(10 132 255 / 0.2);
+  /* Identidade do agente: só tons da própria marca (uma cor de destaque) */
+  --agente-nucleo: #061a3a;
+  --agente-claro: color-mix(in srgb, var(--marca) 45%, white);
+  --agente-ciano: color-mix(in srgb, var(--marca) 55%, #5ee6ff);
+  --agente-indigo: color-mix(in srgb, var(--marca) 60%, #5e5ce6);
+  --sucesso: #30d158;
   --alerta: #ff9f0a;
-  --perigo: #ff3b30;
-  /* Texto sobre fundo claro (os de cima são para preenchimento e ícones) */
-  --sucesso-texto: #248a3d;
-  --alerta-texto: #b25000;
-  --perigo-texto: #d70015;
+  --perigo: #ff453a;
 
-  /* Forma */
-  --raio: 18px;
-  --raio-pequeno: 10px;
-  --sombra: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 20px rgb(0 0 0 / 0.06);
-  --sombra-flutuante: 0 2px 6px rgb(0 0 0 / 0.06), 0 18px 48px rgb(0 0 0 / 0.16);
+  /* Forma (§5) */
+  --raio-padrao: 18px; /* cards e janela de chamada */
+  --raio-controle: 10px; /* botões e inputs; pílula = rounded-full */
+  --sombra-cartao: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
+  --sombra-flutuante: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 56px rgb(0 0 0 / 0.55);
+  --desfoque-vidro: 24px;
 
-  /* Animação */
+  /* Movimento (§6). A mola fica em lib/design/motion.ts */
   --curva-suave: cubic-bezier(0.32, 0.72, 0, 1);
   --curva-saida: cubic-bezier(0.22, 1, 0.36, 1);
   --duracao-rapida: 160ms;
@@ -49,6 +47,7 @@
 }
 
 @theme inline {
+  /* Cores: bg-fundo, text-texto-suave, border-borda, bg-marca... */
   --color-fundo: var(--fundo);
   --color-superficie: var(--superficie);
   --color-superficie-2: var(--superficie-2);
@@ -59,30 +58,211 @@
   --color-texto-suave: var(--texto-suave);
   --color-texto-claro: var(--texto-claro);
   --color-marca: var(--marca);
+  --color-agente: var(--marca);
   --color-marca-suave: var(--marca-suave);
-  --color-agente: var(--agente);
   --color-sucesso: var(--sucesso);
   --color-alerta: var(--alerta);
   --color-perigo: var(--perigo);
-  --color-sucesso-texto: var(--sucesso-texto);
-  --color-alerta-texto: var(--alerta-texto);
-  --color-perigo-texto: var(--perigo-texto);
 
-  --radius-padrao: var(--raio);
-  --radius-pequeno: var(--raio-pequeno);
-  --shadow-padrao: var(--sombra);
+  /* Tamanhos de fonte: text-mini, text-codigo, text-corpo, text-corpo-grande, text-subtitulo */
+  --text-mini: 12px;
+  --text-codigo: 13px;
+  --text-corpo: 14px;
+  --text-corpo-grande: 15px;
+  --text-subtitulo: 17px;
+
+  /* Raios: rounded-padrao, rounded-controle */
+  --radius-padrao: var(--raio-padrao);
+  --radius-controle: var(--raio-controle);
+
+  /* Sombras: shadow-cartao, shadow-flutuante */
+  --shadow-cartao: var(--sombra-cartao);
   --shadow-flutuante: var(--sombra-flutuante);
 
+  /* Curvas: ease-suave, ease-saida */
   --ease-suave: var(--curva-suave);
   --ease-saida: var(--curva-saida);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", var(--font-geist-mono), monospace;
+  /* Fonte: do sistema (SF Pro no Mac), Inter de reserva */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter),
+    "Inter", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+}
+
+/* Durações: duration-rapida, duration-normal, duration-lenta */
+@utility duration-rapida {
+  transition-duration: var(--duracao-rapida);
+}
+@utility duration-normal {
+  transition-duration: var(--duracao);
+}
+@utility duration-lenta {
+  transition-duration: var(--duracao-lenta);
+}
+
+/* Vidro (§2.4): fundo translúcido + desfoque; sombra vem por classe */
+@utility vidro {
+  background-color: var(--vidro);
+  backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  border: 1px solid var(--borda);
+}
+@utility vidro-escuro {
+  background-color: var(--vidro-escuro);
+  color: var(--texto-claro);
+  backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  border: 1px solid rgb(255 255 255 / 0.12);
+}
+
+/* Tipografia (§4) */
+@utility titulo {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+@utility label-pequena {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--texto-suave);
+}
+@utility numero {
+  font-variant-numeric: tabular-nums;
 }
 
 body {
   background: var(--fundo);
   color: var(--texto);
   font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Movimento reduzido (§2.5): sem animação para quem pede */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Grifos do agente no Monaco (#6). Só tokens; o Monaco renderiza fora do React. */
+.agent-highlight {
+  background: var(--marca-suave);
+}
+.agent-highlight-bar {
+  background: var(--marca);
+  width: 3px !important;
+  margin-left: 3px;
+}
+.agent-glyph {
+  background: var(--marca);
+  border-radius: 9999px;
+  width: 8px !important;
+  height: 8px !important;
+  margin: 8px 0 0 6px;
+}
+.agent-inline-note {
+  color: var(--marca);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Orb do agente (docs/design.md §8.3): esfera de vidro com manchas de luz
+   em tons da marca, estilo Siri. Só transform/opacity animam. */
+@keyframes orb-giro {
+  to { transform: rotate(360deg); }
+}
+@keyframes orb-giro-inverso {
+  to { transform: rotate(-360deg); }
+}
+@keyframes orb-flutua {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6%, -6%) scale(1.15); }
+}
+@utility orb-esfera {
+  background: radial-gradient(circle at 50% 60%, var(--agente-indigo), var(--agente-nucleo) 75%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.14),
+    inset 0 -6px 14px rgb(0 0 0 / 0.35),
+    0 6px 20px color-mix(in srgb, var(--marca) 45%, transparent);
+}
+@utility orb-camada {
+  position: absolute;
+  inset: 0;
+  animation: orb-giro var(--orb-giro, 9s) linear infinite;
+}
+@utility orb-camada-inversa {
+  position: absolute;
+  inset: 0;
+  animation: orb-giro-inverso calc(var(--orb-giro, 9s) * 1.4) linear infinite;
+}
+@utility orb-mancha {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(7px);
+  mix-blend-mode: screen;
+  animation: orb-flutua 3.4s ease-in-out infinite;
+}
+@utility orb-reflexo {
+  background: radial-gradient(ellipse at 35% 22%, rgb(255 255 255 / 0.55), transparent 55%);
+}
+@utility orb-anel {
+  background: conic-gradient(from 0deg, transparent 0 55%, var(--agente-claro) 85%, var(--agente-ciano) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+}
+
+/*
+ * Quadro (agente do Excalidraw): tema CLARO, só nas páginas dele.
+ * O resto do app (live coding, pré-entrevista) segue no tema escuro acima. As páginas do quadro põem
+ * <div className="tema-quadro-pagina contents"> na raiz; :has() vira os tokens no documento todo
+ * (inclusive portais e popovers do Excalidraw), sem JS.
+ */
+@theme inline {
+  /* Só o quadro usa estes nomes (a main tem rounded-controle e shadow-cartao para o mesmo fim). */
+  --color-sucesso-texto: var(--sucesso-texto);
+  --color-alerta-texto: var(--alerta-texto);
+  --color-perigo-texto: var(--perigo-texto);
+  --radius-pequeno: var(--raio-pequeno);
+  --shadow-padrao: var(--sombra);
+}
+
+:root {
+  /* Valores padrão (tema escuro), para os nomes do quadro nunca ficarem indefinidos fora dele. */
+  --sucesso-texto: #30d158;
+  --alerta-texto: #ff9f0a;
+  --perigo-texto: #ff453a;
+  --raio-pequeno: 10px;
+  --sombra: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
+}
+
+:root:has(.tema-quadro-pagina) {
+  color-scheme: light;
+  --fundo: #f5f5f7;
+  --superficie: #ffffff;
+  --superficie-2: #f0f0f2;
+  --vidro: rgb(255 255 255 / 0.72);
+  --vidro-escuro: rgb(28 28 30 / 0.72);
+  --borda: rgb(0 0 0 / 0.08);
+  --texto: #1d1d1f;
+  --texto-suave: #6e6e73;
+  --texto-claro: #f5f5f7;
+  --marca: #0071e3;
+  --marca-suave: #e8f1fc;
+  --sucesso: #34c759;
+  --alerta: #ff9f0a;
+  --perigo: #ff3b30;
+  /* Texto sobre fundo claro (os de cima são para preenchimento e ícones) */
+  --sucesso-texto: #248a3d;
+  --alerta-texto: #b25000;
+  --perigo-texto: #d70015;
+  --raio-padrao: 18px;
+  --raio-pequeno: 10px;
+  --sombra: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 20px rgb(0 0 0 / 0.06);
+  --sombra-flutuante: 0 2px 6px rgb(0 0 0 / 0.06), 0 18px 48px rgb(0 0 0 / 0.16);
 }

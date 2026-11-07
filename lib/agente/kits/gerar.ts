@@ -120,6 +120,8 @@ export async function gerarKitDetalhado(args: ArgsGerarKit): Promise<ResultadoGe
       uso.saida += r.uso?.saida ?? 0;
       if (r.uso?.custo !== undefined) uso.custo = (uso.custo ?? 0) + r.uso.custo;
       dados = r.dados;
+      // O cliente diz qual modelo respondeu (o lib/llm escolhe por papel); isso vai para o registro da geração.
+      if (r.modelo) modelo = r.modelo;
     } catch (e) {
       if (e instanceof ErroLlm && e.codigo === "invalido") {
         // Saída fora do schema: conta como tentativa inválida e usa o erro como feedback.

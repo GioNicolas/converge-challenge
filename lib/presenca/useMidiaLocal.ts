@@ -15,29 +15,19 @@ export function useMidiaLocal() {
   const [volume, setVolume] = useState(0);
   const streamRef = useRef<MediaStream | null>(null);
 
-  /** Pede câmera e microfone. Chamar a partir de um clique (exigência do navegador). */
+  /** Pede só o microfone (a câmera do candidato não é usada). Chamar a partir de um clique ou ao abrir a sala. */
   const pedir = useCallback(async () => {
     if (streamRef.current) return;
-    let s: MediaStream | null = null;
     try {
-      s = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: "user" },
+      const s = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       });
-      setCameraLigada(true);
+      streamRef.current = s;
+      setStream(s);
+      setMicrofoneLigado(true);
     } catch {
-      // Sem câmera (ou negada): segue só com o microfone.
-      try {
-        s = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setErro("camera");
-      } catch {
-        setErro("microfone");
-        return;
-      }
+      setErro("microfone");
     }
-    streamRef.current = s;
-    setStream(s);
-    setMicrofoneLigado(true);
   }, []);
 
   const alternarCamera = useCallback(() => {

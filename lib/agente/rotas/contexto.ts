@@ -1,7 +1,8 @@
 // Dependências das rotas (repositório, LLM, relógio). Em produção vêm do ambiente; os testes
 // substituem com `definirContextoParaTestes`.
 import { repositorioPadrao, type RepositorioSessoes } from "../armazenamento";
-import { criarClienteOpenRouter, type LlmCliente } from "../llm/cliente";
+import type { LlmCliente } from "../llm/cliente";
+import { criarClientePrincipal } from "../llm/principal";
 import { criarLlmFalsoDeterministico } from "./llm-falso";
 
 export type Contexto = {
@@ -24,11 +25,12 @@ export function definirContextoParaTestes(c: Partial<Contexto> | null): void {
 function escolherLlm(): LlmCliente | null {
   if (process.env.AGENTE_FAKE === "1") return criarLlmFalsoDeterministico();
   if (llmReal === undefined) {
-    llmReal = process.env.OPENROUTER_API_KEY ? criarClienteOpenRouter() : null;
+    // Sem nenhuma das duas chaves o `lib/llm` não tem como chamar: o cérebro fica em silêncio.
+    llmReal = process.env.FEATHERLESS_API_KEY || process.env.OPENROUTER_API_KEY ? criarClientePrincipal() : null;
   }
   if (llmReal === null && !avisouSemChave) {
     avisouSemChave = true;
-    console.warn("[agente] OPENROUTER_API_KEY ausente (e AGENTE_FAKE != 1): as análises respondem sempre `ok`.");
+    console.warn("[agente] FEATHERLESS_API_KEY e OPENROUTER_API_KEY ausentes (e AGENTE_FAKE != 1): as análises respondem sempre `ok`.");
   }
   return llmReal;
 }

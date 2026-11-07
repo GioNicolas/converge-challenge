@@ -62,7 +62,7 @@ const ROTULO_RECOMENDACAO: Record<string, string> = {
   evidencia_insuficiente: "Evidência insuficiente para sugerir",
 };
 
-export default function PaginaEntrevistaTexto() {
+function PaginaEntrevistaTextoInterno() {
   const [avaliacao, setAvaliacao] = useState("demo");
   const [sessaoId, setSessaoId] = useState<string | null>(null);
   const [problema, setProblema] = useState<{ titulo: string; enunciado: string } | null>(null);
@@ -568,5 +568,14 @@ function PainelScorecard({ sc }: { sc: Scorecard }) {
         </details>
       )}
     </section>
+  );
+}
+
+// Página do quadro: tema claro (o resto do app é escuro); ver app/globals.css.
+export default function PaginaEntrevistaTexto() {
+  return (
+    <div className="tema-quadro-pagina contents">
+      <PaginaEntrevistaTextoInterno />
+    </div>
   );
 }

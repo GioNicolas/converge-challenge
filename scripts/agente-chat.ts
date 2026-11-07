@@ -7,7 +7,8 @@ import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
 import { analisar, type DepsAnalisar } from "../lib/agente/analisar";
 import { carregarKit } from "../lib/agente/kits";
-import { criarClienteFalso, criarClienteOpenRouter, type LlmCliente } from "../lib/agente/llm/cliente";
+import { criarClientePrincipal } from "../lib/agente/llm/principal";
+import { criarClienteFalso, type LlmCliente } from "../lib/agente/llm/cliente";
 import { perguntar } from "../lib/agente/perguntar";
 import {
   criteriosSemEvidencia,
@@ -83,7 +84,7 @@ async function main() {
     console.error("OPENROUTER_API_KEY não encontrada (ambiente ou .env.local). Defina a chave ou rode com --fake.");
     process.exit(1);
   }
-  const llm = falso ? llmFalsoDoHarness() : criarClienteOpenRouter();
+  const llm = falso ? llmFalsoDoHarness() : criarClientePrincipal();
   const deps: DepsAnalisar = { llm, kit, problema, log: (e, m) => console.log(`  [log] ${e} ${JSON.stringify(m)}`) };
 
   let offset = 0; // segundos simulados com /tempo

@@ -43,7 +43,7 @@ export default function Legenda({ fala }: { fala: FalaNaTela | null }) {
   const resto = fala && bloco ? fala.texto.slice(bloco.inicio + falado.length, bloco.fim) : "";
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-5 z-10 flex justify-center px-4">
+    <div className="pointer-events-none absolute inset-x-0 bottom-[76px] z-10 flex justify-center px-4">
       <AnimatePresence mode="wait">
         {fala && bloco && (
           <motion.p

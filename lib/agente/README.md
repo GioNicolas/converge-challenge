@@ -63,7 +63,7 @@ pedido do quadro --> analisar() --> podeAnalisar? --(não)--> ok
                         |
                  prompts/avaliador  (bloco ESTÁTICO: kit+problema, com cache | bloco DINÂMICO: fase, tempo, grafo, conversa, estado)
                         |
-                 llm.completarJson  (OpenRouter, JSON schema estrito; erro/timeout --> ok)
+                 llm.completarJson  (lib/llm: Featherless + OpenRouter de reserva; erro/timeout --> ok)
                         |
         guardas: pergunta repetida --> ok
                         |
@@ -72,7 +72,7 @@ pedido do quadro --> analisar() --> podeAnalisar? --(não)--> ok
 fala do candidato --> perguntar() --> só pela ficha --> { responder, texto, requisito, estado }
 ```
 
-- `llm/cliente.ts`: `LlmCliente.completarJson`, `criarClienteOpenRouter()` (fetch puro, timeout de 8s = prazo do quadro, 1 retry em 5xx/429 só se sobrar tempo, saída validada pelo Zod, erro tipado `ErroLlm`), `criarClienteFalso()` para testes. `llm/jsonschema.ts` converte Zod 3 em JSON Schema (sem dependência nova).
+- `llm/cliente.ts`: a interface `LlmCliente.completarJson`, o erro tipado `ErroLlm` e `criarClienteFalso()` para testes. `llm/principal.ts`: `criarClientePrincipal()`, o cliente real, que traduz a interface do cérebro para o `lib/llm` da `main` (papéis `analyst`, `interviewer` e `evaluator`; modelos e chaves nas variáveis do `lib/llm`). `criarClienteOpenRouter()` (cliente antigo, só OpenRouter) continua no arquivo, sem uso em produção. `llm/jsonschema.ts` converte Zod 3 em JSON Schema.
 - `prompts/avaliador.ts`: o prompt da análise (10 princípios, tabela de ações, notação do grafo, rubrica, regras de saída). `prompts/entrevistador.ts`: o do `perguntar`.
 - `guardas.ts`: só guardas estruturais (pergunta quase repetida por sobreposição de tokens >= 0.7, corte de frases). Nenhuma lista de palavras: o que o candidato quis dizer e o que o agente pode dizer ficam nos prompts.
 - `analisar.ts`, `perguntar.ts`: as duas funções públicas. Não lançam por causa do LLM; log só com metadados.
@@ -86,16 +86,15 @@ Você faz o papel do candidato no terminal.
 
 ```
 npm run agente:chat -- --fake      # sem chave: LLM de mentira com regras simples
-npm run agente:chat                # LLM real (precisa de OPENROUTER_API_KEY)
+npm run agente:chat                # LLM real (precisa de FEATHERLESS_API_KEY ou OPENROUTER_API_KEY)
 ```
 
 Comandos: `/grafo scripts/exemplos/encurtador-ruim.txt` (carrega o desenho e roda a análise), `/fase APROFUNDAMENTO` (força a fase), `/tick`, `/tempo 90` (avança o relógio simulado, útil para o intervalo de 60s), `/plin` (clica no plin pendente), `/estado`, `/sair`. Texto livre é a fala do candidato: vai para o `perguntar`, ou é a resposta do plin ativo (e dispara nova análise). O harness imprime status, pergunta, nota, elementos, observações e os efeitos da máquina de estados, mais uma linha com fase, plin, perguntas feitas e critérios sem evidência.
 
 ## Variáveis de ambiente (só servidor, nunca `NEXT_PUBLIC_*`)
 
-- `OPENROUTER_API_KEY`: obrigatória no modo real. O harness carrega `.env.local` se existir.
-- `AGENTE_MODELO_AO_VIVO`: modelo da análise ao vivo. Padrão `anthropic/claude-haiku-5.5`. **Confira o id no catálogo da OpenRouter** (https://openrouter.ai/models) antes de usar; se estiver errado a chamada falha e a análise cai em `ok`.
-- `AGENTE_MODELO_FINAL`: reservada para o scorecard (ainda não usada).
+- `FEATHERLESS_API_KEY` e/ou `OPENROUTER_API_KEY`: pelo menos uma é obrigatória no modo real (o harness carrega `.env.local` se existir).
+- `ANALYST_MODEL`, `INTERVIEWER_MODEL`, `EVALUATOR_MODEL` (e as `*_FALLBACK_MODEL`): modelo de cada papel, definidos no `lib/llm`.
 
 ## Testes
 
@@ -105,7 +104,6 @@ Comandos: `/grafo scripts/exemplos/encurtador-ruim.txt` (carrega o desenho e rod
 
 - Rotas: já existem (ver `docs/cerebro-rotas.md`). Falta voz (`/api/falar`, `/api/stt-token`).
 - Persistência no banco (o estado já é JSON puro) e carregar kit/problema por avaliação.
-- Scorecard final (modelo `AGENTE_MODELO_FINAL`).
 - Voz (ElevenLabs, STT) e `/falar`.
 - Quadro de requisitos persistido no estado (hoje `perguntar` recebe `requisitosAtuais` de quem chama).
 

@@ -6,5 +6,10 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return <SalaEntrevista />;
+  // O quadro usa o tema claro (o resto do app é escuro); ver app/globals.css.
+  return (
+    <div className="tema-quadro-pagina contents">
+      <SalaEntrevista />
+    </div>
+  );
 }

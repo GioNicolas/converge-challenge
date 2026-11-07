@@ -1,0 +1,162 @@
+{
+  "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7",
+  "problemId": "two-sum",
+  "startedAt": "2026-11-07T14:50:07.166Z",
+  "durationMs": 27002,
+  "finalCode": "def two_sum(nums, target):\n    seen = {}\n    for i, n in enumerate(nums):\n        if target - n in seen:\n            return [seen[target - n], i]\n        seen[n] = i\n",
+  "timeline": [
+    {
+      "type": "session_started",
+      "configId": "default-backend-pleno",
+      "problemId": "two-sum",
+      "language": "python",
+      "t": 0,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "snapshot",
+      "code": "def two_sum(nums, target):\n    for i in range(len(nums)):\n        for j in range(i + 1, len(nums)):\n            if nums[i] + nums[j] == target:\n                return [i, j]\n",
+      "version": 1,
+      "language": "python",
+      "t": 5595,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "run",
+      "result": {
+        "passed": 3,
+        "total": 3,
+        "cases": [
+          {
+            "name": "Exemplo 1",
+            "passed": true,
+            "input": "[[2,7,11,15],9]",
+            "expected": "[0,1]",
+            "got": "[0, 1]"
+          },
+          {
+            "name": "Exemplo 2",
+            "passed": true,
+            "input": "[[3,2,4],6]",
+            "expected": "[1,2]",
+            "got": "[1, 2]"
+          },
+          {
+            "name": "Exemplo 3",
+            "passed": true,
+            "input": "[[3,3],6]",
+            "expected": "[0,1]",
+            "got": "[0, 1]"
+          }
+        ],
+        "stdout": "",
+        "stderr": "",
+        "durationMs": 28
+      },
+      "t": 7626,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "pause",
+      "idleMs": 8003,
+      "t": 13598,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "blip_opened",
+      "blipId": "q-1",
+      "t": 16600,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "speech",
+      "role": "agent",
+      "text": "Por que você escolheu esse caminho?",
+      "blipId": "q-1",
+      "t": 18098,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "speech",
+      "role": "candidate",
+      "text": "Usei força bruta porque é o mais simples de explicar.",
+      "blipId": "q-1",
+      "t": 18807,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "speech",
+      "role": "agent",
+      "text": "Entendi. E sobre a escolha da abordagem, você pode me falar um pouco mais?",
+      "blipId": "q-1",
+      "t": 18822,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "speech",
+      "role": "candidate",
+      "text": "Pode ser com um dicionário guardando o que já vi.",
+      "blipId": "q-1",
+      "t": 20511,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "speech",
+      "role": "agent",
+      "text": "Beleza, obrigado! Pode seguir.",
+      "blipId": "q-1",
+      "t": 20551,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "blip_closed",
+      "blipId": "q-1",
+      "reason": "agent",
+      "t": 20551,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "snapshot",
+      "code": "def two_sum(nums, target):\n    seen = {}\n    for i, n in enumerate(nums):\n        if target - n in seen:\n            return [seen[target - n], i]\n        seen[n] = i\n",
+      "version": 2,
+      "language": "python",
+      "t": 22014,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    },
+    {
+      "type": "run",
+      "result": {
+        "passed": 3,
+        "total": 3,
+        "cases": [
+          {
+            "name": "Exemplo 1",
+            "passed": true,
+            "input": "[[2,7,11,15],9]",
+            "expected": "[0,1]",
+            "got": "[0, 1]"
+          },
+          {
+            "name": "Exemplo 2",
+            "passed": true,
+            "input": "[[3,2,4],6]",
+            "expected": "[1,2]",
+            "got": "[1, 2]"
+          },
+          {
+            "name": "Exemplo 3",
+            "passed": true,
+            "input": "[[3,3],6]",
+            "expected": "[0,1]",
+            "got": "[0, 1]"
+          }
+        ],
+        "stdout": "",
+        "stderr": "",
+        "durationMs": 23
+      },
+      "t": 24040,
+      "sessionId": "067420b9-8e99-4c44-b446-75e3f4a523c7"
+    }
+  ]
+}

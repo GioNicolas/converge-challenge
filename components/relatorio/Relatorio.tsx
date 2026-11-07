@@ -4,7 +4,7 @@
 // (o que o candidato disse ou desenhou, e quando). A decisão é sempre de uma pessoa.
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import Icone from "@/components/Icone";
+import Icone from "@/components/quadro/Icone";
 import type { CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
 import type { Recomendacao } from "@/lib/agente/scorecard";
 

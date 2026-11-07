@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
-import type { MensagemConversa } from "@/components/PainelConversa";
+import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import { perguntar } from "@/lib/sessao/servidor";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import {

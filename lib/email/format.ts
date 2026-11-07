@@ -33,3 +33,21 @@ export const feedbackMessage: Record<"avancar" | "talvez" | "nao_avancar", strin
   nao_avancar:
     "Depois de avaliar com calma, decidimos não seguir com sua candidatura pra essa vaga. Agradecemos o tempo e o esforço que você dedicou.",
 };
+
+const NOME_LINGUAGEM: Record<string, string> = {
+  python: "Python",
+  cpp: "C++",
+  c: "C",
+  java: "Java",
+  javascript: "JavaScript",
+  typescript: "TypeScript",
+  go: "Go",
+  rust: "Rust",
+};
+
+/** Nomes legíveis das linguagens: ["python","cpp"] → "Python ou C++". Desconhecida: mantém o id. */
+export function nomeLinguagens(langs: string[]): string {
+  const nomes = langs.map((l) => NOME_LINGUAGEM[l] ?? l);
+  if (nomes.length <= 1) return nomes[0] ?? "";
+  return `${nomes.slice(0, -1).join(", ")} ou ${nomes[nomes.length - 1]}`;
+}

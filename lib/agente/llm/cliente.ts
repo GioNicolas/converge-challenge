@@ -30,6 +30,8 @@ export type LlmResultado<T> = {
   dados: T;
   uso?: { entrada: number; saida: number; cache?: number; /** USD, se o provedor informar (usage.cost). */ custo?: number };
   ms: number;
+  /** Modelo que de fato respondeu, quando o cliente sabe (o `lib/llm` escolhe por papel). */
+  modelo?: string;
 };
 
 export interface LlmCliente {

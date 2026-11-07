@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-// Inter é a reserva da fonte do sistema (SF Pro no Mac), definida em globals.css.
+// Fonte do sistema primeiro; Inter só de reserva (Windows/Linux). Ver globals.css.
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Converge",
-  description: "Entrevistas conduzidas por um agente de IA",
+  title: "Converge — Entrevista técnica",
+  description: "Entrevista técnica com um agente de voz que desenha no quadro.",
 };
 
 export default function RootLayout({
@@ -24,8 +24,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" className={`${inter.variable} ${geistMono.variable} h-full`}>
-      <body className="min-h-full flex flex-col font-sans">{children}</body>
+    <html lang="pt-BR">
+      <body
+        className={`${inter.variable} ${geistMono.variable} antialiased`}
+      >
+        {children}
+      </body>
     </html>
   );
 }

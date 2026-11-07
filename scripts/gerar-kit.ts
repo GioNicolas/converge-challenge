@@ -9,7 +9,8 @@ import { analisar } from "../lib/agente/analisar";
 import { JOB_POSTINGS } from "../lib/hiring/mocks/job-postings";
 import { kitFalso } from "../lib/agente/kits/falso";
 import { ErroGeracaoKit, gerarKitDetalhado } from "../lib/agente/kits/gerar";
-import { criarClienteFalso, criarClienteOpenRouter, type LlmCliente } from "../lib/agente/llm/cliente";
+import { criarClientePrincipal } from "../lib/agente/llm/principal";
+import { criarClienteFalso, type LlmCliente } from "../lib/agente/llm/cliente";
 import { NOME_SCHEMA_KIT } from "../lib/agente/prompts/gerador-kit";
 import { estadoInicial, transicionar } from "../lib/agente/sessao/estado";
 import { GRAFO_GENERICO, GRAFOS_VAGAS } from "./exemplos/grafos-vagas";
@@ -53,7 +54,7 @@ async function main() {
           ? kitFalso(a.mensagens[0].content.match(/"title":\s*"([^"]+)"/)?.[1])
           : { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] },
       )
-    : criarClienteOpenRouter();
+    : criarClientePrincipal();
   mkdirSync(saida, { recursive: true });
 
   let falhas = 0;
