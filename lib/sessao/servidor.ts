@@ -27,6 +27,14 @@ const EsquemaFala = z.object({ audio_base64: z.string().min(1), alinhamento: Esq
 const EsquemaImagem = z.object({ url: z.string().min(1) });
 const EsquemaToken = z.object({ token: z.string().min(1) });
 
+/** Erro HTTP de uma rota do servidor, com o status para quem precisar decidir por ele. */
+export class ErroHttp extends Error {
+  constructor(mensagem: string, readonly status: number) {
+    super(mensagem);
+    this.name = "ErroHttp";
+  }
+}
+
 function rotaDaSessao(sessaoId: string, acao: string): string {
   return `/api/sessoes/${encodeURIComponent(sessaoId)}/${acao}`;
 }
@@ -57,7 +65,7 @@ async function requisitar(rota: string, opcoes: RequestInit): Promise<Response> 
       preservarCancelamento(erro, opcoes.signal);
     }
     opcoes.signal?.throwIfAborted();
-    throw new Error(`Erro HTTP ${resposta.status} em ${rota}: ${resumir(corpo) || "sem corpo"}`);
+    throw new ErroHttp(`Erro HTTP ${resposta.status} em ${rota}: ${resumir(corpo) || "sem corpo"}`, resposta.status);
   }
   return resposta;
 }

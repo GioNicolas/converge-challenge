@@ -92,6 +92,7 @@ export function validarResposta(dados: unknown): RespostaAnalise {
 
 // Só o enunciado vem ao navegador: a ficha de requisitos e a rubrica ficam no servidor.
 export async function criarSessao(): Promise<Sessao> {
+  vozDoServidorDisponivel = true;
   if (usarServidor()) {
     const servidor = await import("./servidor");
     return servidor.criarSessao({
@@ -229,6 +230,8 @@ function falarNoNavegador(texto: string, aoProgresso: (caracteres: number) => vo
 }
 
 let controleDaVoz: AbortController | null = null;
+/** Vira false quando o servidor diz que não tem voz (501): até a próxima sessão, nem tenta. */
+let vozDoServidorDisponivel = true;
 
 /** A assinatura usada pelo quadro permanece a mesma nos dois modos. */
 export function falar(texto: string, aoProgresso?: (caracteres: number) => void): Promise<void> {
@@ -249,9 +252,9 @@ export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoPro
     if (!controle.signal.aborted && controleDaVoz === controle) aoProgresso?.(Math.min(texto.length, n));
   };
   try {
-    if (usarServidor()) {
+    if (usarServidor() && vozDoServidorDisponivel) {
+      const servidor = await import("./servidor");
       try {
-        const servidor = await import("./servidor");
         const voz = await servidor.sintetizarFala(texto, controle.signal);
         if (controle.signal.aborted) return;
         const { tocarComAlinhamento } = await import("../presenca/vozSincronizada");
@@ -260,6 +263,7 @@ export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoPro
         return;
       } catch (erro) {
         if (controle.signal.aborted) return;
+        if (erro instanceof servidor.ErroHttp && erro.status === 501) vozDoServidorDisponivel = false;
         console.warn("[voz] usando síntese do navegador:", erro);
       }
     }
