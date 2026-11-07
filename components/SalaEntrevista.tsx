@@ -306,7 +306,21 @@ export default function SalaEntrevista() {
               ) : (
                 <>
                   <h1 className="text-2xl font-semibold tracking-tight">Entrevista encerrada</h1>
-                  <p className="leading-relaxed text-texto-suave">Obrigado! O relatório está sendo gerado.</p>
+                  <p className="leading-relaxed text-texto-suave">
+                    Obrigado pelo seu tempo. A equipe de recrutamento recebe o resultado e entra em contato com
+                    você.
+                  </p>
+                  {/* Só para demonstração: em produção, a recrutadora recebe o link pelo painel dela. */}
+                  {sessao && usarServidor() && (
+                    <a
+                      href={`/relatorio/${encodeURIComponent(sessao.sessao_id)}`}
+                      target="_blank"
+                      rel="noopener"
+                      className="mt-1 w-fit rounded-full border border-borda px-3.5 py-1.5 text-xs font-medium text-texto-suave outline-none transition-[color,transform] duration-150 ease-suave hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95"
+                    >
+                      Demo: ver o relatório da recrutadora
+                    </a>
+                  )}
                 </>
               )}
             </motion.div>

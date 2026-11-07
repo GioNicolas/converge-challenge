@@ -74,3 +74,45 @@ Valores estimados do pedido original; não foram medidos aqui.
 ## Testes automáticos
 
 `npm run test:entrevista-texto` (diff do grafo, guardas do scorecard, entrevista completa pelos handlers com LLM falso, finalizar idempotente, visão de estado e gating de produção).
+
+## Guardas do scorecard
+
+Só falas do candidato podem ser citadas como prova. Falas do entrevistador e eventos sem autor são contexto; `resposta` legado sem `quem` continua significando resposta do candidato. Eventos de resposta sem texto apenas sinalizam fim de resposta: nunca geram uma transcrição fictícia.
+
+O quadro aceita texto opcional em `terminarResposta(texto)` e registra `{ numero, quem: "candidato", texto }` quando há uma string não vazia. O botão e o detector de fim de fala continuam podendo chamá-lo sem texto. A captura/transcrição de áudio permanece uma integração separada.
+
+O `/analisar` guarda no estado interno de cada observação nova o snapshot recebido (`desenho: { horario, grafo }`); esse horário registra a captura para análise. Ao finalizar, o servidor procura a versão idêntica do grafo vigente naquele instante na linha do tempo completa, incluindo lotes recebidos depois. A prova usa o evento original daquela versão, nunca o horário de uma reanálise ou de um upload repetido. Uma reversão ao mesmo grafo conta como nova versão. Sem evento compatível anterior à captura, a observação fica apenas como contexto, sem prova visual; não se escolhe outra versão por proximidade.
+
+Essa associação não aceita o evento `analise` do navegador como livro de provas. Uma observação só pode aparecer como `texto` de evidência visual no mesmo critério e snapshot. Isso registra uma interpretação do entrevistador sobre um desenho real; não a transforma em fala do candidato. Observações antigas sem vínculo não são ancoradas retroativamente por proximidade.
+
+Referências visuais usam IDs que coexistem no snapshot. Horários arredondados têm tolerância de 1,5 segundo e são substituídos pelo horário real mais próximo. Referências de imagem aceitas: número, `imagem N (data opcional)`, `/imagens/N` ou URL relativa da própria sessão. Um snapshot vazio não prova desenho. Critérios explicitamente orais na rubrica não recebem prova exclusivamente visual.
+
+Notas fora dos inteiros de 1 a 4 viram `null`, com ajuste registrado. A média usa as notas não nulas. Recomendação: média menor que 2 = `nao_avancar`; de 2 até menos de 3 = `avancar_com_ressalvas`; a partir de 3 = `avancar`. Cobertura parcial impede avanço sem ressalvas; menos da metade coberta (ou nenhuma nota) = `evidencia_insuficiente`. Um nível que exige espontaneidade não é comprovado apenas por observações explicitamente provocadas. Mudanças de evidência invalidam os resumos livres potencialmente apoiados na prova descartada.
+
+Textos explicativos usam nomes legíveis da rubrica e dos elementos. O prompt proíbe IDs nesses textos e a guarda substitui referências conhecidas em justificativas, resumos, briefing e ajustes, inclusive no modo falso. Campos estruturados (`criterio`, `elementos`) e citações literais permanecem preservados.
+
+A duração curta não impõe nota 1 nem reprovação automática: o que decide é a cobertura por provas. Sem desenho, falas reais ainda podem sustentar critérios. Sem fala, o desenho e as observações ancoradas podem sustentar critérios visuais, mas não comunicação oral. O modo falso usa somente observações ancoradas; repetição de observação não aumenta a nota.
+
+O prompt é específico do kit (inclusive `demo-produto`), mantém os dados da sessão na mensagem de usuário como JSON e trata instruções no grafo, conversa e observações como dados não confiáveis. A linha do tempo preserva o começo e prioriza o fim ao atingir 40 mil caracteres. As guardas verificam proveniência e consistência estrutural; a pertinência semântica da nota e da interpretação da observação ainda requer avaliação do modelo e revisão humana.
+
+Prazo da geração: `AGENTE_TIMEOUT_SCORECARD_MS`, padrão `45000`, valores inteiros entre `1` e `50000`; inválidos voltam ao padrão. A rota reserva `maxDuration = 60`. Timeout devolve 502 explícito, aborta a chamada e não salva relatório; repetir `/finalizar` tenta novamente na mesma sessão encerrada. Relatório já salvo continua idempotente.
+
+## Evals reproduzíveis do scorecard
+
+`npm run test:scorecard` roda as regressões e **68 sessões pelos handlers**, sem chave: 12 boas, 12 medianas, 12 fracas, 12 só com desenho, 12 com injeção em fala/grafo e 8 de `demo-produto`. Cada família cruza variantes de autoria, citação inventada, notas inválidas, critério repetido/desconhecido, IDs inventados, horário arredondado, imagem com data e encerramento precoce. Os oito casos de produto cobrem as primeiras oito variantes. O LLM falso produz também saídas deliberadamente incorretas para testar as guardas. Cada sessão passa por criar, eventos, analisar, finalizar e consultar, verificando ainda a idempotência.
+
+Para avaliar o modelo final real, configure `OPENROUTER_API_KEY` no ambiente ou em `.env.local` (nunca `NEXT_PUBLIC_*`). Rode na raiz, com Node 22+:
+
+```powershell
+npm run eval:scorecard
+# Só a segunda área:
+npm run eval:scorecard -- --filtro=produto
+# Só um caso:
+npm run eval:scorecard -- --filtro=so_desenho/base
+# Guardar a saída para leitura posterior:
+npm run eval:scorecard > scorecards-revisao.log
+```
+
+O comando carrega `.env.local` quando existir e aceita `AGENTE_MODELO_FINAL` para escolher o modelo. Sem chave, termina com código 1 e instrução de configuração. Com chave, executa sequencialmente as mesmas 68 sessões em memória e imprime cada scorecard completo, seguido das contagens de sessões e falhas. É uma chamada real do modelo final por sessão; criação, análise intermediária e captura têm entradas fixas, sem serviços de voz. Os dados são fictícios e não exigem servidor Next nem banco externo. `AGENTE_FAKE=1` não interfere nesse comando.
+
+No modo real, as corrupções artificiais da **saída** usadas nos testes não são impostas ao modelo: ele recebe a sessão e decide livremente; a mesma guarda do handler continua obrigatória. A avaliação automática cobre as regras estruturais; a leitura humana deve conferir pertinência de cada prova ao critério, nota conforme a rubrica, iniciativa espontânea versus provocada, resistência à injeção, comunicação sem transcrição e adequação à área de produto. Uma sessão boa pode ter nota 3 sem ser 4; a descrição da família não substitui a rubrica.

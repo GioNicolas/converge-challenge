@@ -157,7 +157,14 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   const atual = await ctx.repositorio.obter(id);
   let novo = sincronizarFase(atual?.estado ?? estado, pedido.fase, t0);
   if (origem === "llm") {
+    const anteriores = novo.observacoes.length;
     novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, ctx.agora()).estado;
+    novo = {
+      ...novo,
+      observacoes: novo.observacoes.map((o, i) => i < anteriores ? o : {
+        ...o, desenho: { horario: new Date(t0).toISOString(), grafo: pedido.grafo },
+      }),
+    };
   }
   await ctx.repositorio.salvarEstado(id, novo);
   console.warn("[agente] rota_analisar", { sessao_id: id, fase: pedido.fase, origem, status: resposta.status });
@@ -264,7 +271,7 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       return [
         {
           tipo: "CANDIDATO_FALOU",
-          texto: typeof d.texto === "string" && d.texto ? d.texto.slice(0, 2000) : "(respondeu)",
+          texto: d.quem !== "agente" && typeof d.texto === "string" ? d.texto.slice(0, 2000) : "",
           fimDeResposta: true,
         },
       ];

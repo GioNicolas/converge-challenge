@@ -79,5 +79,34 @@ describe("conclusão (interpretada pelo modelo)", () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Uns 4 mil por segundo.", requisito: null }]);
     const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "qual a escala?" }, AGORA);
     assert.equal(r.concluiu, false);
+});
+
+describe("perguntar: prompt contra quebra de personagem (sem limpeza por código)", () => {
+  it("o prompt estático não instrui a citar a ficha e proíbe pergunta", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Ok, 5 anos.", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?" }, AGORA);
+    const p = llm.chamadas[0].sistema.estatico;
+    // "ficha" só pode aparecer dentro da proibição entre aspas.
+    const semProibicao = p.replace(/"ficha"/g, "");
+    assert.ok(!/ficha/i.test(semProibicao), "o prompt ainda usa o termo 'ficha' fora da proibição");
+    assert.match(p, /NUNCA cite "ficha"/);
+    assert.match(p, /NUNCA faça pergunta/);
+    assert.match(p, /SEMPRE preencha/);
+  });
+
+  it("o prompt orienta recusa curta e variada, convite sem '?', assumir só se faltar dado e resposta só do perguntado", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Ok, 5 anos.", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?" }, AGORA);
+    const p = llm.chamadas[0].sistema.estatico;
+    assert.match(p, /UMA frase curta e natural/);
+    assert.match(p, /VARIE a redação/);
+    assert.match(p, /convite sem interrogação/);
+    assert.match(p, /SOMENTE quando a pergunta do candidato é sobre um dado que não existe/);
+    assert.match(p, /Nunca use essa orientação em recusas/);
+    assert.match(p, /Responda SOMENTE o que foi perguntado/);
+    assert.ok(!/o time espera/i.test(p), "o prompt não deve sugerir 'o time espera'");
+    // Sem texto fixo de recusa para copiar.
+    assert.ok(!/Não posso compartilhar/i.test(p));
+  });
   });
 });

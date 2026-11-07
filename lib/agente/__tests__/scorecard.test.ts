@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { EventoArmazenado } from "../armazenamento/repositorio";
 import { KIT_SYSTEM_DESIGN } from "../kits/system-design";
+import { montarRelatorio } from "../relatorio";
 import {
   aplicarGuardas,
   citacaoExiste,
   extrairFontes,
   gerarScorecardFalso,
   normalizar,
+  montarEntradaDoPrompt,
+  timeoutScorecardMs,
   SEM_EVIDENCIA,
   type SaidaScorecardLlm,
 } from "../scorecard";
@@ -95,7 +98,7 @@ describe("scorecard: guardas", () => {
     const s = saida();
     s.criterios[0].evidencias = [{ tipo: "desenho", horario: T1, texto: null, elementos: ["e1", "zz9"], imagem: null }];
     s.criterios[1].evidencias = [{ tipo: "desenho", horario: "2020-01-01T00:00:00.000Z", texto: null, elementos: ["zz9"], imagem: null }];
-    s.criterios[2].evidencias = [{ tipo: "desenho", horario: "2020-01-01T00:00:00.000Z", texto: null, elementos: ["r1"], imagem: "snap_1.png" }];
+    s.criterios[2].evidencias = [{ tipo: "desenho", horario: "2020-01-01T00:00:00.000Z", texto: null, elementos: ["r1"], imagem: "imagem 1 (2026-11-07T15:02:11.120Z)" }];
     s.criterios[3].evidencias = [{ tipo: "desenho", horario: T1, texto: null, elementos: [], imagem: "snap_7.png" }];
     const sc = guardas(s);
     assert.deepEqual(sc.criterios[0].evidencias[0].elementos, ["e1"]);
@@ -109,7 +112,7 @@ describe("scorecard: guardas", () => {
     const s = saida({ nota_geral: 1 });
     s.criterios[0].nota = 4;
     s.criterios[1].nota = 2;
-    s.criterios[2].nota = 2.4; // arredonda para 2
+    s.criterios[2].nota = 2;
     const sc = guardas(s);
     assert.equal(sc.nota_geral, 2.8); // (4+2+2+3+3+3)/6 = 2.83
   });
@@ -132,7 +135,7 @@ describe("scorecard: auxiliares", () => {
   it("normalizar tira acentos, pontuação e caixa", () => {
     assert.equal(normalizar("  Você, AGORA!! "), "voce agora");
   });
-  it("citacaoExiste exige trechos de 4+ caracteres", () => {
+  it("citacaoExiste exige ao menos quatro caracteres significativos", () => {
     assert.equal(citacaoExiste("ok", [{ texto: "ok tudo bem" }]).ok, false);
     assert.equal(citacaoExiste("tudo ... bem", [{ texto: "ok tudo bem" }]).ok, true);
   });
@@ -141,7 +144,8 @@ describe("scorecard: auxiliares", () => {
     const comObs = {
       ...estado,
       observacoes: [
-        { criterio: "escalabilidade", sinal: "negativo" as const, espontaneo: false, evidencia: "banco único", em: Date.parse(T2), fase: "APROFUNDAMENTO" as const },
+        { criterio: "escalabilidade", sinal: "negativo" as const, espontaneo: false, evidencia: "banco único", em: Date.parse(T2), fase: "APROFUNDAMENTO" as const,
+          desenho: { horario: T1, grafo: GRAFO } },
       ],
     };
     const sc = gerarScorecardFalso(
@@ -154,5 +158,188 @@ describe("scorecard: auxiliares", () => {
     assert.equal(esc?.nota, 1);
     assert.ok((esc?.evidencias.length ?? 0) > 0);
     assert.equal(sc.recomendacao, "evidencia_insuficiente");
+  });
+});
+
+describe("scorecard: regressões de proveniência", () => {
+  it("só candidato é prova; fala sem autor, entrevistador e marcadores são contexto", () => {
+    const estado = estadoInicial();
+    estado.conversa = [{ quem: "agente", texto: "Sugiro cache distribuído", em: Date.parse(T1) },
+      { quem: "candidato", texto: "(respondeu)", em: Date.parse(T2) }];
+    const f = extrairFontes(estado, [
+      ev(T1, "fala", { quem: "agente", texto: "Sugiro cache distribuído" }),
+      ev(T1, "fala", { texto: "Não há autor" }),
+      ev(T1, "resposta", { quem: "agente", texto: "Resposta do entrevistador" }),
+      ev(T1, "resposta", { texto: "(respondeu)" }),
+      ev(T2, "resposta", { quem: "candidato", texto: "Eu escolhi cache local" }),
+    ], []);
+    assert.deepEqual(f.falas.map(f => f.texto), ["Eu escolhi cache local"]);
+  });
+
+  it("não concatena falas distintas, não reordena trechos nem ignora negações", () => {
+    assert.equal(citacaoExiste("cache ... distribuído", [{ texto: "cache" }, { texto: "distribuído" }]).ok, false);
+    assert.equal(citacaoExiste("distribuído ... cache", [{ texto: "cache distribuído" }]).ok, false);
+    assert.equal(citacaoExiste("não ... usaria cache", [{ texto: "eu usaria cache" }]).ok, false);
+    assert.equal(citacaoExiste("cache", [{ texto: "cacheado" }]).ok, false);
+  });
+
+  it("imagem aceita referências explícitas e data não interfere no número", () => {
+    const s = saida();
+    const valores = ["1", "imagem 1 (2026-11-07T15:02:11.120Z)", "/imagens/1", "/api/sessoes/s1/imagens/1", "snap_1.png", "/api/sessoes/outra/imagens/1"];
+    s.criterios.forEach((c, i) => { c.evidencias = [{ tipo: "desenho", horario: T1, texto: null, elementos: [], imagem: valores[i] }]; });
+    const sc = aplicarGuardas(s, { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA.map(({ id }) => ({ id })), fontes: fontes().f, origem: "llm" });
+    assert.deepEqual(sc.criterios.map(c => !!c.evidencias[0].imagem), [true, true, true, true, false, false]);
+  });
+
+  it("liga horário arredondado ao snapshot mais próximo e rejeita horário distante sem referência", () => {
+    const estado = estadoInicial();
+    const fontes = extrairFontes(estado, [ev("2026-11-07T15:00:00.120Z", "desenho", { grafo: GRAFO }), ev("2026-11-07T15:00:01.120Z", "desenho", { grafo: GRAFO })], []);
+    const s = saida();
+    s.criterios[0].evidencias = [{ tipo: "desenho", horario: "2026-11-07T15:00:01.000Z", texto: null, elementos: [], imagem: null }];
+    s.criterios[1].evidencias = [{ tipo: "desenho", horario: T2, texto: null, elementos: [], imagem: null }];
+    const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes, origem: "llm" });
+    assert.equal(sc.criterios[0].evidencias[0].horario, "2026-11-07T15:00:01.120Z");
+    assert.equal(sc.criterios[1].nota, null);
+  });
+
+  it("não mistura ids apagados de versões diferentes do quadro", () => {
+    const f = extrairFontes(estadoInicial(), [ev(T1, "desenho", { grafo: "COMPONENTES\n- [r1] Primeira versão" }), ev(T2, "desenho", { grafo: "COMPONENTES\n- [r2] Segunda versão" })], []);
+    const s = saida();
+    s.criterios[0].evidencias = [{ tipo: "desenho", horario: "inválido", texto: null, elementos: ["r1", "r2"], imagem: null }];
+    const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(sc.criterios[0].nota, null);
+  });
+
+  it("observação só ancora texto do mesmo critério e snapshot, nunca observação do navegador", () => {
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: false,
+      evidencia: "priorizou o fluxo", em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T1, grafo: GRAFO } }];
+    const f = extrairFontes(estado, [ev(T1, "desenho", { grafo: GRAFO }), ev(T1, "analise", { observacoes: [{ criterio: RUBRICA[1].id, evidencia: "inventado" }] })], []);
+    const s = saida();
+    s.criterios.forEach(c => { c.evidencias = [{ tipo: "desenho", horario: T1, texto: "priorizou o fluxo", elementos: ["r1"], imagem: null }]; });
+    const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(sc.criterios[0].nota, 3);
+    assert.equal(sc.criterios[0].evidencias[0].texto, "priorizou o fluxo");
+    assert.ok(sc.criterios.slice(1).every(c => c.nota === null));
+  });
+
+  it("não promove observação provocada ao nível que exige espontaneidade", () => {
+    const rubrica = [{ ...RUBRICA[0], niveis: { ...RUBRICA[0].niveis, 4: "Compara alternativas espontaneamente" } }];
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: rubrica[0].id, sinal: "positivo", espontaneo: false,
+      evidencia: "comparou alternativas", em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T1, grafo: GRAFO } }];
+    const s = saida(); s.criterios[0].nota = 4;
+    s.criterios[0].evidencias = [{ tipo: "desenho", horario: T1, texto: "comparou alternativas", elementos: ["r1"], imagem: null }];
+    const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica, fontes: extrairFontes(estado, [ev(T1, "desenho", { grafo: GRAFO })], []), origem: "llm" });
+    assert.equal(sc.criterios[0].nota, 3);
+    assert.match(sc.ajustes.join(" "), /espontaneidade/);
+  });
+
+  it("nota 14 e frações não viram notas válidas silenciosamente", () => {
+    const s = saida(); s.criterios[0].nota = 14; s.criterios[1].nota = 2.7;
+    const sc = guardas(s);
+    assert.equal(sc.criterios[0].nota, null); assert.equal(sc.criterios[1].nota, null);
+    assert.equal(sc.recomendacao, "avancar_com_ressalvas");
+    assert.deepEqual(sc.pontos_fortes, []);
+  });
+
+  it("sem desenho nem fala: nenhuma nota, mesmo com observação sem vínculo", () => {
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "sem prova", em: Date.parse(T1), fase: "REQUISITOS" }];
+    const sc = gerarScorecardFalso({ kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0] }, { sessaoId: "s", candidatoId: "c", estado, eventos: [ev(T1, "desenho", { grafo: "COMPONENTES\nCONEXÕES" })], imagens: [] });
+    assert.equal(sc.nota_geral, null); assert.equal(sc.recomendacao, "evidencia_insuficiente");
+    assert.deepEqual(sc.pontos_fortes, []);
+  });
+
+  it("prompt preserva começo e fim em sessões longas, com o livro separado e false explícito", () => {
+    const eventos = Array.from({ length: 200 }, (_, i) => ev(new Date(Date.parse(T1) + i * 1000).toISOString(), "fala", { quem: "candidato", texto: `${i === 0 ? "INICIO" : i === 199 ? "FIM_IMPORTANTE" : "meio"} ${"x".repeat(500)}` }));
+    const estado = estadoInicial();
+    const prompt = montarEntradaDoPrompt({ sessaoId: "s", candidatoId: "c", estado, eventos, imagens: [] }, extrairFontes(estado, eventos, []));
+    assert.ok(prompt.linhaDoTempo.includes("INICIO")); assert.ok(prompt.linhaDoTempo.includes("FIM_IMPORTANTE"));
+    assert.ok(prompt.linhaDoTempo.length <= 40_000);
+  });
+
+  it("timeout configurável valida o intervalo seguro e não aceita NaN ou negativos", () => {
+    const anterior = process.env.AGENTE_TIMEOUT_SCORECARD_MS;
+    try {
+      for (const valor of ["", "-1", "NaN", "120000", "1.5"]) {
+        process.env.AGENTE_TIMEOUT_SCORECARD_MS = valor; assert.equal(timeoutScorecardMs(), 45_000);
+      }
+      process.env.AGENTE_TIMEOUT_SCORECARD_MS = "30000"; assert.equal(timeoutScorecardMs(), 30_000);
+    } finally {
+      if (anterior === undefined) delete process.env.AGENTE_TIMEOUT_SCORECARD_MS; else process.env.AGENTE_TIMEOUT_SCORECARD_MS = anterior;
+    }
+  });
+
+  it("troca ids por nomes em resumos, briefing, justificativas e ajustes sem mudar a citação", () => {
+    const s = saida();
+    const f = fontes().f;
+    const literal = "Escolhi e1 para guardar os dados_consistencia";
+    f.falas.push({ horario: T2, texto: literal });
+    s.criterios[0].justificativa = "requisitos: discutiu dados_consistencia e e1.";
+    s.criterios[0].evidencias = [{ tipo: "fala", horario: T2, texto: literal, elementos: [], imagem: null }];
+    s.pontos_fortes = ["COMPONENTES_FLUXO e E1"];
+    s.pontos_a_aprofundar = ["dados_consistencia; não alterar componentes_fluxo_extra nem e10"];
+    s.briefing_para_proxima_etapa = "Retomar tradeoffs e e1.";
+    const sc = aplicarGuardas(s, { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(sc.pontos_fortes[0], "Componentes e fluxo e Postgres");
+    assert.equal(sc.pontos_a_aprofundar[0], "Dados e consistência; não alterar componentes_fluxo_extra nem e10");
+    assert.equal(sc.briefing_para_proxima_etapa, "Retomar Trade-offs e Postgres.");
+    assert.equal(sc.criterios[0].justificativa, "Requisitos e escopo: discutiu Dados e consistência e Postgres.");
+    assert.equal(sc.criterios[0].criterio, "requisitos");
+    assert.equal(sc.criterios[0].evidencias[0].texto, literal);
+    assert.ok(sc.ajustes.some(a => a.includes("Referências técnicas")));
+  });
+
+  it("falso usa nomes da rubrica nos pontos a aprofundar", () => {
+    const estado = estadoInicial();
+    const sc = gerarScorecardFalso({ kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0] },
+      { sessaoId: "s", candidatoId: "c", estado, eventos: [], imagens: [] });
+    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Componentes e fluxo."));
+    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Dados e consistência."));
+    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Requisitos e escopo."), "não expande duas vezes um nome já legível");
+    assert.ok(!sc.pontos_a_aprofundar.join(" ").includes("componentes_fluxo"));
+  });
+
+  it("reanálise e upload da mesma versão preservam horário real e foto daquela versão no relatório", () => {
+    const data = (segundos: number) => new Date(Date.parse(T1) + segundos * 1000).toISOString();
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "priorizou o fluxo",
+      em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: data(45), grafo: GRAFO } }];
+    const eventos = [ev(data(-10), "fase", { fase: "ALTO_NIVEL" }), ev(T1, "desenho", { grafo: GRAFO }),
+      ev(data(20), "desenho", { grafo: GRAFO, imagem_url: "/api/sessoes/s/imagens/1" }),
+      ev(data(50), "desenho", { grafo: GRAFO + "\n- [r2] Outra versão" })];
+    const imagens = [{ numero: 1, horario: T1 }, { numero: 2, horario: data(50) }];
+    const sc = gerarScorecardFalso({ kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0] },
+      { sessaoId: "s", candidatoId: "c", estado, eventos, imagens });
+    assert.equal(sc.criterios[0].evidencias[0].horario, T1);
+    assert.equal(estado.observacoes[0].desenho?.horario, data(45), "não altera a auditoria da análise no estado");
+    const relatorio = montarRelatorio({ sessao: { id: "s", candidatoId: "c", avaliacaoId: "demo", criadaEm: Date.parse(data(-10)), estado, analises: 1 },
+      scorecard: sc, kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0], eventos, imagens });
+    const prova = relatorio.criterios[0].provas[0];
+    assert.equal(prova.tipo, "desenho");
+    assert.equal(prova.momento, "00:10");
+    assert.equal(prova.tipo === "desenho" && prova.imagem, "/api/sessoes/s/imagens/1");
+  });
+
+  it("não ancora observação em versão antiga que já foi substituída, nem em evento futuro", () => {
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "observação",
+      em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T2, grafo: GRAFO } }];
+    const antes = new Date(Date.parse(T2) - 1000).toISOString();
+    const depois = new Date(Date.parse(T2) + 1000).toISOString();
+    assert.equal(extrairFontes(estado, [ev(T1, "desenho", { grafo: GRAFO }), ev(antes, "desenho", { grafo: "COMPONENTES" })], []).observacoes[0].desenho, undefined);
+    assert.equal(extrairFontes(estado, [ev(depois, "desenho", { grafo: GRAFO })], []).observacoes[0].desenho, undefined);
+    assert.equal(extrairFontes(estado, [], []).observacoes[0].desenho, undefined);
+  });
+
+  it("reversão ao mesmo grafo usa a última versão e lotes recebidos tarde ainda têm o horário original", () => {
+    const estado = estadoInicial();
+    const retorno = new Date(Date.parse(T2) - 500).toISOString();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "observação",
+      em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T2, grafo: GRAFO } }];
+    const eventos = [ev(T1, "desenho", { grafo: GRAFO }), ev(new Date(Date.parse(T1) + 1000).toISOString(), "desenho", { grafo: "COMPONENTES" }),
+      { ...ev(retorno, "desenho", { grafo: GRAFO }), recebidoEm: Date.parse(T2) + 60_000 }];
+    assert.equal(extrairFontes(estado, eventos, []).observacoes[0].desenho?.horario, retorno);
   });
 });

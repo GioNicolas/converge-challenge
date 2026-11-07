@@ -191,6 +191,12 @@ export async function enviarEventos(sessaoId: string, lote: { horario: string; t
   console.debug(`[linha do tempo] ${sessaoId}: ${lote.length} evento(s)`, lote);
 }
 
+/** Fim da entrevista: o servidor gera o scorecard da recrutadora. Sem servidor, não há o que gerar. */
+export async function finalizarSessao(sessaoId: string): Promise<void> {
+  if (usarServidor()) return (await import("./servidor")).finalizar(sessaoId);
+  console.debug(`[fim] ${sessaoId}: sem servidor, nenhum relatório gerado`);
+}
+
 // --- Síntese do navegador: demonstração e fallback do áudio remoto ---
 
 /**
