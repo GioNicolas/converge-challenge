@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
   }
 
   const t = Date.now() - session.startedAt;
-  const blip = decideBlip(session, t);
-  const response: EventsResponse = blip ? { blip } : {};
+  const { blip, dismissBlipId } = decideBlip(session, t);
+  const response: EventsResponse = { blip, dismissBlipId };
   return NextResponse.json(response);
 }

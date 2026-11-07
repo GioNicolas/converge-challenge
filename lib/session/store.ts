@@ -11,6 +11,9 @@ const globalForSessions = globalThis as typeof globalThis & {
 };
 const sessions = (globalForSessions.__convergeSessions ??= new Map<string, SessionState>());
 
+/** Quanto tempo a pergunta adiada com "agora não" fica fora da fila. Fica aqui pra evitar import circular com a policy. */
+export const SNOOZE_MS = 150_000;
+
 export function getSession(sessionId: string): SessionState | undefined {
   return sessions.get(sessionId);
 }
@@ -66,6 +69,19 @@ export function appendEvent(session: SessionState, event: SessionEvent): void {
       if (session.pendingBlipId === event.blipId) session.pendingBlipId = undefined;
       session.lastConversationEndedAt = event.t;
       break;
+    case "blip_snoozed": {
+      // Só o balão que está na tela pode ser adiado: um já aberto ou antigo é ignorado.
+      if (session.pendingBlipId !== event.blipId) break;
+      session.pendingBlipId = undefined;
+      const question = session.queue.find((q) => q.id === event.blipId);
+      if (question) {
+        question.status = "queued";
+        question.snoozedUntil = event.t + SNOOZE_MS;
+      }
+      // Dá respiro: a regra dos 30 s depois de uma conversa também vale pra quem adiou.
+      session.lastConversationEndedAt = event.t;
+      break;
+    }
     default:
       break;
   }

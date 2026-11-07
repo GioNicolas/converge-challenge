@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
-import type { Blip, SessionEvent } from "@/lib/contracts";
+import type { Blip, EventsResponse, SessionEvent } from "@/lib/contracts";
 import { getPendingBlip, postEvent } from "./api";
 import { INITIAL_LANGUAGE } from "./problem";
 
@@ -47,6 +47,13 @@ export function useSession() {
     setLog((prev) => [...prev.slice(-(LOG_LIMIT - 1)), entry]);
   }, []);
 
+  /** Aplica a resposta de POST /api/events ou do polling: primeiro tira o balão expirado, depois mostra o novo. */
+  const applyResponse = useCallback((res: EventsResponse) => {
+    const dismissId = res.dismissBlipId;
+    if (dismissId !== undefined) setIncomingBlip((prev) => (prev?.id === dismissId ? null : prev));
+    if (res.blip !== undefined) setIncomingBlip(res.blip);
+  }, []);
+
   const sendEvent = useCallback(
     async (input: EventInput): Promise<void> => {
       const id = sessionIdRef.current;
@@ -54,14 +61,13 @@ export function useSession() {
       const event: SessionEvent = { ...input, sessionId: id, t: nowT() };
       pushLog(event.type, event.t, false);
       try {
-        const res = await postEvent(event);
-        if (res.blip !== undefined) setIncomingBlip(res.blip);
+        applyResponse(await postEvent(event));
       } catch (err) {
         console.error("POST /api/events falhou", event.type, err);
         pushLog(`${event.type} (falhou)`, event.t, true);
       }
     },
-    [nowT, pushLog],
+    [nowT, pushLog, applyResponse],
   );
 
   const endSession = useCallback(
@@ -96,7 +102,7 @@ export function useSession() {
     const id = setInterval(() => {
       getPendingBlip(sessionId)
         .then((res) => {
-          if (alive && res.blip !== undefined) setIncomingBlip(res.blip);
+          if (alive) applyResponse(res);
         })
         .catch(() => {
           // falha transitória do polling: tenta de novo no próximo tick
@@ -106,7 +112,7 @@ export function useSession() {
       alive = false;
       clearInterval(id);
     };
-  }, [sessionId, ended]);
+  }, [sessionId, ended, applyResponse]);
 
   // Cronômetro: atualiza o tempo decorrido e encerra por timeout.
   useEffect(() => {

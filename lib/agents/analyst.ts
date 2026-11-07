@@ -5,6 +5,7 @@
 import type { AnalystQuestion } from "@/lib/agents/analystSchema";
 import { AnalystOutput } from "@/lib/agents/analystSchema";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
+import { allPassed } from "@/lib/agents/policy";
 import { checkQuestion } from "@/lib/agents/spoilerFilter";
 import type { LineRange, SessionEvent } from "@/lib/contracts";
 import { completeJson } from "@/lib/llm";
@@ -25,8 +26,11 @@ interface AnalystBookkeeping {
 }
 
 type PauseEvent = Extract<SessionEvent, { type: "pause" }>;
+type RunEvent = Extract<SessionEvent, { type: "run" }>;
 
 const PAUSE_MIN_GAP_MS = 15_000;
+/** Colagem a partir desse tanto de linhas é momento-chave: o candidato acabou de trazer código pra conversa. */
+const KEY_PASTE_LINES = 5;
 
 // Em globalThis, como o store: o Next em dev recarrega o módulo ao compilar outra rota, e um
 // WeakMap local zeraria no meio da sessão (já causou ids de pergunta repetidos).
@@ -64,6 +68,27 @@ export async function runAnalyst(session: SessionState, trigger: SessionEvent): 
   }
 }
 
+/**
+ * Momento-chave do gatilho, ou undefined. Pura: lê a sessão e o evento (que já está em session.events,
+ * porque o POST grava o evento antes de chamar o Analyst).
+ */
+export function detectKeyMoment(session: SessionState, trigger: SessionEvent): string | undefined {
+  if (trigger.type === "paste") {
+    return trigger.lines >= KEY_PASTE_LINES ? `acabou de colar um trecho de ${trigger.lines} linhas` : undefined;
+  }
+  if (trigger.type !== "run") return undefined;
+
+  const earlierRuns = session.events
+    .slice(0, session.events.indexOf(trigger))
+    .filter((e): e is RunEvent => e.type === "run");
+  const passedBefore = earlierRuns.some((e) => allPassed(e.result));
+
+  if (allPassed(trigger.result)) {
+    return passedBefore ? undefined : "primeiro run com todos os testes passando (bom momento pra falar de complexidade e da escolha)";
+  }
+  return passedBefore ? "o código voltou a falhar depois de já ter passado" : undefined;
+}
+
 /** Uma análise. Nunca lança: erros viram `analyst.lastError`. */
 async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trigger: SessionEvent): Promise<void> {
   const code = latestCode(session);
@@ -71,12 +96,19 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     session.analyst.lastOutcome = { t: trigger.t, text: "pulada: código vazio" };
     return;
   }
-  if ((trigger.type === "pause" || trigger.type === "paste") && code === book.lastCompletedCode) {
+  // Momento-chave não pula pelo código igual nem espera a janela de 15 s: o candidato tem o que falar.
+  const keyMoment = detectKeyMoment(session, trigger);
+  if (keyMoment === undefined && (trigger.type === "pause" || trigger.type === "paste") && code === book.lastCompletedCode) {
     session.analyst.lastOutcome = { t: trigger.t, text: "pulada: código igual à última análise" };
     return;
   }
   const lastStartedAt = session.analyst.lastRunAt;
-  if (trigger.type === "pause" && lastStartedAt !== undefined && trigger.t - lastStartedAt < PAUSE_MIN_GAP_MS) {
+  if (
+    keyMoment === undefined &&
+    trigger.type === "pause" &&
+    lastStartedAt !== undefined &&
+    trigger.t - lastStartedAt < PAUSE_MIN_GAP_MS
+  ) {
     deferPause(session, book, trigger, PAUSE_MIN_GAP_MS - (trigger.t - lastStartedAt));
     return;
   }
@@ -104,13 +136,18 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
       askedQuestions: session.queue
         .filter((q) => q.status === "asked" || q.status === "blipped")
         .map((q) => q.question),
+      keyMoment,
     });
 
     const result = await completeJson({ role: "analyst", system, user, schema: AnalystOutput });
     const { questions, ...insights } = result.data;
 
+    // Cada análise substitui a fila, mas sobrevivem: pergunta adiada pelo candidato ("agora não") e
+    // pergunta de momento-chave ainda esperando uma regra (senão a análise seguinte a derrubaria antes
+    // de ela aparecer). Pra essas, vale só a checagem de frescor das linhas.
     for (const q of session.queue) {
-      if (q.status === "queued" && !q.kickoff) q.status = "stale";
+      const keep = q.kickoff || q.snoozedUntil !== undefined || q.keyMoment !== undefined;
+      if (q.status === "queued" && !keep) q.status = "stale";
     }
     analyst.insights = insights;
     analyst.costUsd += result.costUsd;
@@ -155,6 +192,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         highlight: lines,
         createdAt: trigger.t,
         status: "queued",
+        keyMoment,
       });
     });
     analyst.lastOutcome = {

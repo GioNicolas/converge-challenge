@@ -15,9 +15,14 @@ export interface QueuedQuestion {
   priority: number; // 0–1
   highlight?: LineRange;
   createdAt: number; // t da sessão
-  status: "queued" | "blipped" | "asked" | "stale";
+  /** ignored: o balão expirou sem clique. */
+  status: "queued" | "blipped" | "asked" | "stale" | "ignored";
   /** Pergunta fixa de abertura ("me conta como pretende resolver"), não vem do Analyst. */
   kickoff?: boolean;
+  /** Momento-chave que gerou a pergunta ("primeiro run verde"): tem algo pra falar ali, então ganha passagem. */
+  keyMoment?: string;
+  /** Candidato clicou "agora não": a pergunta só volta a partir deste t. */
+  snoozedUntil?: number;
 }
 
 /** Observação pra rubrica, acumulada ao longo da sessão (o Evaluator lê tudo). */

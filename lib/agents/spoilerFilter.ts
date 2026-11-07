@@ -17,6 +17,7 @@ Decida se o conjunto é SEGURO ou INSEGURO.
 - sugere a solução, um algoritmo ou uma estrutura de dados ("dá pra usar um dicionário?").
 - pede para o candidato bolar testes ou escolher entradas ("como você testaria?", "que entradas usaria?").
 - a PERGUNTA em si pede duas coisas diferentes.
+- insinua que existe uma alternativa melhor ("em vez de alguma alternativa", "não teria um jeito mais rápido?").
 - o TEMA cita o erro, o caso que quebra ou a solução.
 
 Pedir para explicar ou justificar uma decisão do candidato é SEGURO, mesmo que essa decisão seja justamente onde está o erro: o candidato precisa descobrir sozinho. Perguntar sobre cenário genérico (entrada grande, entrada vazia) também é SEGURO. Na dúvida, SEGURO.

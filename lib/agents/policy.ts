@@ -25,6 +25,8 @@ const KICKOFF_SKIP_IF_LINES_WRITTEN = 3;
 const BLIP_THRESHOLD = 0.6;
 /** Perguntas com prioridade a partir daqui pulam a regra de 60 s entre blips (não as outras). */
 const HIGH_PRIORITY = 0.9;
+/** Balão nunca aberto some sozinho depois desse tempo (a pergunta vira "ignorada"). */
+const BLIP_EXPIRY_MS = 80_000;
 /** Nenhum blip do Analyst nos primeiros 45 s da sessão. */
 const WARMUP_MS = 45_000;
 /** Intervalo mínimo entre o createdAt do último blip e o próximo. */
@@ -123,12 +125,36 @@ export function lastBlipDecision(session: SessionState): string | undefined {
 
 /**
  * Decide se a fila vira um blip agora (t em ms de sessão). Só levanta blip com o candidato parado
- * e sem outro blip pendente. Efeito colateral: marca a pergunta como blipped ou stale.
+ * e sem outro blip pendente. Efeito colateral: marca a pergunta como blipped, stale ou ignored.
+ * `dismissBlipId`: o balão anterior expirou nesta chamada e a IDE deve tirá-lo da tela.
  */
-export function decideBlip(session: SessionState, t: number): Blip | undefined {
+export function decideBlip(session: SessionState, t: number): { blip?: Blip; dismissBlipId?: string } {
+  const dismissBlipId = expireBlip(session, t);
   const { blip, reason } = pickBlip(session, t);
-  decisions.set(session, reason);
-  return blip;
+  decisions.set(session, dismissBlipId ? `balão ${dismissBlipId.slice(0, 8)} expirou · ${reason}` : reason);
+  return { blip, dismissBlipId };
+}
+
+/** Balão aberto e nunca clicado há BLIP_EXPIRY_MS vira ignorado. Devolve o id que sai da tela, se houver. */
+function expireBlip(session: SessionState, t: number): string | undefined {
+  const pendingId = session.pendingBlipId;
+  if (pendingId === undefined) return undefined;
+  const found = findBlipQuestion(session, pendingId);
+  if (!found || found.question.status !== "blipped") return undefined;
+  if (t - found.blip.createdAt < BLIP_EXPIRY_MS) return undefined;
+
+  found.question.status = "ignored";
+  session.pendingBlipId = undefined;
+  // Abertura ignorada não conta contra o candidato: ele pode ter preferido codar.
+  if (!found.question.kickoff) {
+    session.evidence.push({
+      t,
+      criterionId: "comunicacao",
+      note: `não abriu a pergunta sobre ${found.question.topicLabel ?? "o código"}`,
+      source: "analyst",
+    });
+  }
+  return pendingId;
 }
 
 function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: string } {
@@ -156,11 +182,18 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
 
   const { boost, reason: boostReason } = momentBoost(session);
   const candidates = session.queue
-    .filter((q) => q.status === "queued" && q.priority + boost >= BLIP_THRESHOLD)
-    .sort((a, b) => b.priority - a.priority);
+    .filter((q) => q.status === "queued" && !isSnoozed(q, t) && q.priority + boost >= BLIP_THRESHOLD)
+    // Momento-chave primeiro (o candidato tem certeza que há o que falar), depois a prioridade.
+    .sort((a, b) => Number(b.keyMoment !== undefined) - Number(a.keyMoment !== undefined) || b.priority - a.priority);
   if (candidates.length === 0) {
-    const anyQueued = session.queue.some((q) => q.status === "queued");
-    return { reason: anyQueued ? `esperando: nenhuma pergunta acima de ${BLIP_THRESHOLD.toFixed(2)}` : "sem pergunta na fila" };
+    const waiting = session.queue.filter((q) => q.status === "queued");
+    if (waiting.length === 0) return { reason: "sem pergunta na fila" };
+    const snoozed = waiting.filter((q) => isSnoozed(q, t));
+    if (snoozed.length === waiting.length) {
+      const backAt = Math.min(...snoozed.map((q) => q.snoozedUntil ?? t));
+      return { reason: `esperando: pergunta adiada (volta em ${Math.ceil((backAt - t) / 1000)} s)` };
+    }
+    return { reason: `esperando: nenhuma pergunta acima de ${BLIP_THRESHOLD.toFixed(2)}` };
   }
 
   for (const q of candidates) {
@@ -168,7 +201,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
       q.status = "stale";
       continue;
     }
-    const wait = waitReason(session, t, q.priority);
+    const wait = waitReason(session, t, q);
     if (wait !== undefined) return { reason: wait };
     const label = boost > 0 ? ` (boost +${boost.toFixed(2)}: ${boostReason})` : "";
     return { blip: raise(session, q, t), reason: `blip ${q.id}${label}` };
@@ -176,12 +209,19 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   return { reason: "sem pergunta válida na fila (todas obsoletas)" };
 }
 
+/** Pergunta adiada pelo candidato ("agora não") que ainda não voltou. */
+function isSnoozed(q: QueuedQuestion, t: number): boolean {
+  return q.snoozedUntil !== undefined && q.snoozedUntil > t;
+}
+
 /** Motivo de espera pelo ritmo (aquecimento e intervalos), ou undefined se já pode aparecer. */
-function waitReason(session: SessionState, t: number, priority: number): string | undefined {
+function waitReason(session: SessionState, t: number, q: QueuedQuestion): string | undefined {
   if (t < WARMUP_MS) return `esperando: aquecimento (faltam ${Math.ceil((WARMUP_MS - t) / 1000)} s)`;
 
+  // Prioridade alta ou momento-chave pulam a regra de 60 s entre blips.
+  const skipsSpacing = q.priority >= HIGH_PRIORITY || q.keyMoment !== undefined;
   const lastBlip = session.blips.at(-1);
-  if (lastBlip && priority < HIGH_PRIORITY && t - lastBlip.createdAt < MIN_GAP_BETWEEN_BLIPS_MS) {
+  if (lastBlip && !skipsSpacing && t - lastBlip.createdAt < MIN_GAP_BETWEEN_BLIPS_MS) {
     const elapsed = Math.floor((t - lastBlip.createdAt) / 1000);
     return `esperando: ${elapsed} s desde o último blip (mín. ${MIN_GAP_BETWEEN_BLIPS_MS / 1000} s)`;
   }
@@ -231,6 +271,6 @@ function previewFor(q: QueuedQuestion): string {
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
 }
 
-function allPassed(result: RunResult): boolean {
+export function allPassed(result: RunResult): boolean {
   return result.total > 0 && result.passed === result.total;
 }

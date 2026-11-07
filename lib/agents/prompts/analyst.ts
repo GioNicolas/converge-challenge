@@ -53,6 +53,7 @@ Não pode:
 - Sugerir a solução ou a estrutura de dados ("Dá pra usar um dicionário?", "reduzir pra O(n) com uma estrutura auxiliar").
 - Pedir para o candidato bolar testes ("Como você testaria?", "Que entradas usaria?").
 - Fazer duas perguntas numa só.
+- Elogiar ("parabéns", "muito bem") ou insinuar que existe algo melhor ("em vez de outra alternativa", "não teria um jeito mais rápido?").
 
 O topicLabel tem 2 a 5 palavras e vai no balão que avisa o candidato ("Quero entender <topicLabel>"): diga do que se trata sem revelar nada. Ex.: "o loop interno", "sua escolha de abordagem", "o retorno da função".
 
@@ -79,11 +80,16 @@ export interface AnalystTurnInput {
   recentEvents: string[];
   previousApproach?: string;
   askedQuestions: string[];
+  /** Momento-chave que disparou esta análise ("primeiro run com todos os testes passando"), se houver. */
+  keyMoment?: string;
 }
 
 export function buildAnalystUser(input: AnalystTurnInput): string {
+  const keyMoment = input.keyMoment
+    ? `\nMOMENTO-CHAVE: ${input.keyMoment}. O candidato com certeza tem algo a dizer agora. Gere UMA pergunta sobre exatamente isso, com priority 0.85 ou mais, nas mesmas regras de estilo (sem entregar nada).\n`
+    : "";
   return `Tempo de sessão: ${input.elapsedLabel}. Gatilho desta análise: ${input.trigger}. Linguagem: ${input.language}.
-
+${keyMoment}
 Código atual:
 ${input.numberedCode || "(vazio)"}
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { BlipContext } from "@/lib/contracts";
 import type { LlmStatsSnapshot } from "@/lib/llm";
-import type { AnalystStatus, SessionStateView } from "@/lib/session/types";
+import type { AnalystStatus, QueuedQuestion, SessionStateView } from "@/lib/session/types";
 import { getState } from "../_lib/api";
 import { formatMs } from "../_lib/format";
 
@@ -16,6 +16,14 @@ interface CodeSeen {
   version: number;
   at: number;
 }
+
+const STATUS_LABELS: Record<QueuedQuestion["status"], string> = {
+  queued: "na fila",
+  blipped: "balão aberto",
+  asked: "conversada",
+  stale: "obsoleta",
+  ignored: "ignorada",
+};
 
 function Box({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -198,11 +206,16 @@ export function StatePanel({ sessionId, elapsedMs, blipContext }: StatePanelProp
           <li key={q.id}>
             <div>{q.question}</div>
             <div className="text-neutral-500">
-              prio {q.priority.toFixed(2)} · {q.status} · tópico: {q.followUpTopic}
+              prio {q.priority.toFixed(2)} · {STATUS_LABELS[q.status]}
+              {q.status === "queued" && q.snoozedUntil !== undefined && q.snoozedUntil > elapsedMs
+                ? ` · adiada até ${formatMs(q.snoozedUntil)}`
+                : ""}
+              {` · tópico: ${q.followUpTopic}`}
               {q.topicLabel !== undefined ? ` · balão: ${q.topicLabel}` : ""}
               {q.highlight !== undefined ? ` · linhas ${q.highlight.startLine}-${q.highlight.endLine}` : ""}
               {q.kickoff === true ? " · abertura" : ""}
             </div>
+            {q.keyMoment !== undefined && <div className="text-amber-300">⚑ momento-chave: {q.keyMoment}</div>}
           </li>
         ))}
       </Block>
