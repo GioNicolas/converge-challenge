@@ -2,7 +2,7 @@
  * Leitura da duração que a recrutadora disse, sem LLM: "60 minutos", "sessenta minutos", "45min", "uma hora",
  * "uma hora e meia", "meia hora", "quarenta e cinco". Funções puras.
  *
- * Um número sem unidade de tempo só vale quando a última pergunta da Totti foi sobre tempo, e fica dentro de
+ * Um número sem unidade de tempo só vale quando a última pergunta do Totti foi sobre tempo, e fica dentro de
  * 5 a 300 minutos. Assim "3 milhões de transações" e "nível 2" não viram duração.
  */
 
@@ -64,7 +64,7 @@ function valida(minutos: number | undefined): number | undefined {
   return minutos !== undefined && minutos >= LIMITE_MIN && minutos <= LIMITE_MAX ? minutos : undefined;
 }
 
-/** A última fala da Totti perguntou sobre tempo ou duração? */
+/** A última fala do Totti perguntou sobre tempo ou duração? */
 export function perguntouSobreTempo(textoAgente: string | undefined): boolean {
   if (!textoAgente) return false;
   const t = normalizar(textoAgente);
@@ -73,7 +73,7 @@ export function perguntouSobreTempo(textoAgente: string | undefined): boolean {
 
 /**
  * Duração em minutos dita na fala, ou undefined. Com unidade (min, minuto, hora) sempre vale;
- * sem unidade, só se a Totti tiver perguntado sobre tempo (`contexto.perguntouTempo`).
+ * sem unidade, só se o Totti tiver perguntado sobre tempo (`contexto.perguntouTempo`).
  */
 export function lerDuracao(texto: string, contexto: { perguntouTempo?: boolean } = {}): number | undefined {
   const t = normalizar(texto);

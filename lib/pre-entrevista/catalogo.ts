@@ -135,7 +135,7 @@ export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
 /**
  * Como cada área é observada em cada formato, só com os sinais que a plataforma tem: código, execuções de teste,
  * colagens e dicas pedidas (live coding), desenho no quadro, falas e perguntas do entrevistador.
- * A Totti usa estas frases para responder a dúvida "como isso é avaliado?" sem prometer nada a mais.
+ * O Totti usa estas frases para responder a dúvida "como isso é avaliado?" sem prometer nada a mais.
  */
 export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = {
   live_coding: {

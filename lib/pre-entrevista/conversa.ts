@@ -38,8 +38,8 @@ function alvosDaConversa(): Alvo[] {
   ];
 }
 
-const PROMPT_SISTEMA_CONVERSA = `Você é a Totti, assistente que monta entrevistas técnicas conversando com a recrutadora.
-Você soa como uma colega de RH experiente que conhece tecnologia: direta, simpática, sem enrolação.
+const PROMPT_SISTEMA_CONVERSA = `Você é o Totti, assistente que monta entrevistas técnicas conversando com a recrutadora.
+Você soa como um colega de RH experiente que conhece tecnologia: direto, simpático, sem enrolação.
 A fala vai ser ouvida em voz alta.
 
 Como falar:
@@ -51,8 +51,8 @@ Como falar:
 - Não repita uma pergunta que aparece em "SUAS ÚLTIMAS FALAS", e não pergunte de novo o que ela já respondeu na transcrição.
 - Só cite o que está na transcrição ou em "O QUE JÁ SE SABE". Nunca invente.
 - Sem listas, markdown, asteriscos, aspas nem emojis. Português do Brasil, tratando a recrutadora por "você".
-- Você se apresenta só na abertura. Depois dela, nunca diga "sou Totti", "eu sou a Totti" nem repita seu nome.
-  Evite adjetivos com gênero sobre você.
+- Você se apresenta só na abertura. Depois dela, nunca diga "sou Totti", "eu sou o Totti" nem repita seu nome.
+  Quando falar de si, use o masculino (o Totti é ele).
 - Varie as palavras: não repita de uma fala para a outra a mesma expressão de fechamento ou de tom.
 - Para pressão, diga "lidar com pressão e imprevistos" ou "manter a calma quando dá errado". Nunca diga "alta demanda": isso é escala.
 
@@ -62,7 +62,7 @@ Exemplos de tom (não copie as palavras):
 - "Fechado, então escalabilidade entra no foco e uso de IA fica de lado, beleza? E o que separa uma solução simples de uma que não aguenta volume?"
 
 A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, o PASSO desta fala e a transcrição.
-Siga o PASSO. Responda somente com a fala da Totti, sem prefixo, sem aspas e sem explicações.`;
+Siga o PASSO. Responda somente com a fala do Totti, sem prefixo, sem aspas e sem explicações.`;
 
 const FORMATO_FALA: Record<Rascunho["mode"], string> = {
   live_coding: "live coding, com código na IDE",
@@ -242,7 +242,7 @@ function comoAvaliamosDoFoco(sessao: Sessao): string[] {
   return areas.map((a) => COMO_AVALIAMOS[r.mode][a]);
 }
 
-/** A pergunta que um passo fez, em forma de instrução curta, para a Totti retomar depois de uma dúvida. */
+/** A pergunta que um passo fez, em forma de instrução curta, para o Totti retomar depois de uma dúvida. */
 function perguntaParaRetomar(passo: Passo, sessao: Sessao): string {
   switch (passo.tipo) {
     case "resumo_final":
@@ -387,7 +387,7 @@ export function montarMensagensConversa(sessao: Sessao, passo: Passo): Mensagem[
     `SUAS ÚLTIMAS FALAS (não repita essas perguntas):\n${ultimas.join("\n") || "(nenhuma)"}`,
     `PASSO DESTA FALA:\n${instrucaoDoPasso(passo, sessao)}`,
     `ÚLTIMAS 6 FALAS DA TRANSCRIÇÃO:\n${formatarTranscricao(sessao.transcricao.slice(-6))}`,
-    "Escreva a próxima fala da Totti.",
+    "Escreva a próxima fala do Totti.",
   ].join("\n\n");
 
   return [
@@ -420,7 +420,7 @@ export interface RespostaAgente {
   respostaCrua: string;
 }
 
-/** Gera a fala da Totti para o passo escolhido. Lança `ErroChat` se nenhum alvo responder. */
+/** Gera a fala do Totti para o passo escolhido. Lança `ErroChat` se nenhum alvo responder. */
 /** Número de frases de uma fala (pelos sinais de pontuação). */
 export function contarFrases(texto: string): number {
   return texto.split(/[.!?]+/).filter((s) => s.trim()).length;

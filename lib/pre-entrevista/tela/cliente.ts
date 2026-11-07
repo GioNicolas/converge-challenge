@@ -24,7 +24,7 @@ const sessoesDemo = new Map<string, EstadoSessao>();
 
 export async function criarSessao(vaga: Vaga): Promise<EstadoSessao> {
   if (!usarServidor()) {
-    await esperar(2600); // o tempo da Totti "lendo" a vaga
+    await esperar(2600); // o tempo do Totti "lendo" a vaga
     const estado = estadoInicialDemo(vaga);
     sessoesDemo.set(estado.id, estado);
     return estado;

@@ -5,7 +5,7 @@
  *  - Tópicos (`topicosDo`) são cumulativos: uma vez cobertos (probabilidade de pelo menos 0,6), seguem cobertos.
  *  - Sinais (`sinaisDo`) valem a leitura do turno atual, porque a recrutadora pode mudar de ideia:
  *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
- * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo da Totti.
+ * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo do Totti.
  */
 import { noul } from "@typesafe-ai/sdk";
 import { FocusArea } from "@/lib/contracts";
@@ -17,7 +17,7 @@ export const LIMIAR = 0.6;
 
 export const AREAS = FocusArea.options;
 
-/** Nome da área do jeito que a Totti fala. Nunca os rótulos internos. */
+/** Nome da área do jeito que o Totti fala. Nunca os rótulos internos. */
 export const NOME_AREA_FALA: Record<FocusArea, string> = {
   tecnico: "algoritmos e código",
   pressao: "lidar com pressão e imprevistos",
@@ -61,7 +61,7 @@ export interface Cobertura extends ChamadaJev {
 }
 
 export interface ContextoCobertura {
-  /** Última fala da Totti, para os sinais que dependem do que foi perguntado (resposta vaga, aprovação do resumo). */
+  /** Última fala do Totti, para os sinais que dependem do que foi perguntado (resposta vaga, aprovação do resumo). */
   ultimaFalaAgente?: string;
 }
 
@@ -210,12 +210,12 @@ function sinaisDo(): Pergunta[] {
     {
       id: "fez_pergunta",
       pergunta:
-        "A última fala da recrutadora é uma pergunta ou dúvida dirigida à Totti (sobre o formato, a avaliação ou o processo), e não uma resposta?",
+        "A última fala da recrutadora é uma pergunta ou dúvida dirigida ao Totti (sobre o formato, a avaliação ou o processo), e não uma resposta?",
       sinal_sim:
-        "Sim se ela perguntou à Totti como a entrevista é avaliada, como funciona o formato ou o processo: " +
+        "Sim se ela perguntou ao Totti como a entrevista é avaliada, como funciona o formato ou o processo: " +
         "'mas como isso vai ser avaliado num live code?', 'isso acontece na entrevista toda?', 'e se ele não usar IA, conta?'.",
       sinal_nao:
-        "Não se ela respondeu à Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), pediu mudança " +
+        "Não se ela respondeu ao Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), pediu mudança " +
         "('tira a dica leve', 'muda pra quarenta e cinco'), aprovou o resumo ('pode finalizar?', 'tá bom') ou fez pergunta que não é sobre a entrevista.",
     },
     {
@@ -224,7 +224,7 @@ function sinaisDo(): Pergunta[] {
       sinal_sim:
         "Sim se ela pediu uma alteração: 'tira a dica leve', 'muda o tom', 'põe quarenta e cinco minutos', " +
         "'acrescenta que falha de rede é eliminatória', 'sem pressão'.",
-      sinal_nao: "Não se ela só aprovou ('pode finalizar', 'tá bom'), respondeu à Totti sem pedir nada novo, ou só fez uma pergunta.",
+      sinal_nao: "Não se ela só aprovou ('pode finalizar', 'tá bom'), respondeu ao Totti sem pedir nada novo, ou só fez uma pergunta.",
     },
     {
       id: "aprovou_resumo",

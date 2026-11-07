@@ -1,5 +1,5 @@
 // Leitura de documentos da vaga (PDF, TXT, Markdown) no próprio navegador: o arquivo não sai da máquina,
-// só o texto extraído vai para a conversa com a Totti.
+// só o texto extraído vai para a conversa com o Totti.
 
 export type Documento = {
   id: string;

@@ -1,6 +1,6 @@
-// Demonstração da pré-entrevista sem as chaves dos modelos: uma conversa roteirizada com a Totti
+// Demonstração da pré-entrevista sem as chaves dos modelos: uma conversa roteirizada com o Totti
 // que devolve exatamente o formato do `EstadoSessao` real (ver `../sessoes.ts`).
-// A cada fala da recrutadora, a Totti avança um passo e o rascunho se atualiza.
+// A cada fala da recrutadora, o Totti avança um passo e o rascunho se atualiza.
 import type { Criterion, FocusArea } from "@/lib/contracts";
 import { CATALOGO } from "../catalogo";
 import type { Vaga } from "../classificador";
@@ -23,7 +23,7 @@ function criterios(focus: FocusArea[]): Criterion[] {
   return CATALOGO.system_design.filter((c) => focus.includes(c.focus)).map((c) => ({ ...c }));
 }
 
-/** Um passo do roteiro: o que muda no estado quando a recrutadora responde, e a próxima fala da Totti. */
+/** Um passo do roteiro: o que muda no estado quando a recrutadora responde, e a próxima fala do Totti. */
 type Passo = {
   cobre: string[];
   totti: (texto: string) => string;

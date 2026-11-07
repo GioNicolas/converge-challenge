@@ -111,7 +111,7 @@ type Avisos = string[];
 
 /**
  * Só aceita `durationMin` se alguma fala da recrutadora, lida com `lerDuracao`, devolve exatamente esse valor
- * (com `perguntouTempo` calculado pela fala anterior da Totti). Caso contrário, a duração veio do modelo sem
+ * (com `perguntouTempo` calculado pela fala anterior do Totti). Caso contrário, a duração veio do modelo sem
  * base na fala, e descarta com aviso. "3 milhões de transações" não libera nada. Função pura quanto ao patch.
  */
 export function checarDuracao(patch: Patch, transcricao: Turno[], avisos: Avisos): Patch {
@@ -335,7 +335,7 @@ function quaseIgual(a: string, b: string): boolean {
 const TOM_OU_DICA = /\b(tom|dica|dicas|clima)\b|amig|desafi/i;
 
 /**
- * Limpa as notas da recrutadora. Tira as frases que são perguntas, as que repetem uma fala da Totti e as que
+ * Limpa as notas da recrutadora. Tira as frases que são perguntas, as que repetem uma fala do Totti e as que
  * falam de tom ou dicas. No lugar dessas últimas, acrescenta a frase gerada das preferências. Função pura.
  */
 export function limparNotas(notas: string, falasDaTotti: string[], preferencias: Preferencias): string {
