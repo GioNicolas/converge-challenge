@@ -38,7 +38,13 @@ export type PerguntaFeita = {
   feitaEm: number;
 };
 
-export type ObservacaoRegistrada = Observacao & { em: number; fase: Fase };
+export type ObservacaoRegistrada = Observacao & {
+  em: number;
+  fase: Fase;
+  /** Snapshot recebido pelo /analisar; horario = captura para análise, não criação do desenho.
+   * Só o servidor preenche. O scorecard resolve o evento real com o mesmo grafo ao finalizar. */
+  desenho?: { horario: string; grafo: string };
+};
 
 /** Quantas observações de cada sinal já existem para um critério da rubrica. */
 export type EvidenciaDoCriterio = { positivo: number; negativo: number; neutro: number };

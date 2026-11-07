@@ -9,6 +9,8 @@ export type Contexto = {
   /** null = sem LLM disponível (sem chave): as rotas respondem em silêncio. */
   llm: LlmCliente | null;
   agora: () => number;
+  /** true = scorecard determinístico (AGENTE_FAKE=1), sem chamar o LLM. */
+  fake: boolean;
 };
 
 let substituto: Partial<Contexto> | null = null;
@@ -36,5 +38,6 @@ export function contexto(): Contexto {
     repositorio: substituto?.repositorio ?? repositorioPadrao(),
     llm: substituto && "llm" in substituto ? (substituto.llm ?? null) : escolherLlm(),
     agora: substituto?.agora ?? Date.now,
+    fake: substituto?.fake ?? process.env.AGENTE_FAKE === "1",
   };
 }
