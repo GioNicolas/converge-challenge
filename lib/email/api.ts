@@ -15,9 +15,17 @@ function constantTimeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb);
 }
 
-/** Rate limit simples em memória, por IP (por instância; não é distribuído). */
+/**
+ * Rate limit simples em memória, por IP. Best-effort: é por instância (não
+ * distribuído, zera a cada cold start) e o IP vem de headers que dependem do
+ * proxy/plataforma. Prefere x-real-ip (setado pelo proxy) ao primeiro item de
+ * x-forwarded-for, que o cliente pode forjar.
+ */
 function rateLimited(req: NextRequest): boolean {
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const ip =
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "unknown";
   const now = Date.now();
   if (hits.size > 1000) {
     for (const [k, v] of hits) if (v.resetAt <= now) hits.delete(k);

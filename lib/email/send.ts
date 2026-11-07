@@ -11,6 +11,20 @@ type SendArgs = {
   templateName?: string;
 };
 
+/** Subconjunto do cliente Resend usado aqui (permite injetar um fake nos testes). */
+export type EmailClient = {
+  emails: {
+    send(payload: {
+      from: string;
+      to: string;
+      subject: string;
+      html: string;
+      text: string;
+      replyTo?: string;
+    }): Promise<{ data: { id: string } | null; error: unknown }>;
+  };
+};
+
 /** Falha real de envio/renderização; as rotas traduzem pra 502. */
 export class EmailDeliveryError extends Error {
   constructor(message: string) {
@@ -32,12 +46,11 @@ function errorMessage(err: unknown): string {
  * configurada E NODE_ENV !== "production". Qualquer outra falha vira
  * EmailDeliveryError. Logs trazem só metadados — nunca o HTML (PII).
  */
-export async function sendEmail({
-  to,
-  subject,
-  template,
-  templateName = "unknown",
-}: SendArgs): Promise<EmailSendResult> {
+export async function sendEmail(
+  { to, subject, template, templateName = "unknown" }: SendArgs,
+  /** Seam de teste: cliente alternativo (padrão: Resend real). */
+  client?: EmailClient,
+): Promise<EmailSendResult> {
   const from = process.env.EMAIL_FROM ?? "Converge Challenge <onboarding@resend.dev>";
   const replyTo = process.env.EMAIL_REPLY_TO || undefined;
   const domain = to.split("@")[1] ?? "?";
@@ -49,7 +62,7 @@ export async function sendEmail({
 
   try {
     const [html, text] = await Promise.all([render(template), render(template, { plainText: true })]);
-    const resend = getResendClient();
+    const resend: EmailClient = client ?? getResendClient();
     const { data, error } = await resend.emails.send({ from, to, subject, html, text, replyTo });
     if (error) throw error;
     return { status: "sent", id: data!.id };
