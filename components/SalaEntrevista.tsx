@@ -9,6 +9,7 @@ import JanelaChamada from "@/components/JanelaChamada";
 import Legenda from "@/components/Legenda";
 import PainelConversa, { type MensagemConversa } from "@/components/PainelConversa";
 import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
+import ConfirmarEncerrar from "@/components/ConfirmarEncerrar";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
@@ -111,6 +112,8 @@ export default function SalaEntrevista() {
     }
   }, [demo.requisitos, quadro]);
   const [conversaAberta, setConversaAberta] = useState(false);
+  const [confirmandoFim, setConfirmandoFim] = useState(false);
+  const cancelarFim = useCallback(() => setConfirmandoFim(false), []);
   const fecharConversa = useCallback(() => setConversaAberta(false), []);
 
   // A resposta a um plin termina sozinha quando o candidato fala e depois fica em silêncio.
@@ -156,7 +159,7 @@ export default function SalaEntrevista() {
           agenteFalando={entrevista.agenteFalando}
           onClicarPlin={entrevista.clicarPlin}
           onTerminarResposta={entrevista.terminarResposta}
-          onEncerrar={entrevista.encerrar}
+          onEncerrar={() => setConfirmandoFim(true)}
         />
       )}
 
@@ -213,6 +216,15 @@ export default function SalaEntrevista() {
         onFechar={fecharConversa}
         mensagens={demo.mensagens}
         onVerNoQuadro={(id) => console.debug("[conversa] ver no quadro", id)}
+      />
+
+      <ConfirmarEncerrar
+        aberto={confirmandoFim}
+        onCancelar={cancelarFim}
+        onConfirmar={() => {
+          setConfirmandoFim(false);
+          entrevista.encerrar();
+        }}
       />
 
       <CursorAgente
