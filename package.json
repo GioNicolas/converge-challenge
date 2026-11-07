@@ -11,6 +11,7 @@
     "test:e2e": "playwright test",
     "test:agente": "tsx --test lib/agente/__tests__/*.test.ts lib/agente/**/__tests__/*.test.ts",
     "test:rotas": "tsx --test app/api/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",
+    "test:entrevista-texto": "tsx --test lib/dev/entrevista-texto/__tests__/*.test.ts lib/agente/__tests__/scorecard.test.ts app/api/__tests__/entrevista-texto.test.ts",
     "test:kits": "tsx --test lib/agente/kits/__tests__/*.test.ts",
     "test:vagas": "tsx --test lib/agente/kits/__tests__/vagas-*.test.ts app/api/__tests__/avaliacoes.test.ts",
     "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
