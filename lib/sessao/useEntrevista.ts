@@ -54,6 +54,26 @@ export function useEntrevista(quadro: Quadro | null) {
     estadoAtual.current = estado;
   }, [estado]);
 
+  // O que o agente está falando agora (para o orb e a legenda).
+  const [falaAtual, setFalaAtual] = useState<FalaRecente | null>(null);
+  const [agenteFalando, setAgenteFalando] = useState(false);
+  const fimDaLegenda = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const dizer = useCallback(async (texto: string) => {
+    if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
+    setFalaAtual({ quem: "agente", texto });
+    setAgenteFalando(true);
+    await falar(texto);
+    setAgenteFalando(false);
+    // A legenda fica um pouco depois da voz, para dar tempo de terminar de ler.
+    fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 1800);
+  }, []);
+
+  const silenciar = useCallback(() => {
+    calar();
+    setAgenteFalando(false);
+  }, []);
+
   const conversor = useRef(criarConversor());
   const ultimoInstantaneo = useRef<Instantaneo | null>(null);
   const conversa = useRef<FalaRecente[]>([]);
@@ -110,7 +130,7 @@ export function useEntrevista(quadro: Quadro | null) {
     let cancelado = false;
     (async () => {
       const { titulo, enunciado } = sessao.problema;
-      const fala = falar(`${titulo}. ${enunciado}`);
+      const fala = dizer(`${titulo}. ${enunciado}`);
       await quadro.agente.escrever({
         id: "agente-enunciado-titulo",
         grupo: "enunciado",
@@ -133,7 +153,7 @@ export function useEntrevista(quadro: Quadro | null) {
     return () => {
       cancelado = true;
     };
-  }, [estado.fase, quadro, sessao, enviar]);
+  }, [estado.fase, quadro, sessao, enviar, dizer]);
 
   // Pergunta ativa: o agente fala e escreve a nota; quando a resposta termina, apaga a nota.
   const numeroPergunta = estado.perguntaAtiva?.numero ?? null;
@@ -146,7 +166,7 @@ export function useEntrevista(quadro: Quadro | null) {
 
     if (p.pergunta) {
       conversa.current.push({ quem: "agente", texto: p.pergunta });
-      void falar(p.pergunta);
+      void dizer(p.pergunta);
     }
     void quadro.agente.escrever({
       id: `agente-${grupo}-nota`,
@@ -158,10 +178,10 @@ export function useEntrevista(quadro: Quadro | null) {
     });
 
     return () => {
-      calar();
+      silenciar();
       void quadro.agente.apagarGrupo(grupo);
     };
-  }, [numeroPergunta, quadro]);
+  }, [numeroPergunta, quadro, dizer, silenciar]);
 
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
@@ -181,14 +201,16 @@ export function useEntrevista(quadro: Quadro | null) {
     setTimeout(() => gatilho.current?.dispararAgora(), 0);
   }, [enviar]);
   const encerrar = useCallback(() => {
-    calar();
+    silenciar();
     enviar({ tipo: "ENCERRAR" });
-  }, [enviar]);
+  }, [enviar, silenciar]);
 
   return {
     sessao,
     estado,
     iniciadaEm,
+    falaAtual,
+    agenteFalando,
     desenhoMudou,
     comecar,
     clicarPlin,

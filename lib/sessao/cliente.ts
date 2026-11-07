@@ -13,6 +13,8 @@ export type Fase =
 
 export type Sessao = {
   sessao_id: string;
+  /** Nome da área do kit de avaliação (ex.: "system design", "marketing"). */
+  area: string;
   problema: { titulo: string; enunciado: string };
   /** Duração de cada fase, em segundos. */
   tempos: Partial<Record<Fase, number>>;
@@ -57,6 +59,7 @@ export type RespostaAnalise = {
 export async function criarSessao(): Promise<Sessao> {
   return {
     sessao_id: "sessao-de-mentira",
+    area: "system design",
     problema: {
       titulo: "Encurtador de URL",
       enunciado:
