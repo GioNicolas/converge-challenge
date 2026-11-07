@@ -20,13 +20,8 @@ import {
   type EventoEntrevista,
 } from "@/lib/sessao/estados";
 import { criarGatilho, type Gatilho } from "@/lib/sessao/gatilho";
-// Trocar por "@/lib/excalidraw/conversor" e "@/lib/excalidraw/diff" quando ficarem prontos.
-import {
-  criarConversor,
-  descreverMudancas,
-  houveMudancaRelevante,
-  type InstantaneoProvisorio,
-} from "@/lib/excalidraw/provisorio";
+import { criarConversor, type Instantaneo } from "@/lib/excalidraw/conversor";
+import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff";
 import type { ExcalidrawElement } from "@/lib/excalidraw/tipos";
 
 type Acao = { evento: EventoEntrevista; agora: number };
@@ -60,7 +55,7 @@ export function useEntrevista(quadro: Quadro | null) {
   }, [estado]);
 
   const conversor = useRef(criarConversor());
-  const ultimoInstantaneo = useRef<InstantaneoProvisorio | null>(null);
+  const ultimoInstantaneo = useRef<Instantaneo | null>(null);
   const conversa = useRef<FalaRecente[]>([]);
   const gatilho = useRef<Gatilho | null>(null);
 
