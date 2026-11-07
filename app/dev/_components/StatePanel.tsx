@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { BlipContext } from "@/lib/contracts";
-import type { SessionStateView } from "@/lib/session/types";
+import type { LlmStatsSnapshot } from "@/lib/llm";
+import type { AnalystStatus, QueuedQuestion, SessionStateView } from "@/lib/session/types";
 import { getState } from "../_lib/api";
 import { formatMs } from "../_lib/format";
 
@@ -15,6 +16,14 @@ interface CodeSeen {
   version: number;
   at: number;
 }
+
+const STATUS_LABELS: Record<QueuedQuestion["status"], string> = {
+  queued: "na fila",
+  blipped: "balão aberto",
+  asked: "conversada",
+  stale: "obsoleta",
+  ignored: "ignorada",
+};
 
 function Box({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -43,9 +52,77 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/** Última análise do LLM: abordagem, complexidade, linhas suspeitas, evidências e custo. */
+function AnalysisBlock({ analyst }: { analyst: AnalystStatus }) {
+  const insights = analyst.insights;
+  const duration = analyst.lastDurationMs === undefined ? "-" : `${analyst.lastDurationMs} ms`;
+  return (
+    <Block title="análise">
+      {analyst.lastError !== undefined && <li className="break-words text-red-400">erro: {analyst.lastError}</li>}
+      {analyst.lastOutcome !== undefined && (
+        <li className="break-words text-neutral-300">
+          último resultado: {analyst.lastOutcome.text} ({formatMs(analyst.lastOutcome.t)})
+        </li>
+      )}
+      {insights === undefined ? (
+        <li className="text-neutral-600">ainda sem análise</li>
+      ) : (
+        <>
+          <li>abordagem: {insights.approach}</li>
+          <li>
+            tempo {insights.timeComplexity} · memória {insights.spaceComplexity} · progresso: {insights.progress}
+          </li>
+          {insights.suspiciousLines.map((s, i) => (
+            <li key={i} className="text-neutral-400">
+              linhas {s.startLine}-{s.endLine}: {s.reason}
+            </li>
+          ))}
+          {insights.evidence.map((e, i) => (
+            <li key={i} className="text-neutral-400">
+              {e.criterionId}: {e.note}
+            </li>
+          ))}
+        </>
+      )}
+      <li className="text-neutral-500">
+        duração da última análise: {duration} · custo acumulado: US$ {analyst.costUsd.toFixed(4)}
+      </li>
+    </Block>
+  );
+}
+
+/** Estatísticas dos LLMs: por provedor e a rota de cada papel (breaker aberto mostra até quando). */
+function LlmBlock({ llm }: { llm: LlmStatsSnapshot }) {
+  return (
+    <Block title="LLMs">
+      {Object.entries(llm.providers).map(([name, p]) => (
+        <li key={name}>
+          {name}: {p.calls} chamadas · {p.wins} vitórias · {p.failures} falhas · {p.lost} perdidas · média{" "}
+          {p.avgMs === null ? "-" : `${p.avgMs} ms`} · US$ {p.costUsd.toFixed(4)}
+        </li>
+      ))}
+      {Object.entries(llm.roles).map(([role, r]) => (
+        <li key={role} className="text-neutral-400">
+          {role}:{" "}
+          {r.directUntil === undefined
+            ? r.route
+            : `openrouter direto até ${new Date(r.directUntil).toLocaleTimeString("pt-BR", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}`}
+        </li>
+      ))}
+    </Block>
+  );
+}
+
+/** GET /api/state acrescenta o motivo da última decisão de blip (lastBlipDecision). */
+type StateView = SessionStateView & { blipDecision?: string };
+
 /** Painel de estado do agente. Faz polling de GET /api/state a cada 1 s (404 é ignorado). */
 export function StatePanel({ sessionId, elapsedMs, blipContext }: StatePanelProps) {
-  const [view, setView] = useState<SessionStateView | null>(null);
+  const [view, setView] = useState<StateView | null>(null);
   const [codeSeen, setCodeSeen] = useState<CodeSeen | null>(null);
   const [nowMs, setNowMs] = useState(0);
 
@@ -118,18 +195,42 @@ export function StatePanel({ sessionId, elapsedMs, blipContext }: StatePanelProp
         <Row label="encerrada">{view.ended ? "sim" : "não"}</Row>
       </div>
 
+      <AnalysisBlock analyst={view.analyst} />
+
+      {view.llm !== undefined && <LlmBlock llm={view.llm} />}
+
       <Block title={`fila de perguntas (${view.queue.length})`}>
+        <li className="text-neutral-400">decisão do blip: {view.blipDecision ?? "-"}</li>
         {view.queue.length === 0 && <li className="text-neutral-600">vazia</li>}
         {view.queue.map((q) => (
           <li key={q.id}>
             <div>{q.question}</div>
             <div className="text-neutral-500">
-              prio {q.priority.toFixed(2)} · {q.status} · tópico: {q.followUpTopic}
+              prio {q.priority.toFixed(2)} · {STATUS_LABELS[q.status]}
+              {q.status === "queued" && q.snoozedUntil !== undefined && q.snoozedUntil > elapsedMs
+                ? ` · adiada até ${formatMs(q.snoozedUntil)}`
+                : ""}
+              {` · tópico: ${q.followUpTopic}`}
+              {q.topicLabel !== undefined ? ` · balão: ${q.topicLabel}` : ""}
               {q.highlight !== undefined ? ` · linhas ${q.highlight.startLine}-${q.highlight.endLine}` : ""}
+              {q.kickoff === true ? " · abertura" : ""}
             </div>
+            {q.keyMoment !== undefined && <div className="text-amber-300">⚑ momento-chave: {q.keyMoment}</div>}
           </li>
         ))}
       </Block>
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-neutral-400">evidências ({view.evidence.length})</summary>
+        <ul className="mt-1 ml-2 flex flex-col gap-1">
+          {view.evidence.length === 0 && <li className="text-neutral-600">nenhuma</li>}
+          {view.evidence.map((e, i) => (
+            <li key={i} className="break-words text-neutral-400">
+              {formatMs(e.t)} · {e.criterionId} · {e.source} · {e.note}
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <Block title={`blips (${view.blips.length})`}>
         {view.blips.length === 0 && <li className="text-neutral-600">nenhum</li>}

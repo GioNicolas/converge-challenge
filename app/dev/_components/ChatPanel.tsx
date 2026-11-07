@@ -7,6 +7,8 @@ interface ChatPanelProps {
   blipId: string | undefined;
   messages: ChatMessage[];
   busy: boolean;
+  /** O entrevistador encerrou a conversa: input travado e o painel fecha sozinho. */
+  ended?: boolean;
   error: string | null;
   disabled: boolean;
   onSend: (text: string) => void;
@@ -22,6 +24,7 @@ export function ChatPanel({
   blipId,
   messages,
   busy,
+  ended = false,
   error,
   disabled,
   onSend,
@@ -50,7 +53,7 @@ export function ChatPanel({
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const text = draft.trim();
-    if (text === "" || busy || disabled) return;
+    if (text === "" || busy || disabled || ended) return;
     setDraft("");
     onSend(text);
   };
@@ -82,7 +85,8 @@ export function ChatPanel({
             {m.text}
           </div>
         ))}
-        {busy && <div className="self-start text-neutral-500">...</div>}
+        {busy && <div className="self-start text-neutral-500">digitando…</div>}
+        {ended && <div className="self-center text-xs text-neutral-500">conversa encerrada</div>}
       </div>
 
       {error !== null && <div className="mb-2 text-red-400">{error}</div>}
@@ -91,11 +95,11 @@ export function ChatPanel({
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          disabled={busy || disabled}
+          disabled={busy || disabled || ended}
           placeholder="responda ao entrevistador"
           className="min-w-0 flex-1 border border-neutral-700 bg-neutral-900 px-2 py-1 outline-none"
         />
-        <button type="submit" disabled={busy || disabled || draft.trim() === ""} className={BTN}>
+        <button type="submit" disabled={busy || disabled || ended || draft.trim() === ""} className={BTN}>
           Enviar
         </button>
       </form>

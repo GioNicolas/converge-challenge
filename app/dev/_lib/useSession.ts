@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
-import type { Blip, SessionEvent } from "@/lib/contracts";
-import { postEvent } from "./api";
+import type { Blip, EventsResponse, SessionEvent } from "@/lib/contracts";
+import { getPendingBlip, postEvent } from "./api";
 import { INITIAL_LANGUAGE } from "./problem";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -18,6 +18,8 @@ export interface LogEntry {
 
 const DURATION_MS = DEFAULT_CONFIG.durationMin * 60_000;
 const LOG_LIMIT = 200;
+/** Com o candidato parado, o blip só aparece por polling: a cada 3 s. */
+const PENDING_POLL_MS = 3000;
 
 /**
  * Sessão: id, relógio (t), cronômetro, fim de sessão e o único ponto de envio (sendEvent).
@@ -45,6 +47,13 @@ export function useSession() {
     setLog((prev) => [...prev.slice(-(LOG_LIMIT - 1)), entry]);
   }, []);
 
+  /** Aplica a resposta de POST /api/events ou do polling: primeiro tira o balão expirado, depois mostra o novo. */
+  const applyResponse = useCallback((res: EventsResponse) => {
+    const dismissId = res.dismissBlipId;
+    if (dismissId !== undefined) setIncomingBlip((prev) => (prev?.id === dismissId ? null : prev));
+    if (res.blip !== undefined) setIncomingBlip(res.blip);
+  }, []);
+
   const sendEvent = useCallback(
     async (input: EventInput): Promise<void> => {
       const id = sessionIdRef.current;
@@ -52,14 +61,13 @@ export function useSession() {
       const event: SessionEvent = { ...input, sessionId: id, t: nowT() };
       pushLog(event.type, event.t, false);
       try {
-        const res = await postEvent(event);
-        if (res.blip !== undefined) setIncomingBlip(res.blip);
+        applyResponse(await postEvent(event));
       } catch (err) {
         console.error("POST /api/events falhou", event.type, err);
         pushLog(`${event.type} (falhou)`, event.t, true);
       }
     },
-    [nowT, pushLog],
+    [nowT, pushLog, applyResponse],
   );
 
   const endSession = useCallback(
@@ -86,6 +94,25 @@ export function useSession() {
       language: INITIAL_LANGUAGE,
     });
   }, [sendEvent]);
+
+  // Polling de blip (GET /api/blip/pending): mostra o balão mesmo sem evento novo do candidato.
+  useEffect(() => {
+    if (sessionId === null || ended) return;
+    let alive = true;
+    const id = setInterval(() => {
+      getPendingBlip(sessionId)
+        .then((res) => {
+          if (alive) applyResponse(res);
+        })
+        .catch(() => {
+          // falha transitória do polling: tenta de novo no próximo tick
+        });
+    }, PENDING_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [sessionId, ended, applyResponse]);
 
   // Cronômetro: atualiza o tempo decorrido e encerra por timeout.
   useEffect(() => {

@@ -86,6 +86,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("hint"), level: z.number().int(), text: z.string() }),
   z.object({ ...base, type: z.literal("blip_opened"), blipId: z.string() }),
   z.object({ ...base, type: z.literal("blip_closed"), blipId: z.string(), reason: z.enum(["agent", "button"]) }),
+  /** Candidato clicou "agora não" no balão: a pergunta volta mais tarde. */
+  z.object({ ...base, type: z.literal("blip_snoozed"), blipId: z.string() }),
   z.object({ ...base, type: z.literal("language_changed"), language: z.string() }),
   z.object({ ...base, type: z.literal("session_ended"), reason: z.enum(["timeout", "button"]) }),
 ]);
@@ -109,8 +111,11 @@ export const Blip = z.object({
 });
 export type Blip = z.infer<typeof Blip>;
 
-/** Resposta de POST /api/events. */
-export const EventsResponse = z.object({ blip: Blip.optional() });
+/**
+ * Resposta de POST /api/events e de GET /api/blip/pending (a IDE consulta a cada ~3 s).
+ * `dismissBlipId`: o balão com esse id expirou sem clique — a IDE deve tirá-lo da tela.
+ */
+export const EventsResponse = z.object({ blip: Blip.optional(), dismissBlipId: z.string().optional() });
 export type EventsResponse = z.infer<typeof EventsResponse>;
 
 /** Resposta de GET /api/blip/:id/context — o que a conversa (voz ou texto) recebe ao abrir. */

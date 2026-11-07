@@ -3,6 +3,7 @@
  */
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import type { InterviewConfig, SessionEvent } from "@/lib/contracts";
+import { getLlmStats } from "@/lib/llm";
 import type { SessionState, SessionStateView } from "@/lib/session/types";
 
 const globalForSessions = globalThis as typeof globalThis & {
@@ -10,8 +11,16 @@ const globalForSessions = globalThis as typeof globalThis & {
 };
 const sessions = (globalForSessions.__convergeSessions ??= new Map<string, SessionState>());
 
+/** Quanto tempo a pergunta adiada com "agora não" fica fora da fila. Fica aqui pra evitar import circular com a policy. */
+export const SNOOZE_MS = 150_000;
+
 export function getSession(sessionId: string): SessionState | undefined {
   return sessions.get(sessionId);
+}
+
+/** Sessões em memória, da mais recente para a mais antiga. */
+export function listSessions(): SessionState[] {
+  return [...sessions.values()].sort((a, b) => b.startedAt - a.startedAt);
 }
 
 export function getOrCreateSession(sessionId: string, config: InterviewConfig = DEFAULT_CONFIG): SessionState {
@@ -25,11 +34,12 @@ export function getOrCreateSession(sessionId: string, config: InterviewConfig = 
     events: [],
     codeHistory: [],
     language: config.languages[0],
-    analyst: { state: "idle", runs: 0 },
+    analyst: { state: "idle", runs: 0, costUsd: 0 },
     queue: [],
     blips: [],
     hintsUsed: 0,
     ended: false,
+    evidence: [],
   };
   sessions.set(sessionId, session);
   return session;
@@ -62,7 +72,21 @@ export function appendEvent(session: SessionState, event: SessionEvent): void {
     }
     case "blip_closed":
       if (session.pendingBlipId === event.blipId) session.pendingBlipId = undefined;
+      session.lastConversationEndedAt = event.t;
       break;
+    case "blip_snoozed": {
+      // Só o balão que está na tela pode ser adiado: um já aberto ou antigo é ignorado.
+      if (session.pendingBlipId !== event.blipId) break;
+      session.pendingBlipId = undefined;
+      const question = session.queue.find((q) => q.id === event.blipId);
+      if (question) {
+        question.status = "queued";
+        question.snoozedUntil = event.t + SNOOZE_MS;
+      }
+      // Dá respiro: a regra dos 30 s depois de uma conversa também vale pra quem adiou.
+      session.lastConversationEndedAt = event.t;
+      break;
+    }
     default:
       break;
   }
@@ -91,7 +115,17 @@ export function toView(session: SessionState): SessionStateView {
     pendingBlipId: session.pendingBlipId,
     hintsUsed: session.hintsUsed,
     ended: session.ended,
+    evidence: session.evidence,
+    report: reportView(session),
+    llm: getLlmStats(),
   };
+}
+
+/** Estado da avaliação sem o relatório (que sai em GET /api/report). */
+function reportView(session: SessionState): SessionStateView["report"] {
+  if (!session.report) return undefined;
+  const { state, startedAt, durationMs, hiddenTests, error, costUsd } = session.report;
+  return { state, startedAt, durationMs, hiddenTests, error, costUsd };
 }
 
 /** Prefixa cada linha com o número, alinhado à direita. */

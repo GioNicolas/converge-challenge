@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AVAILABLE_HINT, findBlipQuestion } from "@/lib/agents/policy";
+import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import type { BlipContext } from "@/lib/contracts";
 import { getSession, latestCode, numberCode } from "@/lib/session/store";
 
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     blip: found.blip,
     question: found.question.question,
     followUpTopic: found.question.followUpTopic,
-    availableHint: AVAILABLE_HINT,
+    availableHint: nextHint(session),
     numberedCode: numberCode(latestCode(session)),
     summary: `Candidato está há ${elapsedS}s na sessão, ${runs} execuções, ${pastes} colagens.`,
     focus: session.config.focus.map((f) => f.area),

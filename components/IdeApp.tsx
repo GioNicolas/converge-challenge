@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Flag, MessageSquare, Mic, MicOff, Play } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Download, Flag, MessageSquare, Mic, MicOff, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import type { EditorCommand } from "@/lib/contracts";
+import { entrada } from "@/lib/design/motion";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { numberCode } from "@/lib/format";
@@ -109,11 +111,11 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
     return () => clearTimeout(id);
   }, [last]);
 
-  // Fim da sessão (botão ou tempo): solta a voz e vai para o relatório.
+  // Fim da sessão (botão ou tempo): solta a voz e vai para o agradecimento. O relatório é só da recrutadora.
   useEffect(() => {
     if (!session.ended || !session.sessionId) return;
     void voice.stop();
-    const id = setTimeout(() => router.push(`/report?sessionId=${session.sessionId}`), 400);
+    const id = setTimeout(() => router.push("/obrigado"), 400);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.ended, session.sessionId, router]);
@@ -175,6 +177,14 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
     } else if (!chat.open) {
       chat.openFree();
     }
+  }
+
+  /** "Agora não": tira a pergunta da tela; o servidor decide quando ela volta. */
+  function adiarPergunta() {
+    const blip = session.incomingBlip;
+    if (!blip) return;
+    session.setIncomingBlip(null);
+    void session.sendEvent({ type: "blip_snoozed", blipId: blip.id });
   }
 
   function fecharConversa() {
@@ -332,6 +342,23 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
             session.endSession("button");
           }}
         />
+
+        {/* "Agora não": adia a pergunta do entrevistador sem abrir a conversa. */}
+        <div className="absolute bottom-24 right-4 z-20">
+          <AnimatePresence initial={false}>
+            {session.incomingBlip && !chat.open && (
+              <motion.button
+                key="agora-nao"
+                {...entrada}
+                type="button"
+                onClick={adiarPergunta}
+                className="vidro rounded-full px-3 py-2 font-medium text-texto-suave shadow-cartao"
+              >
+                Agora não
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
 
         {process.env.NODE_ENV !== "production" && (
           <button

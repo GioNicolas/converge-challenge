@@ -59,6 +59,13 @@ export default function DevPage() {
     void chat.openBlip(blip.id);
   };
 
+  const snoozeFromBalloon = () => {
+    const blip = session.incomingBlip;
+    if (blip === null) return;
+    session.setIncomingBlip(null);
+    void session.sendEvent({ type: "blip_snoozed", blipId: blip.id });
+  };
+
   const run = (kind: FakeRunKind) => {
     const result = fakeRunResult(kind);
     setLastRun(result);
@@ -119,7 +126,7 @@ export default function DevPage() {
               onPaste={capture.onPaste}
             />
             {session.incomingBlip !== null && (
-              <BlipBalloon blip={session.incomingBlip} onOpen={openFromBalloon} />
+              <BlipBalloon blip={session.incomingBlip} onOpen={openFromBalloon} onSnooze={snoozeFromBalloon} />
             )}
           </div>
 
@@ -147,6 +154,7 @@ export default function DevPage() {
             blipId={chat.blipId}
             messages={chat.messages}
             busy={chat.busy}
+            ended={chat.ended}
             error={chat.error}
             disabled={session.ended}
             onSend={chat.send}
