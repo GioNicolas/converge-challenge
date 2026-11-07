@@ -48,3 +48,6 @@ next-env.d.ts
 
 # configs geradas pela pré-entrevista
 /data/
+
+# saídas de scripts/simulate.ts
+sim-runs/

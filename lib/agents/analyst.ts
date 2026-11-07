@@ -4,6 +4,7 @@
  */
 import type { AnalystQuestion } from "@/lib/agents/analystSchema";
 import { AnalystOutput } from "@/lib/agents/analystSchema";
+import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
 import { focoPendente } from "@/lib/agents/focoQuota";
 import { allPassed } from "@/lib/agents/policy";
@@ -142,6 +143,12 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         .map((q) => q.question),
       keyMoment,
       focoPendente: focoParaPedir,
+      remainingLabel: formatElapsed(Math.max(0, session.config.durationMin * 60_000 - trigger.t)),
+      uncovered: uncoveredCriteria(session).map((id) => {
+        const c = session.config.criteria.find((item) => item.id === id)!;
+        return `${c.id}: ${c.name} — ${c.description}`;
+      }),
+      hasWorkingSolution: hasWorkingSolution(session),
     });
 
     const result = await completeJson({ role: "analyst", system, user, schema: AnalystOutput });
@@ -166,12 +173,21 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
       const duplicate = session.evidence.some((n) => n.criterionId === e.criterionId && n.note === e.note);
       if (!duplicate) {
         session.evidence.push({ t: trigger.t, criterionId: e.criterionId, note: e.note, source: "analyst" });
+        // Mostrou sozinho, sem pergunta: o critério sai da agenda.
+        if (e.spontaneous) {
+          recordOutcome(session, { t: trigger.t, criterionId: e.criterionId, kind: "espontaneo", note: e.note, source: "analyst" });
+        }
       }
     }
 
     const lineCount = code.split("\n").length;
+    const criterionIds = new Set(session.config.criteria.map((c) => c.id));
+    const working = hasWorkingSolution(session);
     const candidates: { question: Omit<AnalystQuestion, "startLine" | "endLine" | "priority"> & { priority: number }; lines?: LineRange; focusArea?: FocusArea }[] =
-      questions.map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
+      questions
+        // Desafio só com código funcionando: antes disso, "dá pra melhorar?" soaria como "tem erro".
+        .filter((q) => q.kind !== "desafio" || working)
+        .map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
     // Pergunta de foco: só vale se o código pediu (focoParaPedir) e o modelo devolveu; sem trecho de código.
     if (focoParaPedir && focusQuestion?.question.trim()) {
       candidates.push({ question: { ...focusQuestion, priority: PRIORIDADE_FOCO }, focusArea: focoParaPedir });
@@ -179,7 +195,12 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     // O tema de aprofundamento também vai pro entrevistador, então passa pelo filtro junto.
     const verdicts = await Promise.all(
       candidates.map(({ question }) =>
-        checkQuestion(question.question, question.followUpTopic),
+        checkQuestion(question.question, question.followUpTopic, question.kind ?? "explicar", {
+          code,
+          candidateSaid: session.events.flatMap((e) =>
+            e.type === "speech" && e.role === "candidate" ? [e.text] : [],
+          ).slice(-6),
+        }),
       ),
     );
 
@@ -204,6 +225,8 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         status: "queued",
         keyMoment: focusArea ? undefined : keyMoment,
         focusArea,
+        kind: question.kind ?? "explicar",
+        criterionId: question.criterionId && criterionIds.has(question.criterionId) ? question.criterionId : undefined,
       });
     });
     analyst.lastOutcome = {
@@ -221,6 +244,11 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
   } finally {
     analyst.state = "idle";
   }
+}
+
+/** Já houve run com todos os testes visíveis passando. */
+function hasWorkingSolution(session: SessionState): boolean {
+  return session.events.some((e) => e.type === "run" && allPassed(e.result));
 }
 
 /**

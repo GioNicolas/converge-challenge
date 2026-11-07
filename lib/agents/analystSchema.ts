@@ -3,6 +3,9 @@ import { z } from "zod";
 
 export const AnalystQuestion = z.object({
   question: z.string(),
+  kind: z.enum(["explicar", "sondar", "desafio"]).optional(),
+  /** Critério da config que a pergunta explora. */
+  criterionId: z.string().optional(),
   /** Tema pra aprofundar se a resposta vier rasa — sempre o mesmo assunto da pergunta. */
   followUpTopic: z.string(),
   /** 2–5 palavras pro balão ("o loop interno", "sua escolha de abordagem"). */
@@ -30,7 +33,9 @@ export const AnalystOutput = z.object({
     .array(z.object({ startLine: z.number().int(), endLine: z.number().int(), reason: z.string() }))
     .max(5),
   /** Observações curtas pra rubrica, ligadas a um critério da config. */
-  evidence: z.array(z.object({ criterionId: z.string(), note: z.string() })).max(5),
+  evidence: z
+    .array(z.object({ criterionId: z.string(), note: z.string(), spontaneous: z.boolean().optional() }))
+    .max(5),
   questions: z.array(AnalystQuestion).max(2),
   /** Só quando o prompt pede um FOCO PENDENTE. */
   focusQuestion: FocusQuestion.nullable().optional(),

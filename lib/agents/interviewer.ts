@@ -4,14 +4,18 @@
  */
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
+import { recordOutcome } from "@/lib/agents/coverage";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
+import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
 import { completeJson } from "@/lib/llm";
-import { appendEvent, latestCode, numberCode } from "@/lib/session/store";
+import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
 const FALLBACK_REPLY = "Desculpa, me perdi aqui. Pode repetir?";
+/** Fala barrada duas vezes pelo filtro: reconhece e fecha, sem arriscar. */
+const SAFE_CLOSE_REPLY = "Entendi. Beleza, pode seguir.";
 
 export async function runInterviewerTurn(
   session: SessionState,
@@ -23,6 +27,10 @@ export async function runInterviewerTurn(
   const code = latestCode(session);
   const lineCount = code.split("\n").length;
   const hint = nextHint(session);
+  const question = found?.question;
+  const criterion = session.config.criteria.find((c) => c.id === question?.criterionId);
+  const problem = getProblem(session.config.problemId);
+  const checkIn = question?.checkInId ? session.checkIns.find((c) => c.id === question.checkInId) : undefined;
   const input: InterviewerTurnInput = {
     mode: found ? "blip" : "candidate",
     elapsedLabel: formatMmSs(elapsedMs(session)),
@@ -32,6 +40,10 @@ export async function runInterviewerTurn(
     question: found?.question.question,
     followUpTopic: found?.question.followUpTopic,
     kickoff: found?.question.kickoff,
+    kind: question?.kind,
+    criterion: criterion ? `${criterion.id}: ${criterion.name} — ${criterion.description}` : undefined,
+    probeGuide: criterion ? problem.private.probeGuides?.[criterion.id] : undefined,
+    challengeSummary: checkIn?.challenge,
     questionHighlight: found?.question.highlight,
     availableHint: hint,
     analystNotes: analystNotesOf(session),
@@ -41,16 +53,36 @@ export async function runInterviewerTurn(
     messages: req.messages,
   };
 
+  const system = buildInterviewerSystem(session.config, problem);
+  const user = buildInterviewerUser(input);
+  const candidateLines = req.messages.filter((m) => m.role === "candidate").slice(-3).map((m) => m.text);
   let output: InterviewerOutput;
   try {
-    const result = await completeJson({
-      role: "interviewer",
-      system: buildInterviewerSystem(session.config, getProblem(session.config.problemId)),
-      user: buildInterviewerUser(input),
-      schema: InterviewerOutput,
-    });
-    session.analyst.costUsd += result.costUsd;
-    output = result.data;
+    output = await generate(session, system, user);
+    // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
+    const opening = found !== undefined && req.messages.length === 0;
+    // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
+    if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
+      const verdict = await checkReply(output.reply, candidateLines, hint, code);
+      session.analyst.costUsd += verdict.costUsd;
+      if (!verdict.safe) {
+        console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
+        output = await generate(
+          session,
+          system,
+          `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
+        );
+        const second = await checkReply(output.reply, candidateLines, hint, code);
+        session.analyst.costUsd += second.costUsd;
+        if (!second.safe) {
+          console.info(`[interviewer] fala barrada de novo (${second.reason}): ${output.reply}`);
+          // Na abertura, a pergunta preparada (já filtrada); depois, reconhece e fecha.
+          output = opening
+            ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
+            : { ...output, reply: SAFE_CLOSE_REPLY, highlight: null, end: true, gaveHint: false, challenge: null };
+        }
+      }
+    }
   } catch (err) {
     console.error("[interviewer] falha no LLM:", err instanceof Error ? err.message : err);
     // Primeira fala de um blip: a pergunta preparada, com o grifo dela. Senão, pede pra repetir.
@@ -64,11 +96,16 @@ export async function runInterviewerTurn(
     return { reply: FALLBACK_REPLY, commands: [], end: false };
   }
 
+  // A primeira fala de um blip é a pergunta: encerrar ali não deixaria o candidato responder.
+  if (found && req.messages.length === 0) output.end = false;
+  const t = elapsedMs(session);
+
   const highlight = output.highlight ? clampLines(output.highlight, lineCount) : undefined;
   const commands: EditorCommand[] = highlightCommands(highlight);
   if (output.end) commands.push({ type: "clear_highlights" });
 
-  if (output.gaveHint && hint !== undefined) {
+  // Só conta como dica se a fala traz a dica de fato (o modelo às vezes marca gaveHint ao fechar).
+  if (output.gaveHint && hint !== undefined && containsHint(output.reply, hint)) {
     appendEvent(session, {
       type: "hint",
       sessionId: session.sessionId,
@@ -85,13 +122,62 @@ export async function runInterviewerTurn(
       source: "interviewer",
     });
   }
-  if (output.end) session.lastConversationEndedAt = elapsedMs(session);
+  const outcome = output.probeOutcome;
+  if (outcome) {
+    recordOutcome(session, { t, ...outcome, questionId: question?.id, source: "interviewer" });
+  }
+  // Topou um desafio (da pergunta de desafio ou emendado numa sondagem): o agente volta depois para ver
+  // como foi (policy.enqueueDueCheckIns). Nunca a partir de um retorno, para não virar um ciclo.
+  if (
+    question &&
+    question.kind !== "retorno" &&
+    output.challenge?.accepted &&
+    !session.checkIns.some((c) => c.challengeId === question.id)
+  ) {
+    session.checkIns.push({
+      id: `c-${session.checkIns.length + 1}`,
+      challengeId: question.id,
+      criterionId: question.criterionId,
+      challenge: output.challenge.summary,
+      createdAt: t,
+      versionAtStart: session.codeHistory.at(-1)?.version ?? 0,
+      status: "aguardando",
+    });
+  }
+  if (output.end && checkIn) checkIn.status = "feito";
+  if (output.end) session.lastConversationEndedAt = t;
 
   return { reply: output.reply, commands, end: output.end };
 }
 
+async function generate(session: SessionState, system: string, user: string): Promise<InterviewerOutput> {
+  const result = await completeJson({ role: "interviewer", system, user, schema: InterviewerOutput });
+  session.analyst.costUsd += result.costUsd;
+  return result.data;
+}
+
+function words(text: string): string[] {
+  return text.toLowerCase().match(/[a-zà-ú]{4,}/g) ?? [];
+}
+
+/** A fala traz a dica: boa parte das palavras da dica aparecem nela. */
+function containsHint(reply: string, hint: string): boolean {
+  const said = new Set(words(reply));
+  const hintWords = words(hint);
+  return hintWords.length > 0 && hintWords.filter((w) => said.has(w)).length / hintWords.length >= 0.6;
+}
+
+/** A fala é praticamente a pergunta preparada: quase todas as palavras dela e quase nada a mais. */
+function isAboutTheSame(reply: string, question: string): boolean {
+  const asked = new Set(words(question));
+  const said = words(reply);
+  if (asked.size === 0 || said.length === 0) return false;
+  const extra = said.filter((w) => !asked.has(w)).length;
+  return containsHint(reply, question) && extra <= 2;
+}
+
 function elapsedMs(session: SessionState): number {
-  return Date.now() - session.startedAt;
+  return sessionNow(session);
 }
 
 function highlightCommands(range: LineRange | undefined): EditorCommand[] {

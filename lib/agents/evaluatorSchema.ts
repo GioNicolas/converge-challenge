@@ -3,7 +3,8 @@ import { z } from "zod";
 
 export const EvaluatorCriterion = z.object({
   id: z.string(),
-  score: z.number().int().min(1).max(4),
+  /** null: a sessão não deu oportunidade de observar o critério. */
+  score: z.number().int().min(1).max(4).nullable(),
   /** `at` é um mm:ss que aparece na linha do tempo; evidência com tempo inventado é descartada. */
   evidence: z.array(z.object({ at: z.string(), text: z.string() })).max(3),
 });

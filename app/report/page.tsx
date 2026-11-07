@@ -84,7 +84,7 @@ function SessionReport({ id }: { id: string }) {
           <div key={c.id} className="rounded-padrao bg-superficie p-4 shadow-cartao">
             <p className="flex justify-between font-medium">
               {c.name}
-              <span className="numero">{c.score}/4</span>
+              <span className="numero">{c.score === null ? "Não explorado" : `${c.score}/4`}</span>
             </p>
             {c.evidence.map((e, i) => (
               <p key={i} className="text-corpo text-texto-suave">

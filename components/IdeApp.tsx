@@ -239,7 +239,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
             />
           </div>
           <RunResults state={run} total={problem.visibleTests.length} />
-          <Composer busy={chat.busy} disabled={session.ended} onSend={chat.send} />
+          <Composer busy={chat.busy} disabled={session.ended || chat.ended} onSend={chat.send} />
         </div>
 
         {/* Coluna da questão: o painel do problema e, logo abaixo dele, os botões */}

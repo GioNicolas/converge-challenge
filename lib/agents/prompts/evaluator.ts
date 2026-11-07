@@ -6,11 +6,12 @@ import type { InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
 
-/** Âncoras genéricas de 1 a 4; o "bom" específico de cada critério vem do pacote do problema. */
-const ANCHORS = `1 — Não demonstrou, ou demonstrou errado, mesmo quando perguntado.
-2 — Demonstrou em parte: só quando provocado, de forma rasa ou com erros importantes.
-3 — Demonstrou bem, com pequenas lacunas ou precisando de algum estímulo.
-4 — Demonstrou por conta própria, com clareza e profundidade.`;
+/** Escala pelo que aconteceu quando o critério foi explorado; o "bom" de cada critério vem do pacote do problema. */
+const SCALE = `4 — Mostrou por conta própria e certo; ou respondeu certo e com profundidade quando perguntado sobre um aspecto secundário (ex.: custo de memória).
+3 — Respondeu certo quando perguntado, com pequenas lacunas.
+2 — Respondeu em parte ou raso; ou chegou lá só com dica.
+1 — Errou ou não conseguiu, mesmo com aprofundamento.
+Se o critério teve várias sondagens, pese a mais importante (ex.: num desafio de otimização, o que aconteceu no retorno pesa mais que a primeira resposta).`;
 
 export function buildEvaluatorSystem(config: InterviewConfig, problem: Problem, judgedIds: string[]): string {
   const judged = config.criteria.filter((c) => judgedIds.includes(c.id));
@@ -44,14 +45,18 @@ ${mistakes}
 ${criteria}
 
 Escala:
-${ANCHORS}
+${SCALE}
 
 # Regras
 - Julgue só pelo que está na sessão: código, execuções e o que o CANDIDATO disse. O que o entrevistador disse não conta como mérito do candidato.
-- Sem evidência, a nota é baixa. Não presuma que ele sabia algo que não mostrou.
-- Resposta dada só depois de o entrevistador perguntar vale menos que iniciativa própria (no máximo 3).
-- Dica pedida não zera nada, mas entra em como ele usou a ajuda.
-- Colagem grande de código é um alerta: diga isso em concerns se houver.
+- A seção "Cobertura" lista como ele se saiu em cada sondagem. Ela é a base da nota; a linha do tempo confirma e dá contexto.
+- Começar por uma solução simples (força bruta) é estratégia legítima, não falha. Em complexidade, o que conta é se ele sabe o custo da solução dele e o que aconteceu quando foi desafiado a melhorar.
+- Não puna por não ter mencionado sozinho um aspecto secundário (ex.: memória) se, quando perguntado, respondeu certo.
+- Não presuma que ele sabia algo que não mostrou. Mas falta de pergunta não é falha dele: avalie só o que foi explorado.
+- Dica não zera nada, mas entra em como ele usou a ajuda.
+- Desafio de otimização: se ele não conseguiu melhorar sozinho (só com dica, ou não conseguiu), a nota de complexidade é no máximo 2, mesmo que tenha explicado bem o custo da primeira solução. Se conseguiu sozinho e explicou o novo custo, pode ser 4.
+- score = null só quando a sessão não deu NENHUMA oportunidade de observar o critério (nem pergunta, nem fala, nem código que mostre). Comunicação é observável em qualquer conversa.
+- Colagem grande de código é um alerta: diga isso em concerns se houver. Código colado só conta como mérito (abordagem, bordas) se ele explicar direito por que funciona; se disse que copiou ou não soube explicar, abordagem no máximo 2.
 - Os testes escondidos rodaram depois que a sessão acabou e já viraram a nota de corretude: não os cite como evidência de outro critério.
 - Cada evidência cita o momento com o mm:ss EXATO de uma linha da sessão (o que vem entre colchetes). Nunca invente um tempo.
 - Evidência é um fato observável, curto, na terceira pessoa ("Explicou que o loop interno começa em i+1 para não somar o elemento com ele mesmo."). Sem adjetivos vazios.
@@ -60,10 +65,11 @@ ${ANCHORS}
 - Tudo em português do Brasil.
 
 Responda SOMENTE com JSON neste formato, com um item em criteria para cada critério acima (${judgedIds.join(", ")}):
-{"criteria": [{"id": string, "score": 1 | 2 | 3 | 4, "evidence": [{"at": "mm:ss", "text": string}]}], "summary": string, "strengths": [string], "concerns": [string], "nextSteps": [string]}`;
+{"criteria": [{"id": string, "score": 1 | 2 | 3 | 4 | null, "evidence": [{"at": "mm:ss", "text": string}]}], "summary": string, "strengths": [string], "concerns": [string], "nextSteps": [string]}`;
 }
 
 export function buildEvaluatorUser(input: {
+  coverage: string[];
   durationLabel: string;
   language: string;
   signals: string[];
@@ -73,6 +79,9 @@ export function buildEvaluatorUser(input: {
 }): string {
   return `# Sinais objetivos (calculados pelo sistema)
 ${input.signals.map((s) => `- ${s}`).join("\n")}
+
+# Cobertura (como ele se saiu em cada critério explorado)
+${input.coverage.join("\n")}
 
 # Linha do tempo (duração ${input.durationLabel}, linguagem final: ${input.language})
 ${input.timeline.join("\n")}

@@ -1,0 +1,445 @@
+/**
+ * Entrevistas simuladas, do início ao relatório, sem a IDE. Mede o agente antes e depois de mexer nos prompts.
+ * O código de cada perfil é roteirizado; as falas do candidato vêm de um LLM com a persona.
+ * Uso: npx tsx scripts/simulate.ts [--only otimiza,trava] [--out sim-runs]
+ */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
+import { runAnalyst } from "@/lib/agents/analyst";
+import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
+import { runInterviewerTurn } from "@/lib/agents/interviewer";
+import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
+import { DEFAULT_CONFIG } from "@/lib/config/default";
+import type { Blip, ChatMessage, Report, SessionEvent } from "@/lib/contracts";
+import { runPythonTests } from "@/lib/execution/python";
+import { formatMs } from "@/lib/format";
+import { completeJson } from "@/lib/llm";
+import { problems as IDE_PROBLEMS } from "@/lib/problems";
+import { appendEvent, getOrCreateSession } from "@/lib/session/store";
+import type { SessionState } from "@/lib/session/types";
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type EventInput = DistributiveOmit<SessionEvent, "sessionId" | "t">;
+
+const DURATION_MIN = 15;
+const TICK_MS = 5_000;
+const PAUSE_MS = 8_000;
+/** Cada fala (do candidato ou do agente) "custa" esse tempo de sessão. */
+const TURN_MS = 15_000;
+const MAX_TURNS = 8;
+const ANALYZED = new Set<SessionEvent["type"]>(["pause", "run", "paste", "blip_closed"]);
+
+// ---------------------------------------------------------------------------
+// Perfis
+// ---------------------------------------------------------------------------
+
+const BRUTE = `def two_sum(nums, target):
+    for i in range(len(nums)):
+        for j in range(i + 1, len(nums)):
+            if nums[i] + nums[j] == target:
+                return [i, j]
+    return []
+`;
+const BRUTE_BUG = BRUTE.replace("range(i + 1, len(nums))", "range(len(nums))");
+const HASH = `def two_sum(nums, target):
+    vistos = {}
+    for i, n in enumerate(nums):
+        if target - n in vistos:
+            return [vistos[target - n], i]
+        vistos[n] = i
+    return []
+`;
+
+interface Stage {
+  /** ms de sessão; com `afterOptimizing`, ms depois de o candidato topar otimizar. */
+  at: number;
+  code: string;
+  run?: boolean;
+  paste?: boolean;
+  afterOptimizing?: boolean;
+}
+
+interface Persona {
+  key: string;
+  title: string;
+  /** Como o candidato fala e o que ele sabe (vai para o LLM do candidato). */
+  persona: string;
+  stages: Stage[];
+  /** Chance de abrir um balão (1 = sempre). */
+  opensBlips: number;
+  checks: (r: SimResult) => Check[];
+}
+
+interface Check {
+  label: string;
+  pass: boolean;
+}
+
+const PERSONAS: Persona[] = [
+  {
+    key: "otimiza",
+    title: "Força bruta de propósito, otimiza quando desafiado",
+    persona:
+      "Você começa pela força bruta de propósito, para garantir que funciona. Sabe dizer que é O(n²) de tempo e O(1) de memória e por quê. " +
+      "Se o entrevistador pedir para melhorar ou otimizar, você topa ('vou tentar') e depois chega na ideia de guardar os números vistos num dicionário, O(n) de tempo e O(n) de memória. " +
+      "Explica com clareza, mas sem discursos.",
+    stages: [
+      { at: 50_000, code: BRUTE },
+      { at: 70_000, code: BRUTE, run: true },
+      { at: 90_000, code: HASH, afterOptimizing: true },
+      { at: 100_000, code: HASH, run: true, afterOptimizing: true },
+    ],
+    opensBlips: 1,
+    checks: (r) => [
+      { label: "desafiou a otimizar", pass: r.challenged },
+      { label: "fechou o desafio (retorno ou na hora)", pass: r.checkedIn },
+      { label: "otimizou no código", pass: r.optimized },
+      { label: "complexidade ≥ 3", pass: (score(r.report, "complexidade") ?? 0) >= 3 },
+    ],
+  },
+  {
+    key: "trava",
+    title: "Força bruta, desafiado a otimizar mas não consegue",
+    persona:
+      "Você só conhece a força bruta. Sabe dizer que é O(n²) quando perguntado. Você NÃO conhece a técnica de dicionário/hash map " +
+      "para esse problema e nunca fala em dicionário, hash, mapa, set ou ordenar. Se pedirem para otimizar, você topa tentar, " +
+      "mas não consegue pensar em nada; quando perguntarem como foi, admite que travou. Se oferecerem uma dica, aceita, " +
+      "mas mesmo assim só chega a uma ideia vaga ('talvez guardar alguma coisa? não sei'), sem fechar.",
+    stages: [
+      { at: 50_000, code: BRUTE },
+      { at: 70_000, code: BRUTE, run: true },
+    ],
+    opensBlips: 1,
+    checks: (r) => [
+      { label: "desafiou a otimizar", pass: r.challenged },
+      { label: "fechou o desafio (retorno ou na hora)", pass: r.checkedIn },
+      { label: "complexidade ≤ 2", pass: (score(r.report, "complexidade") ?? 4) <= 2 },
+    ],
+  },
+  {
+    key: "calado",
+    title: "Respostas monossilábicas, bug corrigido depois do teste",
+    persona:
+      "Você fala muito pouco: respostas de 1 a 4 palavras ('sei lá', 'porque sim', 'acho que funciona'). Não explica raciocínio. " +
+      "Se pedirem para otimizar, diz que não sabe.",
+    stages: [
+      { at: 60_000, code: BRUTE_BUG },
+      { at: 80_000, code: BRUTE_BUG, run: true },
+      { at: 200_000, code: BRUTE },
+      { at: 210_000, code: BRUTE, run: true },
+    ],
+    opensBlips: 0.7,
+    checks: (r) => [{ label: "comunicação ≤ 2", pass: (score(r.report, "comunicacao") ?? 4) <= 2 }],
+  },
+  {
+    key: "forte",
+    title: "Vai direto no hashmap e explica tudo",
+    persona:
+      "Você é experiente. Explica o plano antes de codar: dicionário de vistos em uma passada, O(n) de tempo e O(n) de memória, " +
+      "e comenta sozinho casos como repetidos, negativos e por que procurar antes de inserir. Fala com clareza e confiança, 1 a 3 frases.",
+    stages: [
+      { at: 60_000, code: HASH },
+      { at: 75_000, code: HASH, run: true },
+    ],
+    opensBlips: 1,
+    checks: (r) => [{ label: "nota geral ≥ 3", pass: (r.report?.overallScore ?? 0) >= 3 }],
+  },
+  {
+    key: "cola",
+    title: "Cola a solução pronta e não sabe explicar",
+    persona:
+      "Você colou a solução de algum lugar e NÃO entende o código. Antes de colar, não tinha plano ('vou ver aqui'). " +
+      "Quando perguntam, responde vago ou errado: acha que o dicionário 'guarda os resultados das somas', não sabe por que procura antes de inserir " +
+      "('foi assim que fiz'), e chuta a complexidade ('acho que O(n²)? não sei'). Nunca dá uma explicação correta e completa.",
+    stages: [
+      { at: 120_000, code: HASH, paste: true },
+      { at: 130_000, code: HASH, run: true },
+    ],
+    opensBlips: 1,
+    checks: (r) => [
+      { label: "colagem citada no relatório", pass: (r.report?.concerns ?? []).some((c) => /col(a|ou|agem)/i.test(c)) },
+      { label: "abordagem ≤ 2", pass: (score(r.report, "abordagem") ?? 4) <= 2 },
+    ],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Candidato simulado
+// ---------------------------------------------------------------------------
+
+const CandidateTurn = z.object({
+  reply: z.string(),
+  /** true quando nesta fala o candidato topou tentar otimizar o código. */
+  startsOptimizing: z.boolean(),
+});
+
+async function candidateReply(persona: Persona, code: string, messages: ChatMessage[]): Promise<z.infer<typeof CandidateTurn>> {
+  const problem = IDE_PROBLEMS["two-sum"];
+  const transcript = messages.map((m) => `${m.role === "agent" ? "Entrevistador" : "Você"}: ${m.text}`).join("\n");
+  const result = await completeJson({
+    role: "fast",
+    system: `Você interpreta um CANDIDATO numa entrevista técnica de programação, em português do Brasil informal.
+Problema: ${problem.title}: ${problem.statement}
+Sua persona: ${persona.persona}
+Responda à última fala do entrevistador como esse candidato responderia, em 1 a 3 frases faladas (sem markdown, sem código).
+startsOptimizing = true só se nesta fala você topou tentar melhorar/otimizar o código agora.
+Responda SOMENTE com JSON: {"reply": string, "startsOptimizing": boolean}`,
+    user: `Seu código atual:\n${code}\n\nConversa:\n${transcript}`,
+    schema: CandidateTurn,
+  });
+  return result.data;
+}
+
+// ---------------------------------------------------------------------------
+// Simulação
+// ---------------------------------------------------------------------------
+
+interface SimResult {
+  persona: Persona;
+  report?: Report;
+  error?: string;
+  log: string[];
+  blips: number;
+  conversations: number;
+  challenged: boolean;
+  checkedIn: boolean;
+  optimized: boolean;
+  hints: number;
+  unexplored: string[];
+}
+
+function score(report: Report | undefined, id: string): number | undefined {
+  const s = report?.criteria.find((c) => c.id === id)?.score;
+  return s === null ? undefined : s;
+}
+
+const OPTIMIZE_RE = /otimiz|melhorar (a |essa |isso)|mais (rápid|eficiente)|reduzir (o tempo|a complexidade)|dá pra fazer melhor/i;
+const CHECKIN_RE = /como foi|conseguiu|chegou (a|em) alguma|e aí,? (o que|como)|pensou em algo/i;
+
+async function simulate(persona: Persona): Promise<SimResult> {
+  let simT = 0;
+  const sessionId = `sim-${persona.key}-${Date.now()}`;
+  const session: SessionState = getOrCreateSession(sessionId, { ...DEFAULT_CONFIG, durationMin: DURATION_MIN });
+  session.clock = () => simT;
+
+  const res: SimResult = {
+    persona,
+    log: [],
+    blips: 0,
+    conversations: 0,
+    challenged: false,
+    checkedIn: false,
+    optimized: false,
+    hints: 0,
+    unexplored: [],
+  };
+  const log = (line: string) => res.log.push(`[${formatMs(simT)}] ${line}`);
+  const ide = IDE_PROBLEMS["two-sum"];
+
+  let version = 0;
+  let code = ide.starters.python;
+  let lastEditAt: number | undefined;
+  let pausedSinceEdit = true;
+  let optimizingSince: number | undefined;
+  const done = new Set<Stage>();
+  let blipOnScreen: Blip | undefined;
+
+  async function send(input: EventInput): Promise<void> {
+    const event = { ...input, sessionId, t: simT } as SessionEvent;
+    appendEvent(session, event);
+    if (event.type === "session_started") enqueueKickoff(session, event.t);
+    if (event.type === "session_ended") startEvaluation(session);
+    if (ANALYZED.has(event.type)) await runAnalyst(session, event);
+    handleBlip(decideBlip(session, simT));
+  }
+
+  function handleBlip(r: { blip?: Blip; dismissBlipId?: string }): void {
+    if (r.dismissBlipId && blipOnScreen?.id === r.dismissBlipId) {
+      log(`balão expirou sem clique: ${blipOnScreen.preview}`);
+      blipOnScreen = undefined;
+    }
+    if (r.blip) {
+      blipOnScreen = r.blip;
+      res.blips += 1;
+      log(`BALÃO: ${r.blip.preview}`);
+    }
+  }
+
+  async function conversation(blip: Blip): Promise<void> {
+    res.conversations += 1;
+    await send({ type: "blip_opened", blipId: blip.id });
+    const messages: ChatMessage[] = [];
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+      const hintsBefore = session.hintsUsed;
+      const agent = await runInterviewerTurn(session, { blipId: blip.id, messages });
+      messages.push({ role: "agent", text: agent.reply });
+      await send({ type: "speech", role: "agent", text: agent.reply, blipId: blip.id });
+      const grifo = agent.commands.find((c) => c.type === "highlight_range");
+      log(`  entrevistador: ${agent.reply}${grifo && grifo.type === "highlight_range" ? ` [grifo ${grifo.startLine}-${grifo.endLine}]` : ""}${session.hintsUsed > hintsBefore ? " [DICA]" : ""}${agent.end ? " [fim]" : ""}`);
+      if (OPTIMIZE_RE.test(agent.reply) && turn <= 2) res.challenged = true;
+      if (res.challenged && optimizingSince !== undefined && CHECKIN_RE.test(agent.reply)) res.checkedIn = true;
+      simT += TURN_MS;
+      if (agent.end) break;
+
+      const cand = await candidateReply(persona, code, messages);
+      messages.push({ role: "candidate", text: cand.reply });
+      await send({ type: "speech", role: "candidate", text: cand.reply, blipId: blip.id });
+      log(`  candidato: ${cand.reply}${cand.startsOptimizing ? " [vai otimizar]" : ""}`);
+      if (cand.startsOptimizing && optimizingSince === undefined) optimizingSince = simT;
+      simT += TURN_MS;
+    }
+    await send({ type: "blip_closed", blipId: blip.id, reason: "agent" });
+  }
+
+  await send({ type: "session_started", configId: session.config.id, problemId: "two-sum", language: "python" });
+  log("sessão começou");
+
+  const endAt = DURATION_MIN * 60_000;
+  while (simT < endAt) {
+    // Etapas do roteiro de código.
+    for (const stage of persona.stages) {
+      if (done.has(stage)) continue;
+      const due = stage.afterOptimizing ? (optimizingSince !== undefined ? optimizingSince + stage.at : Infinity) : stage.at;
+      if (simT < due) continue;
+      done.add(stage);
+      if (stage.code !== code) {
+        code = stage.code;
+        version += 1;
+        await send({ type: "snapshot", code, version, language: "python" });
+        if (stage.paste) await send({ type: "paste", chars: code.length, lines: code.split("\n").length, startLine: 1 });
+        if (code === HASH && optimizingSince !== undefined) res.optimized = true;
+        lastEditAt = simT;
+        pausedSinceEdit = false;
+        log(stage.paste ? "colou código" : `escreveu código (versão ${version})`);
+      }
+      if (stage.run) {
+        const result = await runPythonTests(ide, code, { tests: ide.visibleTests, runTimeoutMs: 5_000 });
+        await send({ type: "run", result });
+        log(`rodou: ${result.passed}/${result.total}`);
+      }
+    }
+
+    // Pausa de 8 s depois de editar, como a IDE.
+    if (!pausedSinceEdit && lastEditAt !== undefined && simT - lastEditAt >= PAUSE_MS) {
+      pausedSinceEdit = true;
+      await send({ type: "pause", idleMs: simT - lastEditAt });
+    }
+
+    // Polling do balão (GET /api/blip/pending).
+    handleBlip(decideBlip(session, simT));
+    if (blipOnScreen) {
+      const blip = blipOnScreen;
+      blipOnScreen = undefined;
+      if (Math.random() < persona.opensBlips) {
+        log(`abriu o balão`);
+        await conversation(blip);
+      } else {
+        log(`ignorou o balão`);
+      }
+    }
+    simT += TICK_MS;
+  }
+
+  await send({ type: "session_ended", reason: "timeout" });
+  log("sessão encerrada");
+  const status = await waitForEvaluation(session);
+  res.report = status?.report;
+  res.error = status?.error;
+  res.hints = session.hintsUsed;
+  // Pelo estado do agente, não só pelo texto: pergunta de desafio aberta e retorno concluído.
+  res.challenged ||= session.queue.some((q) => q.kind === "desafio" && q.status === "asked");
+  // Desafio fechado: o agente voltou para conferir, ou o candidato já respondeu com a ideia na própria conversa.
+  const challengeIds = new Set(session.queue.filter((q) => q.kind === "desafio").map((q) => q.id));
+  res.checkedIn ||=
+    session.checkIns.some((c) => c.status === "feito") ||
+    Object.values(session.coverage).some((c) => c.outcomes.some((o) => o.questionId !== undefined && challengeIds.has(o.questionId)));
+  res.unexplored = res.report?.criteria.filter((c) => c.score === null).map((c) => c.id) ?? [];
+  log(`check-ins: ${session.checkIns.map((c) => `${c.challenge} (${c.status})`).join("; ") || "nenhum"}`);
+  log(`cobertura: ${Object.entries(session.coverage).map(([id, c]) => `${id}=${c.outcomes.map((o) => o.kind).join("/") || c.status}`).join(" ")}`);
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// Saída
+// ---------------------------------------------------------------------------
+
+function render(r: SimResult): string {
+  const rep = r.report;
+  const lines = [
+    `# ${r.persona.key}: ${r.persona.title}`,
+    "",
+    ...r.log,
+    "",
+    "## Relatório",
+    rep
+      ? [
+          `${rep.recommendation} · ${rep.overallScore}/4`,
+          rep.summary,
+          ...rep.criteria.map(
+            (c) => `- ${c.name}: ${c.score ?? "não explorado"}\n${c.evidence.map((e) => `    [${formatMs(e.t)}] ${e.text}`).join("\n")}`,
+          ),
+          `Atenção: ${rep.concerns.join(" | ")}`,
+        ].join("\n")
+      : `falhou: ${r.error}`,
+  ];
+  return lines.join("\n");
+}
+
+async function main(): Promise<void> {
+  try {
+    process.loadEnvFile(".env.local");
+  } catch {
+    // sem .env.local: usa as variáveis do ambiente
+  }
+  const args = process.argv.slice(2);
+  const only = args.includes("--only") ? args[args.indexOf("--only") + 1].split(",") : undefined;
+  const outDir = args.includes("--out") ? args[args.indexOf("--out") + 1] : "sim-runs";
+  const personas = PERSONAS.filter((p) => !only || only.includes(p.key));
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dir = join(outDir, stamp);
+  mkdirSync(dir, { recursive: true });
+
+  const results = await Promise.all(
+    personas.map((p) =>
+      simulate(p).catch((err: unknown): SimResult => ({
+        persona: p,
+        error: err instanceof Error ? err.message : String(err),
+        log: [],
+        blips: 0,
+        conversations: 0,
+        challenged: false,
+        checkedIn: false,
+        optimized: false,
+        hints: 0,
+        unexplored: [],
+      })),
+    ),
+  );
+
+  const rows: string[] = [];
+  let failed = 0;
+  for (const r of results) {
+    writeFileSync(join(dir, `${r.persona.key}.md`), render(r));
+    const checks = [
+      { label: `todos os critérios explorados${r.unexplored.length ? ` (faltou: ${r.unexplored.join(", ")})` : ""}`, pass: r.unexplored.length === 0 },
+      ...r.persona.checks(r),
+    ];
+    failed += checks.filter((c) => !c.pass).length;
+    const crit = r.report?.criteria.map((c) => `${c.id.slice(0, 5)} ${c.score ?? "–"}`).join(" ") ?? `erro: ${r.error}`;
+    rows.push(
+      `${r.persona.key.padEnd(8)} geral ${r.report?.overallScore ?? "–"} | ${crit} | balões ${r.blips}, conversas ${r.conversations}, dicas ${r.hints}`,
+      ...checks.map((c) => `           ${c.pass ? "✓" : "✗"} ${c.label}`),
+    );
+  }
+  const summary = rows.join("\n");
+  writeFileSync(join(dir, "resumo.txt"), summary);
+  console.log(summary);
+  console.log(`\ntranscrições em ${dir}/ · ${failed} checagem(ns) falhando`);
+}
+
+main().catch((err: unknown) => {
+  console.error(err instanceof Error ? err.message : err);
+  process.exitCode = 1;
+});

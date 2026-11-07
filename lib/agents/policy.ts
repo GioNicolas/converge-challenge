@@ -2,6 +2,7 @@
  * Política determinística do agente: escolhe quando um blip aparece e qual dica está disponível.
  * O conteúdo das perguntas vem do Analyst (lib/agents/analyst.ts), menos a pergunta de abertura.
  */
+import { isCovered } from "@/lib/agents/coverage";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
 import { latestCode } from "@/lib/session/store";
 import type { QueuedQuestion, SessionState } from "@/lib/session/types";
@@ -45,6 +46,20 @@ const BOOST_FAILED_RUN = 0.1;
 const BOOST_LONG_PAUSE = 0.1;
 /** Pausa a partir desse tamanho conta como pausa longa pro boost. */
 const LONG_PAUSE_MS = 30_000;
+/** A partir dessa fração do tempo, pergunta de critério ainda não explorado ganha reforço. */
+const AGENDA_START_FRACTION = 0.4;
+/** Reforço de agenda: critério da recrutadora que ainda não foi explorado. */
+const BOOST_UNCOVERED = 0.15;
+/** Na reta final, pergunta de critério não explorado pula o intervalo entre blips e o limite de blips. */
+const FINAL_STRETCH_MS = 8 * 60_000;
+/** Retorno de desafio: depois desse tempo volta mesmo sem o código mudar. */
+const CHECK_IN_MAX_WAIT_MS = 4 * 60_000;
+/** Retorno de desafio: com o código mudado, volta depois desse tempo sem digitar. */
+const CHECK_IN_IDLE_MS = 30_000;
+/** Retorno de desafio: volta de qualquer jeito quando faltar esse tempo. */
+const CHECK_IN_BEFORE_END_MS = 5 * 60_000;
+/** Pergunta ignorada de critério não explorado volta depois desse tempo (uma vez). */
+const IGNORED_RETRY_MS = 120_000;
 /** Tipos que deixam o candidato parado: ele não está digitando nem rodando nada agora. */
 const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_closed", "session_started"]);
 /** Depois desse tempo sem evento novo, o candidato também conta como parado. */
@@ -147,6 +162,11 @@ function expireBlip(session: SessionState, t: number): string | undefined {
 
   found.question.status = "ignored";
   session.pendingBlipId = undefined;
+  // Critério da agenda ainda não explorado: a pergunta volta mais tarde, uma vez.
+  const q = found.question;
+  if (!q.kickoff && q.kind !== "retorno" && !isCovered(session, q.criterionId) && q.criterionId !== undefined && !q.retried) {
+    session.queue.push({ ...q, id: `q-${session.queue.length + 1}`, status: "queued", snoozedUntil: t + IGNORED_RETRY_MS, retried: true });
+  }
   // Abertura ignorada não conta contra o candidato: ele pode ter preferido codar.
   if (!found.question.kickoff) {
     session.evidence.push({
@@ -161,6 +181,7 @@ function expireBlip(session: SessionState, t: number): string | undefined {
 
 function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: string } {
   if (session.ended) return { reason: "sessão encerrada" };
+  enqueueDueCheckIns(session, t);
   if (session.pendingBlipId) return { reason: "esperando: outro blip já aberto ou pendente" };
 
   const kickoff = session.queue.find((q) => q.kickoff && q.status === "queued");
@@ -180,11 +201,14 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   if (!isCandidateIdle(session, t)) return { reason: "esperando: candidato digitando" };
 
   const analystBlips = session.blips.filter((b) => !session.queue.some((q) => q.id === b.id && q.kickoff)).length;
-  if (analystBlips >= MAX_ANALYST_BLIPS) return { reason: `limite de ${MAX_ANALYST_BLIPS} blips atingido` };
+  // O limite não barra retorno de desafio nem critério da agenda ainda não explorado.
+  const overLimit = analystBlips >= MAX_ANALYST_BLIPS;
 
   const { boost, reason: boostReason } = momentBoost(session);
   const candidates = session.queue
-    .filter((q) => q.status === "queued" && !isSnoozed(q, t) && q.priority + boost >= BLIP_THRESHOLD)
+    .filter((q) => q.status === "queued" && !isSnoozed(q, t))
+    .filter((q) => !overLimit || q.kind === "retorno" || !isCovered(session, q.criterionId))
+    .filter((q) => q.priority + boost + agendaBoost(session, q, t) >= BLIP_THRESHOLD)
     // Momento-chave primeiro (o candidato tem certeza que há o que falar), depois a prioridade.
     .sort(
       (a, b) =>
@@ -192,6 +216,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
         b.priority + (b.focusArea ? FOCUS_QUESTION_BONUS : 0) - (a.priority + (a.focusArea ? FOCUS_QUESTION_BONUS : 0)),
     );
   if (candidates.length === 0) {
+    if (overLimit) return { reason: `limite de ${MAX_ANALYST_BLIPS} blips atingido` };
     const waiting = session.queue.filter((q) => q.status === "queued");
     if (waiting.length === 0) return { reason: "sem pergunta na fila" };
     const snoozed = waiting.filter((q) => isSnoozed(q, t));
@@ -209,10 +234,57 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
     }
     const wait = waitReason(session, t, q);
     if (wait !== undefined) return { reason: wait };
-    const label = boost > 0 ? ` (boost +${boost.toFixed(2)}: ${boostReason})` : "";
+    const agenda = agendaBoost(session, q, t);
+    const label =
+      (boost > 0 ? ` (boost +${boost.toFixed(2)}: ${boostReason})` : "") + (agenda > 0 ? ` (agenda +${agenda.toFixed(2)})` : "");
     return { blip: raise(session, q, t), reason: `blip ${q.id}${label}` };
   }
   return { reason: "sem pergunta válida na fila (todas obsoletas)" };
+}
+
+/** Reforço de agenda: critério da recrutadora ainda não explorado, depois de parte do tempo. */
+function agendaBoost(session: SessionState, q: QueuedQuestion, t: number): number {
+  if (q.criterionId === undefined || isCovered(session, q.criterionId)) return 0;
+  return t >= session.config.durationMin * 60_000 * AGENDA_START_FRACTION ? BOOST_UNCOVERED : 0;
+}
+
+function isFinalStretchForAgenda(session: SessionState, q: QueuedQuestion, t: number): boolean {
+  if (q.criterionId === undefined || isCovered(session, q.criterionId)) return false;
+  return session.config.durationMin * 60_000 - t <= FINAL_STRETCH_MS;
+}
+
+/**
+ * Desafio topado vira pergunta de retorno quando chega a hora, o que vier primeiro:
+ * rodou depois de mexer no código; mexeu e ficou 30 s parado; passaram 4 min; ou faltam 5 min.
+ */
+function enqueueDueCheckIns(session: SessionState, t: number): void {
+  for (const checkIn of session.checkIns) {
+    if (checkIn.status !== "aguardando") continue;
+    const changed = session.codeHistory.filter((v) => v.t > checkIn.createdAt && v.version > checkIn.versionAtStart);
+    const lastChange = changed.at(-1);
+    const ranAfterChange =
+      lastChange !== undefined && session.events.some((e) => e.type === "run" && e.t >= lastChange.t);
+    const idleAfterChange = lastChange !== undefined && t - lastChange.t >= CHECK_IN_IDLE_MS && isCandidateIdle(session, t);
+    const waitedLong = t - checkIn.createdAt >= CHECK_IN_MAX_WAIT_MS;
+    const endingSoon = session.config.durationMin * 60_000 - t <= CHECK_IN_BEFORE_END_MS;
+    if (!ranAfterChange && !idleAfterChange && !waitedLong && !endingSoon) continue;
+
+    checkIn.status = "na_fila";
+    session.queue.push({
+      id: `q-${session.queue.length + 1}`,
+      question: `E aí, como foi com o desafio de ${checkIn.challenge}? O que você pensou?`,
+      followUpTopic: `o que ele tentou ou pensou para ${checkIn.challenge}`,
+      topicLabel: "como foi o desafio",
+      priority: 0.95,
+      createdAt: t,
+      status: "queued",
+      // Como momento-chave: passa na frente e pula o intervalo entre blips.
+      keyMoment: "retorno de um desafio que o candidato topou",
+      kind: "retorno",
+      criterionId: checkIn.criterionId,
+      checkInId: checkIn.id,
+    });
+  }
 }
 
 /** Pergunta adiada pelo candidato ("agora não") que ainda não voltou. */
@@ -224,8 +296,8 @@ function isSnoozed(q: QueuedQuestion, t: number): boolean {
 function waitReason(session: SessionState, t: number, q: QueuedQuestion): string | undefined {
   if (t < WARMUP_MS) return `esperando: aquecimento (faltam ${Math.ceil((WARMUP_MS - t) / 1000)} s)`;
 
-  // Prioridade alta ou momento-chave pulam a regra de 60 s entre blips.
-  const skipsSpacing = q.priority >= HIGH_PRIORITY || q.keyMoment !== undefined;
+  // Prioridade alta, momento-chave e critério não explorado na reta final pulam a regra de 60 s entre blips.
+  const skipsSpacing = q.priority >= HIGH_PRIORITY || q.keyMoment !== undefined || isFinalStretchForAgenda(session, q, t);
   const lastBlip = session.blips.at(-1);
   if (lastBlip && !skipsSpacing && t - lastBlip.createdAt < MIN_GAP_BETWEEN_BLIPS_MS) {
     const elapsed = Math.floor((t - lastBlip.createdAt) / 1000);
@@ -274,6 +346,7 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
 /** Texto curto do balão. Nunca a pergunta inteira. */
 function previewFor(q: QueuedQuestion): string {
   if (q.kickoff) return "Quando quiser, uma pergunta rápida";
+  if (q.kind === "retorno") return "E aí, como foi o desafio?";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
 }
 

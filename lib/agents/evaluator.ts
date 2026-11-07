@@ -3,6 +3,7 @@
  * o LLM só julga os critérios subjetivos, e cada evidência dele precisa citar um momento real da sessão.
  * Nota geral e recomendação também saem daqui, não do LLM.
  */
+import { OBJECTIVE_CRITERION } from "@/lib/agents/coverage";
 import { EvaluatorOutput } from "@/lib/agents/evaluatorSchema";
 import { runHiddenTests, type HiddenTestsResult } from "@/lib/agents/hiddenTests";
 import { allPassed } from "@/lib/agents/policy";
@@ -11,11 +12,9 @@ import type { Report, SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
 import { latestCode, numberCode } from "@/lib/session/store";
-import type { CodeVersion, ReportStatus, SessionState } from "@/lib/session/types";
+import type { CodeVersion, ProbeKind, ReportStatus, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
-/** Critério calculado pelos testes escondidos, sem LLM. */
-const OBJECTIVE_CRITERION = "corretude";
 /** Colagem a partir disso conta como "grande" nos sinais. */
 const LARGE_PASTE_LINES = 5;
 const MAX_CODE_VERSIONS = 6;
@@ -70,9 +69,14 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
   status.hiddenTests = hidden;
 
   const timeline = buildTimeline(session);
-  const judgedIds = config.criteria.map((c) => c.id).filter((id) => id !== OBJECTIVE_CRITERION);
+  // Sem nenhuma sondagem, observação ou fala do candidato, nem vai para o LLM: vira null. O resto o LLM julga
+  // (e pode devolver null se não houve oportunidade de observar).
+  const judgedIds = config.criteria
+    .map((c) => c.id)
+    .filter((id) => id !== OBJECTIVE_CRITERION && isExplored(session, id));
   const system = buildEvaluatorSystem(config, problem, judgedIds);
   const user = buildEvaluatorUser({
+    coverage: timeline.coverage,
     durationLabel: formatMs(endT),
     language: session.language,
     signals: describeSignals(session, hidden),
@@ -86,7 +90,10 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
 
   const criteria = config.criteria.map((c) => {
     if (c.id === OBJECTIVE_CRITERION) return { id: c.id, name: c.name, ...correctness(session, hidden, endT) };
-    const judged = byId.get(c.id)!;
+    const judged = byId.get(c.id);
+    if (!judged || !judgedIds.includes(c.id) || judged.score === null) {
+      return { id: c.id, name: c.name, score: null, evidence: [{ t: endT, text: "Não explorado na entrevista." }] };
+    }
     return {
       id: c.id,
       name: c.name,
@@ -99,8 +106,13 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     };
   });
 
-  const totalWeight = config.criteria.reduce((sum, c) => sum + c.weight, 0);
-  const weighted = config.criteria.reduce((sum, c, i) => sum + criteria[i].score * c.weight, 0) / totalWeight;
+  // Média só dos critérios explorados (corretude sempre tem nota).
+  const scored = config.criteria.flatMap((c, i) => {
+    const score = criteria[i].score;
+    return score === null ? [] : [{ score, weight: c.weight }];
+  });
+  const totalWeight = scored.reduce((sum, c) => sum + c.weight, 0);
+  const weighted = scored.reduce((sum, c) => sum + c.score * c.weight, 0) / totalWeight;
   const overall = Math.round(Math.min(4, Math.max(1, weighted)) * 10) / 10;
   const tests = testCounts(session, hidden);
 
@@ -228,6 +240,8 @@ function describeSignals(session: SessionState, hidden: HiddenTestsResult): stri
 
 interface Timeline {
   lines: string[];
+  /** Por critério, como ele se saiu em cada sondagem ("[03:10] respondeu_bem: …"). */
+  coverage: string[];
   codeVersions: string[];
   analystNotes: string[];
   /** mm:ss citável → t. Só tempos que aparecem no prompt. */
@@ -258,7 +272,34 @@ function buildTimeline(session: SessionState): Timeline {
     (v) => `${label(v.t)} versão ${v.version} (${v.language}):\n${numberCode(v.code)}`,
   );
   const analystNotes = session.evidence.map((n) => `${label(n.t)} (${n.criterionId}) ${n.note}`);
-  return { lines, codeVersions, analystNotes, labels };
+  const coverage = session.config.criteria.map((c) => {
+    const outcomes = session.coverage[c.id]?.outcomes ?? [];
+    const items = outcomes.map((o) => `  ${label(o.t)} ${OUTCOME_LABELS[o.kind]}: ${o.note}`);
+    return `- ${c.id}:${items.length ? `\n${items.join("\n")}` : " nenhuma sondagem registrada (use a linha do tempo e as observações)"}`;
+  });
+  const challenges = session.checkIns.map(
+    (ci) => `${label(ci.createdAt)} topou o desafio de ${ci.challenge}${ci.status === "feito" ? " (o entrevistador voltou para conferir)" : " (o entrevistador não chegou a voltar)"}`,
+  );
+  return { lines, coverage: [...coverage, ...challenges], codeVersions, analystNotes, labels };
+}
+
+const OUTCOME_LABELS: Record<ProbeKind, string> = {
+  espontaneo: "mostrou por conta própria",
+  respondeu_bem: "respondeu bem quando perguntado",
+  parcial: "respondeu em parte",
+  errou: "errou",
+  nao_conseguiu: "não conseguiu",
+  com_dica: "chegou lá com dica",
+  recusou: "preferiu não responder",
+};
+
+/** Teve sondagem, observação do analista ou do entrevistador, ou ao menos uma conversa com o candidato. */
+function isExplored(session: SessionState, criterionId: string): boolean {
+  return (
+    (session.coverage[criterionId]?.outcomes.length ?? 0) > 0 ||
+    session.evidence.some((n) => n.criterionId === criterionId) ||
+    session.events.some((e) => e.type === "speech" && e.role === "candidate")
+  );
 }
 
 function describeEvent(session: SessionState, e: SessionEvent): string | undefined {

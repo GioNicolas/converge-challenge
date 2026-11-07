@@ -40,6 +40,10 @@ export function getOrCreateSession(sessionId: string, config: InterviewConfig = 
     hintsUsed: 0,
     ended: false,
     evidence: [],
+    coverage: Object.fromEntries(
+      config.criteria.map((c) => [c.id, { status: "nao_explorado" as const, outcomes: [] }]),
+    ),
+    checkIns: [],
   };
   sessions.set(sessionId, session);
   return session;
@@ -67,6 +71,8 @@ export function appendEvent(session: SessionState, event: SessionEvent): void {
     case "blip_opened": {
       const question = session.queue.find((q) => q.id === event.blipId);
       if (question) question.status = "asked";
+      const coverage = question?.criterionId ? session.coverage[question.criterionId] : undefined;
+      if (coverage?.status === "nao_explorado") coverage.status = "em_andamento";
       // pendingBlipId continua até o blip_closed: nada de blip novo com a conversa aberta.
       break;
     }
@@ -90,6 +96,11 @@ export function appendEvent(session: SessionState, event: SessionEvent): void {
     default:
       break;
   }
+}
+
+/** Tempo de sessão agora, em ms (o mesmo `t` dos eventos, contado pelo servidor). */
+export function sessionNow(session: SessionState): number {
+  return session.clock ? session.clock() : Date.now() - session.startedAt;
 }
 
 /** Código mais recente enviado pela IDE (vazio se ainda não houve snapshot). */
@@ -116,6 +127,8 @@ export function toView(session: SessionState): SessionStateView {
     hintsUsed: session.hintsUsed,
     ended: session.ended,
     evidence: session.evidence,
+    coverage: session.coverage,
+    checkIns: session.checkIns,
     report: reportView(session),
     llm: getLlmStats(),
   };
