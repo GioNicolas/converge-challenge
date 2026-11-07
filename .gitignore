@@ -47,3 +47,5 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+# kits gerados localmente (scripts/gerar-kit.ts)
+/kits-gerados/
