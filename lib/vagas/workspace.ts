@@ -538,7 +538,9 @@ export function situacaoDa(v: VagaEmpresa): string {
   const f = v.funil;
   if (v.etapa === "encerrada") return `Encerrada ${dias(v.encerradaHaDias ?? 0)} · ${numero(f.concluiram)} entrevistas`;
   if (f.inscritos === 0) return "Link pronto · nenhum inscrito ainda";
-  return `${numero(f.inscritos)} inscritos · ${numero(f.concluiram)} entrevistas feitas`;
+  return `${numero(f.inscritos)} ${f.inscritos === 1 ? "inscrito" : "inscritos"} · ${numero(f.concluiram)} ${
+    f.concluiram === 1 ? "entrevista feita" : "entrevistas feitas"
+  }`;
 }
 
 /** Uma frase curta sobre o rascunho. */

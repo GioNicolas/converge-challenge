@@ -28,6 +28,7 @@ import {
   type VagaEmpresa,
 } from "@/lib/vagas/workspace";
 import { buscaNormalizada, comConvites, useConvitesFeitos, type Funil } from "@/lib/vagas/candidatos";
+import { comReais, useEntrevistasReais } from "@/lib/vagas/entrevistas";
 import { curvaSuave } from "@/lib/design/motion";
 import Casca from "./Casca";
 import { Abas, Busca, Paginacao, Seletor, type Aba } from "./controles";
@@ -53,7 +54,16 @@ export default function Workspace() {
 
 function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: RascunhoVaga[] }) {
   const convites = useConvitesFeitos();
-  const linhas: Linha[] = useMemo(() => vagas.map((v) => ({ ...v, f: comConvites(v.funil, convites[v.id]) })), [vagas, convites]);
+  const reais = useEntrevistasReais();
+  // As entrevistas feitas pelo link entram no funil da vaga (e nos "relatórios novos" da tela inicial).
+  const linhas: Linha[] = useMemo(
+    () =>
+      vagas.map((v) => {
+        const funil = comReais(v.funil, v.resumo ? reais?.[v.resumo.configId] : undefined);
+        return { ...v, funil, f: comConvites(funil, convites[v.id]) };
+      }),
+    [vagas, convites, reais],
+  );
 
   const params = useSearchParams();
   const abaDaUrl = params.get("aba");

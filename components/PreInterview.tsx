@@ -21,11 +21,7 @@ const PASSOS = [
     titulo: "Explique o plano, depois codifique",
     texto: "Conte sua abordagem em voz alta antes de escrever. Você resolve no editor, na linguagem que preferir, e roda os testes quando quiser.",
   },
-  {
-    icon: Lightbulb,
-    titulo: "Dicas, se precisar",
-    texto: "Pode pedir ajuda a qualquer momento. As dicas são graduais e ficam registradas no relatório.",
-  },
+  // O passo das dicas depende da política da vaga (ver DICAS).
   {
     icon: Mic,
     titulo: "Voz ou texto",
@@ -33,10 +29,27 @@ const PASSOS = [
   },
 ];
 
+/** O passo das dicas segue o que a recrutadora combinou (`config.hints`): sem prometer o que o agente não vai dar. */
+const DICAS: Record<NonNullable<InterviewConfig["hints"]>, { titulo: string; texto: string }> = {
+  livres: {
+    titulo: "Dicas, se precisar",
+    texto: "Pode pedir ajuda a qualquer momento. As dicas são graduais e ficam registradas no relatório.",
+  },
+  leves: {
+    titulo: "Uma dica, se travar",
+    texto: "Se travar, dá para pedir uma dica leve, uma vez só. Ela fica registrada no relatório.",
+  },
+  nenhuma: {
+    titulo: "Sem dicas",
+    texto: "Esta entrevista não tem dicas. Se travar, conte onde travou e o que já tentou: isso também conta.",
+  },
+};
+
 /** `vaga`: config da vaga (saída da pré-entrevista da recrutadora); sem ela, a padrão. */
 export default function PreInterview({ vaga = DEFAULT_CONFIG }: { vaga?: InterviewConfig }) {
   const router = useRouter();
   const { roleTitle, durationMin, languages } = vaga;
+  const passos = [...PASSOS.slice(0, 2), { icon: Lightbulb, ...DICAS[vaga.hints ?? "livres"] }, ...PASSOS.slice(2)];
   const nivel = DIFFICULTIES.find((d) => d.id === (vaga.difficulty ?? difficultyForSeniority(vaga.seniority)))?.label;
 
   return (
@@ -72,7 +85,7 @@ export default function PreInterview({ vaga = DEFAULT_CONFIG }: { vaga?: Intervi
         </div>
 
         <ol className="mt-8 space-y-5">
-          {PASSOS.map(({ icon: Icon, titulo, texto }, i) => (
+          {passos.map(({ icon: Icon, titulo, texto }, i) => (
             <motion.li
               key={titulo}
               initial={{ opacity: 0, y: 8 }}
