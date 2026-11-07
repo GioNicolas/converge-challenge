@@ -2,6 +2,7 @@
 // (JSONB para o estado, tabela de eventos, bucket para as imagens) pode substituir a de memória
 // sem mexer nas rotas. Tudo é assíncrono por isso.
 import type { EstadoSessao } from "../sessao/estado";
+import type { Scorecard } from "../scorecard";
 
 export type SessaoArmazenada = {
   id: string;
@@ -38,4 +39,9 @@ export interface RepositorioSessoes {
   /** Devolve o número da imagem (1, 2, 3...). Pode lançar ErroLimite. */
   salvarImagem(id: string, imagem: ImagemArmazenada): Promise<number>;
   obterImagem(id: string, numero: number): Promise<ImagemArmazenada | null>;
+  /** Número e horário das imagens da sessão (sem os bytes). */
+  listarImagens(id: string): Promise<{ numero: number; horario: string }[]>;
+  /** Guarda o scorecard (um por sessão; a rota garante a idempotência). */
+  salvarScorecard(id: string, scorecard: Scorecard): Promise<void>;
+  obterScorecard(id: string): Promise<Scorecard | null>;
 }
