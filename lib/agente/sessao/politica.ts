@@ -59,8 +59,10 @@ export function motivoBloqueio(estado: EstadoSessao): MotivoBloqueio | null {
 /** A análise pode rodar agora? (`agora` e `regras` ficam na assinatura por compatibilidade.) */
 export function podeAnalisar(
   estado: EstadoSessao,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _agora?: number,
-  _regras: Regras = REGRAS_PADRAO,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _regras?: Regras,
 ): boolean {
   return motivoBloqueio(estado) === null;
 }
