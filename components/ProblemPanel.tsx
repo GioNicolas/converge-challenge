@@ -7,7 +7,7 @@ import type { PublicProblem } from "@/lib/problems";
 import { formatMs } from "@/lib/format";
 
 /** Fase da entrevista, derivada do tempo decorrido (só rótulo visual). */
-function fase(elapsedMs: number, durationMs: number): string {
+export function fase(elapsedMs: number, durationMs: number): string {
   const f = durationMs > 0 ? elapsedMs / durationMs : 0;
   if (f < 0.15) return "Entendimento";
   if (f < 0.8) return "Implementação";
@@ -49,7 +49,7 @@ export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, o
   const chip = fase(elapsedMs, durationMs);
 
   return (
-    <div className="absolute left-4 top-4 z-10 origin-top-left">
+    <div className="origin-top-left">
       <AnimatePresence mode="popLayout" initial={false}>
         {aberto ? (
           <motion.section
@@ -57,7 +57,7 @@ export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, o
             {...entrada}
             style={{ transformOrigin: "top left" }}
             aria-label="Problema"
-            className="vidro flex max-h-[calc(100vh-5rem)] w-[360px] flex-col rounded-padrao shadow-flutuante"
+            className="vidro flex max-h-[calc(100vh-10rem)] w-[360px] flex-col rounded-padrao shadow-flutuante"
           >
             <header className="flex items-start justify-between gap-3 px-4 pt-3">
               <div>

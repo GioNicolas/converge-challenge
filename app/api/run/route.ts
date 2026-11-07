@@ -1,13 +1,13 @@
-// Compila e roda C/C++ com o clang/gcc LOCAL (sem enviar código para fora).
-// Só para demo local: executa código do candidato na máquina do servidor.
-// Em produção fica desligado, a menos que ENABLE_NATIVE_RUN=1.
+// Compila e roda C/C++ com o clang/gcc LOCAL (sem enviar código para fora), isolado em lib/sandbox.ts.
+// Só para demo local: em produção fica desligado, a menos que ENABLE_NATIVE_RUN=1.
+// Responde em NDJSON: {progress:[feitos,passaram]} a cada caso e, no fim, {result}.
 import { NextResponse } from "next/server";
 import { isNativeLanguage, runNativeTests } from "@/lib/execution/native";
 import { problems } from "@/lib/problems";
 
 export const dynamic = "force-dynamic";
 
-const RUN_TIMEOUT_MS = 5_000;
+const RUN_TIMEOUT_MS = 1_000; // padrão LeetCode: ~1 s por execução (C/C++)
 const MAX_CODE_CHARS = 20_000;
 
 export async function POST(request: Request) {
@@ -28,5 +28,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "código grande demais" }, { status: 413 });
   }
 
-  return NextResponse.json(await runNativeTests(lang, problem, body.code, { runTimeoutMs: RUN_TIMEOUT_MS }));
+  const code = body.code;
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(ctrl) {
+      const send = (o: unknown) => ctrl.enqueue(enc.encode(JSON.stringify(o) + "\n"));
+      try {
+        const result = await runNativeTests(lang, problem, code, {
+          runTimeoutMs: RUN_TIMEOUT_MS,
+          onProgress: (feitos, passaram) => send({ progress: [feitos, passaram] }),
+        });
+        send({ result });
+      } finally {
+        ctrl.close();
+      }
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
 }

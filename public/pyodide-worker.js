@@ -31,9 +31,11 @@ def _run():
             else:
                 ok = got == t["expected"]
             results.append({"name": t["name"], "passed": bool(ok), "got": repr(got), "ms": ms})
+            PROGRESS(len(results), sum(1 for r in results if r["passed"]))
         except BaseException:
             ms = (time.perf_counter() - s) * 1000
             results.append({"name": t["name"], "passed": False, "error": traceback.format_exc(limit=2), "ms": ms})
+            PROGRESS(len(results), sum(1 for r in results if r["passed"]))
     return json.dumps({"results": results})
 _run()
 `;
@@ -49,6 +51,7 @@ self.onmessage = async (e) => {
     py.globals.set("FNAME", fname);
     py.globals.set("TESTS_JSON", JSON.stringify(tests));
     py.globals.set("COMPARE", compare);
+    py.globals.set("PROGRESS", (done, passed) => self.postMessage({ id, progress: true, done, passed }));
     const raw = await py.runPythonAsync(HARNESS);
     self.postMessage({ id, ok: true, data: JSON.parse(raw), stdout: out.join("\n") });
   } catch (err) {

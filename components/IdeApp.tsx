@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { Download, Flag, Play } from "lucide-react";
+import { Download, Flag, MessageSquare, Mic, MicOff, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import type { EditorCommand } from "@/lib/contracts";
 import { entrada } from "@/lib/design/motion";
@@ -13,14 +13,16 @@ import { numberCode } from "@/lib/format";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
 import { getProblem, resolveProblem } from "@/lib/problems";
 import { runCode, warmUp } from "@/lib/runner";
-import Caption from "./Caption";
 import Composer from "./Composer";
 import FakeCursor, { measureLines, type FakeCursorHandle } from "./FakeCursor";
 import CodeEditor from "./CodeEditor";
-import ConversationPanel from "./ConversationPanel";
-import Orb, { orbLabel, type OrbState } from "./Orb";
+import ConfirmarEncerrar from "./ConfirmarEncerrar";
+import JanelaChamada from "./JanelaChamada";
+import Legenda, { type FalaNaTela } from "./Legenda";
+import PainelConversa, { type MensagemConversa } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
+import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
@@ -28,6 +30,23 @@ import { VOICE_AVAILABLE, useVoice } from "./useVoice";
 
 const DURATION_MS = DEFAULT_CONFIG.durationMin * 60_000;
 const CAPTION_MS = 8000;
+const CHARS_POR_SEGUNDO = 18; // ritmo da legenda quando a voz não informa o progresso
+
+/** Legenda palavra a palavra: revela o texto no ritmo de fala e some depois de um tempo. */
+function useFalaProgressiva(texto: string | null): FalaNaTela | null {
+  const [progresso, setProgresso] = useState({ texto, ate: 0 });
+  useEffect(() => {
+    if (!texto) return;
+    let ate = 0;
+    const id = setInterval(() => {
+      ate = Math.min(texto.length, ate + 2);
+      setProgresso({ texto, ate });
+      if (ate >= texto.length) clearInterval(id);
+    }, 2000 / CHARS_POR_SEGUNDO);
+    return () => clearInterval(id);
+  }, [texto]);
+  return texto ? { quem: "agente", texto, ate: progresso.texto === texto ? progresso.ate : 0 } : null;
+}
 
 /**
  * A IDE não tem inteligência: mostra, captura e obedece (docs/contexto-pessoa-a-ide.md).
@@ -49,6 +68,8 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
   const [firstRun, setFirstRun] = useState(true);
   const [problemaAberto, setProblemaAberto] = useState(true);
   const [caption, setCaption] = useState<string | null>(null);
+  const [confirmandoFim, setConfirmandoFim] = useState(false);
+  const midia = useMidiaLocal();
 
   const executorRef = useRef<CommandExecutor | null>(null);
   const cursorRef = useRef<FakeCursorHandle>(null);
@@ -75,6 +96,11 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
   });
 
   useEffect(() => warmUp(), []);
+  // Microfone da chamada (a câmera do candidato não é usada).
+  const pedirMidia = midia.pedir;
+  useEffect(() => {
+    void pedirMidia();
+  }, [pedirMidia]);
 
   // Legenda: a última fala do agente, por alguns segundos.
   const last = chat.messages.at(-1);
@@ -134,28 +160,13 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
 
   async function rodar() {
     if (session.ended) return;
-    setRun({ status: "running", loadingPyodide: firstRun });
-    const result = await runCode(capture.code, problem, capture.language);
+    setRun({ status: "running", loadingPyodide: firstRun, feitos: 0, passaram: 0 });
+    const result = await runCode(capture.code, problem, capture.language, (feitos, passaram) =>
+      setRun((r) => (r.status === "running" ? { ...r, feitos, passaram } : r)),
+    );
     setFirstRun(false);
     setRun({ status: "done", result });
     void capture.runWithResult(result);
-  }
-
-  function baixarSessao() {
-    const data = {
-      sessionId: session.sessionId,
-      problemId: problem.id,
-      startedAt: new Date(session.startedAtRef.current).toISOString(),
-      durationMs: session.elapsedMs,
-      finalCode: capture.code,
-      timeline: session.eventsRef.current,
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sessao-${session.sessionId?.slice(0, 8)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   function abrirConversa() {
@@ -181,16 +192,21 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
     chat.close();
   }
 
-  const orb: OrbState =
-    voice.status === "on" && voice.mode === "speaking"
-      ? "falando"
-      : voice.status === "on"
-        ? "ouvindo"
-        : chat.busy || voice.status === "connecting"
-          ? "pensando"
-          : session.incomingBlip
-            ? "duvida"
-            : "ocioso";
+  const falando = voice.status === "on" && voice.mode === "speaking";
+  const fala = useFalaProgressiva(caption);
+
+  // Horário de cada fala (o chat não guarda): marcado quando a mensagem chega.
+  const [horarios, setHorarios] = useState<number[]>([]);
+  const total = chat.messages.length;
+  useEffect(() => {
+    setHorarios((h) => (total <= h.length ? h.slice(0, total) : [...h, ...Array<number>(total - h.length).fill(Date.now())]));
+  }, [total]);
+  const mensagens: MensagemConversa[] = chat.messages.map((m, i) => ({
+    id: String(i),
+    quem: m.role === "agent" ? "agente" : "candidato",
+    texto: m.text,
+    horario: horarios[i] ?? horarios.at(-1) ?? 0,
+  }));
 
   const remaining = Math.max(0, DURATION_MS - session.elapsedMs);
 
@@ -198,91 +214,137 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
     <main className="h-screen p-3">
       <section ref={sectionRef} className="relative h-full overflow-hidden rounded-padrao bg-superficie shadow-cartao">
         {/* O editor começa depois do painel do problema, para não ficar escondido */}
-        <div className="h-full" style={{ marginLeft: problemaAberto ? 392 : 0 }}>
-          <CodeEditor
-            value={capture.code}
-            language={capture.language}
-            readOnly={session.ended}
-            onChange={capture.onCodeChange}
-            onPaste={capture.onPaste}
-            onReady={(editor: MonacoEditor.IStandaloneCodeEditor, monaco) => {
-              executorRef.current = createAnimatedExecutor(editor, createExecutor(editor, monaco));
-            }}
-          />
+        {/* Coluna do editor: editor, testes e campo de conversa. Recolhido, o painel do problema vira uma
+            pílula na coluna da esquerda; o editor fica fixo, não se move ao recolher/expandir. */}
+        <div
+          className="flex h-full flex-col pr-3 pb-3"
+          style={{ marginLeft: 392 }}
+        >
+          <div className="min-h-0 flex-1">
+            <CodeEditor
+              value={capture.code}
+              language={capture.language}
+              readOnly={session.ended}
+              onChange={capture.onCodeChange}
+              onPaste={capture.onPaste}
+              onReady={(editor: MonacoEditor.IStandaloneCodeEditor, monaco) => {
+                executorRef.current = createAnimatedExecutor(editor, createExecutor(editor, monaco));
+              }}
+            />
+          </div>
+          <RunResults state={run} total={problem.visibleTests.length} />
+          <Composer busy={chat.busy} disabled={session.ended} onSend={chat.send} />
         </div>
 
-        <ProblemPanel
-          problem={problem}
-          elapsedMs={session.elapsedMs}
-          durationMs={DURATION_MS}
-          aberto={problemaAberto}
-          onToggle={setProblemaAberto}
-        />
-
-        <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-          {remaining <= 5 * 60_000 && !session.ended && (
-            <span className="label-pequena numero text-alerta">Pouco tempo</span>
-          )}
-          <select
-            value={capture.language}
-            onChange={(e) => trocarLinguagem(e.target.value)}
-            disabled={session.ended}
-            aria-label="Linguagem"
-            className="vidro rounded-full px-3 py-2 font-medium shadow-cartao outline-none"
-          >
-            {DEFAULT_CONFIG.languages.map((l) => (
-              <option key={l} value={l}>
-                {LANGUAGE_LABELS[l] ?? l}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={baixarSessao}
-            aria-label="Baixar sessão em JSON"
-            className="vidro rounded-full p-2 shadow-cartao"
-          >
-            <Download size={16} strokeWidth={1.75} />
-          </button>
-          <button
-            type="button"
-            onClick={() => session.endSession("button")}
-            disabled={session.ended}
-            className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
-          >
-            <Flag size={16} strokeWidth={1.75} />
-            Finalizar
-          </button>
-          <button
-            type="button"
-            onClick={rodar}
-            disabled={run.status === "running" || session.ended}
-            className="flex items-center gap-2 rounded-full bg-marca px-4 py-2 font-medium text-texto-claro shadow-cartao disabled:opacity-60"
-          >
-            <Play size={16} strokeWidth={1.75} />
-            {run.status === "running" ? "Rodando…" : "Rodar"}
-          </button>
+        {/* Coluna da questão: o painel do problema e, logo abaixo dele, os botões */}
+        <div className="absolute top-4 left-4 z-10 flex w-[360px] flex-col gap-3">
+          <ProblemPanel
+            problem={problem}
+            elapsedMs={session.elapsedMs}
+            durationMs={DURATION_MS}
+            aberto={problemaAberto}
+            onToggle={setProblemaAberto}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {remaining <= 5 * 60_000 && !session.ended && (
+              <span className="label-pequena numero text-alerta">Pouco tempo</span>
+            )}
+            {VOICE_AVAILABLE && (
+              <button
+                type="button"
+                onClick={() => (voice.status === "on" ? void voice.stop() : void voice.start(chat.blipContext))}
+                disabled={voice.status === "connecting" || session.ended}
+                aria-label={voice.status === "on" ? "Desligar voz" : "Ligar voz"}
+                className="vidro rounded-full p-2 shadow-cartao disabled:opacity-50"
+              >
+                {voice.status === "on" ? (
+                  <Mic size={16} strokeWidth={1.75} className="text-sucesso" />
+                ) : (
+                  <MicOff size={16} strokeWidth={1.75} className="text-texto-suave" />
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={chat.open ? fecharConversa : abrirConversa}
+              aria-label="Abrir conversa"
+              aria-haspopup="dialog"
+              aria-expanded={chat.open}
+              className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao transition-transform duration-rapida ease-suave active:scale-95"
+            >
+              <MessageSquare size={16} strokeWidth={1.75} />
+              Conversa
+            </button>
+            <select
+              value={capture.language}
+              onChange={(e) => trocarLinguagem(e.target.value)}
+              disabled={session.ended}
+              aria-label="Linguagem"
+              className="vidro rounded-full px-3 py-2 font-medium shadow-cartao outline-none"
+            >
+              {DEFAULT_CONFIG.languages.map((l) => (
+                <option key={l} value={l}>
+                  {LANGUAGE_LABELS[l] ?? l}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setConfirmandoFim(true)}
+              disabled={session.ended}
+              className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
+            >
+              <Flag size={16} strokeWidth={1.75} />
+              Finalizar
+            </button>
+            <button
+              type="button"
+              onClick={rodar}
+              disabled={run.status === "running" || session.ended}
+              className="flex items-center gap-2 rounded-full bg-marca px-4 py-2 font-medium text-texto-claro shadow-cartao disabled:opacity-60"
+            >
+              <Play size={16} strokeWidth={1.75} />
+              {run.status === "running" ? "Rodando…" : "Rodar"}
+            </button>
+          </div>
         </div>
 
         <FakeCursor ref={cursorRef} />
 
-        <RunResults state={run} />
+        <JanelaChamada
+          duvidaPendente={!!session.incomingBlip}
+          encerrada={session.ended}
+          iniciadaEm={session.startedAtRef.current || null}
+          midia={midia}
+          agenteFalando={falando}
+          onClicarPlin={abrirConversa}
+        />
 
-        {chat.open && (
-          <ConversationPanel
-            messages={chat.messages}
-            busy={chat.busy}
-            error={chat.error}
-            voiceAvailable={VOICE_AVAILABLE}
-            voiceStatus={voice.status}
-            voiceError={voice.error}
-            onToggleVoice={() => (voice.status === "on" ? void voice.stop() : void voice.start(chat.blipContext))}
-            onClose={fecharConversa}
-          />
-        )}
+        <Legenda fala={fala} />
+        <PainelConversa
+          aberto={chat.open}
+          onFechar={fecharConversa}
+          mensagens={mensagens}
+          rodape={
+            <>
+              {chat.busy && <p className="text-texto-suave">Pensando…</p>}
+              {chat.error && <p className="text-perigo">{chat.error}</p>}
+              {voice.error && <p className="text-alerta">Voz indisponível ({voice.error}). Continue por texto.</p>}
+            </>
+          }
+        />
 
-        {/* O agente "ao vivo": sempre no canto inferior direito. Com dúvida, a rodela gira e mostra a pergunta. */}
-        <div className="absolute bottom-4 right-4 z-20 flex items-center gap-2">
+        <ConfirmarEncerrar
+          aberto={confirmandoFim}
+          onCancelar={() => setConfirmandoFim(false)}
+          onConfirmar={() => {
+            setConfirmandoFim(false);
+            session.endSession("button");
+          }}
+        />
+
+        {/* "Agora não": adia a pergunta do entrevistador sem abrir a conversa. */}
+        <div className="absolute bottom-24 right-4 z-20">
           <AnimatePresence initial={false}>
             {session.incomingBlip && !chat.open && (
               <motion.button
@@ -296,30 +358,7 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
               </motion.button>
             )}
           </AnimatePresence>
-          <button
-            type="button"
-            onClick={chat.open ? fecharConversa : abrirConversa}
-            aria-label={chat.open ? "Fechar conversa" : "Chamar o entrevistador"}
-            className="vidro-escuro flex max-w-[300px] items-center gap-3 rounded-full py-2 pl-2 pr-4 text-left shadow-flutuante transition-transform duration-normal ease-suave hover:scale-[1.02]"
-          >
-            <Orb state={orb} size={48} />
-            <span className="flex min-w-0 flex-col">
-              <span className="flex items-center gap-1.5 text-mini font-medium text-texto-suave">
-                <span className="relative flex size-1.5">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-sucesso opacity-70" />
-                  <span className="relative inline-flex size-1.5 rounded-full bg-sucesso" />
-                </span>
-                Ao vivo
-              </span>
-              <span className="truncate text-corpo font-semibold titulo">
-                {session.incomingBlip ? session.incomingBlip.preview : orbLabel(orb)}
-              </span>
-            </span>
-          </button>
         </div>
-
-        <Caption text={caption} />
-        <Composer busy={chat.busy} disabled={session.ended || chat.ended} onSend={chat.send} />
 
         {process.env.NODE_ENV !== "production" && (
           <button

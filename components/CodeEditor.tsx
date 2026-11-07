@@ -28,14 +28,26 @@ export default function CodeEditor({ value, language, readOnly, onChange, onPast
       beforeMount={(monaco) => {
         const css = getComputedStyle(document.documentElement);
         const superficie = css.getPropertyValue("--superficie").trim();
+        // Contraste: código claro, comentários verdes legíveis, números das linhas visíveis.
         monaco.editor.defineTheme("converge-dark", {
           base: "vs-dark",
           inherit: true,
-          rules: [],
+          rules: [
+            { token: "", foreground: "F5F5F7" },
+            { token: "comment", foreground: "8FD694", fontStyle: "italic" },
+            { token: "keyword", foreground: "5EB0FF" },
+            { token: "string", foreground: "FFB27A" },
+            { token: "number", foreground: "C4E88A" },
+            { token: "type", foreground: "7DE0E6" },
+            { token: "delimiter", foreground: "C7C7CC" },
+          ],
           colors: {
             "editor.background": superficie,
+            "editor.foreground": "#F5F5F7",
             "editorGutter.background": superficie,
             "editor.lineHighlightBackground": superficie,
+            "editorLineNumber.foreground": "#9A9AA0",
+            "editorLineNumber.activeForeground": "#F5F5F7",
           },
         });
       }}
