@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { EventoArmazenado } from "../armazenamento/repositorio";
 import { KIT_SYSTEM_DESIGN } from "../kits/system-design";
+import { montarRelatorio } from "../relatorio";
 import {
   aplicarGuardas,
   citacaoExiste,
@@ -213,7 +214,7 @@ describe("scorecard: regressões de proveniência", () => {
     const estado = estadoInicial();
     estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: false,
       evidencia: "priorizou o fluxo", em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T1, grafo: GRAFO } }];
-    const f = extrairFontes(estado, [ev(T1, "analise", { observacoes: [{ criterio: RUBRICA[1].id, evidencia: "inventado" }] })], []);
+    const f = extrairFontes(estado, [ev(T1, "desenho", { grafo: GRAFO }), ev(T1, "analise", { observacoes: [{ criterio: RUBRICA[1].id, evidencia: "inventado" }] })], []);
     const s = saida();
     s.criterios.forEach(c => { c.evidencias = [{ tipo: "desenho", horario: T1, texto: "priorizou o fluxo", elementos: ["r1"], imagem: null }]; });
     const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
@@ -229,7 +230,7 @@ describe("scorecard: regressões de proveniência", () => {
       evidencia: "comparou alternativas", em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T1, grafo: GRAFO } }];
     const s = saida(); s.criterios[0].nota = 4;
     s.criterios[0].evidencias = [{ tipo: "desenho", horario: T1, texto: "comparou alternativas", elementos: ["r1"], imagem: null }];
-    const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica, fontes: extrairFontes(estado, [], []), origem: "llm" });
+    const sc = aplicarGuardas(s, { sessaoId: "s", candidatoId: "c", problemaId: "p", rubrica, fontes: extrairFontes(estado, [ev(T1, "desenho", { grafo: GRAFO })], []), origem: "llm" });
     assert.equal(sc.criterios[0].nota, 3);
     assert.match(sc.ajustes.join(" "), /espontaneidade/);
   });
@@ -268,5 +269,77 @@ describe("scorecard: regressões de proveniência", () => {
     } finally {
       if (anterior === undefined) delete process.env.AGENTE_TIMEOUT_SCORECARD_MS; else process.env.AGENTE_TIMEOUT_SCORECARD_MS = anterior;
     }
+  });
+
+  it("troca ids por nomes em resumos, briefing, justificativas e ajustes sem mudar a citação", () => {
+    const s = saida();
+    const f = fontes().f;
+    const literal = "Escolhi e1 para guardar os dados_consistencia";
+    f.falas.push({ horario: T2, texto: literal });
+    s.criterios[0].justificativa = "requisitos: discutiu dados_consistencia e e1.";
+    s.criterios[0].evidencias = [{ tipo: "fala", horario: T2, texto: literal, elementos: [], imagem: null }];
+    s.pontos_fortes = ["COMPONENTES_FLUXO e E1"];
+    s.pontos_a_aprofundar = ["dados_consistencia; não alterar componentes_fluxo_extra nem e10"];
+    s.briefing_para_proxima_etapa = "Retomar tradeoffs e e1.";
+    const sc = aplicarGuardas(s, { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(sc.pontos_fortes[0], "Componentes e fluxo e Postgres");
+    assert.equal(sc.pontos_a_aprofundar[0], "Dados e consistência; não alterar componentes_fluxo_extra nem e10");
+    assert.equal(sc.briefing_para_proxima_etapa, "Retomar Trade-offs e Postgres.");
+    assert.equal(sc.criterios[0].justificativa, "Requisitos e escopo: discutiu Dados e consistência e Postgres.");
+    assert.equal(sc.criterios[0].criterio, "requisitos");
+    assert.equal(sc.criterios[0].evidencias[0].texto, literal);
+    assert.ok(sc.ajustes.some(a => a.includes("Referências técnicas")));
+  });
+
+  it("falso usa nomes da rubrica nos pontos a aprofundar", () => {
+    const estado = estadoInicial();
+    const sc = gerarScorecardFalso({ kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0] },
+      { sessaoId: "s", candidatoId: "c", estado, eventos: [], imagens: [] });
+    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Componentes e fluxo."));
+    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Dados e consistência."));
+    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Requisitos e escopo."), "não expande duas vezes um nome já legível");
+    assert.ok(!sc.pontos_a_aprofundar.join(" ").includes("componentes_fluxo"));
+  });
+
+  it("reanálise e upload da mesma versão preservam horário real e foto daquela versão no relatório", () => {
+    const data = (segundos: number) => new Date(Date.parse(T1) + segundos * 1000).toISOString();
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "priorizou o fluxo",
+      em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: data(45), grafo: GRAFO } }];
+    const eventos = [ev(data(-10), "fase", { fase: "ALTO_NIVEL" }), ev(T1, "desenho", { grafo: GRAFO }),
+      ev(data(20), "desenho", { grafo: GRAFO, imagem_url: "/api/sessoes/s/imagens/1" }),
+      ev(data(50), "desenho", { grafo: GRAFO + "\n- [r2] Outra versão" })];
+    const imagens = [{ numero: 1, horario: T1 }, { numero: 2, horario: data(50) }];
+    const sc = gerarScorecardFalso({ kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0] },
+      { sessaoId: "s", candidatoId: "c", estado, eventos, imagens });
+    assert.equal(sc.criterios[0].evidencias[0].horario, T1);
+    assert.equal(estado.observacoes[0].desenho?.horario, data(45), "não altera a auditoria da análise no estado");
+    const relatorio = montarRelatorio({ sessao: { id: "s", candidatoId: "c", avaliacaoId: "demo", criadaEm: Date.parse(data(-10)), estado, analises: 1 },
+      scorecard: sc, kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0], eventos, imagens });
+    const prova = relatorio.criterios[0].provas[0];
+    assert.equal(prova.tipo, "desenho");
+    assert.equal(prova.momento, "00:10");
+    assert.equal(prova.tipo === "desenho" && prova.imagem, "/api/sessoes/s/imagens/1");
+  });
+
+  it("não ancora observação em versão antiga que já foi substituída, nem em evento futuro", () => {
+    const estado = estadoInicial();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "observação",
+      em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T2, grafo: GRAFO } }];
+    const antes = new Date(Date.parse(T2) - 1000).toISOString();
+    const depois = new Date(Date.parse(T2) + 1000).toISOString();
+    assert.equal(extrairFontes(estado, [ev(T1, "desenho", { grafo: GRAFO }), ev(antes, "desenho", { grafo: "COMPONENTES" })], []).observacoes[0].desenho, undefined);
+    assert.equal(extrairFontes(estado, [ev(depois, "desenho", { grafo: GRAFO })], []).observacoes[0].desenho, undefined);
+    assert.equal(extrairFontes(estado, [], []).observacoes[0].desenho, undefined);
+  });
+
+  it("reversão ao mesmo grafo usa a última versão e lotes recebidos tarde ainda têm o horário original", () => {
+    const estado = estadoInicial();
+    const retorno = new Date(Date.parse(T2) - 500).toISOString();
+    estado.observacoes = [{ criterio: RUBRICA[0].id, sinal: "positivo", espontaneo: true, evidencia: "observação",
+      em: Date.parse(T2), fase: "APROFUNDAMENTO", desenho: { horario: T2, grafo: GRAFO } }];
+    const eventos = [ev(T1, "desenho", { grafo: GRAFO }), ev(new Date(Date.parse(T1) + 1000).toISOString(), "desenho", { grafo: "COMPONENTES" }),
+      { ...ev(retorno, "desenho", { grafo: GRAFO }), recebidoEm: Date.parse(T2) + 60_000 }];
+    assert.equal(extrairFontes(estado, eventos, []).observacoes[0].desenho?.horario, retorno);
   });
 });

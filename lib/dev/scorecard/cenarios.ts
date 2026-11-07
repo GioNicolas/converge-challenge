@@ -72,7 +72,7 @@ export async function executarCenarioScorecard(c: CenarioScorecard, modeloReal?:
     evidencia: falas[kit.criterios.indexOf(o)],
   }));
   let relogio = T0;
-  let horarioDesenho = new Date(T0 + 10_000).toISOString();
+  const horarioDesenho = new Date(T0 + 10_000).toISOString();
   const resposta: SaidaScorecardLlm = {
     nota_geral: 4, recomendacao: nota === 1 ? "avancar" : "nao_avancar", // propositalmente incoerente
     criterios: kit.criterios.map((o, i) => ({ criterio: o.id,
@@ -108,14 +108,14 @@ export async function executarCenarioScorecard(c: CenarioScorecard, modeloReal?:
     relogio = T0 + 20_000;
     assert.equal((await eventosHandler(post(`/api/sessoes/${id}/eventos`, { eventos }), params)).status, 200);
     // O livro ancora observações exatamente no pedido analisado; não no evento de navegador.
-    horarioDesenho = new Date(relogio).toISOString();
-    resposta.criterios.forEach(o => { if (o.evidencias[0]?.tipo === "desenho") o.evidencias[0].horario = horarioDesenho; });
+    const horarioAnalise = new Date(relogio).toISOString();
+    resposta.criterios.forEach(o => { if (o.evidencias[0]?.tipo === "desenho") o.evidencias[0].horario = horarioAnalise; });
     assert.equal((await analisarHandler(post(`/api/sessoes/${id}/analisar`, {
       sessao_id: id, fase: "APROFUNDAMENTO", grafo, mudancas: "+ desenho", conversa_recente: [], perguntas_feitas: 0, imagem_url: null,
     }), params)).status, 200);
     const armazenada = await repo.obter(id);
     assert.equal(armazenada?.estado.observacoes.length, observacoes.length, "evento analise do navegador não entra no livro do servidor");
-    assert.ok(armazenada?.estado.observacoes.every(o => o.desenho?.grafo === grafo && o.desenho.horario === horarioDesenho));
+    assert.ok(armazenada?.estado.observacoes.every(o => o.desenho?.grafo === grafo && o.desenho.horario === horarioAnalise));
     const primeiro = resposta.criterios[0];
     switch (c.variante) {
       case "entrevistador":
@@ -160,6 +160,7 @@ export async function executarCenarioScorecard(c: CenarioScorecard, modeloReal?:
       if (c.variante === "milissegundos") assert.equal(sc.criterios[0].evidencias[0].horario, horarioDesenho);
       if (c.variante === "imagem_com_data") assert.equal(sc.criterios[0].evidencias[0].imagem, `/api/sessoes/${id}/imagens/1`);
       if (semFala) assert.ok(sc.criterios.flatMap(o => o.evidencias).every(e => e.tipo === "desenho"));
+      if (semFala) assert.ok(sc.criterios.flatMap(o => o.evidencias).filter(e => e.texto).every(e => e.horario === horarioDesenho), "observação usa a mudança real do quadro, não o horário da análise");
     }
     return sc;
   } finally {

@@ -41,7 +41,8 @@ export type PerguntaFeita = {
 export type ObservacaoRegistrada = Observacao & {
   em: number;
   fase: Fase;
-  /** Snapshot recebido pelo /analisar. Só o servidor preenche; nunca vem de eventos do navegador. */
+  /** Snapshot recebido pelo /analisar; horario = captura para análise, não criação do desenho.
+   * Só o servidor preenche. O scorecard resolve o evento real com o mesmo grafo ao finalizar. */
   desenho?: { horario: string; grafo: string };
 };
 

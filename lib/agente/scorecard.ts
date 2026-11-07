@@ -101,6 +101,7 @@ export type FontesDeProva = {
   imagens: ImagemRef[];
   grafoFinal: string;
   desenhos: { horario: string; ids: Set<string>; grafo: string }[];
+  /** Cópia do livro; desenho.horario resolvido ao evento real ou desenho removido se não verificável. */
   observacoes: EstadoSessao["observacoes"];
 };
 
@@ -140,9 +141,25 @@ export function extrairFontes(estado: EstadoSessao, eventos: EventoArmazenado[],
       falas.push({ horario: new Date(f.em).toISOString(), texto: f.texto });
     }
   }
-  for (const o of estado.observacoes) if (o.desenho) adicionarDesenho(o.desenho.horario, o.desenho.grafo);
   desenhos.sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
-  return { falas, idsDeDesenho, horariosDeDesenho, imagens, grafoFinal, desenhos, observacoes: estado.observacoes };
+  // A captura do /analisar comprova o que foi observado, não quando o candidato
+  // desenhou. Resolve no fim da sessão, quando inclusive os lotes tardios chegaram.
+  const registros = [...eventos].filter(e => e.tipo === "desenho" && typeof dadosComo(e.dados).grafo === "string")
+    .sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
+  const observacoes = estado.observacoes.map(o => {
+    if (!o.desenho) return o;
+    const anteriores = registros.filter(e => Date.parse(e.horario) <= Date.parse(o.desenho!.horario));
+    let indice = anteriores.length - 1;
+    if (indice < 0 || dadosComo(anteriores[indice].dados).grafo !== o.desenho.grafo) {
+      // Nunca liga a observação a uma versão antiga só porque o mesmo grafo já existiu.
+      const { desenho: _snapshot, ...semAncora } = o;
+      return semAncora;
+    }
+    // Reanálise ou upload tardio da mesma versão não mudam o momento do desenho.
+    while (indice > 0 && dadosComo(anteriores[indice - 1].dados).grafo === o.desenho.grafo) indice--;
+    return { ...o, desenho: { ...o.desenho, horario: anteriores[indice].horario } };
+  });
+  return { falas, idsDeDesenho, horariosDeDesenho, imagens, grafoFinal, desenhos, observacoes };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -203,6 +220,27 @@ export type ParametrosGuardas = {
 
 const arred1 = (n: number) => Math.round(n * 10) / 10;
 export const JANELA_DESENHO_MS = 1500;
+
+function humanizador(p: ParametrosGuardas): (texto: string) => string {
+  const nomes = new Map<string, string>();
+  for (const d of p.fontes.desenhos) {
+    for (const [, id, descricao] of d.grafo.matchAll(/^- \[([^\]]+)\]\s+(.+)$/gm)) {
+      const nome = descricao.replace(/\s{2}dentro de \[.*$/, "").replace(/, perto de \[.*$/, "")
+        .replace(/\s*\([^()]*\)$/, "").replace(/^"(.*)"$/, "$1").trim();
+      if (nome) nomes.set(id.toLowerCase(), nome);
+    }
+  }
+  for (const c of p.rubrica) if (c.nome && c.nome !== c.id) nomes.set(c.id.toLowerCase(), c.nome);
+  if (!nomes.size) return texto => texto;
+  const legiveis = new Set([...nomes.values()].map(nome => nome.toLowerCase()));
+  const termos = [...new Set([...nomes.values(), ...nomes.keys()])].sort((a, b) => b.length - a.length)
+    .map(termo => termo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const padrao = new RegExp(`(^|[^\\p{L}\\p{N}_])(${termos.join("|")})(?=$|[^\\p{L}\\p{N}_])`, "giu");
+  // Preserva nomes já legíveis ("Requisitos e escopo" contém o id "requisitos").
+  // Uma só passagem: nomes substituídos não viram novas referências técnicas.
+  return texto => texto.replace(padrao, (_, prefixo: string, termo: string) => prefixo
+    + (legiveis.has(termo.toLowerCase()) ? termo : nomes.get(termo.toLowerCase())));
+}
 
 function validarDesenho(e: SaidaScorecardLlm["criterios"][number]["evidencias"][number], criterio: string, p: ParametrosGuardas): Evidencia | null {
   const { fontes } = p;
@@ -313,19 +351,34 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
   if (recomendacao !== saida.recomendacao) ajustes.push(`recomendação corrigida de ${saida.recomendacao} para ${recomendacao}: média e cobertura da rubrica`);
   const corrigiuCriterios = ajustes.some(a => !a.startsWith("recomendação") && !a.startsWith("menos da metade"));
   const reverResumo = corrigiuCriterios || insuficiente || notas.length < criterios.length;
+  const humanizar = humanizador(p);
+  const nomes = new Map(p.rubrica.map(c => [c.id, c.nome ?? c.id]));
+  let corrigiuTexto = false;
+  const legivel = (texto: string) => {
+    const resultado = humanizar(texto);
+    corrigiuTexto ||= resultado !== texto;
+    return resultado;
+  };
+  const criteriosLegiveis = criterios.map(c => ({ ...c, justificativa: legivel(c.justificativa) }));
+  const pontosFortes = (reverResumo ? [] : saida.pontos_fortes).map(legivel);
+  const pontosAAprofundar = (reverResumo ? criterios.filter(c => c.nota === null || c.nota < 3)
+    .map(c => `Aprofundar ${nomes.get(c.criterio)}.`) : saida.pontos_a_aprofundar).map(legivel);
+  const briefing = legivel(reverResumo ? "Revisar as evidências por critério e aprofundar os pontos sem cobertura antes de decidir." : saida.briefing_para_proxima_etapa);
+  const ajustesLegiveis = ajustes.map(legivel);
+  if (corrigiuTexto) ajustesLegiveis.push("Referências técnicas substituídas por nomes nos textos explicativos.");
 
   return {
     candidato_id: p.candidatoId,
     problema_id: p.problemaId,
     nota_geral: notaGeral,
     recomendacao,
-    criterios,
-    pontos_fortes: reverResumo ? [] : saida.pontos_fortes,
-    pontos_a_aprofundar: reverResumo ? criterios.filter(c => c.nota === null || c.nota < 3).map(c => `Aprofundar ${c.criterio}.`) : saida.pontos_a_aprofundar,
-    briefing_para_proxima_etapa: reverResumo ? "Revisar as evidências por critério e aprofundar os pontos sem cobertura antes de decidir." : saida.briefing_para_proxima_etapa,
+    criterios: criteriosLegiveis,
+    pontos_fortes: pontosFortes,
+    pontos_a_aprofundar: pontosAAprofundar,
+    briefing_para_proxima_etapa: briefing,
     gerado_em: (p.agora?.() ?? new Date()).toISOString(),
     origem: p.origem,
-    ajustes,
+    ajustes: ajustesLegiveis,
   };
 }
 
@@ -373,7 +426,7 @@ export function montarEntradaDoPrompt(entrada: EntradaScorecard, fontes: FontesD
     .map((f) => `${new Date(f.em).toISOString()} ${f.quem === "agente" ? "Entrevistador" : "Candidato"}: ${f.texto}`)
     .join("\n");
   const conversa = conversaCompleta.length <= 20_000 ? conversaCompleta : "[início omitido]\n" + conversaCompleta.slice(-19_950);
-  const observacoes = entrada.estado.observacoes
+  const observacoes = fontes.observacoes
     .map((o) => `- ${JSON.stringify({ criterio: o.criterio, sinal: o.sinal, espontaneo: o.espontaneo,
       horario: new Date(o.em).toISOString(), fase: o.fase, evidencia: o.evidencia,
       desenho: o.desenho ? { horario: o.desenho.horario, elementos: [...extrairIdsDoGrafo(o.desenho.grafo)] } : null })}`)
@@ -432,7 +485,7 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
   const fontes = extrairFontes(entrada.estado, entrada.eventos, entrada.imagens);
 
   const criterios = deps.kit.criterios.map((c) => {
-    const obs = entrada.estado.observacoes.filter((o) => o.criterio === c.id && o.desenho && extrairIdsDoGrafo(o.desenho.grafo).size > 0);
+    const obs = fontes.observacoes.filter((o) => o.criterio === c.id && o.desenho && extrairIdsDoGrafo(o.desenho.grafo).size > 0);
     if (obs.length === 0) return { criterio: c.id, nota: null, justificativa: "Sem observações.", evidencias: [] };
     const positivos = obs.some(o => o.sinal === "positivo");
     const negativos = obs.some(o => o.sinal === "negativo");
@@ -443,7 +496,7 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
       criterio: c.id,
       // Repetir a mesma observação não aumenta nota; neutro não autoriza nota.
       nota: positivos ? negativos ? 2 : 3 : negativos ? 1 : null,
-      justificativa: `[fake] ${obs.map((o) => `${o.sinal}: ${o.evidencia}`).join("; ")}`,
+      justificativa: `${c.nome}: [fake] ${obs.map((o) => `${o.sinal}: ${o.evidencia}`).join("; ")}`,
       evidencias,
     };
   });
