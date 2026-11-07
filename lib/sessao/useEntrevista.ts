@@ -1,6 +1,6 @@
 "use client";
 
-// Liga a máquina de estados, o gatilho, o quadro e o servidor (por enquanto, de mentira).
+// Liga a máquina de estados, o gatilho, o quadro e o modo de servidor escolhido.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
@@ -11,6 +11,8 @@ import {
   duvidaDeDemonstracao,
   enviarEventos,
   falar,
+  falarComMarcas,
+  usarServidor,
   type FalaNaTela,
   type FalaRecente,
   type PedidoAnalise,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/sessao/cliente";
 import { criarLinhaDoTempo } from "@/lib/sessao/eventos";
 import { apontarEAnotar } from "@/lib/presenca/coreografia";
+import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
 import {
   estadoInicial,
   podeAnalisar,
@@ -39,8 +42,35 @@ function redutor(estado: EstadoEntrevista, acao: Acao) {
   return transicionar(estado, acao.evento, acao.agora);
 }
 
+/** Aguarda a prova por até 300 ms; a tarefa original continua para registrar a URL tardia. */
+export async function pedidoComImagem(
+  pedido: PedidoAnalise,
+  imagem: Promise<string | null>,
+  sinal: AbortSignal,
+): Promise<PedidoAnalise> {
+  sinal.throwIfAborted();
+  let prazo: ReturnType<typeof setTimeout> | undefined;
+  let cancelar: (() => void) | undefined;
+  try {
+    const url = await Promise.race([
+      imagem.catch(() => null),
+      new Promise<null>((resolver) => { prazo = setTimeout(() => resolver(null), 300); }),
+      new Promise<never>((_, rejeitar) => {
+        cancelar = () => rejeitar(sinal.reason);
+        sinal.addEventListener("abort", cancelar, { once: true });
+      }),
+    ]);
+    sinal.throwIfAborted();
+    return url ? { ...pedido, imagem_url: url } : pedido;
+  } finally {
+    if (prazo !== undefined) clearTimeout(prazo);
+    if (cancelar) sinal.removeEventListener("abort", cancelar);
+  }
+}
+
 export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<ControleCursor | null>) {
   const [sessao, setSessao] = useState<Sessao | null>(null);
+  const criacaoDaSessao = useRef<Promise<Sessao> | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
   const enviar = useCallback(
     (evento: EventoEntrevista) => despachar({ evento, agora: Date.now() }),
@@ -56,23 +86,38 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const [falaAtual, setFalaAtual] = useState<FalaNaTela | null>(null);
   const [agenteFalando, setAgenteFalando] = useState(false);
   const fimDaLegenda = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const versaoDaFala = useRef(0);
 
-  const dizer = useCallback(async (texto: string) => {
+  const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
+    const versao = ++versaoDaFala.current;
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(true);
     linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
-    await falar(texto, (ate) =>
-      setFalaAtual((atual) => (atual && atual.texto === texto && atual.ate !== ate ? { ...atual, ate } : atual)),
-    );
+    const aoProgresso = (ate: number) => {
+      if (versao !== versaoDaFala.current) return;
+      setFalaAtual((atual) => (versao === versaoDaFala.current && atual && atual.texto === texto && atual.ate !== ate ? { ...atual, ate } : atual));
+    };
+    if (marcas) await falarComMarcas(texto, marcas, aoProgresso);
+    else await falar(texto, aoProgresso);
+    if (versao !== versaoDaFala.current) return;
     setAgenteFalando(false);
     // A legenda fica um pouco depois da voz, para dar tempo de terminar de ler.
     fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 1800);
   }, []);
 
   const silenciar = useCallback(() => {
+    versaoDaFala.current++;
+    if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     calar();
     setAgenteFalando(false);
+    setFalaAtual(null);
+  }, []);
+
+  useEffect(() => () => {
+    versaoDaFala.current++;
+    if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
+    calar();
   }, []);
 
   const conversor = useRef(criarConversor());
@@ -87,7 +132,12 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   );
 
   useEffect(() => {
-    criarSessao().then(setSessao);
+    let cancelado = false;
+    criacaoDaSessao.current ??= criarSessao();
+    criacaoDaSessao.current.then((nova) => {
+      if (!cancelado) setSessao(nova);
+    }).catch((erro) => console.warn("[sessão] não foi possível iniciar:", erro));
+    return () => { cancelado = true; };
   }, []);
 
   // Linha do tempo da entrevista: vai ao servidor em lotes.
@@ -109,10 +159,13 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   // Gatilho da análise.
   useEffect(() => {
     if (!quadro || !sessao) return;
+    let ativo = true;
+    const imagens = new WeakMap<PedidoAnalise, Promise<string | null>>();
     const g = criarGatilho({
       podeAnalisar: () => podeAnalisar(estadoAtual.current),
       montarPedido: (forcar) => {
-        const r = conversor.current.converter(quadro.api.getSceneElements());
+        const elementos = quadro.api.getSceneElements();
+        const r = conversor.current.converter(elementos);
         if (!forcar && !houveMudancaRelevante(ultimoInstantaneo.current, r.instantaneo)) return null;
         const mudancas = descreverMudancas(ultimoInstantaneo.current, r.instantaneo);
         ultimoInstantaneo.current = r.instantaneo;
@@ -126,10 +179,49 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
           imagem_url: null,
         };
         console.log("[análise] pedido", pedido);
-        if (mudancas) registrar("desenho", { grafo: r.texto, mudancas });
+        if (mudancas) {
+          registrar("desenho", { grafo: r.texto, mudancas });
+          const horario = new Date().toISOString();
+          const linha = linhaDoTempo.current;
+          const imagem = (async () => {
+            const estadoDaCaptura = quadro.api.getAppState();
+            const arquivosDaCaptura = quadro.api.getFiles();
+            const apiDaCaptura = {
+              ...quadro.api,
+              getSceneElements: () => elementos,
+              getAppState: () => estadoDaCaptura,
+              getFiles: () => arquivosDaCaptura,
+            };
+            const { imagemDoCandidato } = await import("@/lib/excalidraw/imagem");
+            const png = await imagemDoCandidato(apiDaCaptura);
+            if (!png) return null;
+            if (!usarServidor()) {
+              console.log("[desenho] PNG do candidato:", png.size, "bytes");
+              return null;
+            }
+            const { enviarImagem } = await import("@/lib/sessao/servidor");
+            const url = await enviarImagem(sessao.sessao_id, png, horario);
+            const dados = { grafo: r.texto, mudancas, imagem_url: url, horario };
+            if (ativo && linha) {
+              linha.registrar("desenho", dados);
+              if (estadoAtual.current.fase === "ENCERRADA") void linha.descarregar().catch(() => {});
+            } else {
+              await enviarEventos(sessao.sessao_id, [{ horario, tipo: "desenho", dados }]);
+            }
+            return url;
+          })().catch((erro) => {
+            console.warn("[desenho] imagem indisponível:", erro);
+            return null;
+          });
+          imagens.set(pedido, imagem);
+        }
         return pedido;
       },
-      analisar,
+      analisar: async (pedido, sinal) => {
+        const imagem = imagens.get(pedido);
+        const comImagem = usarServidor() && imagem ? await pedidoComImagem(pedido, imagem, sinal) : pedido;
+        return analisar(comImagem, sinal);
+      },
       aoResultado: (bruta) => {
         // IDs que não existem no quadro (o modelo inventou ou o candidato apagou) são ignorados.
         const resposta = { ...bruta, elementos: bruta.elementos.filter((c) => conversor.current.idReal(c)) };
@@ -140,7 +232,10 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       aoErro: (erro) => console.warn("[análise] ignorada:", erro),
     });
     gatilho.current = g;
-    return () => g.parar();
+    return () => {
+      ativo = false;
+      g.parar();
+    };
   }, [quadro, sessao, enviar, registrar]);
 
   // Tempo de cada fase.
@@ -184,7 +279,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     };
   }, [estado.fase, quadro, sessao, enviar, dizer]);
 
-  // Pergunta ativa: ao mesmo tempo, a voz fala e a mão do agente circula o elemento e escreve a nota.
+  // Pergunta ativa: a mão acompanha a palavra do primeiro alvo quando houver alinhamento.
   // Quando a resposta termina, o agente para (se ainda estiver desenhando) e apaga o que desenhou.
   const numeroPergunta = estado.perguntaAtiva?.numero ?? null;
   useEffect(() => {
@@ -196,25 +291,30 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       .filter((id): id is string => !!id);
 
     registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos });
+    const controle = new AbortController();
+    let coreografia: Promise<void> | null = null;
+    const desenhar = () => {
+      if (controle.signal.aborted || coreografia) return;
+      coreografia = apontarEAnotar({
+        quadro,
+        cursor: cursor.current,
+        grupo,
+        alvos,
+        nota: p.nota ?? p.pergunta ?? "?",
+        semente: numeroPergunta * 7919,
+        sinal: controle.signal,
+      }).catch((erro) => console.warn("[mão do agente]", erro));
+    };
     if (p.pergunta) {
       conversa.current.push({ quem: "agente", texto: p.pergunta });
-      void dizer(p.pergunta);
-    }
-    const controle = new AbortController();
-    const coreografia = apontarEAnotar({
-      quadro,
-      cursor: cursor.current,
-      grupo,
-      alvos,
-      nota: p.nota ?? p.pergunta ?? "?",
-      semente: numeroPergunta * 7919,
-      sinal: controle.signal,
-    }).catch((erro) => console.warn("[mão do agente]", erro));
+      const alvo = ultimoInstantaneo.current?.componentes.find((c) => c.id === p.elementos[0]);
+      void dizer(p.pergunta, [{ trecho: alvo?.nome ?? "", aoChegar: desenhar }]);
+    } else desenhar();
 
     return () => {
       silenciar();
       controle.abort();
-      void coreografia.then(() => quadro.agente.apagarGrupo(grupo));
+      void (coreografia ?? Promise.resolve()).then(() => quadro.agente.apagarGrupo(grupo));
     };
   }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar]);
 
