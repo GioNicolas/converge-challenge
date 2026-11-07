@@ -18,6 +18,11 @@ export function getSession(sessionId: string): SessionState | undefined {
   return sessions.get(sessionId);
 }
 
+/** Sessões em memória, da mais recente para a mais antiga. */
+export function listSessions(): SessionState[] {
+  return [...sessions.values()].sort((a, b) => b.startedAt - a.startedAt);
+}
+
 export function getOrCreateSession(sessionId: string, config: InterviewConfig = DEFAULT_CONFIG): SessionState {
   const existing = sessions.get(sessionId);
   if (existing) return existing;
@@ -111,8 +116,16 @@ export function toView(session: SessionState): SessionStateView {
     hintsUsed: session.hintsUsed,
     ended: session.ended,
     evidence: session.evidence,
+    report: reportView(session),
     llm: getLlmStats(),
   };
+}
+
+/** Estado da avaliação sem o relatório (que sai em GET /api/report). */
+function reportView(session: SessionState): SessionStateView["report"] {
+  if (!session.report) return undefined;
+  const { state, startedAt, durationMs, hiddenTests, error, costUsd } = session.report;
+  return { state, startedAt, durationMs, hiddenTests, error, costUsd };
 }
 
 /** Prefixa cada linha com o número, alinhado à direita. */

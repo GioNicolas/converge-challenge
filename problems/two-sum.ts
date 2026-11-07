@@ -28,12 +28,17 @@ export const TWO_SUM: Problem = {
   },
   private: {
     hiddenTests: [
-      { input: { nums: [-3, 4, 3, 90], target: 0 }, expected: [0, 2] },
-      { input: { nums: [0, 4, 3, 0], target: 0 }, expected: [0, 3] },
-      { input: { nums: [1, 5, 1, 5], target: 10 }, expected: [1, 3] },
-      { input: { nums: [5, 75, 25], target: 100 }, expected: [1, 2] },
-      // Caso grande: 10^5 elementos, par no fim. Força bruta estoura o tempo.
-      { input: { generator: "range", size: 100000, pair: [99998, 99999] }, expected: [99998, 99999] },
+      { name: "Negativos e zero", input: { nums: [-3, 4, 3, 90], target: 0 }, expected: [0, 2] },
+      { name: "Zeros repetidos", input: { nums: [0, 4, 3, 0], target: 0 }, expected: [0, 3] },
+      { name: "Valores repetidos", input: { nums: [1, 5, 1, 5], target: 10 }, expected: [1, 3] },
+      { name: "Par no fim", input: { nums: [5, 75, 25], target: 100 }, expected: [1, 2] },
+      // Caso grande: 10^5 elementos (0..99999), o único par que soma 199997 é o do fim. Força bruta estoura o tempo.
+      {
+        name: "Caso grande (10⁵ elementos)",
+        input: { nums: Array.from({ length: 100_000 }, (_, i) => i), target: 199_997 },
+        expected: [99_998, 99_999],
+        large: true,
+      },
     ],
     approaches: [
       {

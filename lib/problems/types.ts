@@ -3,8 +3,13 @@
  * Testes são entrada/saída em JSON pra servir a qualquer linguagem.
  */
 export interface ProblemTest {
+  /** Nos testes escondidos: chaves = nomes dos parâmetros da função. */
   input: unknown;
   expected: unknown;
+  /** Nome no relatório ("Caso grande"). */
+  name?: string;
+  /** Caso de desempenho: roda separado, com tempo próprio (força bruta estoura). */
+  large?: boolean;
 }
 
 export interface ProblemPublic {

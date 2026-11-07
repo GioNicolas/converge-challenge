@@ -56,6 +56,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterEnv: "EVALUATOR_FALLBACK_MODEL",
     openrouterDefault: "z-ai/glm-5.2",
     maxTokens: 6000,
+    // A recrutadora espera o relatório na tela: com a Featherless lenta, o OpenRouter entra em paralelo.
+    hedgeMs: 30_000,
   },
   interviewer: {
     featherlessEnv: "INTERVIEWER_MODEL",

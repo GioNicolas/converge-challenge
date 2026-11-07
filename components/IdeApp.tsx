@@ -85,11 +85,11 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
     return () => clearTimeout(id);
   }, [last]);
 
-  // Fim da sessão (botão ou tempo): solta a voz e vai para o relatório.
+  // Fim da sessão (botão ou tempo): solta a voz e vai para o agradecimento. O relatório é só da recrutadora.
   useEffect(() => {
     if (!session.ended || !session.sessionId) return;
     void voice.stop();
-    const id = setTimeout(() => router.push(`/report?sessionId=${session.sessionId}`), 400);
+    const id = setTimeout(() => router.push("/obrigado"), 400);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.ended, session.sessionId, router]);

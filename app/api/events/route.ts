@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runAnalyst } from "@/lib/agents/analyst";
+import { startEvaluation } from "@/lib/agents/evaluator";
 import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { EventsResponse, SessionEvent } from "@/lib/contracts";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
@@ -20,6 +21,8 @@ export async function POST(request: Request) {
   const session = getOrCreateSession(event.sessionId);
   appendEvent(session, event);
   if (event.type === "session_started") enqueueKickoff(session, event.t);
+  // A avaliação leva de 15 s a 1 min: começa já, em segundo plano, e o GET /api/report busca o resultado.
+  if (event.type === "session_ended") startEvaluation(session);
   if (ANALYZED_TRIGGERS.has(event.type)) {
     try {
       await runAnalyst(session, event);
