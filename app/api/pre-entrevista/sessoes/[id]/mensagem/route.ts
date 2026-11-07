@@ -10,7 +10,7 @@ const Corpo = z.object({ text: z.string().trim().min(1, "fala vazia").max(2000, 
 
 /**
  * Fala da recrutadora. O turno (`conduzirTurno`) registra a fala, mede a cobertura, escolhe o passo e
- * gera a fala da Totti. Só então agenda a extração em segundo plano. Se a Totti falhar, a fala sai da
+ * gera a fala do Totti. Só então agenda a extração em segundo plano. Se o Totti falhar, a fala sai da
  * transcrição e volta 502, para a recrutadora reenviar sem duplicar nada.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -24,7 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   if (!ocupar(id)) {
-    return NextResponse.json({ erro: "a Totti ainda está respondendo a fala anterior" }, { status: 409 });
+    return NextResponse.json({ erro: "o Totti ainda está respondendo a fala anterior" }, { status: 409 });
   }
   try {
     try {
@@ -32,7 +32,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : String(err);
       return NextResponse.json(
-        { erro: "a Totti não respondeu; envie a fala de novo", detalhe: mensagem, estado: estadoDaSessao(sessao) },
+        { erro: "o Totti não respondeu; envie a fala de novo", detalhe: mensagem, estado: estadoDaSessao(sessao) },
         { status: 502 },
       );
     }

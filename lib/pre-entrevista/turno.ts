@@ -3,9 +3,9 @@
  *
  *   1. registra a fala da recrutadora;
  *   2. mede a cobertura e os sinais no momento (Jev, ~0,3 s) e aplica no rascunho;
- *   3. se a Totti acabou de oferecer a troca de formato, aplica a escolha dela;
+ *   3. se o Totti acabou de oferecer a troca de formato, aplica a escolha dela;
  *   4. o planejador escolhe o próximo passo;
- *   5. a Totti escreve a fala desse passo e ela é registrada.
+ *   5. o Totti escreve a fala desse passo e ela é registrada.
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
@@ -137,7 +137,7 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
 function resolverTradeoff(sessao: Sessao): void {
   const oferta = ofertaEmCurso(sessao.plano);
   if (!oferta || sessao.plano.decisoesTradeoff[oferta.area]) return;
-  // Dúvida dela não é escolha: a Totti responde e a oferta segue em aberto.
+  // Dúvida dela não é escolha: o Totti responde e a oferta segue em aberto.
   if ((sessao.plano.sinais.fez_pergunta ?? 0) >= LIMIAR) return;
 
   const decisao = decidirTradeoff(sessao.plano.sinais);
@@ -187,7 +187,7 @@ export function atualizarNaoAvaliado(sessao: Sessao): void {
   sessao.naoAvaliado = [...new Set([...porDecisao, ...porCompetencia])];
 }
 
-/** Primeira fala da Totti, sem LLM. Conta como a pergunta de confirmação do início. */
+/** Primeira fala do Totti, sem LLM. Conta como a pergunta de confirmação do início. */
 export function abrirConversa(sessao: Sessao): void {
   const oferta = tradeoffDaAbertura(sessao);
   registrarFala(sessao, { role: "agente", text: aberturaDoAgente(sessao) }, { dados: { origem: "abertura_sem_llm", oferta } });
@@ -198,8 +198,8 @@ export function abrirConversa(sessao: Sessao): void {
 }
 
 /**
- * Processa uma fala da recrutadora e devolve o passo escolhido e a fala da Totti.
- * Se a Totti falhar, a fala da recrutadora sai da transcrição e o erro sobe (a rota responde 502).
+ * Processa uma fala da recrutadora e devolve o passo escolhido e a fala do Totti.
+ * Se o Totti falhar, a fala da recrutadora sai da transcrição e o erro sobe (a rota responde 502).
  */
 export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ passo: Passo; fala: string }> {
   registrarFala(sessao, { role: "recrutadora", text: texto });
@@ -246,7 +246,7 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
     registrarEvento(sessao, {
       tipo: "erro",
       nivel: "erro",
-      resumo: `resposta da Totti falhou; fala desfeita: ${mensagem}`,
+      resumo: `resposta do Totti falhou; fala desfeita: ${mensagem}`,
       dados: {
         etapa: "conversa",
         textoNaoRespondido: texto,

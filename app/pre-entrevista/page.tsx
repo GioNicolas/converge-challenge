@@ -278,7 +278,7 @@ export default function PaginaPreEntrevista() {
         <main className="mx-auto max-w-2xl">
           <h1 className="text-2xl font-semibold">Pré-entrevista</h1>
           <p className="mt-1 text-sm text-neutral-600">
-            Cole a vaga. A Totti classifica o formato e a senioridade e conversa com você para montar a entrevista.
+            Cole a vaga. O Totti classifica o formato e a senioridade e conversa com você para montar a entrevista.
           </p>
           <form onSubmit={criarSessao} className="mt-6 space-y-4 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
             <label className="block">
@@ -383,7 +383,7 @@ export default function PaginaPreEntrevista() {
               onKeyDown={teclaNaFala}
               disabled={enviando}
               rows={2}
-              placeholder="Responda à Totti (Enter envia, Shift+Enter quebra linha)"
+              placeholder="Responda ao Totti (Enter envia, Shift+Enter quebra linha)"
               className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
             />
             <button

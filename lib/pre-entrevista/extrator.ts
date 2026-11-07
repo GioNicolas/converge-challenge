@@ -118,7 +118,7 @@ type Avisos = string[];
 
 /**
  * Só aceita `durationMin` se alguma fala da recrutadora, lida com `lerDuracao`, devolve exatamente esse valor
- * (com `perguntouTempo` calculado pela fala anterior da Totti). Caso contrário, a duração veio do modelo sem
+ * (com `perguntouTempo` calculado pela fala anterior do Totti). Caso contrário, a duração veio do modelo sem
  * base na fala, e descarta com aviso. "3 milhões de transações" não libera nada. Função pura quanto ao patch.
  */
 export function checarDuracao(patch: Patch, transcricao: Turno[], avisos: Avisos): Patch {

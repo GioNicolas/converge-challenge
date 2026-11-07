@@ -139,7 +139,7 @@ export function pesosPelaEnfase(e: EntradaPesos): { focus: Foco[]; detalhe: Deta
 
 /**
  * Procura o trecho nas falas da recrutadora, ignorando acento e caixa. Devolve a fala mais recente que o contém e
- * o número dela na transcrição (1 = abertura da Totti). Trecho de menos de 3 palavras não serve como prova.
+ * o número dela na transcrição (1 = abertura do Totti). Trecho de menos de 3 palavras não serve como prova.
  * Trecho que não aparece em nenhuma fala dela: undefined. Função pura.
  */
 export function acharEvidencia(trecho: string, transcricao: Turno[]): { fala: string; turno: number } | undefined {

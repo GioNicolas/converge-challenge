@@ -4,7 +4,7 @@
  * O store fica em `globalThis` para sobreviver ao hot reload do `next dev`. Não é banco: se o
  * servidor reiniciar, as sessões somem. Só as configs finais também vão para `data/configs/`.
  *
- * Cada fala da recrutadora passa pelo turno (`turno.ts`): cobertura síncrona, planejador, fala da Totti.
+ * Cada fala da recrutadora passa pelo turno (`turno.ts`): cobertura síncrona, planejador, fala do Totti.
  * A extração lenta (`extrair` + cobertura) roda depois, em segundo plano. Se chegar fala nova durante
  * uma rodada, nada roda em paralelo: ao terminar, roda uma rodada extra com a transcrição mais recente
  * (as falas acumuladas viram uma rodada só).
@@ -29,7 +29,7 @@ export interface Sessao {
   id: string;
   criadaEm: number;
   vaga: Vaga;
-  /** Classificação do Jev, guardada para a abertura da Totti e para a tela. */
+  /** Classificação do Jev, guardada para a abertura do Totti e para a tela. */
   classificacao: Classificacao;
   rascunho: Rascunho;
   transcricao: Turno[];
@@ -37,7 +37,7 @@ export interface Sessao {
   plano: PlanoEstado;
   /** Tom e dicas que a recrutadora pediu, atualizados a cada fala (ver `preferencias.ts`). */
   preferencias: Preferencias;
-  /** Como estava o resumo da última vez que a Totti o falou. Serve para confirmar só o que mudou na revisão. */
+  /** Como estava o resumo da última vez que o Totti o falou. Serve para confirmar só o que mudou na revisão. */
   resumo?: { preferencias: Preferencias; duracaoMin: number };
   /** Competências-chave da vaga e se o formato verifica cada uma (ver `competencias.ts`). Não viram pergunta. */
   competencias: Competencia[];
@@ -255,7 +255,7 @@ export function registrarFala(
   registrarEvento(sessao, evento);
 }
 
-/** Tira a última fala da transcrição (usado quando a resposta da Totti falha, para a recrutadora reenviar). */
+/** Tira a última fala da transcrição (usado quando a resposta do Totti falha, para a recrutadora reenviar). */
 export function desfazerUltimaFala(sessao: Sessao): void {
   sessao.transcricao.pop();
 }

@@ -2,7 +2,7 @@
 
 // O entrevistador na chamada: um anel fino de luz que ondula com a voz.
 //   ouvindo  → calmo e lento, branco, seguindo de leve o microfone do candidato
-//   falando  → mais vivo e rápido, azul
+//   falando  → mais vivo e rápido, azul (no fundo claro, tinta preta)
 //   pensando → branco, com um arco claro percorrendo o anel
 //   duvida   → azul, calmo, chamando atenção sem agitar
 // Ritmo, amplitude e cor mudam aos poucos entre um estado e outro (nada "pula").
@@ -21,12 +21,26 @@ const AZUL: Cor = [64, 156, 255];
 const BRILHO_CLARO: Cor = [120, 180, 255];
 const BRILHO_AZUL: Cor = [10, 132, 255];
 
-/** Como cada estado se mexe: velocidade das ondas, quanto a energia abre o anel e a cor. */
-const JEITO: Record<EstadoAgente, { velocidade: number; amplitude: number; cor: Cor; brilho: Cor }> = {
+type Jeito = Record<EstadoAgente, { velocidade: number; amplitude: number; cor: Cor; brilho: Cor }>;
+
+/** Como cada estado se mexe: velocidade das ondas, quanto a energia abre o anel e a cor (fundo escuro). */
+const JEITO: Jeito = {
   ouvindo: { velocidade: 0.45, amplitude: 0.55, cor: BRANCO, brilho: BRILHO_CLARO },
   falando: { velocidade: 1.25, amplitude: 1.15, cor: AZUL, brilho: BRILHO_AZUL },
   pensando: { velocidade: 0.7, amplitude: 0.6, cor: BRANCO, brilho: BRILHO_CLARO },
   duvida: { velocidade: 0.55, amplitude: 0.8, cor: AZUL, brilho: BRILHO_AZUL },
+};
+
+/** Fundo claro (papel): o anel vira grafite, como traço de caneta; falando, a tinta fica mais escura e
+ *  o brilho é uma sombra quente bem leve. Sem azul: no papel o estado aparece no ritmo, não na cor. */
+const GRAFITE: Cor = [40, 38, 34];
+const TINTA: Cor = [17, 17, 17];
+const SOMBRA_PAPEL: Cor = [190, 182, 168];
+const JEITO_CLARO: Jeito = {
+  ouvindo: { ...JEITO.ouvindo, cor: GRAFITE, brilho: SOMBRA_PAPEL },
+  falando: { ...JEITO.falando, cor: TINTA, brilho: SOMBRA_PAPEL },
+  pensando: { ...JEITO.pensando, cor: GRAFITE, brilho: SOMBRA_PAPEL },
+  duvida: { ...JEITO.duvida, cor: TINTA, brilho: SOMBRA_PAPEL },
 };
 
 const mistura = (a: number, b: number, k: number) => a + (b - a) * k;
@@ -36,20 +50,24 @@ export default function OndaDeVoz({
   estado,
   volume = 0,
   tamanho = LADO,
+  fundo = "escuro",
 }: {
   estado: EstadoAgente;
   volume?: number;
   tamanho?: number;
+  /** Cor do fundo onde o anel aparece. */
+  fundo?: "escuro" | "claro";
 }) {
+  const jeitos = fundo === "claro" ? JEITO_CLARO : JEITO;
   const reduzido = useReducedMotion() ?? false;
   const tela = useRef<HTMLCanvasElement>(null);
   // Valores atuais, que vão chegando aos do estado aos poucos.
   const atual = useRef({
     fase: 0,
-    velocidade: JEITO.ouvindo.velocidade,
-    amplitude: JEITO.ouvindo.amplitude,
-    cor: [...BRANCO] as Cor,
-    brilho: [...BRILHO_CLARO] as Cor,
+    velocidade: jeitos.ouvindo.velocidade,
+    amplitude: jeitos.ouvindo.amplitude,
+    cor: [...jeitos.ouvindo.cor] as Cor,
+    brilho: [...jeitos.ouvindo.brilho] as Cor,
   });
 
   useLacoDeEnergia(
@@ -70,7 +88,7 @@ export default function OndaDeVoz({
       const c = LADO / 2;
 
       // Transição suave entre os estados (~0,5s).
-      const alvo = JEITO[estado];
+      const alvo = jeitos[estado];
       const s = atual.current;
       const passo = Math.min(1, dt * 4);
       s.velocidade = mistura(s.velocidade, alvo.velocidade, passo);
@@ -117,7 +135,7 @@ export default function OndaDeVoz({
         const inicio = t * 3;
         ctx.beginPath();
         ctx.arc(c, c, RAIO, inicio, inicio + 1.1);
-        ctx.strokeStyle = "rgba(255,255,255,1)";
+        ctx.strokeStyle = fundo === "claro" ? "rgba(27,29,31,1)" : "rgba(255,255,255,1)";
         ctx.lineWidth = 3;
         ctx.shadowBlur = 18;
         ctx.stroke();

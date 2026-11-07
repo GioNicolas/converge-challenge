@@ -22,6 +22,7 @@
     "motion": "^14.10.1",
     "@typesafe-ai/sdk": "^0.7.0",
     "next": "15.5.4",
+    "pdfjs-dist": "6.4.299",
     "pyodide": "^0.26.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",

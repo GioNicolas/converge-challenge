@@ -5,7 +5,7 @@
  *  - Tópicos (`topicosDo`) são cumulativos: uma vez cobertos (probabilidade de pelo menos 0,6), seguem cobertos.
  *  - Sinais (`sinaisDo`) valem a leitura do turno atual, porque a recrutadora pode mudar de ideia:
  *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
- * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo da Totti.
+ * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo do Totti.
  */
 import { choice, noul } from "@typesafe-ai/sdk";
 import { FocusArea } from "@/lib/contracts";
@@ -19,7 +19,7 @@ export const LIMIAR = 0.6;
 
 export const AREAS = FocusArea.options;
 
-/** Nome da área do jeito que a Totti fala. Nunca os rótulos internos. */
+/** Nome da área do jeito que o Totti fala. Nunca os rótulos internos. */
 export const NOME_AREA_FALA: Record<FocusArea, string> = {
   tecnico: "algoritmos e código",
   pressao: "lidar com pressão e imprevistos",
@@ -88,7 +88,7 @@ export interface Cobertura extends ChamadaJev {
 }
 
 export interface ContextoCobertura {
-  /** Última fala da Totti, para os sinais que dependem do que foi perguntado (resposta vaga, aprovação do resumo). */
+  /** Última fala do Totti, para os sinais que dependem do que foi perguntado (resposta vaga, aprovação do resumo). */
   ultimaFalaAgente?: string;
 }
 
@@ -220,7 +220,7 @@ function sinaisDo(): Pergunta[] {
     {
       id: "escolheu_trocar_formato",
       pergunta:
-        "Na última fala, a recrutadora escolheu trocar para o outro formato de entrevista, o que a Totti ofereceu como alternativa?",
+        "Na última fala, a recrutadora escolheu trocar para o outro formato de entrevista, o que o Totti ofereceu como alternativa?",
       sinal_sim:
         "Sim se ela escolheu o outro formato: 'vamos de system design', 'pode ser system design', 'troca pra system design', 'prefiro desenhar'.",
       sinal_nao: "Não se ela escolheu manter o formato atual, deixou a área para depois, ou respondeu outra coisa, inclusive uma dúvida.",
@@ -276,12 +276,12 @@ function sinaisDo(): Pergunta[] {
     {
       id: "fez_pergunta",
       pergunta:
-        "A última fala da recrutadora é uma pergunta ou dúvida dirigida à Totti (sobre o formato, a avaliação ou o processo), e não uma resposta?",
+        "A última fala da recrutadora é uma pergunta ou dúvida dirigida ao Totti (sobre o formato, a avaliação ou o processo), e não uma resposta?",
       sinal_sim:
-        "Sim se ela perguntou à Totti como a entrevista é avaliada, como funciona o formato ou o processo: " +
+        "Sim se ela perguntou ao Totti como a entrevista é avaliada, como funciona o formato ou o processo: " +
         "'mas como isso vai ser avaliado num live code?', 'isso acontece na entrevista toda?', 'e se ele não usar IA, conta?'.",
       sinal_nao:
-        "Não se ela respondeu à Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), pediu mudança " +
+        "Não se ela respondeu ao Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), pediu mudança " +
         "('tira a dica leve', 'muda pra quarenta e cinco'), aprovou o resumo ('pode finalizar?', 'tá bom') ou fez pergunta que não é sobre a entrevista.",
     },
     {
@@ -290,7 +290,7 @@ function sinaisDo(): Pergunta[] {
       sinal_sim:
         "Sim se ela pediu uma alteração: 'tira a dica leve', 'muda o tom', 'põe quarenta e cinco minutos', " +
         "'acrescenta que falha de rede é eliminatória', 'sem pressão'.",
-      sinal_nao: "Não se ela só aprovou ('pode finalizar', 'tá bom'), respondeu à Totti sem pedir nada novo, ou só fez uma pergunta.",
+      sinal_nao: "Não se ela só aprovou ('pode finalizar', 'tá bom'), respondeu ao Totti sem pedir nada novo, ou só fez uma pergunta.",
     },
     {
       id: "aprovou_resumo",
@@ -403,7 +403,7 @@ function nivelDaFala(area: FocusArea) {
       exemplos: "'pesa menos', 'um pouco', 'também conta'",
     },
     respondeu: {
-      quando: "descreveu o que espera nessa área, inclusive ao responder uma pergunta da Totti sobre ela.",
+      quando: "descreveu o que espera nessa área, inclusive ao responder uma pergunta do Totti sobre ela.",
       exemplos: "'quero ver se implementam algoritmos de forma simples', 'vejo quando ele calcula o custo'",
     },
     central: {
@@ -423,7 +423,7 @@ export interface EnfaseFala {
 }
 
 /**
- * Classifica só a última fala da recrutadora, com a última pergunta da Totti, em um nível por área.
+ * Classifica só a última fala da recrutadora, com a última pergunta do Totti, em um nível por área.
  * A conversa inteira não entra aqui: quem acumula é `acumularEnfase`.
  */
 export async function avaliarEnfaseDaFala(transcricao: Turno[]): Promise<EnfaseFala> {
@@ -432,7 +432,7 @@ export async function avaliarEnfaseDaFala(transcricao: Turno[]): Promise<EnfaseF
   const request = {
     state: {
       tarefa:
-        "Você lê UMA fala da recrutadora numa pré-entrevista e diz o que ela disse sobre cada área, em relação à pergunta da Totti logo antes.",
+        "Você lê UMA fala da recrutadora numa pré-entrevista e diz o que ela disse sobre cada área, em relação à pergunta do Totti logo antes.",
       ultima_pergunta_da_totti: perguntaDaTotti,
       ultima_fala_da_recrutadora: dela ?? "(nenhuma)",
     },

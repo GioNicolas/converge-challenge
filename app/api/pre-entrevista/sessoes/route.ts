@@ -14,7 +14,7 @@ const Corpo = z.object({
   context: z.string().trim().optional(),
 });
 
-/** Cria a sessão: classifica a vaga (Jev), monta o rascunho e registra a abertura da Totti. */
+/** Cria a sessão: classifica a vaga (Jev), monta o rascunho e registra a abertura do Totti. */
 export async function POST(req: Request) {
   const lido = Corpo.safeParse(await req.json().catch(() => null));
   if (!lido.success) {

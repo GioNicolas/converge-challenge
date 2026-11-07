@@ -1,7 +1,7 @@
 /**
  * Ênfase por fala: o que a recrutadora disse sobre cada área, acumulado no código (sem LLM).
  *
- * O Jev classifica só a última fala dela (com a última pergunta da Totti), com um nível por área (`cobertura.ts`).
+ * O Jev classifica só a última fala dela (com a última pergunta do Totti), com um nível por área (`cobertura.ts`).
  * Quem acumula é `acumularEnfase`, função pura:
  *  - "dispensou" e "central" são declarações explícitas: a mais recente vence e fixa o estado (0 ou 3),
  *    até outra declaração explícita mudar. Guardam a frase que as disparou;

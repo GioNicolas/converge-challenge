@@ -1,5 +1,5 @@
 /**
- * Planejador da conversa: o código decide o próximo passo da Totti, e o modelo só escreve a fala.
+ * Planejador da conversa: o código decide o próximo passo do Totti, e o modelo só escreve a fala.
  *
  * `proximoPasso` é função pura: recebe o foco, a cobertura, os sinais e o que já foi perguntado,
  * e devolve um `Passo`. Regras:
@@ -19,9 +19,9 @@ import type { DecisaoTradeoff, DecisoesTradeoff, Foco } from "./rascunho";
 
 /** Quantas vezes um tópico pode ser perguntado: a pergunta inicial e um follow-up. */
 export const MAX_PERGUNTAS_POR_TOPICO = 2;
-/** Depois de tantos resumos, a Totti para de pedir revisão e encerra. */
+/** Depois de tantos resumos, o Totti para de pedir revisão e encerra. */
 export const MAX_RESUMOS = 3;
-/** Quantas dúvidas seguidas a Totti responde. Depois disso, a conversa segue pelo fluxo normal. */
+/** Quantas dúvidas seguidas o Totti responde. Depois disso, a conversa segue pelo fluxo normal. */
 export const MAX_DUVIDAS_SEGUIDAS = 2;
 
 export interface AprofundarPasso {
@@ -29,12 +29,12 @@ export interface AprofundarPasso {
   area: FocusArea;
   /** `inicial`: pergunta o que separa o ótimo do fraco. `vaga`: follow-up depois de resposta genérica. */
   motivo: "inicial" | "vaga";
-  /** Troca de formato recém-feita: a Totti confirma a troca numa frase antes da pergunta. */
+  /** Troca de formato recém-feita: o Totti confirma a troca numa frase antes da pergunta. */
   confirmaTroca?: InterviewMode;
 }
 
 /**
- * O formato atual não mede a área. A Totti diz isso e oferece 3 caminhos: trocar para `modoAlternativo`,
+ * O formato atual não mede a área. O Totti diz isso e oferece 3 caminhos: trocar para `modoAlternativo`,
  * deixar para a próxima etapa do processo, ou seguir sem a área.
  */
 export interface OferecerTradeoffPasso {
@@ -45,7 +45,7 @@ export interface OferecerTradeoffPasso {
 
 export interface ResponderDuvidaPasso {
   tipo: "responder_duvida";
-  /** Passo que estava em curso: a Totti responde a dúvida e retoma a pergunta dele. */
+  /** Passo que estava em curso: o Totti responde a dúvida e retoma a pergunta dele. */
   retomar: Passo;
   /** Quantas dúvidas seguidas, contando esta. */
   seguidas: number;
@@ -63,7 +63,7 @@ export type Passo =
       entra: FocusArea[];
       /** Áreas que ela disse que não importam ou pesam menos. */
       sai: FocusArea[];
-      /** Áreas do foco que ficaram sem definição depois da mudança: a Totti pergunta se continuam. */
+      /** Áreas do foco que ficaram sem definição depois da mudança: o Totti pergunta se continuam. */
       duvida: FocusArea[];
       /** Próximo aprofundamento, emendado na mesma fala quando não há dúvida pendente. */
       proximo?: AprofundarPasso;
@@ -80,7 +80,7 @@ export interface PlanoEstado {
   perguntasPorTopico: Record<string, number>;
   /** Áreas que já entraram numa confirmação de mudança de foco ou numa dúvida. */
   mudancasPerguntadas: FocusArea[];
-  /** Último passo que a Totti executou. */
+  /** Último passo que o Totti executou. */
   ultimoPasso?: Passo;
   /** Quantos resumos já foram falados. */
   resumos: number;
@@ -88,7 +88,7 @@ export interface PlanoEstado {
   decisoesTradeoff: DecisoesTradeoff;
   /** Formato escolhido na troca. Prevalece sobre o extrator. */
   modoEscolhido?: InterviewMode;
-  /** Troca feita e ainda não confirmada pela Totti: vai na próxima pergunta de aprofundamento. */
+  /** Troca feita e ainda não confirmada pelo Totti: vai na próxima pergunta de aprofundamento. */
   trocaPendente?: InterviewMode;
   /** A primeira fala já foi a oferta de troca (ver `abrirConversa` em `turno.ts`). */
   tradeoffNaAbertura?: boolean;
@@ -237,13 +237,13 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
     emJogo.includes(a) && medida(a) && !coberto(criterio(a)) && sinal(`quer_${a}`) < LIMIAR && sinal(`dispensa_${a}`) < LIMIAR;
 
   if (entra.length + sai.length > 0) {
-    // Áreas indecisas ainda não perguntadas: a mudança deixa dúvida, e a Totti pergunta uma vez.
+    // Áreas indecisas ainda não perguntadas: a mudança deixa dúvida, e o Totti pergunta uma vez.
     const duvida = focoAtual.filter((a) => indecisa(a) && perguntas(`duvida_${a}`) === 0);
     const proximo = duvida.length === 0 ? aprofundarPasso(e, emJogo) : undefined;
     return { tipo: "confirmar_mudanca_foco", entra, sai, duvida, ...(proximo ? { proximo } : {}) };
   }
 
-  // 2c. Depois do resumo, ela pediu mudança: a Totti confirma só a mudança e pergunta se pode finalizar.
+  // 2c. Depois do resumo, ela pediu mudança: o Totti confirma só a mudança e pergunta se pode finalizar.
   // Com o limite de resumos atingido, encerra mesmo assim.
   if (e.resumos > 0 && pediuMudanca) {
     return e.resumos < MAX_RESUMOS ? { tipo: "resumo_final", revisao: true } : { tipo: "encerrar" };
@@ -264,7 +264,7 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   return { tipo: "encerrar" };
 }
 
-/** Registra no plano o passo que a Totti acabou de executar. Função pura. */
+/** Registra no plano o passo que o Totti acabou de executar. Função pura. */
 export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
   const perguntas = { ...p.perguntasPorTopico };
   const contar = (id: string) => {

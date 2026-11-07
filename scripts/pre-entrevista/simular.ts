@@ -86,10 +86,10 @@ const PERSONAS: Persona[] = [
     descricao:
       "Você é técnica e gosta de entender o processo antes de responder. Quer avaliar algoritmos e código limpo, e uso de IA (revisar o que a IA gera). " +
       "Dispensa pressão: não precisa ser rigorosa com prazo. Siga esta ordem, sem pular etapas: " +
-      "(1) na primeira vez que a Totti perguntar o que separa um candidato ótimo de um mediano, antes de responder, pergunte uma única vez: " +
+      "(1) na primeira vez que o Totti perguntar o que separa um candidato ótimo de um mediano, antes de responder, pergunte uma única vez: " +
       "'mas como isso vai ser avaliado num live code?'; depois responda com um comportamento concreto. " +
-      "(2) Não fale de dicas até a Totti fazer o resumo. Só depois do resumo, pede: 'tira a dica'. " +
-      "(3) Quando a Totti confirmar a mudança e perguntar se pode finalizar, aprova com 'pode finalizar'. Não pede mais nada depois disso.",
+      "(2) Não fale de dicas até o Totti fazer o resumo. Só depois do resumo, pede: 'tira a dica'. " +
+      "(3) Quando o Totti confirmar a mudança e perguntar se pode finalizar, aprova com 'pode finalizar'. Não pede mais nada depois disso.",
     verdade: {
       ordemFoco: ["tecnico"],
       dispensa: ["pressao"],
@@ -102,7 +102,7 @@ const PERSONAS: Persona[] = [
     vagaId: "ia-pleno",
     descricao:
       "Você é uma recrutadora que quer contratar alguém que saiba construir agentes com LLM (tool calling, RAG, integrações). " +
-      "Responde direto, em uma ou duas frases. Quando a Totti oferecer a troca de formato entre live coding e system design, " +
+      "Responde direto, em uma ou duas frases. Quando o Totti oferecer a troca de formato entre live coding e system design, " +
       "escolha system design: diga 'vamos de system design', porque quer ver se a pessoa sabe desenhar a parte de IA da solução. " +
       "Depois, se perguntarem, quer avaliar algoritmos e código limpo também. Logo na primeira fala depois da troca, diga com essas palavras: " +
       "'pressão eu tiraria, não precisa ser rigorosa com prazo'. " +
@@ -120,7 +120,7 @@ const PERSONAS: Persona[] = [
     vagaId: "ia-pleno",
     descricao:
       "Você é uma recrutadora que quer avaliar algoritmos e código limpo no live coding. " +
-      "Quando a Totti oferecer a troca de formato entre live coding e system design, escolha manter o live coding e deixar a parte de IA " +
+      "Quando o Totti oferecer a troca de formato entre live coding e system design, escolha manter o live coding e deixar a parte de IA " +
       "para a próxima etapa do processo: diga 'fica no live coding, IA deixa pra próxima etapa'. Não quer system design nesta etapa. " +
       "Dispensa pressão. Responde curto e concreto quando perguntarem sobre algoritmos e código.",
     verdade: {
@@ -165,7 +165,7 @@ function silenciarLogsDoServidor(): void {
 }
 
 function promptRecrutadora(persona: Persona, descricaoVaga: string): string {
-  return `Você é uma recrutadora brasileira real, conversando por texto com a Totti, uma assistente que monta a configuração de uma entrevista técnica para a vaga abaixo.
+  return `Você é uma recrutadora brasileira real, conversando por texto com o Totti, uma assistente que monta a configuração de uma entrevista técnica para a vaga abaixo.
 
 VAGA:
 ${descricaoVaga}
@@ -176,11 +176,11 @@ ${persona.descricao}
 Como responder:
 - Responda como a recrutadora: curta, informal, às vezes com um erro de digitação leve.
 - Uma ou duas frases por resposta. Nunca fale como assistente de IA nem explique o que está fazendo.
-- Responda só o que a Totti perguntou ou pediu. Se ela pedir confirmação de algo que você não quer, diga que não.
+- Responda só o que o Totti perguntou ou pediu. Se ela pedir confirmação de algo que você não quer, diga que não.
 - Responda somente com a sua fala, sem aspas e sem prefixo.`;
 }
 
-/** Fala da recrutadora simulada. Do ponto de vista dela, as falas da Totti são "user" e as dela são "assistant". */
+/** Fala da recrutadora simulada. Do ponto de vista dela, as falas do Totti são "user" e as dela são "assistant". */
 async function falaDaRecrutadora(persona: Persona, descricaoVaga: string, sessao: Sessao): Promise<string> {
   const mensagens: Mensagem[] = [{ role: "system", content: promptRecrutadora(persona, descricaoVaga) }];
   for (const t of sessao.transcricao) {
@@ -289,7 +289,7 @@ function parteDaPergunta(texto: string): string {
   return corte >= 0 ? texto.slice(corte + 1) : texto;
 }
 
-/** Perguntas (frases que terminam em ?) de cada fala da Totti. */
+/** Perguntas (frases que terminam em ?) de cada fala do Totti. */
 function perguntasDe(texto: string): string[] {
   return texto.match(/[^.!?]*\?/g)?.map((s) => s.trim()) ?? [];
 }
@@ -334,7 +334,7 @@ function checarEstilo(sessao: Sessao): string[] {
     if (IDENTIFICADOR_INTERNO.test(t.text) || EXPRESSAO_INTERNA.test(sem.toLowerCase()))
       avisos.push(`fala ${i + 1} usa rótulo interno: "${t.text}"`);
     if (/^\s*entendi/i.test(t.text)) avisos.push(`fala ${i + 1} começa com "Entendi": "${t.text}"`);
-    // A apresentação é só a abertura (índice 0): depois dela, a Totti não se apresenta de novo.
+    // A apresentação é só a abertura (índice 0): depois dela, o Totti não se apresenta de novo.
     if (i > 0 && /\bsou (a )?totti\b/i.test(sem)) avisos.push(`fala ${i + 1} se apresenta de novo: "${t.text}"`);
     const frases = t.text.split(/[.!?]+/).filter((s) => s.trim()).length;
     if (i > 0 && frases > 4) avisos.push(`fala ${i + 1} tem ${frases} frases`);

@@ -56,7 +56,7 @@ export type Foco = z.infer<typeof Foco>;
 
 /**
  * De onde veio um critério: a fala da recrutadora que o justifica (`turno` é o número da fala na transcrição,
- * 1 = abertura da Totti), ou o catálogo, quando ela não falou dele. Interno: não vai no InterviewConfig.
+ * 1 = abertura do Totti), ou o catálogo, quando ela não falou dele. Interno: não vai no InterviewConfig.
  */
 export const Origem = z.union([z.object({ fala: z.string(), turno: z.number().int() }), z.literal("catalogo")]);
 export type Origem = z.infer<typeof Origem>;
