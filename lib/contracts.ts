@@ -125,6 +125,20 @@ export const BlipContext = z.object({
 export type BlipContext = z.infer<typeof BlipContext>;
 
 // ---------------------------------------------------------------------------
+// Conversa por texto (plano B da voz) — POST /api/chat
+// ---------------------------------------------------------------------------
+
+export const ChatMessage = z.object({ role: z.enum(["candidate", "agent"]), text: z.string() });
+export type ChatMessage = z.infer<typeof ChatMessage>;
+
+export const ChatRequest = z.object({
+  sessionId: z.string(),
+  blipId: z.string().optional(),
+  messages: z.array(ChatMessage),
+});
+export type ChatRequest = z.infer<typeof ChatRequest>;
+
+// ---------------------------------------------------------------------------
 // Comandos de editor (agente → IDE)
 // ---------------------------------------------------------------------------
 
@@ -134,6 +148,15 @@ export const EditorCommand = z.discriminatedUnion("type", [
   z.object({ type: z.literal("clear_highlights") }),
 ]);
 export type EditorCommand = z.infer<typeof EditorCommand>;
+
+export const ChatResponse = z.object({
+  reply: z.string(),
+  /** Grifos pra aplicar antes de mostrar/falar a resposta. */
+  commands: z.array(EditorCommand),
+  /** true quando o agente encerra a conversa ("Beleza, pode seguir!"). */
+  end: z.boolean(),
+});
+export type ChatResponse = z.infer<typeof ChatResponse>;
 
 // ---------------------------------------------------------------------------
 // Relatório final (agente → tela da recrutadora)

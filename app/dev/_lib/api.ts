@@ -1,0 +1,44 @@
+import { BlipContext, ChatResponse, EventsResponse } from "@/lib/contracts";
+import type { ChatRequest, SessionEvent } from "@/lib/contracts";
+import type { SessionStateView } from "@/lib/session/types";
+
+/** POST /api/events. Valida a resposta contra o contrato; erro vira exceção. */
+export async function postEvent(event: SessionEvent): Promise<EventsResponse> {
+  const res = await fetch("/api/events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(event),
+  });
+  if (!res.ok) throw new Error(`POST /api/events respondeu ${res.status}`);
+  return EventsResponse.parse(await res.json());
+}
+
+/** GET /api/state. Devolve null em 404 (antes do primeiro evento). */
+export async function getState(sessionId: string): Promise<SessionStateView | null> {
+  const res = await fetch(`/api/state?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET /api/state respondeu ${res.status}`);
+  return (await res.json()) as SessionStateView;
+}
+
+/** GET /api/blip/{id}/context. */
+export async function getBlipContext(blipId: string, sessionId: string): Promise<BlipContext> {
+  const res = await fetch(
+    `/api/blip/${encodeURIComponent(blipId)}/context?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  if (!res.ok) throw new Error(`GET /api/blip/context respondeu ${res.status}`);
+  return BlipContext.parse(await res.json());
+}
+
+/** POST /api/chat. */
+export async function postChat(req: ChatRequest): Promise<ChatResponse> {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(`POST /api/chat respondeu ${res.status}`);
+  return ChatResponse.parse(await res.json());
+}
