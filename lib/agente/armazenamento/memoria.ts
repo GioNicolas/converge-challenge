@@ -10,6 +10,7 @@ import {
   type RepositorioSessoes,
   type SessaoArmazenada,
 } from "./repositorio";
+import type { Scorecard } from "../scorecard";
 
 export type LimitesMemoria = {
   maxSessoes: number;
@@ -30,6 +31,7 @@ type Registro = {
   eventos: { evento: EventoArmazenado; chave: string }[];
   chaves: Set<string>;
   imagens: ImagemArmazenada[];
+  scorecard?: Scorecard;
 };
 
 export function chaveDoEvento(e: EventoEntrada): string {
@@ -133,6 +135,18 @@ export function criarRepositorioEmMemoria(limites: Partial<LimitesMemoria> = {})
       const r = usar(id);
       const img = r?.imagens[numero - 1];
       return img ? { bytes: img.bytes.slice(), horario: img.horario } : null;
+    },
+    async listarImagens(id) {
+      const r = usar(id);
+      return r ? r.imagens.map((i, k) => ({ numero: k + 1, horario: i.horario })) : [];
+    },
+    async salvarScorecard(id, scorecard) {
+      const r = usar(id);
+      if (r) r.scorecard = structuredClone(scorecard);
+    },
+    async obterScorecard(id) {
+      const r = usar(id);
+      return r?.scorecard ? structuredClone(r.scorecard) : null;
     },
   };
 }
