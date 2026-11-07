@@ -207,7 +207,7 @@ export default function JanelaChamada({
                   disabled={!temDuvida}
                   onClick={temDuvida ? onClicarPlin : undefined}
                   aria-label={temDuvida ? "Ouvir a pergunta do entrevistador" : "Entrevistador"}
-                  className={`absolute inset-y-0 left-0 right-[108px] flex items-center justify-center ${
+                  className={`absolute inset-0 flex items-center justify-center ${
                     temDuvida ? "cursor-pointer" : "cursor-default"
                   }`}
                 >
