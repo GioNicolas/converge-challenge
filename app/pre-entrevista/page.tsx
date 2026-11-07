@@ -553,6 +553,14 @@ export default function PaginaPreEntrevista() {
                     >
                       Abrir a entrevista com esta config →
                     </a>
+                    <a
+                      href={`/?config=${final.config.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 inline-block rounded border border-emerald-700 px-3 py-1.5 text-emerald-800 hover:bg-emerald-50"
+                    >
+                      Link do candidato (/?config={final.config.id})
+                    </a>
                   </div>
                   <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-neutral-900 p-2 text-xs text-neutral-100">
                     {JSON.stringify(final.config, null, 2)}

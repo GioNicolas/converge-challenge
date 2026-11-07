@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { InterviewConfig } from "@/lib/contracts";
 import { selecionarProblema } from "@/lib/problems/selecao";
+import { problems } from "@/lib/problems";
 import { hasProblem } from "@/problems";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
@@ -19,14 +20,19 @@ const configs = (globalForConfigs.__convergeConfigs ??= new Map<string, Intervie
 const pasta = () => join(process.cwd(), "data", "configs");
 
 /**
- * Config com questão que o agente não tem (id desconhecido, ou formato sem IDE, como system design):
- * em vez de derrubar a sessão, escolhe do banco pela própria config (senioridade e foco da vaga).
- * O aviso fica no log do servidor.
+ * Config com questão que o agente não pode usar: id desconhecido, formato sem IDE (system design) ou
+ * questão de nível diferente do `difficulty` da config. Em vez de derrubar a sessão, escolhe do banco pela
+ * própria config (senioridade e foco da vaga). O aviso fica no log do servidor.
+ *
+ * É o único lugar que decide a questão: IDE e agente recebem a config já normalizada, então os dois
+ * falam da mesma questão (o `resolveProblem` da IDE vira só uma rede de segurança).
  */
 export function normalizarConfig(config: InterviewConfig): InterviewConfig {
-  if (hasProblem(config.problemId)) return config;
+  const existe = hasProblem(config.problemId);
+  if (existe && (!config.difficulty || problems[config.problemId]?.difficulty === config.difficulty)) return config;
   const escolhida = selecionarProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty, semente: config.roleTitle });
-  console.warn(`[config] ${config.id}: problema "${config.problemId}" não existe no banco do agente; usando "${escolhida.id}"`);
+  const motivo = existe ? `é de nível ${problems[config.problemId]?.difficulty}, e a config pede ${config.difficulty}` : "não existe no banco do agente";
+  console.warn(`[config] ${config.id}: problema "${config.problemId}" ${motivo}; usando "${escolhida.id}"`);
   return { ...config, problemId: escolhida.id, difficulty: escolhida.difficulty };
 }
 
