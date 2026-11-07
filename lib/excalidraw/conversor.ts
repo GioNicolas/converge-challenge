@@ -14,6 +14,8 @@ export type ResultadoConversao = {
 };
 
 type Caixa = Extract<ExcalidrawElement, { type: Componente["tipo"] }>;
+type Linha = Extract<ExcalidrawElement, { type: "arrow" | "line" }>;
+type Texto = Extract<ExcalidrawElement, { type: "text" }>;
 type Ponto = readonly [number, number];
 
 function ehCaixa(elemento: ExcalidrawElement): elemento is Caixa {
@@ -31,6 +33,53 @@ function limites(elemento: ExcalidrawElement) {
 
 function centro(elemento: ExcalidrawElement): Ponto {
   return [elemento.x + elemento.width / 2, elemento.y + elemento.height / 2];
+}
+
+function contemTexto(forma: Caixa, ponto: Ponto): boolean {
+  const [cx, cy] = centro(forma);
+  const cos = Math.cos(forma.angle);
+  const sin = Math.sin(forma.angle);
+  const dx = (ponto[0] - cx) * cos + (ponto[1] - cy) * sin;
+  const dy = -(ponto[0] - cx) * sin + (ponto[1] - cy) * cos;
+  const rx = Math.abs(forma.width) / 2;
+  const ry = Math.abs(forma.height) / 2;
+  const tolerancia = 1e-9;
+  if (rx === 0 || ry === 0) return Math.abs(dx) <= rx + tolerancia && Math.abs(dy) <= ry + tolerancia;
+  if (forma.type === "ellipse") return (dx / rx) ** 2 + (dy / ry) ** 2 <= 1 + tolerancia;
+  if (forma.type === "diamond") return Math.abs(dx) / rx + Math.abs(dy) / ry <= 1 + tolerancia;
+  return Math.abs(dx) <= rx + tolerancia && Math.abs(dy) <= ry + tolerancia;
+}
+
+function areaDaForma(forma: Caixa): number {
+  const fator = forma.type === "ellipse" ? Math.PI / 4 : forma.type === "diamond" ? 0.5 : 1;
+  return Math.abs(forma.width * forma.height) * fator;
+}
+
+/** Projeta no traço completo para medir proximidade e fração do comprimento. */
+function proximidadeDaLinha(ponto: Ponto, linha: Linha): { distancia: number; progresso: number } | null {
+  const pontos = linha.points.map(([x, y]): Ponto => [linha.x + x, linha.y + y]);
+  const comprimentos = pontos.slice(1).map((p, i) => Math.hypot(p[0] - pontos[i][0], p[1] - pontos[i][1]));
+  const total = comprimentos.reduce((soma, valor) => soma + valor, 0);
+  if (total === 0) return null;
+  let percorrido = 0;
+  let distancia = Infinity;
+  let progresso = 0;
+  for (let i = 0; i < comprimentos.length; i++) {
+    const comprimento = comprimentos[i];
+    if (comprimento === 0) continue;
+    const inicio = pontos[i];
+    const fim = pontos[i + 1];
+    const dx = fim[0] - inicio[0];
+    const dy = fim[1] - inicio[1];
+    const fracao = Math.max(0, Math.min(1, ((ponto[0] - inicio[0]) * dx + (ponto[1] - inicio[1]) * dy) / comprimento ** 2));
+    const d = Math.hypot(ponto[0] - inicio[0] - dx * fracao, ponto[1] - inicio[1] - dy * fracao);
+    if (d < distancia) {
+      distancia = d;
+      progresso = (percorrido + comprimento * fracao) / total;
+    }
+    percorrido += comprimento;
+  }
+  return { distancia, progresso };
 }
 
 function distancia(ponto: Ponto, elemento: ExcalidrawElement): number {
@@ -98,9 +147,6 @@ export function criarConversor(): {
       const container = porId.get(e.containerId);
       return !!container && !container.isDeleted && container.customData?.autor !== "agente";
     });
-    const representados = visiveis.filter((e) => e.type !== "text" || !e.containerId);
-    const ids = new Map(representados.map((e) => [e.id, atribuirId(e)]));
-    const id = (real: string) => ids.get(real)!;
     const textos = new Map<string, string[]>();
     for (const e of visiveis) {
       if (e.type !== "text" || !e.containerId) continue;
@@ -108,8 +154,41 @@ export function criarConversor(): {
       lista.push(normalizarTexto(e.text));
       textos.set(e.containerId, lista);
     }
-    const nome = (real: string) => (textos.get(real) ?? []).filter(Boolean).join(" ");
+    const vinculados = new Set([...textos].filter(([, lista]) => lista.some(Boolean)).map(([real]) => real));
     const caixas = visiveis.filter(ehCaixa);
+    const linhasVisiveis = visiveis.filter((e): e is Linha => e.type === "arrow" || e.type === "line");
+    const soltos = visiveis.filter((e): e is Texto => e.type === "text" && !e.containerId);
+    const absorvidos = new Map<string, string>();
+    const dentroDe = new Map<string, string>();
+    for (const texto of soltos) {
+      if (!normalizarTexto(texto.text)) continue;
+      const ponto = centro(texto);
+      const recipiente = caixas.filter((c) => contemTexto(c, ponto)).reduce<Caixa | undefined>((menor, c) =>
+        !menor || areaDaForma(c) < areaDaForma(menor) ? c : menor, undefined);
+      if (recipiente) {
+        if (vinculados.has(recipiente.id)) dentroDe.set(texto.id, recipiente.id);
+        else absorvidos.set(texto.id, recipiente.id);
+        continue;
+      }
+      let proxima: Linha | undefined;
+      let menorDistancia = Infinity;
+      for (const linha of linhasVisiveis) {
+        const p = proximidadeDaLinha(ponto, linha);
+        if (p && p.distancia <= 30 && p.progresso >= 0.2 && p.progresso <= 0.8 && p.distancia < menorDistancia) {
+          proxima = linha;
+          menorDistancia = p.distancia;
+        }
+      }
+      if (proxima && !vinculados.has(proxima.id)) absorvidos.set(texto.id, proxima.id);
+    }
+    for (const texto of soltos) {
+      const destino = absorvidos.get(texto.id);
+      if (destino) textos.set(destino, [...(textos.get(destino) ?? []), normalizarTexto(texto.text)]);
+    }
+    const representados = visiveis.filter((e) => e.type !== "text" || (!e.containerId && !absorvidos.has(e.id)));
+    const ids = new Map(representados.map((e) => [e.id, atribuirId(e)]));
+    const id = (real: string) => ids.get(real)!;
+    const nome = (real: string) => (textos.get(real) ?? []).filter(Boolean).join(" ");
     const componentes: Componente[] = caixas.map((e) => {
       const area = Math.abs(e.width * e.height);
       const pais = caixas.filter((outro) => outro.id !== e.id && Math.abs(outro.width * outro.height) > area && distancia(centro(e), outro) === 0);
@@ -118,10 +197,10 @@ export function criarConversor(): {
         !menor || Math.abs(outro.width * outro.height) < Math.abs(menor.width * menor.height) ? outro : menor, undefined);
       return { id: id(e.id), tipo: e.type, nome: nome(e.id), dentroDe: pai ? id(pai.id) : null };
     });
-    const conexoes = visiveis.filter((e): e is Extract<ExcalidrawElement, { type: "arrow" | "line" }> => e.type === "arrow" || e.type === "line").map((e) => {
+    const conexoes = linhasVisiveis.map((e) => {
       function ponta(binding: typeof e.startBinding, indice: number): string | null {
         // Um vínculo explícito a um elemento ignorado nunca vira vínculo por proximidade.
-        if (binding) return ids.get(binding.elementId) ?? null;
+        if (binding) return ids.get(absorvidos.get(binding.elementId) ?? binding.elementId) ?? null;
         const ponto = e.points[indice];
         if (!ponto) return null;
         const proximo = maisProximo([e.x + ponto[0], e.y + ponto[1]], caixas, 40);
@@ -129,8 +208,8 @@ export function criarConversor(): {
       }
       return { id: id(e.id), tipo: e.type, de: ponta(e.startBinding, 0), para: ponta(e.endBinding, e.points.length - 1), rotulo: nome(e.id) };
     });
-    const anotacoes = visiveis.filter((e): e is Extract<ExcalidrawElement, { type: "text" }> => e.type === "text" && !e.containerId).map((e) => ({
-      id: id(e.id), texto: normalizarTexto(e.text),
+    const anotacoes = soltos.filter((e) => !absorvidos.has(e.id)).map((e) => ({
+      id: id(e.id), texto: normalizarTexto(e.text), dentroDe: dentroDe.has(e.id) ? id(dentroDe.get(e.id)!) : null,
     }));
     const secoes: Secao[] = [];
     const grupos = new Set<string>();
@@ -158,7 +237,8 @@ export function criarConversor(): {
       const solta = c.de === null || c.para === null ? ` (${c.tipo === "arrow" ? "seta" : "linha"} solta)` : "";
       linhas.push(`- [${c.id}] ${descreverConexao(instantaneo, c)}${rotulo}${solta}`);
     }
-    if (anotacoes.length) linhas.push("ANOTAÇÕES SOLTAS", ...anotacoes.map((a) => `- [${a.id}] ${entreAspas(a.texto)}`));
+    if (anotacoes.length) linhas.push("ANOTAÇÕES SOLTAS", ...anotacoes.map((a) =>
+      `- [${a.id}] ${entreAspas(a.texto)}${a.dentroDe ? `  dentro de [${a.dentroDe}] ${nomeDoElemento(instantaneo, a.dentroDe)}` : ""}`));
     if (secoes.length) linhas.push("SEÇÕES", ...secoes.map((s) =>
       `- ${s.tipo === "grupo" ? "grupo" : `[${s.id}] ${textoCurto(s.nome) || "moldura sem nome"}`}: ${s.membros.map((m) => `[${m}]`).join(", ")}`));
     if (desenhos.length) {

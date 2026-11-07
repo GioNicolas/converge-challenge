@@ -61,8 +61,15 @@ export function descreverMudancas(anterior: Instantaneo | null, atual: Instantan
   }
   for (const a of atual.anotacoes) {
     const antiga = notasAntes.get(a.id);
-    if (!antiga) linhas.push(`+ anotou [${a.id}] ${entreAspas(a.texto)}`);
-    else if (antiga.texto !== a.texto) linhas.push(`~ alterou a anotação [${a.id}]: ${entreAspas(antiga.texto)} → ${entreAspas(a.texto)}`);
+    const dentro = a.dentroDe ? ` dentro de [${a.dentroDe}] ${nomeDoElemento(atual, a.dentroDe)}` : "";
+    if (!antiga) linhas.push(`+ anotou [${a.id}] ${entreAspas(a.texto)}${dentro}`);
+    else {
+      if (antiga.texto !== a.texto) linhas.push(`~ alterou a anotação [${a.id}]: ${entreAspas(antiga.texto)} → ${entreAspas(a.texto)}`);
+      if ((antiga.dentroDe ?? null) !== (a.dentroDe ?? null)) {
+        const destino = a.dentroDe ? `para dentro de [${a.dentroDe}] ${nomeDoElemento(atual, a.dentroDe)}` : `para fora de [${antiga.dentroDe}] ${nomeDoElemento(antes, antiga.dentroDe ?? null)}`;
+        linhas.push(`~ moveu a anotação [${a.id}] ${destino}`);
+      }
+    }
   }
   const secoesAntes = indice(antes.secoes);
   const secoesAgora = indice(atual.secoes);
