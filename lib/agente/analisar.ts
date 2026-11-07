@@ -41,7 +41,7 @@ export type ResultadoAnalise = {
     /** Por que a resposta do LLM foi rebaixada/alterada pelas guardas. */
     ajustes: string[];
     ms?: number;
-    uso?: { entrada: number; saida: number; cache?: number };
+    uso?: { entrada: number; saida: number; cache?: number; custo?: number };
   };
 };
 

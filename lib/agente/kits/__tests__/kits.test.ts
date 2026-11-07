@@ -52,7 +52,7 @@ test("modos de leitura e problemas por kit", () => {
   assert.equal(obterProblema("system_design", "x"), undefined);
 });
 
-test("resolverAvaliacao", () => {
+test("resolverAvaliacao", async () => {
   const casos: Record<string, [string, string]> = {
     demo: ["system_design", "encurtador_url"],
     "demo-chat": ["system_design", "chat_tempo_real"],
@@ -60,12 +60,12 @@ test("resolverAvaliacao", () => {
     "demo-produto": ["design_produto", "onboarding_60_mais"],
   };
   for (const [id, [kitId, problemaId]] of Object.entries(casos)) {
-    const r = resolverAvaliacao(id);
+    const r = await resolverAvaliacao(id);
     assert.equal(r?.kit.id, kitId);
     assert.equal(r?.problema.id, problemaId);
   }
-  assert.equal(resolverAvaliacao("nao-existe"), undefined);
-  assert.equal(resolverAvaliacao("constructor"), undefined);
+  assert.equal(await resolverAvaliacao("nao-existe"), undefined);
+  assert.equal(await resolverAvaliacao("constructor"), undefined);
 });
 
 test("dados públicos têm só titulo e enunciado", () => {

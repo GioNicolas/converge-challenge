@@ -8,6 +8,7 @@
 import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "../llm/cliente";
 import { NOME_SCHEMA_ANALISE } from "../prompts/avaliador";
 import { NOME_SCHEMA_PERGUNTAR } from "../prompts/entrevistador";
+import { respostaFalsaDeKit } from "../kits/falso";
 
 function textoDe(args: LlmArgs<unknown>): string {
   return args.mensagens.map((m) => m.content).join("\n") + "\n" + (args.sistema.dinamico ?? "");
@@ -37,6 +38,8 @@ export function criarLlmFalsoDeterministico(): LlmCliente {
         saida = fala.includes("?")
           ? { responder: true, texto: "Considere uns 4 mil acessos por segundo.", requisito: "Leitura: ~4 mil/s" }
           : { responder: false, texto: "", requisito: null };
+      } else if ((saida = respostaFalsaDeKit(args.nomeSchema, args.mensagens)) !== undefined) {
+        // geração de kit (fake)
       } else {
         throw new ErroLlm("invalido", "schema desconhecido no LLM falso");
       }

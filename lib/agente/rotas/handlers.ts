@@ -49,8 +49,12 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   const corpo = await lerJsonValidado(req, EsquemaCriar, MAX_CORPO_JSON);
   if (!corpo.ok) return corpo.resposta;
 
-  const alvo = resolverAvaliacao(corpo.dados.avaliacao_id);
+  const alvo = await resolverAvaliacao(corpo.dados.avaliacao_id);
   if (!alvo) return erro(404, "avaliação não encontrada");
+  // Kit gerado só vai a candidato depois da aprovação humana (AGENTE_PERMITIR_NAO_APROVADA=1 libera, p/ demos).
+  if (alvo.dinamica && !alvo.aprovado && process.env.AGENTE_PERMITIR_NAO_APROVADA !== "1") {
+    return erro(403, "avaliação ainda não aprovada");
+  }
   const { kit, problema } = alvo;
 
   const ctx = contexto();
@@ -109,7 +113,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   const ctx = contexto();
   const sessao = await ctx.repositorio.obter(id);
   if (!sessao) return notFound();
-  const alvo = resolverAvaliacao(sessao.avaliacaoId);
+  const alvo = await resolverAvaliacao(sessao.avaliacaoId);
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
 
   if ((await ctx.repositorio.contarAnalise(id)) > MAX_ANALISES_POR_SESSAO) {
@@ -178,7 +182,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const ctx = contexto();
   const sessao = await ctx.repositorio.obter(id);
   if (!sessao) return notFound();
-  const alvo = resolverAvaliacao(sessao.avaliacaoId);
+  const alvo = await resolverAvaliacao(sessao.avaliacaoId);
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
 
   const agora = ctx.agora();

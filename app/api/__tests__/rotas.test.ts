@@ -313,7 +313,7 @@ describe("voz (stubs)", () => {
 
 describe("segredos", () => {
   it("nenhuma resposta de um fluxo completo contém ficha, sinais, armadilhas ou rubrica", async () => {
-    const alvo = resolverAvaliacao("demo")!;
+    const alvo = (await resolverAvaliacao("demo"))!;
     const segredos = [
       ...alvo.problema.ficha.flatMap((f) => [f.resposta]),
       ...alvo.problema.sinaisEsperados,

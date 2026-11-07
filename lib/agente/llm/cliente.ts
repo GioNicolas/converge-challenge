@@ -21,12 +21,14 @@ export type LlmArgs<T> = {
    * e a resposta pode ser cortada; ao ligar, aumente `maxTokens`.
    */
   raciocinio?: boolean;
+  /** Orçamento de tempo desta chamada (inclui o retry). Padrão: o do cliente (8000 ms, loop ao vivo). */
+  timeoutMs?: number;
   sinal?: AbortSignal;
 };
 
 export type LlmResultado<T> = {
   dados: T;
-  uso?: { entrada: number; saida: number; cache?: number };
+  uso?: { entrada: number; saida: number; cache?: number; /** USD, se o provedor informar (usage.cost). */ custo?: number };
   ms: number;
 };
 
@@ -84,6 +86,7 @@ type RespostaOpenRouter = {
     prompt_tokens?: number;
     completion_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number };
+    cost?: number;
   };
 };
 
@@ -91,7 +94,7 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
   const chave = opcoes.apiKey ?? process.env.OPENROUTER_API_KEY;
   const modeloPadrao =
     opcoes.modeloPadrao ?? (process.env.AGENTE_MODELO_AO_VIVO || MODELO_AO_VIVO_PADRAO);
-  const timeoutPadrao = opcoes.timeoutMs ?? TIMEOUT_PADRAO_MS;
+  const timeoutBase = opcoes.timeoutMs ?? TIMEOUT_PADRAO_MS;
   const chamar = opcoes.fetch ?? fetch;
   const esperar = opcoes.esperar ?? dormir;
   const log = opcoes.log ?? (() => {});
@@ -101,6 +104,7 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
       if (!chave) throw new ErroLlm("sem_chave", "OPENROUTER_API_KEY não configurada");
       const inicio = Date.now();
       const modelo = args.modelo ?? modeloPadrao;
+      const timeoutPadrao = args.timeoutMs ?? timeoutBase;
 
       // Orçamento total (inclui o retry): estoura = timeout.
       const orcamento = AbortSignal.timeout(timeoutPadrao);
@@ -196,6 +200,7 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
                 entrada: u.prompt_tokens ?? 0,
                 saida: u.completion_tokens ?? 0,
                 cache: u.prompt_tokens_details?.cached_tokens,
+                ...(typeof u.cost === "number" ? { custo: u.cost } : {}),
               }
             : undefined,
           ms,
