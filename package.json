@@ -13,6 +13,7 @@
     "test:rotas": "tsx --test app/api/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",
     "test:kits": "tsx --test lib/agente/kits/__tests__/*.test.ts",
     "test:vagas": "tsx --test lib/agente/kits/__tests__/vagas-*.test.ts app/api/__tests__/avaliacoes.test.ts",
+    "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts"
   },
   "dependencies": {

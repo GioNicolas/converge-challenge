@@ -9,6 +9,7 @@ import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "../ll
 import { NOME_SCHEMA_ANALISE } from "../prompts/avaliador";
 import { NOME_SCHEMA_PERGUNTAR } from "../prompts/entrevistador";
 import { respostaFalsaDeKit } from "../kits/falso";
+import { respostaFalsaDePlanejador } from "../planejamento/falso";
 
 function textoDe(args: LlmArgs<unknown>): string {
   return args.mensagens.map((m) => m.content).join("\n") + "\n" + (args.sistema.dinamico ?? "");
@@ -40,6 +41,8 @@ export function criarLlmFalsoDeterministico(): LlmCliente {
           : { responder: false, texto: "", requisito: null };
       } else if ((saida = respostaFalsaDeKit(args.nomeSchema, args.mensagens)) !== undefined) {
         // geração de kit (fake)
+      } else if ((saida = respostaFalsaDePlanejador(args.nomeSchema, args.mensagens)) !== undefined) {
+        // planejamento (fake)
       } else {
         throw new ErroLlm("invalido", "schema desconhecido no LLM falso");
       }
