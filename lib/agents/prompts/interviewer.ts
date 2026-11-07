@@ -2,6 +2,7 @@
  * Prompt do Interviewer: conduz a conversa de um blip, ou responde quando o candidato chama.
  * Este mesmo texto vai virar o prompt do agente de voz (ElevenLabs), então escrevemos pensando em fala.
  */
+import type { Fase } from "@/lib/agents/fase";
 import type { ChatMessage, InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
@@ -30,6 +31,9 @@ Restrições: ${pub.constraints.join("; ")}
 - Reaja ao que ele disse antes de seguir ("Entendi.", "Faz sentido.", "Hum, tá."). Não elogie demais, não diga "ótima pergunta", não faça resumos longos.
 - Nada de markdown, listas ou código na fala: vai virar voz.
 - Quando falar de um trecho do código, preencha highlight com as linhas (pelos números do código que você recebe). Senão, highlight = null.
+- É uma conversa por texto numa barra lateral, enquanto ele programa: escreva como numa conversa de chat entre colegas, não como formulário.
+- Você lembra das conversas anteriores (vêm na mensagem). Use isso para soar contínuo: retome algo que ele disse quando ajudar ("Você comentou que ia começar pela força bruta…") e nunca pergunte de novo o que ele já respondeu.
+- Considere a fase em que ele está (vem na mensagem): quem acabou de ver um teste falhar está com a cabeça no resultado; quem está escrevendo a primeira versão não quer conversa longa.
 
 # Pergunta de abertura (Tipo: abertura)
 É só pra ouvir a ideia inicial, sem pressão: o candidato ainda quer começar a programar.
@@ -38,7 +42,7 @@ Restrições: ${pub.constraints.join("; ")}
 - NUNCA aprofunde na abertura. Se ele contou o plano, registre em evidence, no critério de abordagem, o que ele pretende fazer (ex.: "planeja começar por força bruta e otimizar depois"). Se além disso explicou o porquê ou a complexidade por conta própria, registre também probeOutcome espontaneo nesse critério.
 
 # Conversa sobre uma pergunta sua (modo "blip")
-Sua primeira fala é a pergunta preparada, praticamente com as mesmas palavras, com o highlight dela. Não acrescente detalhes que mudem o sentido. A primeira fala nunca encerra (end = false).
+Sua primeira fala é a pergunta preparada, com o highlight dela. Pode abrir com uma ponte curta para o momento dele, usando só o que ele mesmo está vendo e sem julgar ("Vi que você rodou agora.", "Sobre esse loop que você acabou de escrever:"), mas não acrescente detalhes que mudem o sentido da pergunta. A primeira fala nunca encerra (end = false).
 
 Depois, siga a resposta dele, sempre no MESMO critério e no mesmo tema, com no máximo 2 aprofundamentos:
 - Ele AFIRMOU algo (uma complexidade, uma escolha, um comportamento) sem justificar → peça o porquê: "Por que fica O(n²)?", "O que te fez escolher assim?"
@@ -106,6 +110,7 @@ Responda SOMENTE com um objeto JSON, sem markdown:
 
 export interface InterviewerTurnInput {
   mode: "blip" | "candidate";
+  fase: Fase;
   elapsedLabel: string; // "mm:ss"
   remainingLabel: string; // "mm:ss"
   language: string;
@@ -126,8 +131,8 @@ export interface InterviewerTurnInput {
   availableHint?: string;
   /** O que o Analyst viu, pra o entrevistador não contradizer nem entregar (uso interno). */
   analystNotes?: string;
-  /** Perguntas já feitas em conversas anteriores, pra não repetir. */
-  previousQuestions: string[];
+  /** Conversas anteriores já formatadas (pergunta + falas), pra dar continuidade e não repetir. */
+  previousConversations: string;
   messages: ChatMessage[];
 }
 
@@ -145,11 +150,12 @@ Linhas da pergunta: ${input.questionHighlight ? `${input.questionHighlight.start
 Aprofundamentos já feitos nesta conversa: ${Math.max(0, input.messages.filter((m) => m.role === "agent").length - 1)} (máximo 2, fora a oferta de dica no retorno)`
       : "O candidato te chamou.";
 
-  return `Modo: ${input.mode}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
+  return `Modo: ${input.mode}. Fase: ${input.fase}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
 ${blip}
 Dica leve disponível: ${input.availableHint ?? "(nenhuma: já foram todas)"}
 Notas internas do analista: ${input.analystNotes ?? "(nenhuma)"}
-Perguntas já feitas antes: ${input.previousQuestions.length ? input.previousQuestions.join(" | ") : "(nenhuma)"}
+Conversas anteriores:
+${input.previousConversations}
 
 Código atual:
 ${input.numberedCode || "(vazio)"}

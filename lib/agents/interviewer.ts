@@ -5,6 +5,7 @@
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome } from "@/lib/agents/coverage";
+import { conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
@@ -33,6 +34,7 @@ export async function runInterviewerTurn(
   const checkIn = question?.checkInId ? session.checkIns.find((c) => c.id === question.checkInId) : undefined;
   const input: InterviewerTurnInput = {
     mode: found ? "blip" : "candidate",
+    fase: faseDaEntrevista(session),
     elapsedLabel: formatMmSs(elapsedMs(session)),
     remainingLabel: formatMmSs(Math.max(0, session.config.durationMin * 60_000 - elapsedMs(session))),
     language: session.language,
@@ -47,9 +49,10 @@ export async function runInterviewerTurn(
     questionHighlight: found?.question.highlight,
     availableHint: hint,
     analystNotes: analystNotesOf(session),
-    previousQuestions: session.queue
-      .filter((q) => q.status === "asked" && q.id !== found?.question.id)
-      .map((q) => q.question),
+    // As conversas anteriores (sem a atual, que vai em `messages`).
+    previousConversations: formatarConversas(
+      conversasFeitas(session).filter((c) => c.pergunta !== found?.question.question),
+    ),
     messages: req.messages,
   };
 

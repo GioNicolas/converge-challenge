@@ -5,6 +5,7 @@
 import type { AnalystQuestion } from "@/lib/agents/analystSchema";
 import { AnalystOutput } from "@/lib/agents/analystSchema";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
+import { conversasFeitas, faseDaEntrevista, formatarConversas, regiaoAlterada } from "@/lib/agents/fase";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
 import { focoPendente } from "@/lib/agents/focoQuota";
 import { allPassed } from "@/lib/agents/policy";
@@ -127,8 +128,13 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     // Só pede pergunta de foco quando já há ideia no código (como as outras perguntas) e o foco ainda não teve a sua.
     const focoParaPedir = code.trim() === "" ? undefined : focoPendente(session);
     const problem = getProblem(session.config.problemId);
+    const fase = faseDaEntrevista(session);
     const system = buildAnalystSystem(session.config, problem);
     const user = buildAnalystUser({
+      fase,
+      changedRegion: book.lastCompletedCode === undefined ? undefined : regiaoAlterada(book.lastCompletedCode, code),
+      conversations: formatarConversas(conversasFeitas(session)),
+      previousThinking: analyst.insights?.candidateThinking || undefined,
       elapsedLabel: formatElapsed(trigger.t),
       trigger: trigger.type,
       language: session.language,
@@ -138,9 +144,8 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         return e.t > since && line !== undefined ? [`[${formatElapsed(e.t)}] ${line}`] : [];
       }),
       previousApproach: analyst.insights?.approach,
-      askedQuestions: session.queue
-        .filter((q) => q.status === "asked" || q.status === "blipped")
-        .map((q) => q.question),
+      // Já perguntadas mas ainda sem conversa (balão na tela): as feitas estão em `conversations`.
+      pendingQuestions: session.queue.filter((q) => q.status === "blipped").map((q) => q.question),
       keyMoment,
       focoPendente: focoParaPedir,
       remainingLabel: formatElapsed(Math.max(0, session.config.durationMin * 60_000 - trigger.t)),
@@ -225,6 +230,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         status: "queued",
         keyMoment: focusArea ? undefined : keyMoment,
         focusArea,
+        fase,
         kind: question.kind ?? "explicar",
         criterionId: question.criterionId && criterionIds.has(question.criterionId) ? question.criterionId : undefined,
       });
@@ -291,10 +297,7 @@ function describeEvent(event: SessionEvent): string | undefined {
     }
     case "paste":
       return `colou ${event.lines} linhas a partir da linha ${event.startLine}`;
-    case "speech": {
-      const who = event.role === "candidate" ? "candidato" : "entrevistador";
-      return `${who} disse: ${truncate(event.text, 200)}`;
-    }
+    // As falas vão inteiras, agrupadas por conversa, em `conversations`.
     case "hint":
       return "pediu dica";
     case "language_changed":

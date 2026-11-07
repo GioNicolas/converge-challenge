@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BlipContext, ChatMessage, EditorCommand } from "@/lib/contracts";
-import { getBlipContext, postChat } from "./api";
+import type { Blip, ChatMessage, EditorCommand } from "@/lib/contracts";
+import { postChat } from "./api";
 import type { EventInput } from "./useSession";
 
 interface ChatDeps {
@@ -9,7 +9,17 @@ interface ChatDeps {
   applyCommands: (commands: EditorCommand[]) => void;
 }
 
-/** Quanto tempo a última fala do entrevistador fica na tela antes do painel fechar. */
+/** Fala na tela: a mensagem do contrato mais o horário em que apareceu (Date.now()). */
+export type Fala = ChatMessage & { at: number };
+
+/** Conversa já encerrada, guardada para o candidato reler na barra lateral. */
+export interface ConversaAnterior {
+  blipId: string;
+  preview: string;
+  falas: Fala[];
+}
+
+/** Quanto tempo a última fala do entrevistador fica na tela antes da barra fechar. */
 const END_DELAY_MS = 2500;
 
 function errorText(err: unknown): string {
@@ -17,19 +27,23 @@ function errorText(err: unknown): string {
 }
 
 /**
- * Painel de conversa por texto. `epochRef` invalida respostas que chegam depois de fechar o chat.
+ * Conversa por texto na barra lateral. Só abre por um balão do entrevistador e dura até um dos dois
+ * encerrar ("pode seguir" do agente ou "voltar a programar" do candidato). As conversas encerradas
+ * ficam em `previous`. `epochRef` invalida respostas que chegam depois de fechar.
  */
 export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
   const [open, setOpen] = useState(false);
-  const [blipId, setBlipId] = useState<string | undefined>(undefined);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [blip, setBlip] = useState<Blip | null>(null);
+  const [messages, setMessages] = useState<Fala[]>([]);
+  const [previous, setPrevious] = useState<ConversaAnterior[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [blipContext, setBlipContext] = useState<BlipContext | null>(null);
-  /** O entrevistador encerrou: a última fala fica visível, sem input, até o painel fechar sozinho. */
+  /** O entrevistador encerrou: a última fala fica visível, sem campo de resposta, até a barra fechar sozinha. */
   const [ended, setEnded] = useState(false);
 
-  const activeBlipRef = useRef<string | undefined>(undefined);
+  const activeBlipRef = useRef<Blip | null>(null);
+  const messagesRef = useRef<Fala[]>([]);
+  messagesRef.current = messages;
   const epochRef = useRef(0);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -40,15 +54,18 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
       epochRef.current += 1;
       clearTimeout(endTimerRef.current);
       endTimerRef.current = undefined;
-      const id = activeBlipRef.current;
-      activeBlipRef.current = undefined;
-      if (id !== undefined) void sendEvent({ type: "blip_closed", blipId: id, reason });
+      const active = activeBlipRef.current;
+      activeBlipRef.current = null;
+      if (active !== null) {
+        void sendEvent({ type: "blip_closed", blipId: active.id, reason });
+        const falas = messagesRef.current;
+        if (falas.length > 0) setPrevious((prev) => [...prev, { blipId: active.id, preview: active.preview, falas }]);
+      }
       // Fechou a conversa, os grifos da pergunta saem junto (qualquer motivo).
       applyCommands([{ type: "clear_highlights" }]);
       setOpen(false);
-      setBlipId(undefined);
+      setBlip(null);
       setMessages([]);
-      setBlipContext(null);
       setError(null);
       setBusy(false);
       setEnded(false);
@@ -56,21 +73,26 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
     [sendEvent, applyCommands],
   );
 
+  /** Candidato volta a programar sem esperar o entrevistador fechar. */
   const close = useCallback(() => closeChat("button"), [closeChat]);
 
   /** Chama POST /api/chat com o histórico e aplica a resposta. */
   const runTurn = useCallback(
-    async (history: ChatMessage[], forBlipId: string | undefined): Promise<void> => {
+    async (history: Fala[], forBlipId: string): Promise<void> => {
       if (sessionId === null) return;
       const epoch = epochRef.current;
       setBusy(true);
       setError(null);
       try {
-        const res = await postChat({ sessionId, blipId: forBlipId, messages: history });
+        const res = await postChat({
+          sessionId,
+          blipId: forBlipId,
+          messages: history.map(({ role, text }) => ({ role, text })),
+        });
         if (epoch !== epochRef.current) return;
-        // Ao encerrar, o grifo sai só quando o painel fecha, não junto com a última fala.
+        // Ao encerrar, o grifo sai só quando a barra fecha, não junto com a última fala.
         applyCommands(res.end ? res.commands.filter((c) => c.type !== "clear_highlights") : res.commands);
-        setMessages([...history, { role: "agent", text: res.reply }]);
+        setMessages([...history, { role: "agent", text: res.reply, at: Date.now() }]);
         void sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: forBlipId });
         if (res.end) {
           setEnded(true);
@@ -85,79 +107,42 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
     [sessionId, applyCommands, sendEvent, closeChat],
   );
 
+  /** Candidato clicou no balão: abre a barra e o entrevistador faz a pergunta. */
   const openBlip = useCallback(
-    async (id: string): Promise<void> => {
+    async (next: Blip): Promise<void> => {
       if (sessionId === null) return;
       epochRef.current += 1;
       clearTimeout(endTimerRef.current);
-      const epoch = epochRef.current;
-      activeBlipRef.current = id;
+      activeBlipRef.current = next;
       setOpen(true);
-      setBlipId(id);
+      setBlip(next);
       setMessages([]);
-      setBlipContext(null);
       setError(null);
       setEnded(false);
-      void sendEvent({ type: "blip_opened", blipId: id });
-      try {
-        const ctx = await getBlipContext(id, sessionId);
-        if (epoch === epochRef.current) setBlipContext(ctx);
-      } catch (err) {
-        console.error("GET contexto do blip falhou", err);
-      }
-      if (epoch !== epochRef.current) return;
-      await runTurn([], id);
+      void sendEvent({ type: "blip_opened", blipId: next.id });
+      await runTurn([], next.id);
     },
     [sessionId, sendEvent, runTurn],
   );
 
-  /** Abre o chat sem blip (botão "Chamar entrevistador"). */
-  const openFree = useCallback(() => {
-    epochRef.current += 1;
-    clearTimeout(endTimerRef.current);
-    activeBlipRef.current = undefined;
-    setOpen(true);
-    setBlipId(undefined);
-    setMessages([]);
-    setBlipContext(null);
-    setError(null);
-    setEnded(false);
-  }, []);
-
   const send = useCallback(
     (text: string) => {
-      if (busy || ended) return;
-      setOpen(true); // o campo fixo da tela abre a conversa se ainda não estiver aberta
-      const next: ChatMessage[] = [...messages, { role: "candidate", text }];
-      const id = activeBlipRef.current;
+      const active = activeBlipRef.current;
+      if (busy || ended || active === null) return;
+      const next: Fala[] = [...messages, { role: "candidate", text, at: Date.now() }];
       setMessages(next);
-      void sendEvent({ type: "speech", role: "candidate", text, blipId: id });
-      void runTurn(next, id);
+      void sendEvent({ type: "speech", role: "candidate", text, blipId: active.id });
+      void runTurn(next, active.id);
     },
     [busy, ended, messages, sendEvent, runTurn],
   );
 
-  /** Mensagem vinda de fora (transcrição da voz): entra na lista e na linha do tempo. */
-  const pushMessage = useCallback(
-    (role: ChatMessage["role"], text: string) => {
-      setMessages((prev) => [...prev, { role, text }]);
-      void sendEvent({ type: "speech", role, text, blipId: activeBlipRef.current });
-    },
-    [sendEvent],
-  );
+  /** Tenta de novo o último turno que falhou (a fala do candidato já está na lista). */
+  const retry = useCallback(() => {
+    const active = activeBlipRef.current;
+    if (busy || active === null) return;
+    void runTurn(messages, active.id);
+  }, [busy, messages, runTurn]);
 
-  return {
-    pushMessage,
-    open,
-    blipId,
-    messages,
-    busy,
-    ended,
-    error,
-    blipContext,
-    openBlip,
-    openFree,
-    send,
-    close,
-  };
+  return { open, blip, messages, previous, busy, ended, error, openBlip, send, retry, close };
 }

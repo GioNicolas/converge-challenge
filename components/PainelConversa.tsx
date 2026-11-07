@@ -1,213 +1,240 @@
 "use client";
 
-// Histórico da conversa numa folha lateral à direita: perguntas do agente e falas do candidato,
-// para o candidato reler uma pergunta. Lista simples, sem balões: nome pequeno em cima, texto embaixo.
-// Fecha com Esc, clique fora ou o botão de fechar.
-import { useEffect, useId, useRef, type ReactNode } from "react";
+// Barra lateral da conversa com o entrevistador. Abre quando o candidato clica no balão de pergunta e
+// fica até um dos dois encerrar: o entrevistador ("pode seguir") ou o candidato ("Voltar a programar").
+// Não é modal: o código continua visível e o editor abre espaço para ela. As conversas anteriores ficam
+// no topo, apagadas, para reler.
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, SendHorizontal } from "lucide-react";
+import type { ConversaAnterior, Fala } from "./ide/useChat";
 
-export type MensagemConversa = {
-  id: string;
-  quem: "agente" | "candidato";
-  texto: string;
-  /** Fala ainda em andamento (a transcrição pode mudar). */
-  parcial?: boolean;
-  /** Momento da fala, em milissegundos (Date.now()). */
-  horario: number;
-};
+/** Largura da barra; o editor usa para abrir espaço. */
+export const LARGURA_PAINEL = 380;
 
 type Props = {
   aberto: boolean;
-  onFechar: () => void;
-  mensagens: MensagemConversa[];
-  /** Mostra "ver no quadro" nas falas do agente. */
-  onVerNoQuadro?: (id: string) => void;
-  /** Avisos no fim da lista (ex.: "Pensando…", erros). */
-  rodape?: ReactNode;
+  /** Rótulo da pergunta atual ("Quero entender o loop interno"). */
+  assunto?: string;
+  falas: Fala[];
+  anteriores: ConversaAnterior[];
+  /** Entrevistador escrevendo a próxima fala. */
+  digitando: boolean;
+  /** Entrevistador encerrou: sem campo de resposta até a barra fechar sozinha. */
+  encerrada: boolean;
+  erro: string | null;
+  onEnviar: (texto: string) => void;
+  onTentarDeNovo: () => void;
+  onVoltar: () => void;
 };
 
 const CURVA = [0.32, 0.72, 0, 1] as const; // --curva-suave
-const MOLA = { type: "spring", stiffness: 400, damping: 36 } as const;
+const MOLA = { type: "spring", stiffness: 400, damping: 38 } as const;
 
 function hora(ms: number) {
   return new Date(ms).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function PainelConversa({ aberto, onFechar, mensagens, onVerNoQuadro, rodape }: Props) {
+export default function PainelConversa({
+  aberto,
+  assunto,
+  falas,
+  anteriores,
+  digitando,
+  encerrada,
+  erro,
+  onEnviar,
+  onTentarDeNovo,
+  onVoltar,
+}: Props) {
   const reduzir = useReducedMotion() ?? false;
-  const titulo = useId();
-  const fechar = useRef<HTMLButtonElement>(null);
   const lista = useRef<HTMLDivElement>(null);
-  const colado = useRef(true); // a lista está no fim? então acompanha as falas novas
-  const aoFechar = useRef(onFechar);
-  useEffect(() => {
-    aoFechar.current = onFechar;
-  }, [onFechar]);
+  const campo = useRef<HTMLTextAreaElement>(null);
+  const [rascunho, setRascunho] = useState("");
 
-  // Esc fecha. Ao abrir, o foco vai para o painel; ao fechar, volta para quem abriu.
+  // Rascunho é da conversa atual: abriu outra, começa vazio.
   useEffect(() => {
-    if (!aberto) return;
-    const anterior = document.activeElement as HTMLElement | null;
-    fechar.current?.focus({ preventScroll: true });
-    const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        aoFechar.current();
-      }
-    };
-    addEventListener("keydown", aoTeclar, true);
-    return () => {
-      removeEventListener("keydown", aoTeclar, true);
-      anterior?.focus?.({ preventScroll: true });
-    };
+    if (aberto) setRascunho("");
   }, [aberto]);
 
-  // Ao abrir, começa no fim (a fala mais recente).
+  // Fala nova ou "digitando": desce até o fim.
   useEffect(() => {
-    if (!aberto || !lista.current) return;
-    lista.current.scrollTop = lista.current.scrollHeight;
-    colado.current = true;
-  }, [aberto]);
-
-  // Fala nova ou parcial crescendo: desce junto, se o candidato não estiver relendo lá em cima.
-  const ultima = mensagens.at(-1);
-  useEffect(() => {
-    const el = lista.current;
-    if (!el || !colado.current) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: reduzir ? "auto" : "smooth" });
-  }, [mensagens.length, ultima?.texto, reduzir]);
-
-  function aoRolar() {
     const el = lista.current;
     if (!el) return;
-    colado.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    el.scrollTo({ top: el.scrollHeight, behavior: reduzir ? "auto" : "smooth" });
+  }, [falas.length, digitando, aberto, reduzir]);
+
+  // Quando o entrevistador termina de escrever, o foco vai para a resposta.
+  const podeResponder = aberto && !digitando && !encerrada && falas.length > 0;
+  useEffect(() => {
+    if (podeResponder) campo.current?.focus({ preventScroll: true });
+  }, [podeResponder]);
+
+  function enviar(e?: FormEvent) {
+    e?.preventDefault();
+    const texto = rascunho.trim();
+    if (!texto || !podeResponder) return;
+    setRascunho("");
+    onEnviar(texto);
+  }
+
+  // Enter envia; Shift+Enter quebra a linha.
+  function aoTeclar(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) enviar(e);
   }
 
   return (
     <AnimatePresence>
       {aberto && (
-        <>
-          {/* Clique fora fecha. Sem escurecer: o quadro continua visível. */}
-          <motion.div
-            key="fora"
-            aria-hidden
-            onPointerDown={onFechar}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reduzir ? 0 : 0.28 }}
-            className="fixed inset-0 z-30 bg-fundo/10"
-          />
-          <motion.aside
-            key="painel"
-            role="dialog"
-            aria-labelledby={titulo}
-            initial={reduzir ? { opacity: 0 } : { x: "calc(100% + 24px)", opacity: 0.6 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={reduzir ? { opacity: 0 } : { x: "calc(100% + 24px)", opacity: 0.6 }}
-            transition={reduzir ? { duration: 0 } : MOLA}
-            className="fixed top-3 right-3 bottom-3 z-40 flex w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden rounded-padrao border border-borda bg-vidro shadow-flutuante backdrop-blur-2xl"
-          >
-            <header className="flex items-center gap-3 border-b border-borda px-5 pt-4 pb-3">
-              <div className="flex-1">
-                <h2 id={titulo} className="text-[15px] font-semibold tracking-tight text-texto">
-                  Conversa
-                </h2>
-                <p className="text-xs text-texto-suave tabular-nums">
-                  {mensagens.length === 0
-                    ? "Nada ainda"
-                    : mensagens.length === 1
-                      ? "1 fala"
-                      : `${mensagens.length} falas`}
-                </p>
-              </div>
-              <button
-                ref={fechar}
-                type="button"
-                onClick={onFechar}
-                aria-label="Fechar conversa"
-                className="flex size-8 items-center justify-center rounded-full bg-superficie-2 text-texto-suave transition-[color,transform] duration-150 ease-suave outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95"
-              >
-                <svg
-                  viewBox="0 0 16 16"
-                  width={14}
-                  height={14}
-                  aria-hidden
-                  className="fill-none stroke-current"
-                  strokeWidth={1.75}
-                  strokeLinecap="round"
-                >
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </button>
-            </header>
-
-            <div ref={lista} onScroll={aoRolar} className="flex-1 overflow-y-auto px-5 py-4">
-              {mensagens.length === 0 ? (
-                <p className="pt-8 text-center text-sm leading-relaxed text-texto-suave">
-                  As perguntas do entrevistador e as suas respostas aparecem aqui.
-                </p>
-              ) : (
-                <ol className="flex flex-col gap-5" aria-live="polite">
-                  <AnimatePresence initial={false}>
-                    {mensagens.map((m) => (
-                      <motion.li
-                        key={m.id}
-                        initial={reduzir ? { opacity: 0 } : { opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={reduzir ? { duration: 0 } : { duration: 0.32, ease: CURVA }}
-                      >
-                        <Fala mensagem={m} onVerNoQuadro={onVerNoQuadro} />
-                      </motion.li>
-                    ))}
-                  </AnimatePresence>
-                </ol>
-              )}
-              {rodape && <div className="mt-5 space-y-1 text-sm">{rodape}</div>}
+        <motion.aside
+          key="painel"
+          aria-label="Conversa com o entrevistador"
+          initial={reduzir ? { opacity: 0 } : { x: "calc(100% + 24px)", opacity: 0.6 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={reduzir ? { opacity: 0 } : { x: "calc(100% + 24px)", opacity: 0.6 }}
+          transition={reduzir ? { duration: 0 } : MOLA}
+          style={{ width: `min(${LARGURA_PAINEL}px, calc(100% - 24px))` }}
+          className="absolute top-3 right-3 bottom-3 z-30 flex flex-col overflow-hidden rounded-padrao border border-borda bg-superficie-2 shadow-flutuante"
+        >
+          <header className="flex items-center gap-3 border-b border-borda px-5 pt-4 pb-3">
+            <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-agente/20">
+              <span className="size-2.5 rounded-full bg-agente" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[15px] font-semibold tracking-tight text-texto">Entrevistador</h2>
+              {assunto && <p className="truncate text-xs text-texto-suave">{assunto}</p>}
             </div>
-          </motion.aside>
-        </>
+          </header>
+
+          <div ref={lista} className="flex-1 overflow-y-auto px-5 py-4">
+            {anteriores.length > 0 && (
+              <div className="mb-6 flex flex-col gap-5 opacity-55">
+                {anteriores.map((c) => (
+                  <section key={c.blipId} aria-label={`Conversa anterior: ${c.preview}`} className="flex flex-col gap-4">
+                    <Divisoria texto={`${c.preview} · ${hora(c.falas[0].at)}`} />
+                    {c.falas.map((f, i) => (
+                      <Mensagem key={i} fala={f} />
+                    ))}
+                  </section>
+                ))}
+                <Divisoria texto="Agora" />
+              </div>
+            )}
+
+            <ol className="flex flex-col gap-4" aria-live="polite">
+              <AnimatePresence initial={false}>
+                {falas.map((f, i) => (
+                  <motion.li
+                    key={i}
+                    initial={reduzir ? { opacity: 0 } : { opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={reduzir ? { duration: 0 } : { duration: 0.32, ease: CURVA }}
+                  >
+                    <Mensagem fala={f} />
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+              {digitando && (
+                <li aria-label="Entrevistador escrevendo">
+                  <Digitando />
+                </li>
+              )}
+            </ol>
+
+            {erro && (
+              <p className="mt-4 text-sm text-perigo">
+                Não consegui responder agora.{" "}
+                <button type="button" onClick={onTentarDeNovo} className="font-medium underline underline-offset-2">
+                  Tentar de novo
+                </button>
+              </p>
+            )}
+          </div>
+
+          <footer className="border-t border-borda p-3">
+            {encerrada ? (
+              <p className="px-2 py-2 text-center text-sm text-texto-suave">Voltando para o código…</p>
+            ) : (
+              <>
+                <form onSubmit={enviar} className="flex items-end gap-2 rounded-[18px] bg-superficie px-3 py-2">
+                  <textarea
+                    ref={campo}
+                    value={rascunho}
+                    onChange={(e) => setRascunho(e.target.value)}
+                    onKeyDown={aoTeclar}
+                    rows={2}
+                    disabled={!podeResponder}
+                    placeholder={podeResponder ? "Sua resposta…" : "Aguarde o entrevistador…"}
+                    aria-label="Sua resposta ao entrevistador"
+                    className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent py-1 text-[15px] leading-relaxed text-texto outline-none placeholder:text-texto-suave disabled:opacity-60"
+                  />
+                  <button
+                    type="submit"
+                    aria-label="Enviar resposta"
+                    disabled={!podeResponder || !rascunho.trim()}
+                    className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-marca text-texto-claro transition-opacity duration-150 disabled:opacity-40"
+                  >
+                    <SendHorizontal size={16} strokeWidth={1.75} />
+                  </button>
+                </form>
+                <button
+                  type="button"
+                  onClick={onVoltar}
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-controle py-1.5 text-sm font-medium text-texto-suave transition-colors duration-150 hover:text-texto"
+                >
+                  <ArrowLeft size={14} strokeWidth={1.75} />
+                  Voltar a programar
+                </button>
+              </>
+            )}
+          </footer>
+        </motion.aside>
       )}
     </AnimatePresence>
   );
 }
 
-function Fala({
-  mensagem: m,
-  onVerNoQuadro,
-}: {
-  mensagem: MensagemConversa;
-  onVerNoQuadro?: (id: string) => void;
-}) {
-  const doAgente = m.quem === "agente";
+function Mensagem({ fala }: { fala: Fala }) {
+  const doAgente = fala.role === "agent";
   return (
-    <article>
-      <header className="mb-1 flex items-center gap-1.5 text-xs font-medium text-texto-suave">
-        {doAgente && <span aria-hidden className="size-1.5 rounded-full bg-agente" />}
-        <span>{doAgente ? "Entrevistador" : "Você"}</span>
-        <span aria-hidden>·</span>
-        <time dateTime={new Date(m.horario).toISOString()} className="font-normal tabular-nums">
-          {hora(m.horario)}
-        </time>
-      </header>
+    <article className={doAgente ? "pr-6" : "flex flex-col items-end pl-8"}>
       <p
-        className={`text-[15px] leading-relaxed transition-colors duration-300 ease-suave ${
-          m.parcial ? "text-texto-suave/60" : "text-texto"
+        className={`rounded-[16px] px-3.5 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap ${
+          doAgente ? "rounded-tl-[6px] bg-superficie text-texto" : "rounded-tr-[6px] bg-marca text-texto-claro"
         }`}
       >
-        {m.texto}
-        {m.parcial && <span className="sr-only"> (falando)</span>}
+        {fala.text}
       </p>
-      {doAgente && onVerNoQuadro && (
-        <button
-          type="button"
-          onClick={() => onVerNoQuadro(m.id)}
-          aria-label={`Ver no quadro: ${m.texto}`}
-          className="mt-1.5 -ml-1 rounded-controle px-1 text-xs font-medium text-marca transition-opacity duration-150 ease-suave outline-none hover:opacity-75 focus-visible:ring-2 focus-visible:ring-marca"
-        >
-          ver no quadro
-        </button>
-      )}
+      <time dateTime={new Date(fala.at).toISOString()} className="mt-1 px-1 text-[11px] text-texto-suave tabular-nums">
+        {doAgente ? "Entrevistador · " : ""}
+        {hora(fala.at)}
+      </time>
     </article>
+  );
+}
+
+function Divisoria({ texto }: { texto: string }) {
+  return (
+    <div className="flex items-center gap-3 text-[11px] font-medium text-texto-suave">
+      <span className="h-px flex-1 bg-borda" />
+      <span className="max-w-[70%] truncate">{texto}</span>
+      <span className="h-px flex-1 bg-borda" />
+    </div>
+  );
+}
+
+/** Três pontos pulsando, no lugar da próxima fala do entrevistador. */
+function Digitando() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-[16px] rounded-tl-[6px] bg-superficie px-4 py-3.5">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="size-1.5 rounded-full bg-texto-suave"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18 }}
+        />
+      ))}
+    </span>
   );
 }

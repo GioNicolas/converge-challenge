@@ -68,6 +68,7 @@ function AnalysisBlock({ analyst }: { analyst: AnalystStatus }) {
         <li className="text-neutral-600">ainda sem análise</li>
       ) : (
         <>
+          {insights.candidateThinking && <li className="text-sky-300">pensando: {insights.candidateThinking}</li>}
           <li>abordagem: {insights.approach}</li>
           <li>
             tempo {insights.timeComplexity} · memória {insights.spaceComplexity} · progresso: {insights.progress}
@@ -214,6 +215,7 @@ export function StatePanel({ sessionId, elapsedMs, blipContext }: StatePanelProp
               {q.topicLabel !== undefined ? ` · balão: ${q.topicLabel}` : ""}
               {q.highlight !== undefined ? ` · linhas ${q.highlight.startLine}-${q.highlight.endLine}` : ""}
               {q.kickoff === true ? " · abertura" : ""}
+              {q.fase !== undefined ? ` · fase: ${q.fase}` : ""}
             </div>
             {q.keyMoment !== undefined && <div className="text-amber-300">⚑ momento-chave: {q.keyMoment}</div>}
           </li>
