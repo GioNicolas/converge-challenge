@@ -36,6 +36,8 @@ export type OpcoesEscrita = {
   velocidade?: number;
   /** Para de escrever no meio (ex.: o candidato já respondeu). */
   sinal?: AbortSignal;
+  /** Cor do texto. Padrão: a cor do agente. */
+  cor?: string;
 };
 
 export type OpcoesTraco = {
@@ -159,7 +161,7 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
           text: texto,
           fontSize: o.tamanho ?? 20,
           fontFamily: FONT_FAMILY.Excalifont,
-          strokeColor: corDoAgente(),
+          strokeColor: o.cor ?? corDoAgente(),
           locked: true,
           version: versao,
           customData: { autor: AUTOR_AGENTE, grupo: o.grupo },

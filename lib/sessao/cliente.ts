@@ -131,6 +131,15 @@ const RESPOSTAS_DE_MENTIRA: Omit<RespostaAnalise, "elementos">[] = [
 ];
 
 let proximaResposta = 0;
+let proximaDemo = 0;
+
+/** Uma dúvida pronta para demonstrar o plin, apontando para o último componente desenhado. */
+export function duvidaDeDemonstracao(grafo: string): RespostaAnalise {
+  const duvidas = RESPOSTAS_DE_MENTIRA.filter((r) => r.status === "duvida");
+  const base = duvidas[proximaDemo++ % duvidas.length];
+  const alvo = ultimoComponente(grafo);
+  return validarResposta({ ...base, elementos: alvo ? [alvo] : [] });
+}
 
 /** O último componente citado no grafo (ex.: "- [e1] Postgres (elipse)" → "e1"). */
 function ultimoComponente(grafo: string) {

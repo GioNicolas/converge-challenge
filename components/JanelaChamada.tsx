@@ -203,7 +203,8 @@ export default function JanelaChamada({
                   <span className="text-texto-claro/75">{NOME_DA_FASE[estado.fase]}</span>
                 </div>
 
-                <div className="absolute inset-0 flex items-center justify-center">
+                {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato. */}
+                <div className="absolute inset-y-0 left-0 right-[108px] flex items-center justify-center">
                   <Orb
                     estado={estadoOrb}
                     volume={estadoOrb === "ouvindo" ? midia.volume : 0}

@@ -103,6 +103,14 @@ test("dúvida nova substitui a pendente; 'ok' cancela a pendente", () => {
   assert.equal(e.perguntaPendente, null);
 });
 
+test("plin de demonstração ignora fase, intervalo e limite, mas não atropela uma pergunta ativa", () => {
+  const cheio = { ...estadoInicial(), fase: "REQUISITOS" as const, perguntasFeitas: 5, ultimaRespostaEm: 0 };
+  assert.equal(transicionar(cheio, { tipo: "PLIN_DEMO", resposta: duvida }, 1).plin, "PLIN_PENDENTE");
+  const ativa = { ...noAprofundamento(), plin: "PERGUNTA_ATIVA" as const };
+  assert.equal(transicionar(ativa, { tipo: "PLIN_DEMO", resposta: duvida }, 1).plin, "PERGUNTA_ATIVA");
+  assert.equal(transicionar(estadoInicial(), { tipo: "PLIN_DEMO", resposta: duvida }, 1).plin, "LIVRE");
+});
+
 test("encerrada ignora tudo", () => {
   const fim = transicionar(noAprofundamento(), { tipo: "ENCERRAR" }, 0);
   assert.equal(fim.fase, "ENCERRADA");

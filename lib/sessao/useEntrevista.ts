@@ -8,6 +8,7 @@ import {
   analisar,
   calar,
   criarSessao,
+  duvidaDeDemonstracao,
   enviarEventos,
   falar,
   type FalaNaTela,
@@ -31,6 +32,8 @@ import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff"
 type Acao = { evento: EventoEntrevista; agora: number };
 
 const TRAVADO_MS = 2 * 60_000;
+/** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
+const COR_ENUNCIADO = "#1e1e1e";
 
 function redutor(estado: EstadoEntrevista, acao: Acao) {
   return transicionar(estado, acao.evento, acao.agora);
@@ -162,6 +165,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         x: 40,
         y: 110,
         tamanho: 32,
+        cor: COR_ENUNCIADO,
       });
       await quadro.agente.escrever({
         id: "agente-enunciado-texto",
@@ -169,6 +173,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         texto: enunciado,
         x: 40,
         y: 160,
+        cor: COR_ENUNCIADO,
       });
       await fala;
       conversa.current.push({ quem: "agente", texto: enunciado });
@@ -267,6 +272,12 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     enviar({ tipo: "COMECAR" });
   }, [enviar]);
   const clicarPlin = useCallback(() => enviar({ tipo: "PLIN_CLICADO" }), [enviar]);
+  /** Demonstração: faz o agente ter uma dúvida agora, sobre o último componente desenhado. */
+  const perguntaDemo = useCallback(() => {
+    if (!quadro) return;
+    const { texto } = conversor.current.converter(quadro.api.getSceneElements());
+    enviar({ tipo: "PLIN_DEMO", resposta: duvidaDeDemonstracao(texto) });
+  }, [enviar, quadro]);
   const terminarResposta = useCallback(() => {
     registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero });
     enviar({ tipo: "RESPOSTA_TERMINOU" });
@@ -291,6 +302,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     desenhoMudou,
     comecar,
     clicarPlin,
+    perguntaDemo,
     terminarResposta,
     encerrar,
   };

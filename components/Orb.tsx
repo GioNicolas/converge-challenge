@@ -16,7 +16,7 @@ const TAMANHO: Record<EstadoOrb, [number, number]> = {
   ouvindo: [108, 40],
   pensando: [44, 44],
   falando: [120, 40],
-  duvida: [196, 40],
+  duvida: [180, 40],
 };
 
 const MOLA_GOTA = { type: "spring", stiffness: 420, damping: 20, mass: 0.8 } as const;

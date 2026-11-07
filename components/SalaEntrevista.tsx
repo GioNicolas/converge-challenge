@@ -75,6 +75,17 @@ export default function SalaEntrevista() {
 
       <Legenda fala={entrevista.falaAtual} />
 
+      {/* Só para demonstração: dispara a pergunta do agente a qualquer momento. */}
+      {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
+        <button
+          onClick={entrevista.perguntaDemo}
+          disabled={estado.plin !== "LIVRE"}
+          className="absolute top-[72px] left-4 z-10 rounded-full border border-borda bg-vidro px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[opacity,transform] duration-150 ease-suave hover:text-texto active:scale-95 disabled:opacity-40"
+        >
+          Demo: fazer pergunta
+        </button>
+      )}
+
       <CursorAgente
         onPronto={(c) => {
           cursor.current = c;

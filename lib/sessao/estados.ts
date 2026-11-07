@@ -28,6 +28,8 @@ export type EventoEntrevista =
   | { tipo: "CANDIDATO_DESENHOU" }
   | { tipo: "TEMPO_DA_FASE_ACABOU" }
   | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise }
+  /** Só para demonstração: põe uma dúvida pendente ignorando fase, intervalo e limite. */
+  | { tipo: "PLIN_DEMO"; resposta: RespostaAnalise }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "RESPOSTA_TERMINOU" }
   | { tipo: "ENCERRAR" };
@@ -138,6 +140,10 @@ export function transicionar(
       }
       return estado;
     }
+
+    case "PLIN_DEMO":
+      if (estado.fase === "AGUARDANDO" || estado.plin === "PERGUNTA_ATIVA") return estado;
+      return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: evento.resposta };
 
     case "PLIN_CLICADO": {
       if (estado.plin !== "PLIN_PENDENTE" || !estado.perguntaPendente) return estado;
