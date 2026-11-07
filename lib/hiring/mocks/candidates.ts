@@ -39,30 +39,30 @@ export const CANDIDATES: Candidate[] = [
   // --- frontend-senior ---
   {
     id: "c05", name: "Bruno Siqueira", email: "bruno.siqueira@example.com", jobPostingId: "frontend-senior",
-    yearsExperience: 8, currentRole: "Tech Lead Frontend em SaaS",
+    yearsExperience: 8, currentRole: "Tech Lead Frontend em healthtech",
     skills: ["React", "TypeScript", "Next.js", "Storybook"],
-    resumeSummary: "Liderou a criação de um design system usado por 6 squads. Listas virtualizadas e redução de LCP de 4 s para 1,6 s.",
+    resumeSummary: "Liderou a criação de um design system usado por 6 squads. Listas virtualizadas na agenda de clínicas e redução de LCP de 4 s para 1,6 s. Nunca passou por uma auditoria de LGPD no front.",
     stage: "entrevista_agendada",
   },
   {
     id: "c06", name: "Marina Teixeira", email: "marina.teixeira@example.com", jobPostingId: "frontend-senior",
     yearsExperience: 5, currentRole: "Frontend Pleno em agência",
     skills: ["React", "JavaScript", "Tailwind", "D3"],
-    resumeSummary: "Cinco anos com muita visualização de dados em D3. TypeScript recente; acessibilidade é ponto a investigar.",
+    resumeSummary: "Cinco anos com muita visualização de dados em D3, incluindo dashboards clínicos para clientes de saúde. TypeScript recente; acessibilidade e privacidade de dados no front são pontos a investigar.",
     stage: "triagem",
   },
   {
     id: "c07", name: "Eduardo Cavalcanti", email: "eduardo.cavalcanti@example.com", jobPostingId: "frontend-senior",
-    yearsExperience: 10, currentRole: "Engenheiro Frontend Sênior em marketplace",
+    yearsExperience: 10, currentRole: "Engenheiro Frontend Sênior em telemedicina",
     skills: ["React", "TypeScript", "Redux", "Jest", "WCAG"],
-    resumeSummary: "Dez anos, referência interna em acessibilidade (WCAG AA). Mentorou 5 pessoas. Pouco contato com Next.js.",
+    resumeSummary: "Dez anos, referência interna em acessibilidade (WCAG AA). Mascarou dados de pacientes em telas e logs. Mentorou 5 pessoas. Pouco contato com Next.js.",
     stage: "triagem",
   },
   {
     id: "c08", name: "Júlia Albuquerque", email: "julia.albuquerque@example.com", jobPostingId: "frontend-senior",
     yearsExperience: 7, currentRole: "Fullstack em startup",
     skills: ["React", "Node.js", "TypeScript", "GraphQL"],
-    resumeSummary: "Sete anos, perfil fullstack que se inclina para o front. Gerencia cache com React Query; nunca trabalhou com listas muito grandes.",
+    resumeSummary: "Sete anos, perfil fullstack que se inclina para o front. Gerencia cache com React Query, mas nunca definiu política de expiração para dados sensíveis; nunca trabalhou com listas muito grandes.",
     stage: "triagem",
   },
 
@@ -99,16 +99,16 @@ export const CANDIDATES: Candidate[] = [
   // --- data-ml-engineer ---
   {
     id: "c13", name: "Diego Marques", email: "diego.marques@example.com", jobPostingId: "data-ml-engineer",
-    yearsExperience: 4, currentRole: "Engenheiro de Dados em mídia",
+    yearsExperience: 4, currentRole: "Engenheiro de Dados em varejo e distribuição",
     skills: ["Python", "SQL", "Airflow", "BigQuery", "dbt"],
-    resumeSummary: "Quatro anos construindo pipelines batch com Airflow e dbt. Reduziu o custo mensal de BigQuery em 40%. Sem streaming.",
+    resumeSummary: "Quatro anos construindo pipelines batch de vendas e estoque com Airflow e dbt. Reduziu o custo mensal de BigQuery em 40%. Sem streaming e sem modelos de previsão.",
     stage: "entrevista_agendada",
   },
   {
     id: "c14", name: "Beatriz Leal", email: "beatriz.leal@example.com", jobPostingId: "data-ml-engineer",
     yearsExperience: 3, currentRole: "Cientista de Dados",
     skills: ["Python", "scikit-learn", "SQL", "MLflow"],
-    resumeSummary: "Três anos treinando modelos. Quer migrar para engenharia; colocou um modelo de churn em produção com ajuda do time de plataforma.",
+    resumeSummary: "Três anos treinando modelos de previsão de vendas (Prophet, gradient boosting). Quer migrar para engenharia; colocou um modelo em produção com ajuda do time de plataforma e não sabe monitorar drift.",
     stage: "triagem",
   },
   {
@@ -120,9 +120,9 @@ export const CANDIDATES: Candidate[] = [
   },
   {
     id: "c16", name: "Natália Freitas", email: "natalia.freitas@example.com", jobPostingId: "data-ml-engineer",
-    yearsExperience: 2, currentRole: "Analytics Engineer",
+    yearsExperience: 2, currentRole: "Analytics Engineer em transportadora",
     skills: ["SQL", "dbt", "Looker", "Python"],
-    resumeSummary: "Dois anos, SQL muito sólido e boa modelagem dimensional. Python ainda básico; nunca usou Airflow em produção.",
+    resumeSummary: "Dois anos, SQL muito sólido e boa modelagem dimensional de entregas e rotas. Python ainda básico; nunca usou Airflow em produção.",
     stage: "triagem",
   },
 
@@ -131,14 +131,14 @@ export const CANDIDATES: Candidate[] = [
     id: "c17", name: "Otávio Pimentel", email: "otavio.pimentel@example.com", jobPostingId: "sre-devops",
     yearsExperience: 7, currentRole: "SRE Sênior em streaming de vídeo",
     skills: ["Kubernetes", "Terraform", "Prometheus", "Go", "AWS"],
-    resumeSummary: "Sete anos. Definiu SLOs e error budgets para 12 serviços; conduziu mais de 30 postmortems. Escreve operadores Kubernetes em Go.",
+    resumeSummary: "Sete anos. Definiu SLOs e error budgets para 12 serviços; conduziu mais de 30 postmortems e operou transmissões ao vivo com 20x o tráfego normal. Escreve operadores Kubernetes em Go.",
     stage: "entrevista_agendada",
   },
   {
     id: "c18", name: "Vanessa Coutinho", email: "vanessa.coutinho@example.com", jobPostingId: "sre-devops",
-    yearsExperience: 5, currentRole: "DevOps Pleno",
+    yearsExperience: 5, currentRole: "DevOps Pleno em plataforma de áudio",
     skills: ["Terraform", "GitHub Actions", "AWS", "Python"],
-    resumeSummary: "Cinco anos, muito forte em IaC e pipelines de CI/CD. Experiência limitada com Kubernetes em escala e com SLOs formais.",
+    resumeSummary: "Cinco anos, muito forte em IaC e pipelines de CI/CD. Lida com picos de lançamento só com autoscaling simples. Experiência limitada com Kubernetes em escala e com SLOs formais.",
     stage: "triagem",
   },
   {
