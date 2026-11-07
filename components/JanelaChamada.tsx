@@ -1,21 +1,16 @@
 "use client";
 
-// Janela de chamada (estilo Google Meet, no canto da tela).
-// - Dois participantes lado a lado: o Entrevistador (orb que reage à voz) e Você (câmera só local).
-// - Quem está falando ganha a borda azul, como no Meet. Na dúvida, o quadro do agente chama o clique.
-// - Tempo e fase, microfone, câmera, minimizar e encerrar.
+// Janela de chamada (estilo Meet/FaceTime, no canto da tela).
+// - Quadro do agente com o orb; câmera do candidato pequena no canto (só local: não sai do navegador).
+// - Tempo e fase, microfone, câmera, minimizar e Encerrar.
 // - Arrasta e encaixa no canto mais próximo, com mola. Minimiza numa pílula.
 import { useCallback, useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/Icone";
-import type { EstadoAgente } from "@/components/AgenteOrb";
+import AgentePresenca, { type EstadoAgente } from "@/components/AgentePresenca";
 import type { Fase } from "@/lib/sessao/cliente";
 import type { EstadoEntrevista } from "@/lib/sessao/estados";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
-
-// WebGL só no navegador.
-const AgenteOrb = dynamic(() => import("@/components/AgenteOrb"), { ssr: false });
 
 const NOME_DA_FASE: Record<Fase, string> = {
   AGUARDANDO: "Aguardando",
@@ -31,7 +26,6 @@ const MOLA = { type: "spring", stiffness: 400, damping: 34 } as const;
 const MARGEM = 16;
 const TOPO_LIVRE = 76; // abaixo da barra de ferramentas do Excalidraw
 const BASE_LIVRE = 64; // acima dos controles de zoom e ajuda do Excalidraw
-const FALANDO = 0.08; // volume do microfone a partir do qual o candidato "está falando"
 
 type Canto = "inferior-direito" | "inferior-esquerdo" | "superior-direito" | "superior-esquerdo";
 
@@ -74,15 +68,8 @@ export default function JanelaChamada({
   const ativa = iniciadaEm !== null && estado.fase !== "ENCERRADA";
   const segundos = useCronometro(iniciadaEm, ativa);
   const temDuvida = estado.plin === "PLIN_PENDENTE";
-  const candidatoFalando = midia.microfoneLigado && midia.volume > FALANDO && !agenteFalando;
 
   const estadoAgente: EstadoAgente = temDuvida ? "duvida" : agenteFalando ? "falando" : "ouvindo";
-
-  // O orb lê o volume do microfone a cada quadro, sem re-render.
-  const volumeMicrofone = useRef(0);
-  useEffect(() => {
-    volumeMicrofone.current = midia.volume;
-  }, [midia.volume]);
 
   // --- Arrastar e encaixar no canto ---
   const caixa = useRef<HTMLDivElement>(null);
@@ -116,8 +103,10 @@ export default function JanelaChamada({
     const el = caixa.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const vertical = r.top + r.height / 2 < innerHeight / 2 ? "superior" : "inferior";
-    const lado = r.left + r.width / 2 < innerWidth / 2 ? "esquerdo" : "direito";
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const vertical = cy < innerHeight / 2 ? "superior" : "inferior";
+    const lado = cx < innerWidth / 2 ? "esquerdo" : "direito";
     encaixar(`${vertical}-${lado}` as Canto);
   }
 
@@ -145,7 +134,7 @@ export default function JanelaChamada({
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (video.current) video.current.srcObject = midia.stream;
-  }, [midia.stream, minimizada, midia.cameraLigada]);
+  }, [midia.stream, minimizada]);
 
   return (
     <motion.div
@@ -203,77 +192,69 @@ export default function JanelaChamada({
               animate={{ opacity: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0, filter: "blur(6px)" }}
               transition={{ duration: 0.18 }}
-              className="w-[392px] cursor-grab active:cursor-grabbing"
+              className="w-[320px] cursor-grab active:cursor-grabbing"
             >
-              {/* Os dois participantes, lado a lado */}
-              <div className="grid grid-cols-2 gap-2 p-2">
-                <Participante
-                  nome="Entrevistador"
-                  falando={agenteFalando}
-                  destaque={temDuvida}
-                  onClick={temDuvida ? onClicarPlin : undefined}
-                  rotulo={temDuvida ? "Ouvir a pergunta do entrevistador" : undefined}
-                >
-                  <AgenteOrb
-                    estado={estadoAgente}
-                    volumeEntrada={volumeMicrofone}
-                    className="absolute inset-0 m-auto size-[118px]"
-                  />
-                  <AnimatePresence>
-                    {temDuvida && (
-                      <motion.span
-                        initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 4, scale: 0.98 }}
-                        transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-                        className="absolute inset-x-2 bottom-2 flex items-center justify-center gap-1.5 rounded-full bg-agente py-1 text-[11px] font-medium text-white shadow-padrao"
-                      >
-                        Tenho uma pergunta
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </Participante>
+              {/* Quadro do agente */}
+              <div className="relative m-2 mb-0 h-[176px] overflow-hidden rounded-[14px] bg-black/25">
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-full bg-black/30 px-2.5 py-1 text-[11px] backdrop-blur-md">
+                  <span className={`size-1.5 rounded-full ${ativa ? "bg-sucesso" : "bg-texto-claro/30"}`} />
+                  <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
+                  <span className="text-texto-claro/50">·</span>
+                  <span className="text-texto-claro/75">{NOME_DA_FASE[estado.fase]}</span>
+                </div>
 
-                <Participante nome="Você" falando={candidatoFalando} microfoneDesligado={!midia.microfoneLigado}>
+                {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato. */}
+                <div className="absolute inset-y-0 left-0 right-[108px] flex items-center justify-center pb-3">
+                  <AgentePresenca
+                    estado={estadoAgente}
+                    volume={estadoAgente === "ouvindo" ? midia.volume : 0}
+                    onClicarDuvida={onClicarPlin}
+                  />
+                </div>
+
+                <AnimatePresence>
+                  {!temDuvida && (
+                    <motion.span
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute bottom-2.5 left-3 text-[11px] font-medium text-texto-claro/70"
+                    >
+                      Entrevistador
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+
+                {/* Câmera do candidato: só local */}
+                <div className="absolute right-2 bottom-2 h-[72px] w-[96px] overflow-hidden rounded-[10px] bg-black/40 ring-1 ring-white/10">
                   {midia.stream && midia.cameraLigada ? (
                     <video ref={video} autoPlay muted playsInline className="h-full w-full -scale-x-100 object-cover" />
                   ) : (
-                    <div className="flex h-full items-center justify-center">
-                      <span className="flex size-14 items-center justify-center rounded-full bg-texto-claro/10 text-texto-claro/60">
-                        <Icone nome="pessoa" tamanho={26} />
-                      </span>
+                    <div className="flex h-full items-center justify-center text-texto-claro/40">
+                      <Icone nome="pessoa" tamanho={22} />
                     </div>
                   )}
-                </Participante>
+                  {!midia.microfoneLigado && midia.stream && (
+                    <span className="absolute top-1 right-1 rounded-full bg-perigo p-0.5 text-white">
+                      <Icone nome="microfoneDesligado" tamanho={10} />
+                    </span>
+                  )}
+                </div>
               </div>
 
-              <AnimatePresence initial={false}>
-                {estado.plin === "PERGUNTA_ATIVA" && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.24, ease: [0.32, 0.72, 0, 1] }}
-                    className="px-2"
+              {estado.plin === "PERGUNTA_ATIVA" && (
+                <div className="px-2 pt-2">
+                  <button
+                    onClick={onTerminarResposta}
+                    className="w-full rounded-full bg-texto-claro/12 py-2 text-sm font-medium transition-colors duration-150 ease-suave hover:bg-texto-claro/20"
                   >
-                    <button
-                      onClick={onTerminarResposta}
-                      className="w-full rounded-full bg-texto-claro/12 py-2 text-sm font-medium transition-colors duration-150 ease-suave hover:bg-texto-claro/20"
-                    >
-                      Terminei de responder
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Barra da chamada */}
-              <div className="flex items-center gap-2 px-3 pt-1 pb-2.5">
-                <div className="mr-auto flex min-w-0 items-center gap-1.5 text-xs">
-                  <span className={`size-1.5 shrink-0 rounded-full ${ativa ? "bg-sucesso" : "bg-texto-claro/30"}`} />
-                  <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
-                  <span className="text-texto-claro/40">·</span>
-                  <span className="truncate text-texto-claro/70">{NOME_DA_FASE[estado.fase]}</span>
+                    Terminei de responder
+                  </button>
                 </div>
+              )}
+
+              {/* Controles */}
+              <div className="flex items-center gap-2 p-2.5">
                 <BotaoRedondo
                   rotulo={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
                   desligado={!midia.microfoneLigado}
@@ -295,10 +276,10 @@ export default function JanelaChamada({
                   <button
                     onClick={onEncerrar}
                     aria-label="Encerrar entrevista"
-                    title="Encerrar entrevista"
-                    className="flex h-9 w-14 items-center justify-center rounded-full bg-perigo text-white transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-95"
+                    className="ml-auto flex h-9 items-center gap-1.5 rounded-full bg-perigo px-4 text-sm font-medium text-white transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-95"
                   >
-                    <Icone nome="desligar" />
+                    <Icone nome="desligar" tamanho={16} />
+                    Encerrar
                   </button>
                 )}
               </div>
@@ -307,54 +288,6 @@ export default function JanelaChamada({
         </AnimatePresence>
       </motion.div>
     </motion.div>
-  );
-}
-
-/** Um quadro de participante: conteúdo, nome embaixo e a borda de quem está falando. */
-function Participante({
-  nome,
-  falando,
-  destaque = false,
-  microfoneDesligado = false,
-  onClick,
-  rotulo,
-  children,
-}: {
-  nome: string;
-  falando: boolean;
-  destaque?: boolean;
-  microfoneDesligado?: boolean;
-  onClick?: () => void;
-  rotulo?: string;
-  children: React.ReactNode;
-}) {
-  const Elemento = onClick ? motion.button : motion.div;
-  return (
-    <Elemento
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      aria-label={rotulo}
-      whileTap={onClick ? { scale: 0.97 } : undefined}
-      animate={{
-        boxShadow: destaque
-          ? ["0 0 0 2px rgba(0,113,227,.9)", "0 0 0 5px rgba(0,113,227,.35)", "0 0 0 2px rgba(0,113,227,.9)"]
-          : falando
-            ? "0 0 0 2px rgba(0,113,227,.9)"
-            : "0 0 0 0px rgba(0,113,227,0)",
-      }}
-      transition={destaque ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
-      className={`relative aspect-[4/3] overflow-hidden rounded-[14px] bg-black/30 ${onClick ? "cursor-pointer" : ""}`}
-    >
-      {children}
-      <span className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-black/35 px-2 py-0.5 text-[11px] font-medium text-texto-claro/90 backdrop-blur-md">
-        {microfoneDesligado && (
-          <span className="text-perigo">
-            <Icone nome="microfoneDesligado" tamanho={11} />
-          </span>
-        )}
-        {nome}
-      </span>
-    </Elemento>
   );
 }
 
@@ -374,7 +307,7 @@ function BotaoRedondo({
       onClick={onClick}
       aria-label={rotulo}
       title={rotulo}
-      className={`flex size-9 shrink-0 items-center justify-center rounded-full transition-[background-color,transform] duration-150 ease-suave active:scale-90 ${
+      className={`flex size-9 items-center justify-center rounded-full transition-[background-color,transform] duration-150 ease-suave active:scale-90 ${
         desligado ? "bg-perigo text-white hover:bg-perigo/90" : "bg-texto-claro/12 hover:bg-texto-claro/20"
       }`}
     >
