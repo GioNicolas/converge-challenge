@@ -1,10 +1,13 @@
 "use client";
 
 // Revisão antes de confirmar: uma folha lateral com campos de verdade (sem JSON), em seções numeradas.
+// O formato manda no resto: área que o formato não mede (ver `MEDE`) fica travada em 0%, e trocar o formato
+// ou ligar/desligar uma área refaz os critérios (`ajustarCriterios`), para nunca publicar um plano incoerente.
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { Minus, Plus, X } from "lucide-react";
 import { FocusArea, type Criterion, type InterviewMode } from "@/lib/contracts";
+import { ajustarCriterios, mede, modoAlternativoQueMede } from "@/lib/pre-entrevista/catalogo";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
 
@@ -65,13 +68,42 @@ function Secao({ numero, titulo, children }: { numero: number; titulo: string; c
   );
 }
 
+type Pesos = Record<FocusArea, number>;
+
+/** Áreas que entram: peso acima de zero. */
+const ativas = (p: Pesos) => FocusArea.options.filter((a) => p[a] > 0);
+
+/** Zera o que o formato não mede; se nada sobrar, a área técnica fica com tudo. */
+function pesosDoFormato(p: Pesos, mode: InterviewMode): Pesos {
+  const novo = Object.fromEntries(FocusArea.options.map((a) => [a, mede(mode, a) ? p[a] : 0])) as Pesos;
+  if (ativas(novo).length === 0) novo.tecnico = 100;
+  return novo;
+}
+
 export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, onFechar }: Props) {
-  const [r, setR] = useState<Rascunho>(() => structuredClone(rascunho));
-  const [pesos, setPesos] = useState<Record<FocusArea, number>>(() => {
-    const base = Object.fromEntries(FocusArea.options.map((a) => [a, 0])) as Record<FocusArea, number>;
+  const [inicial] = useState(() => {
+    const base = Object.fromEntries(FocusArea.options.map((a) => [a, 0])) as Pesos;
     for (const f of rascunho.focus) base[f.area] = Math.round(f.weight * 100);
-    return base;
+    const pesos = pesosDoFormato(base, rascunho.mode);
+    const mudou = FocusArea.options.some((a) => pesos[a] !== base[a]);
+    const r = structuredClone(rascunho);
+    return { pesos, r: mudou ? { ...r, criteria: ajustarCriterios(r.mode, ativas(pesos), r.criteria) } : r };
   });
+  const [r, setR] = useState<Rascunho>(inicial.r);
+  const [pesos, setPesos] = useState<Pesos>(inicial.pesos);
+
+  function mudarFormato(mode: InterviewMode, ligar?: FocusArea) {
+    const novos = pesosDoFormato(ligar ? { ...pesos, [ligar]: Math.max(pesos[ligar], 30) } : pesos, mode);
+    setPesos(novos);
+    // A questão escolhida era do outro formato: sem ela, a finalização escolhe uma do formato novo.
+    setR({ ...r, mode, problemId: undefined, criteria: ajustarCriterios(mode, ativas(novos), r.criteria) });
+  }
+
+  function mudarPeso(area: FocusArea, valor: number) {
+    const novos = { ...pesos, [area]: valor };
+    setPesos(novos);
+    if (pesos[area] > 0 !== valor > 0) setR((atual) => ({ ...atual, criteria: ajustarCriterios(atual.mode, ativas(novos), atual.criteria) }));
+  }
 
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => e.key === "Escape" && onFechar();
@@ -133,7 +165,7 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
             <Segmentado
               id="formato"
               valor={r.mode}
-              onMudar={(mode: InterviewMode) => setR({ ...r, mode })}
+              onMudar={(mode: InterviewMode) => mode !== r.mode && mudarFormato(mode)}
               opcoes={(["system_design", "live_coding"] as InterviewMode[]).map((v) => ({ valor: v, nome: NOME_FORMATO[v] }))}
             />
             <Segmentado
@@ -145,23 +177,45 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
           </Secao>
 
           <Secao numero={2} titulo="O que mais pesa">
-            {FocusArea.options.map((a) => (
-              <label key={a} className="flex flex-col gap-1">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[15px] text-texto">{NOME_AREA[a]}</span>
-                  <span className="rotulo text-texto-suave">{porcento(a)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={pesos[a]}
-                  onChange={(e) => setPesos({ ...pesos, [a]: Number(e.target.value) })}
-                  className="accent-[var(--texto)]"
-                  aria-label={`Peso de ${NOME_AREA[a]}`}
-                />
-              </label>
-            ))}
+            {FocusArea.options.map((a) => {
+              const medida = mede(r.mode, a);
+              const alternativo = medida ? undefined : modoAlternativoQueMede(r.mode, a);
+              return (
+                <label key={a} className={`flex flex-col gap-1 ${medida ? "" : "opacity-60"}`}>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[15px] text-texto">{NOME_AREA[a]}</span>
+                    <span className="rotulo text-texto-suave">{medida ? `${porcento(a)}%` : "não medido"}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={pesos[a]}
+                    disabled={!medida}
+                    onChange={(e) => mudarPeso(a, Number(e.target.value))}
+                    className="accent-[var(--texto)] disabled:cursor-not-allowed"
+                    aria-label={`Peso de ${NOME_AREA[a]}`}
+                  />
+                  {!medida && (
+                    <span className="text-[13px] text-texto-suave">
+                      {NOME_FORMATO[r.mode]} não mede isso.
+                      {alternativo && (
+                        <>
+                          {" "}
+                          <button
+                            type="button"
+                            onClick={() => mudarFormato(alternativo, a)}
+                            className="text-texto underline decoration-texto/30 underline-offset-4 hover:decoration-texto"
+                          >
+                            Trocar para {NOME_FORMATO[alternativo]}
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
+                </label>
+              );
+            })}
             <p className="text-[13px] text-texto-suave">Áreas em 0% ficam de fora. Os pesos somam 100%.</p>
           </Secao>
 
@@ -182,7 +236,7 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
                       className="rounded-controle border border-borda bg-superficie-2 px-2 py-2 text-[14px] text-texto"
                       aria-label="Área do critério"
                     >
-                      {FocusArea.options.map((a) => (
+                      {FocusArea.options.filter((a) => a === c.focus || (pesos[a] > 0 && mede(r.mode, a))).map((a) => (
                         <option key={a} value={a}>
                           {NOME_AREA[a]}
                         </option>
@@ -212,7 +266,7 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
                   ...r,
                   criteria: [
                     ...r.criteria,
-                    { id: `novo-${Date.now().toString(36)}`, name: "Novo critério", focus: "tecnico", weight: 1, description: "Bom: … Ruim: …" },
+                    { id: `novo-${Date.now().toString(36)}`, name: "Novo critério", focus: ativas(pesos)[0] ?? "tecnico", weight: 1, description: "Bom: … Ruim: …" },
                   ],
                 })
               }

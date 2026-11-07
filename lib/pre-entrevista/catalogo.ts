@@ -238,3 +238,25 @@ export function criteriosIniciais(mode: InterviewMode, focus: FocusArea[]): Crit
   const base = escolhidos.length > 0 ? escolhidos : catalogo.slice(0, 3);
   return base.map((c) => ({ ...c }));
 }
+
+const IDS_DO_CATALOGO = new Set(Object.values(CATALOGO).flatMap((lista) => lista.map((c) => c.id)));
+
+/**
+ * Critérios que fazem sentido para o formato e as áreas ativas, a partir dos atuais. Usado na revisão,
+ * quando a recrutadora troca o formato ou liga/desliga uma área:
+ *  - fica quem é do catálogo deste formato, ou critério próprio dela, com a área ainda ativa (com as edições);
+ *  - sai critério do outro formato e de área desligada;
+ *  - área ativa sem nenhum critério ganha os do catálogo do formato.
+ * Função pura.
+ */
+export function ajustarCriterios<C extends CriterioModelo>(mode: InterviewMode, areas: FocusArea[], atuais: C[]): CriterioModelo[] {
+  const doFormato = new Set(CATALOGO[mode].map((c) => c.id));
+  const ficam: CriterioModelo[] = atuais.filter(
+    (c) => areas.includes(c.focus) && (doFormato.has(c.id) || !IDS_DO_CATALOGO.has(c.id)),
+  );
+  for (const area of areas) {
+    if (ficam.some((c) => c.focus === area)) continue;
+    ficam.push(...CATALOGO[mode].filter((c) => c.focus === area).map((c) => ({ ...c })));
+  }
+  return ficam.length > 0 ? ficam : criteriosIniciais(mode, areas);
+}
