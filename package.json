@@ -12,15 +12,19 @@
     "prebuild": "node scripts/copy-vendor.mjs",
     "pre:classificar": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/classificar.ts",
     "pre:extrair": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/extrair.ts",
-    "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts"
+    "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts",
+    "test:email": "tsx --test lib/email/__tests__/*.test.ts",
+    "test:convites": "tsx --test lib/convites/__tests__/*.test.ts"
   },
   "dependencies": {
     "@elevenlabs/client": "^1.35.0",
     "@monaco-editor/react": "^4.7.0",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.2.0",
+    "@typesafe-ai/sdk": "^0.7.0",
     "lucide-react": "^1.70.0",
     "monaco-editor": "^0.57.0",
     "motion": "^14.10.1",
-    "@typesafe-ai/sdk": "^0.7.0",
     "next": "15.5.4",
     "pdfjs-dist": "6.4.299",
     "pyodide": "^0.26.4",
