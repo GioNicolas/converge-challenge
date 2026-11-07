@@ -3,8 +3,9 @@
  * com uma persona, e a conversa passa pelas mesmas funções do servidor, sem HTTP.
  * Aqui a extração roda de forma síncrona a cada turno (não há segundo plano no simulador).
  *
- *   npm run pre:simular                  # as três personas
- *   npm run pre:simular -- muda_foco     # só uma
+ *   npm run pre:simular                                  # todas as personas
+ *   npm run pre:simular -- muda_foco                     # só uma
+ *   npm run pre:simular -- questionadora muda_foco       # várias
  */
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
@@ -41,6 +42,17 @@ const PERSONAS: Persona[] = [
       "Você quer que a pessoa saiba implementar algoritmos complexos com soluções simples, pensando em escalabilidade. " +
       "Aceita live coding. Dispensa pressão: diz que não precisa muito. Dá respostas curtas e às vezes genéricas, como 'um pouco de cada' " +
       "ou 'implementar bem os algoritmos'. Quando perguntarem se uso de IA continua no foco, diz que ainda conta, mas bem menos.",
+  },
+  {
+    id: "questionadora",
+    vagaId: "ia-pleno",
+    descricao:
+      "Você é técnica e gosta de entender o processo antes de responder. Quer avaliar algoritmos e código limpo, e uso de IA (revisar o que a IA gera). " +
+      "Dispensa pressão: não precisa ser rigorosa com prazo. Siga esta ordem, sem pular etapas: " +
+      "(1) na primeira vez que a Totti perguntar o que separa um candidato ótimo de um mediano, antes de responder, pergunte uma única vez: " +
+      "'mas como isso vai ser avaliado num live code?'; depois responda com um comportamento concreto. " +
+      "(2) Não fale de dicas até a Totti fazer o resumo. Só depois do resumo, pede: 'tira a dica'. " +
+      "(3) Quando a Totti confirmar a mudança e perguntar se pode finalizar, aprova com 'pode finalizar'. Não pede mais nada depois disso.",
   },
   {
     id: "vaga",
@@ -224,6 +236,8 @@ function checarEstilo(sessao: Sessao): string[] {
     if (IDENTIFICADOR_INTERNO.test(t.text) || EXPRESSAO_INTERNA.test(sem.toLowerCase()))
       avisos.push(`fala ${i + 1} usa rótulo interno: "${t.text}"`);
     if (/^\s*entendi/i.test(t.text)) avisos.push(`fala ${i + 1} começa com "Entendi": "${t.text}"`);
+    // A apresentação é só a abertura (índice 0): depois dela, a Totti não se apresenta de novo.
+    if (i > 0 && /\bsou (a )?totti\b/i.test(sem)) avisos.push(`fala ${i + 1} se apresenta de novo: "${t.text}"`);
     const frases = t.text.split(/[.!?]+/).filter((s) => s.trim()).length;
     if (i > 0 && frases > 4) avisos.push(`fala ${i + 1} tem ${frases} frases`);
   }
@@ -347,9 +361,12 @@ function imprimirChecagens(sessao: Sessao): void {
 
 async function main(): Promise<void> {
   silenciarLogsDoServidor();
-  const filtro = process.argv[2];
-  const personas = filtro ? PERSONAS.filter((p) => p.id === filtro) : PERSONAS;
-  if (personas.length === 0) throw new Error(`persona "${filtro}" não existe: ${PERSONAS.map((p) => p.id).join(", ")}`);
+  const filtros = process.argv.slice(2);
+  const desconhecidas = filtros.filter((f) => !PERSONAS.some((p) => p.id === f));
+  if (desconhecidas.length > 0) {
+    throw new Error(`persona(s) "${desconhecidas.join(", ")}" não existe(m): ${PERSONAS.map((p) => p.id).join(", ")}`);
+  }
+  const personas = filtros.length ? PERSONAS.filter((p) => filtros.includes(p.id)) : PERSONAS;
   for (const persona of personas) {
     await simularPersona(persona);
   }

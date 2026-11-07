@@ -6,7 +6,9 @@
  *  - um tópico é perguntado no máximo duas vezes (a pergunta inicial e um follow-up);
  *  - follow-up só quando a última resposta foi genérica (`resposta_vaga`);
  *  - cada mudança de foco (e cada área ainda sem definição depois de uma mudança) é perguntada uma vez;
- *  - o resumo vem quando não há mais o que perguntar; depois dele, a Totti só resume de novo se ela pedir mudança.
+ *  - dúvida dela sobre a entrevista (`fez_pergunta`): a Totti responde e retoma o passo em curso, sem contar como pergunta nova;
+ *  - o resumo vem quando não há mais o que perguntar; depois dele, a Totti só resume de novo se ela pedir mudança;
+ *  - encerra só depois do resumo aprovado e sem pedido de mudança.
  */
 import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, LIMIAR } from "./cobertura";
@@ -16,12 +18,22 @@ import type { Foco } from "./rascunho";
 export const MAX_PERGUNTAS_POR_TOPICO = 2;
 /** Depois de tantos resumos, a Totti para de pedir revisão e encerra. */
 export const MAX_RESUMOS = 3;
+/** Quantas dúvidas seguidas a Totti responde. Depois disso, a conversa segue pelo fluxo normal. */
+export const MAX_DUVIDAS_SEGUIDAS = 2;
 
 export interface AprofundarPasso {
   tipo: "aprofundar";
   area: FocusArea;
   /** `inicial`: pergunta o que separa o ótimo do fraco. `vaga`: follow-up depois de resposta genérica. */
   motivo: "inicial" | "vaga";
+}
+
+export interface ResponderDuvidaPasso {
+  tipo: "responder_duvida";
+  /** Passo que estava em curso: a Totti responde a dúvida e retoma a pergunta dele. */
+  retomar: Passo;
+  /** Quantas dúvidas seguidas, contando esta. */
+  seguidas: number;
 }
 
 export type Passo =
@@ -39,11 +51,12 @@ export type Passo =
       proximo?: AprofundarPasso;
     }
   | { tipo: "resumo_final"; revisao?: boolean }
+  | ResponderDuvidaPasso
   | { tipo: "encerrar" };
 
 /** O que o planejador guarda entre turnos. */
 export interface PlanoEstado {
-  /** Sinais do último turno (quer/dispensa por área, resposta vaga, aprovação do resumo). */
+  /** Sinais do último turno (quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo). */
   sinais: Record<string, number>;
   /** Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `criterio_<area>`). */
   perguntasPorTopico: Record<string, number>;
@@ -67,8 +80,9 @@ export interface EstadoPlanejamento extends PlanoEstado {
 
 const criterio = (area: FocusArea) => `criterio_${area}`;
 
-/** Último aprofundamento feito, direto ou emendado numa confirmação de mudança. */
+/** Último aprofundamento feito, direto, emendado numa confirmação de mudança ou antes de uma dúvida respondida. */
 function ultimoAprofundamento(passo: Passo | undefined): AprofundarPasso | undefined {
+  if (passo?.tipo === "responder_duvida") return ultimoAprofundamento(passo.retomar);
   if (passo?.tipo === "aprofundar") return passo;
   if (passo?.tipo === "confirmar_mudanca_foco") return passo.proximo;
   return undefined;
@@ -111,8 +125,15 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   const focoAtual = e.focus.map((f) => f.area);
   const jaPerguntadas = new Set(e.mudancasPerguntadas);
 
-  // 1. Ela aprovou o resumo: acabou.
-  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR) return { tipo: "encerrar" };
+  // 0. Dúvida dela sobre a entrevista: responde e retoma o passo em curso. Não conta como pergunta nova.
+  const emCurso = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
+  const seguidas = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.seguidas : 0;
+  if (sinal("fez_pergunta") >= LIMIAR && emCurso && emCurso.tipo !== "encerrar" && seguidas < MAX_DUVIDAS_SEGUIDAS) {
+    return { tipo: "responder_duvida", retomar: emCurso, seguidas: seguidas + 1 };
+  }
+
+  // 1. Ela aprovou o resumo sem pedir mudança: acabou.
+  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && sinal("pediu_mudanca") < LIMIAR) return { tipo: "encerrar" };
 
   // 2. Mudança de foco que ainda não foi confirmada.
   const entra = emJogo.filter((a) => !focoAtual.includes(a) && !jaPerguntadas.has(a));
@@ -134,6 +155,12 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   const reperguntar = focoAtual.filter((a) => indecisa(a) && perguntas(`duvida_${a}`) === 1);
   if (e.mudancasPerguntadas.length > 0 && entradaTratada && reperguntar.length > 0) {
     return { tipo: "confirmar_mudanca_foco", entra: [], sai: [], duvida: reperguntar };
+  }
+
+  // 2c. Depois do resumo, ela pediu mudança: a Totti confirma só a mudança e pergunta se pode finalizar.
+  // Com o limite de resumos atingido, encerra mesmo assim.
+  if (e.resumos > 0 && sinal("pediu_mudanca") >= LIMIAR) {
+    return e.resumos < MAX_RESUMOS ? { tipo: "resumo_final", revisao: true } : { tipo: "encerrar" };
   }
 
   // 3. Início sem confirmação: uma nova tentativa, só antes do primeiro resumo.
@@ -175,6 +202,9 @@ export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
     case "resumo_final":
       resumos += 1;
       break;
+    case "responder_duvida":
+      // Responder dúvida não conta como pergunta: o passo retomado é que vai contar, se for executado.
+      break;
   }
   return { ...p, perguntasPorTopico: perguntas, mudancasPerguntadas: mudancas, resumos, ultimoPasso: passo };
 }
@@ -192,6 +222,8 @@ export function descreverPasso(passo: Passo): string {
     }
     case "resumo_final":
       return passo.revisao ? "resumo_final (revisão)" : "resumo_final";
+    case "responder_duvida":
+      return `responder_duvida (${passo.seguidas}ª seguida) retoma ${descreverPasso(passo.retomar)}`;
     case "encerrar":
       return "encerrar";
   }

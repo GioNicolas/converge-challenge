@@ -79,7 +79,9 @@ Regras:
    - Área nova que ela pediu entra no foco, com pelo menos um critério personalizado com o que ela disse.
 6. recruiterNotes: texto curto em frases curtas. NÃO repita o que já tem campo próprio (modo, senioridade, foco,
    duração, critérios). Guarde só tom, política de dicas, contexto do time/empresa e eliminatórios.
-   Devolva o texto COMPLETO, acumulando o que já está em recruiterNotes com o que ela acrescentou.
+   Devolva o texto COMPLETO. Se ela acrescentou algo, junte ao que já está. Se pediu para tirar ou trocar algo que já está
+   no texto, a versão nova substitui a antiga, sem as duas juntas: 'Tom amigável. Dica leve se travar.' + 'tira a dica'
+   vira 'Tom amigável. Sem dicas.'
 7. confirmado: marque true só para mode, seniority ou focus que ela confirmou ou corrigiu explicitamente nesta conversa.
    Um "sim" a uma proposta que cobre formato, senioridade e foco de uma vez conta para os três.
 8. durationMin: inteiro, em minutos, só se ela disse.

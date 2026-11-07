@@ -132,6 +132,34 @@ export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
   ],
 };
 
+/**
+ * Como cada área é observada em cada formato, só com os sinais que a plataforma tem: código, execuções de teste,
+ * colagens e dicas pedidas (live coding), desenho no quadro, falas e perguntas do entrevistador.
+ * A Totti usa estas frases para responder a dúvida "como isso é avaliado?" sem prometer nada a mais.
+ */
+export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = {
+  live_coding: {
+    tecnico:
+      "Em live coding, a gente olha o código escrito e as execuções de teste: se passa nos testes, se trata os casos de borda e se a estrutura é clara.",
+    pressao:
+      "Em live coding, a gente vê como ele segue quando o requisito muda ou quando trava, pela explicação falada e pelas perguntas do entrevistador. Também conta quantas dicas ele pede.",
+    escala_produto:
+      "Em live coding, a gente olha se ele diz a complexidade da solução e o que acontece com entradas grandes, pela explicação falada e pelas perguntas do entrevistador.",
+    uso_ia:
+      "Em live coding, a IDE registra quando ele cola código, e o entrevistador pede que ele explique o que colou: dá pra ver se revisou ou só aceitou.",
+  },
+  system_design: {
+    tecnico:
+      "Em system design, a gente olha o desenho no quadro: se os componentes e o modelo de dados batem com os requisitos que ele levantou.",
+    pressao:
+      "Em system design, a gente vê como ele defende as decisões quando o entrevistador questiona ou quando o requisito muda, pelas justificativas faladas.",
+    escala_produto:
+      "Em system design, a gente olha a estimativa de escala, as alternativas que ele compara e os gargalos que aponta no desenho, pelo quadro e pela fala.",
+    uso_ia:
+      "Em system design, a gente vê, pelas justificativas faladas e pelas perguntas do entrevistador, se ele revisa o que a IA sugere e por que aceitou ou descartou cada ponto.",
+  },
+};
+
 /** Problema do agente de código quando a recrutadora não escolheu outro. */
 export const PROBLEMA_PADRAO: Record<InterviewMode, string> = {
   live_coding: "two-sum",

@@ -169,7 +169,7 @@ export function topicosDo(r: Rascunho): Topico[] {
   ];
 }
 
-/** Sinais do turno: quer/dispensa por área, resposta vaga e aprovação do resumo. */
+/** Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança e aprovação do resumo. */
 function sinaisDo(): Pergunta[] {
   return [
     ...AREAS.map(quererDaArea),
@@ -182,6 +182,25 @@ function sinaisDo(): Pergunta[] {
         "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
       sinal_nao:
         "Não se ela deu um comportamento concreto ('ruim é colar o código sem entender'), escolheu entre opções concretas, ou respondeu outra coisa.",
+    },
+    {
+      id: "fez_pergunta",
+      pergunta:
+        "A última fala da recrutadora é uma pergunta ou dúvida dirigida à Totti (sobre o formato, a avaliação ou o processo), e não uma resposta?",
+      sinal_sim:
+        "Sim se ela perguntou à Totti como a entrevista é avaliada, como funciona o formato ou o processo: " +
+        "'mas como isso vai ser avaliado num live code?', 'isso acontece na entrevista toda?', 'e se ele não usar IA, conta?'.",
+      sinal_nao:
+        "Não se ela respondeu à Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), pediu mudança " +
+        "('tira a dica leve', 'muda pra quarenta e cinco'), aprovou o resumo ('pode finalizar?', 'tá bom') ou fez pergunta que não é sobre a entrevista.",
+    },
+    {
+      id: "pediu_mudanca",
+      pergunta: "Na última fala, a recrutadora pediu para mudar, tirar ou acrescentar algo?",
+      sinal_sim:
+        "Sim se ela pediu uma alteração: 'tira a dica leve', 'muda o tom', 'põe quarenta e cinco minutos', " +
+        "'acrescenta que falha de rede é eliminatória', 'sem pressão'.",
+      sinal_nao: "Não se ela só aprovou ('pode finalizar', 'tá bom'), respondeu à Totti sem pedir nada novo, ou só fez uma pergunta.",
     },
     {
       id: "aprovou_resumo",

@@ -6,7 +6,8 @@
  * vêm do modelo: Featherless primeiro, OpenRouter depois, com 12 s por alvo.
  */
 import type { FocusArea } from "@/lib/contracts";
-import { AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
+import { areasEmJogo, AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
+import { COMO_AVALIAMOS } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import type { Passo } from "./planejador";
 import { DURACAO_PADRAO, type Rascunho, type Turno } from "./rascunho";
@@ -49,7 +50,9 @@ Como falar:
 - Não repita uma pergunta que aparece em "SUAS ÚLTIMAS FALAS", e não pergunte de novo o que ela já respondeu na transcrição.
 - Só cite o que está na transcrição ou em "O QUE JÁ SE SABE". Nunca invente.
 - Sem listas, markdown, asteriscos, aspas nem emojis. Português do Brasil, tratando a recrutadora por "você".
-- Use "sou Totti" e evite adjetivos com gênero sobre você.
+- Você se apresenta só na abertura. Depois dela, nunca diga "sou Totti", "eu sou a Totti" nem repita seu nome.
+  Evite adjetivos com gênero sobre você.
+- Varie as palavras: não repita de uma fala para a outra a mesma expressão de fechamento ou de tom.
 
 Exemplos de tom (não copie as palavras):
 - "Boa. Num problema de algoritmo, o que faz você achar um candidato ótimo e não só bom?"
@@ -195,22 +198,74 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     case "resumo_final":
       if (passo.revisao) {
         return (
-          "Ela pediu uma mudança depois do resumo. Confirme só o que mudou, em uma ou duas frases curtas, sem repetir o resumo inteiro. " +
-          "Varie o fechamento, por exemplo: 'Anotado: sessenta minutos e sem dicas. Mais alguma coisa?' " +
-          "ou 'Fechado, quarenta e cinco minutos então. Posso finalizar?'."
+          "Ela pediu uma mudança depois do resumo. Confirme só o que mudou, numa frase curta com as palavras dela, sem repetir o resumo. " +
+          "Se a mudança for sobre dicas, diga 'sem dicas' ou 'com uma dica leve se ele travar'. " +
+          "Depois pergunte se pode finalizar. Não faça outra pergunta."
         );
       }
       return (
-        "Faça o resumo falado, em no máximo 3 frases curtas: formato, senioridade e, numa frase natural com as palavras dela, " +
-        "o que vai ser avaliado (por exemplo: 'vou olhar como ele lida com picos de tráfego e falhas no meio do pagamento, e se escreve código limpo'; " +
-        "não copie esse exemplo). Duração: só se ela disse, ou o padrão do formato, dito de forma curta. " +
-        "Tom e dicas: se ela não falou, diga que a entrevista é amigável e que a entrevista dá uma dica leve se o candidato travar " +
-        "(a dica vem da entrevista; nunca diga 'você pode dar' nem peça dica à recrutadora). Se ela citou algo eliminatório, inclua. " +
-        'Termine com "quer mudar algo ou posso finalizar?".'
+        "Faça o resumo falado, em no máximo 3 frases: formato e senioridade; o que vai ser avaliado, numa frase natural com as palavras dela " +
+        "(por exemplo: 'vou olhar como ele lida com picos de tráfego e falhas no meio do pagamento'; não copie esse exemplo); " +
+        "e tom e dicas. Duração: só se ela disse, ou o padrão do formato, dito de forma curta. " +
+        "Tom e dicas: se ela não falou, diga 'com uma dica leve se ele travar'; se pediu sem dicas, diga 'sem dicas'. " +
+        "Nunca diga 'você pode dar' nem peça dica à recrutadora. Se ela citou algo eliminatório, inclua. " +
+        "Termine com 'quer mudar algo ou posso finalizar?'. " +
+        "Modelo de resumo bom, só para a forma (não copie o conteúdo): 'Live coding de nível pleno, com foco em algoritmos e uso de IA: " +
+        "vou olhar como ele revisa o que a IA gera e explica a complexidade do que escreve. Clima tranquilo, com uma dica leve se ele travar. " +
+        "Quer mudar algo ou posso finalizar?'"
       );
+    case "responder_duvida":
+      return [
+        "Ela fez uma pergunta ou dúvida sobre a entrevista (formato, avaliação ou processo). Responda em no máximo 2 frases, " +
+          "concretas e honestas, usando só o que está abaixo; não prometa nada além disso. " +
+          "Se a dúvida for sobre algo que você não sabe, diga isso com franqueza e ofereça um padrão, por exemplo 'a gente segue com o que já combinamos'.",
+        `COMO AS ÁREAS EM JOGO SÃO AVALIADAS (${FORMATO_CURTO[r.mode]}):\n${comoAvaliamosDoFoco(sessao)
+          .map((f) => `- ${f}`)
+          .join("\n")}`,
+        `Depois, em uma frase, retome a pergunta que ficou sem resposta: ${perguntaParaRetomar(passo.retomar, sessao)} ` +
+          "É a mesma pergunta de antes: reformule, sem repetir as palavras dela.",
+      ].join("\n\n");
     case "encerrar":
-      return "Ela aprovou o resumo. Diga em uma frase curta que está tudo certo para revisar e confirmar na tela. Sem pergunta.";
+      // Não passa pelo modelo: a fala de encerramento é fixa (ver `falaDeEncerramento`).
+      return "Fala fixa, sem modelo.";
   }
+}
+
+/** Frases de como as duas áreas mais pesadas em jogo são observadas no formato atual. */
+function comoAvaliamosDoFoco(sessao: Sessao): string[] {
+  const r = sessao.rascunho;
+  const emJogo = areasEmJogo(r.focus, sessao.plano.sinais);
+  const peso = (a: FocusArea) => r.focus.find((f) => f.area === a)?.weight ?? 0;
+  const areas = (emJogo.length ? emJogo : r.focus.map((f) => f.area)).sort((a, b) => peso(b) - peso(a)).slice(0, 2);
+  return areas.map((a) => COMO_AVALIAMOS[r.mode][a]);
+}
+
+/** A pergunta que um passo fez, em forma de instrução curta, para a Totti retomar depois de uma dúvida. */
+function perguntaParaRetomar(passo: Passo, sessao: Sessao): string {
+  switch (passo.tipo) {
+    case "resumo_final":
+      return "pergunte se ela quer mudar algo ou se pode finalizar.";
+    case "confirmar_mudanca_foco":
+      if (passo.duvida.length) {
+        return `pergunte se ${listar(passo.duvida.map((a) => NOME_AREA_FALA[a]))} ainda contam para a avaliação ou se ficam de lado.`;
+      }
+      return passo.proximo ? instrucaoDoPasso(passo.proximo, sessao) : "confirme a mudança numa frase.";
+    case "responder_duvida":
+      return perguntaParaRetomar(passo.retomar, sessao);
+    default:
+      return instrucaoDoPasso(passo, sessao);
+  }
+}
+
+const FALAS_DE_ENCERRAMENTO = [
+  "Pronto! Deixei tudo na tela pra você revisar e confirmar.",
+  "Fechado! Agora é só revisar na tela e confirmar.",
+  "Tudo anotado. Falta só revisar na tela e confirmar.",
+];
+
+/** Fala de encerramento: fixa, escolhida ao acaso entre as variações. Não usa o modelo. */
+export function falaDeEncerramento(): string {
+  return FALAS_DE_ENCERRAMENTO[Math.floor(Math.random() * FALAS_DE_ENCERRAMENTO.length)];
 }
 
 function formatarTranscricao(turnos: Turno[]): string {
@@ -281,6 +336,18 @@ export function contarFrases(texto: string): number {
 }
 
 export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaAgente> {
+  if (passo.tipo === "encerrar") {
+    return {
+      texto: falaDeEncerramento(),
+      provedor: "fixa",
+      model: "-",
+      ms: 0,
+      fallback: false,
+      tentativas: [],
+      mensagens: [],
+      respostaCrua: "",
+    };
+  }
   const mensagens = montarMensagensConversa(sessao, passo);
   let resposta = await chat({
     alvos: alvosDaConversa(),
