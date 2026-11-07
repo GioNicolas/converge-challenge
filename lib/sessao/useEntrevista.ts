@@ -11,6 +11,7 @@ import {
   duvidaDeDemonstracao,
   enviarEventos,
   falar,
+  finalizarSessao,
   falarComMarcas,
   usarServidor,
   type FalaNaTela,
@@ -165,8 +166,13 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
 
   useEffect(() => {
     if (estado.fase !== "AGUARDANDO") registrar("fase", { fase: estado.fase });
-    if (estado.fase === "ENCERRADA") void linhaDoTempo.current?.descarregar().catch(() => {});
-  }, [estado.fase, registrar]);
+    if (estado.fase !== "ENCERRADA" || !sessao) return;
+    // Primeiro a linha do tempo inteira chega ao servidor; só depois ele gera o scorecard com ela.
+    const linha = linhaDoTempo.current;
+    void (linha ? linha.descarregar().catch(() => {}) : Promise.resolve())
+      .then(() => finalizarSessao(sessao.sessao_id))
+      .catch((erro) => console.warn("[fim] não foi possível gerar o relatório:", erro));
+  }, [estado.fase, registrar, sessao]);
 
   // Gatilho da análise.
   useEffect(() => {

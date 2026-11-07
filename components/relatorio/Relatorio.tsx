@@ -1,0 +1,393 @@
+"use client";
+
+// Relatório da entrevista para a recrutadora: nota, sugestão e, para cada critério, a prova
+// (o que o candidato disse ou desenhou, e quando). A decisão é sempre de uma pessoa.
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import Icone from "@/components/Icone";
+import type { CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
+import type { Recomendacao } from "@/lib/agente/scorecard";
+
+const CURVA = [0.32, 0.72, 0, 1] as const;
+
+const RECOMENDACAO: Record<Recomendacao, { rotulo: string; classe: string }> = {
+  avancar: { rotulo: "Avançar", classe: "bg-sucesso/12 text-sucesso-texto" },
+  avancar_com_ressalvas: { rotulo: "Avançar com ressalvas", classe: "bg-alerta/14 text-alerta-texto" },
+  nao_avancar: { rotulo: "Não avançar", classe: "bg-perigo/10 text-perigo-texto" },
+  evidencia_insuficiente: { rotulo: "Evidência insuficiente", classe: "bg-superficie-2 text-texto-suave" },
+};
+
+const nota1 = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** Entra subindo um pouco, em sequência. Sem animação para quem pediu menos movimento. */
+function Surgir({ ordem = 0, children, className }: { ordem?: number; children: React.ReactNode; className?: string }) {
+  const reduzir = useReducedMotion();
+  return (
+    <motion.div
+      className={className}
+      initial={reduzir ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.48, ease: CURVA, delay: Math.min(ordem, 10) * 0.06 }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** Quatro segmentos: a escala da rubrica é de 1 a 4. */
+function Escala({ nota, grande = false }: { nota: number | null; grande?: boolean }) {
+  const reduzir = useReducedMotion();
+  return (
+    <div
+      className={`flex ${grande ? "gap-1.5" : "gap-1"}`}
+      role="img"
+      aria-label={nota === null ? "Sem nota" : `Nota ${nota1(nota)} de 4`}
+    >
+      {[1, 2, 3, 4].map((i) => {
+        const preenchido = nota === null ? 0 : Math.max(0, Math.min(1, nota - (i - 1)));
+        return (
+          <span
+            key={i}
+            className={`relative overflow-hidden rounded-full bg-superficie-2 ${grande ? "h-2 w-12" : "h-1.5 w-6"}`}
+          >
+            <motion.span
+              className="absolute inset-y-0 left-0 rounded-full bg-marca"
+              initial={reduzir ? false : { width: 0 }}
+              animate={{ width: `${preenchido * 100}%` }}
+              transition={{ duration: 0.6, ease: CURVA, delay: 0.25 + i * 0.08 }}
+            />
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function Momento({ momento }: { momento: string | null }) {
+  if (!momento) return null;
+  return <span className="shrink-0 text-xs text-texto-suave tabular-nums">aos {momento}</span>;
+}
+
+function Prova({ prova, aoAbrirImagem }: { prova: ProvaVista; aoAbrirImagem: (url: string) => void }) {
+  if (prova.tipo === "fala") {
+    return (
+      <li className="flex items-start gap-3">
+        <span className="mt-0.5 text-texto-suave">
+          <Icone nome="fala" tamanho={15} />
+        </span>
+        <p className="flex-1 leading-relaxed text-texto">“{prova.texto}”</p>
+        <Momento momento={prova.momento} />
+      </li>
+    );
+  }
+  return (
+    <li className="flex items-start gap-3">
+      <span className="mt-0.5 text-texto-suave">
+        <Icone nome="desenho" tamanho={15} />
+      </span>
+      <div className="flex flex-1 flex-col gap-2.5">
+        {prova.elementos.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {prova.elementos.map((nome, i) => (
+              <span key={`${nome}-${i}`} className="rounded-full bg-marca-suave px-2.5 py-0.5 text-sm text-marca">
+                {nome}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-texto-suave">No desenho</p>
+        )}
+        {prova.imagem && (
+          <button
+            onClick={() => aoAbrirImagem(prova.imagem!)}
+            aria-label="Ver o quadro neste momento"
+            className="group w-fit overflow-hidden rounded-pequeno border border-borda bg-superficie outline-none transition-transform duration-150 ease-suave focus-visible:ring-2 focus-visible:ring-marca active:scale-[0.98]"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- PNG servido pela sessão, sem otimização */}
+            <img
+              src={prova.imagem}
+              alt="O quadro do candidato neste momento"
+              className="h-28 w-auto max-w-56 object-contain transition-transform duration-300 ease-suave group-hover:scale-[1.03]"
+            />
+          </button>
+        )}
+      </div>
+      <Momento momento={prova.momento} />
+    </li>
+  );
+}
+
+function Criterio({ c, ordem, aoAbrirImagem }: { c: CriterioVisto; ordem: number; aoAbrirImagem: (url: string) => void }) {
+  return (
+    <Surgir ordem={ordem}>
+      <article className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao">
+        <header className="flex items-start justify-between gap-6">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-lg font-semibold tracking-tight">{c.nome}</h3>
+            {c.significado && <p className="text-sm text-texto-suave">{c.significado}</p>}
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1">
+            {c.nota === null ? (
+              <span className="text-sm text-texto-suave">Sem nota</span>
+            ) : (
+              <span className="text-sm font-medium tabular-nums">{c.nota} de 4</span>
+            )}
+            <Escala nota={c.nota} />
+          </div>
+        </header>
+        <p className="leading-relaxed text-texto">{c.justificativa}</p>
+        {c.provas.length > 0 && (
+          <ul className="flex flex-col gap-3.5 border-t border-borda pt-4">
+            {c.provas.map((p, i) => (
+              <Prova key={i} prova={p} aoAbrirImagem={aoAbrirImagem} />
+            ))}
+          </ul>
+        )}
+      </article>
+    </Surgir>
+  );
+}
+
+function Lista({ titulo, icone, itens, vazio }: { titulo: string; icone: "check" | "aprofundar"; itens: string[]; vazio: string }) {
+  return (
+    <section className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao">
+      <h2 className="text-sm font-medium text-texto-suave">{titulo}</h2>
+      {itens.length === 0 ? (
+        <p className="text-texto-suave">{vazio}</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {itens.map((t, i) => (
+            <li key={i} className="flex items-start gap-3 leading-relaxed">
+              <span className={`mt-1 ${icone === "check" ? "text-sucesso" : "text-marca"}`}>
+                <Icone nome={icone} tamanho={15} />
+              </span>
+              {t}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ImagemAmpliada({ url, aoFechar }: { url: string | null; aoFechar: () => void }) {
+  useEffect(() => {
+    if (!url) return;
+    const aoTeclar = (e: KeyboardEvent) => e.key === "Escape" && aoFechar();
+    addEventListener("keydown", aoTeclar);
+    return () => removeEventListener("keydown", aoTeclar);
+  }, [url, aoFechar]);
+  return (
+    <AnimatePresence>
+      {url && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.22 }}
+          onClick={aoFechar}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Quadro do candidato"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-8 backdrop-blur-md print:hidden"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.36, ease: CURVA }}
+            className="relative max-h-full max-w-5xl overflow-hidden rounded-padrao bg-superficie shadow-flutuante"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- PNG servido pela sessão */}
+            <img src={url} alt="O quadro do candidato" className="max-h-[85dvh] w-auto object-contain" />
+            <button
+              onClick={aoFechar}
+              aria-label="Fechar"
+              className="absolute top-3 right-3 flex size-8 items-center justify-center rounded-full bg-vidro text-texto-suave shadow-padrao backdrop-blur-xl outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca"
+            >
+              <Icone nome="fechar" tamanho={16} />
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+export default function Relatorio({ r }: { r: RelatorioVisto }) {
+  const [imagem, setImagem] = useState<string | null>(null);
+  const rec = RECOMENDACAO[r.recomendacao];
+  const avaliados = r.criterios.filter((c) => c.nota !== null);
+  const semProva = r.criterios.filter((c) => c.nota === null);
+  const comNota = avaliados.length;
+  // Nota baseada em poucos critérios não deve chamar mais atenção do que o aviso.
+  const fraca = r.recomendacao === "evidencia_insuficiente";
+
+  return (
+    <main className="min-h-dvh w-full bg-fundo">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 pt-10 pb-24 print:max-w-none print:pt-0">
+        <Surgir className="flex items-center justify-between">
+          <span className="text-sm font-semibold tracking-tight">Converge</span>
+          <div className="flex items-center gap-2">
+            {r.demonstracao && (
+              <span className="rounded-full bg-superficie-2 px-2.5 py-1 text-xs text-texto-suave">
+                Dados de demonstração
+              </span>
+            )}
+            <button
+              onClick={() => print()}
+              className="flex items-center gap-1.5 rounded-full border border-borda bg-superficie px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao outline-none transition-[color,transform] duration-150 ease-suave hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95 print:hidden"
+            >
+              <Icone nome="imprimir" tamanho={14} />
+              Salvar em PDF
+            </button>
+          </div>
+        </Surgir>
+
+        <Surgir ordem={1} className="flex flex-col gap-3">
+          <p className="text-xs font-medium tracking-wide text-texto-suave uppercase">
+            Relatório da entrevista de {r.area}
+          </p>
+          <h1 className="text-4xl font-semibold tracking-tight text-balance">{r.problema}</h1>
+          <p className="flex flex-wrap gap-x-2 text-texto-suave">
+            <span>Candidato {r.candidatoId}</span>
+            <span aria-hidden>·</span>
+            <span>{r.realizadaEm}</span>
+            {r.duracao && (
+              <>
+                <span aria-hidden>·</span>
+                <span>{r.duracao}</span>
+              </>
+            )}
+            <span aria-hidden>·</span>
+            <span>
+              {r.perguntas === 1 ? "1 pergunta do entrevistador" : `${r.perguntas} perguntas do entrevistador`}
+            </span>
+          </p>
+        </Surgir>
+
+        <Surgir ordem={2}>
+          <section className="grid gap-8 rounded-padrao bg-superficie p-8 shadow-padrao sm:grid-cols-[auto_1fr]">
+            <div className="flex flex-col gap-4 sm:border-r sm:border-borda sm:pr-8">
+              <p className="text-sm font-medium text-texto-suave">Nota geral</p>
+              <p className="flex items-baseline gap-1.5 tabular-nums">
+                <span className={`text-6xl font-semibold tracking-tight ${fraca ? "text-texto-suave" : ""}`}>
+                  {r.notaGeral === null ? "—" : nota1(r.notaGeral)}
+                </span>
+                <span className="text-xl text-texto-suave">/ 4</span>
+              </p>
+              <Escala nota={r.notaGeral} grande />
+              <p className={`text-xs ${fraca ? "font-medium text-alerta-texto" : "text-texto-suave"}`}>
+                {fraca ? "Só " : ""}
+                {comNota} de {r.criterios.length} critérios com prova
+              </p>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col items-start gap-2">
+                <span className={`rounded-full px-3 py-1 text-sm font-medium ${rec.classe}`}>{rec.rotulo}</span>
+                <p className="text-xs text-texto-suave">Sugestão do entrevistador. Quem decide é você.</p>
+              </div>
+              {r.briefing && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-sm font-medium text-texto-suave">Para a próxima conversa</p>
+                  <p className="leading-relaxed text-pretty">{r.briefing}</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </Surgir>
+
+        {r.desenhoFinal && (
+          <Surgir ordem={3}>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-sm font-medium text-texto-suave">Desenho final</h2>
+              <button
+                onClick={() => setImagem(r.desenhoFinal)}
+                aria-label="Ampliar o desenho final"
+                className="group overflow-hidden rounded-padrao bg-superficie shadow-padrao outline-none focus-visible:ring-2 focus-visible:ring-marca"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- PNG servido pela sessão */}
+                <img
+                  src={r.desenhoFinal}
+                  alt="Desenho final do candidato"
+                  className="max-h-[420px] w-full object-contain p-4 transition-transform duration-500 ease-suave group-hover:scale-[1.01]"
+                />
+              </button>
+            </section>
+          </Surgir>
+        )}
+
+        <section className="flex flex-col gap-4">
+          <Surgir ordem={4}>
+            <h2 className="text-2xl font-semibold tracking-tight">Por critério</h2>
+          </Surgir>
+          {avaliados.map((c, i) => (
+            <Criterio key={c.id} c={c} ordem={5 + i} aoAbrirImagem={setImagem} />
+          ))}
+          {semProva.length > 0 && (
+            <Surgir ordem={5 + avaliados.length}>
+              <article className="flex flex-col gap-3 rounded-padrao border border-dashed border-borda p-6">
+                <div className="flex flex-col gap-1">
+                  <h3 className="font-semibold tracking-tight">
+                    {semProva.length === 1 ? "Sem prova nesta entrevista" : `${semProva.length} critérios sem prova nesta entrevista`}
+                  </h3>
+                  <p className="text-sm leading-relaxed text-texto-suave">
+                    Não apareceu fala nem desenho que permitisse avaliar. Ficam sem nota, em vez de um chute, e
+                    viram pauta para a próxima conversa.
+                  </p>
+                </div>
+                <ul className="flex flex-wrap gap-1.5">
+                  {semProva.map((c) => (
+                    <li key={c.id} className="rounded-full bg-superficie-2 px-3 py-1 text-sm text-texto-suave">
+                      {c.nome}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </Surgir>
+          )}
+        </section>
+
+        <Surgir ordem={6 + r.criterios.length} className="grid gap-4 sm:grid-cols-2">
+          <Lista titulo="Pontos fortes" icone="check" itens={r.pontosFortes} vazio="Nada que se destacou." />
+          <Lista
+            titulo="Onde aprofundar"
+            icone="aprofundar"
+            itens={r.pontosAAprofundar}
+            vazio="Nenhum ponto em aberto."
+          />
+        </Surgir>
+
+        <Surgir ordem={7 + r.criterios.length}>
+          <footer className="flex flex-col gap-3 rounded-padrao border border-borda p-6 text-sm text-texto-suave">
+            <p className="flex items-center gap-2 font-medium text-texto">
+              <span className="text-sucesso">
+                <Icone nome="escudo" tamanho={16} />
+              </span>
+              Como estas notas foram conferidas
+            </p>
+            <p className="leading-relaxed">
+              {r.provasConferidas === 1 ? "1 prova conferida" : `${r.provasConferidas} provas conferidas`} na
+              gravação da sessão. Toda nota aponta para uma fala real do candidato ou para algo que ele desenhou;
+              critério sem prova fica sem nota, em vez de receber um chute.
+            </p>
+            {r.ajustes.length > 0 && (
+              <details className="group">
+                <summary className="w-fit cursor-pointer list-none text-marca outline-none focus-visible:underline">
+                  {r.ajustes.length === 1 ? "1 ajuste automático" : `${r.ajustes.length} ajustes automáticos`}
+                </summary>
+                <ul className="mt-2 flex list-disc flex-col gap-1 pl-5">
+                  {r.ajustes.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </footer>
+        </Surgir>
+      </div>
+
+      <ImagemAmpliada url={imagem} aoFechar={() => setImagem(null)} />
+    </main>
+  );
+}
