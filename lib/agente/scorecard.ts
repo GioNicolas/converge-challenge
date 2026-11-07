@@ -261,7 +261,7 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
         const origem = fontes.falas[r.indice];
         evidencias.push({ tipo: "fala", horario: origem?.horario ?? e.horario, texto: e.texto });
       } else {
-        if (nome && /\b(oral|verbal|respostas|plins)\b/.test(normalizar(nome))) {
+        if (nome && /\b(oral|verbal|plins)\b|comunicacao.*\brespostas\b/.test(normalizar(nome))) {
           ajustes.push(`evidência de desenho descartada em ${id}: rubrica exige fala`);
           continue;
         }
@@ -397,8 +397,8 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
   let timer: ReturnType<typeof setTimeout> | undefined;
   const prazo = new Promise<never>((_, rejeitar) => {
     timer = setTimeout(() => {
-      controle.abort();
       rejeitar(new ErroLlm("timeout", "Prazo do scorecard excedido"));
+      controle.abort();
     }, timeoutMs);
   });
   try {

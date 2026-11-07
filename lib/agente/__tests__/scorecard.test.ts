@@ -134,7 +134,7 @@ describe("scorecard: auxiliares", () => {
   it("normalizar tira acentos, pontuação e caixa", () => {
     assert.equal(normalizar("  Você, AGORA!! "), "voce agora");
   });
-  it("citacaoExiste exige trechos de 4+ caracteres", () => {
+  it("citacaoExiste exige ao menos quatro caracteres significativos", () => {
     assert.equal(citacaoExiste("ok", [{ texto: "ok tudo bem" }]).ok, false);
     assert.equal(citacaoExiste("tudo ... bem", [{ texto: "ok tudo bem" }]).ok, true);
   });

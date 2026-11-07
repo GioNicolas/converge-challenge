@@ -274,7 +274,10 @@ describe("finalizar", () => {
     let sinal: AbortSignal | undefined;
     try {
       const { id } = await novaSessao();
-      const llm: LlmCliente = { completarJson: args => { sinal = args.sinal; return new Promise(() => {}); } };
+      const llm: LlmCliente = { completarJson: args => {
+        sinal = args.sinal;
+        return new Promise((_, rejeitar) => args.sinal?.addEventListener("abort", () => rejeitar(new Error("abortou")), { once: true }));
+      } };
       definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: false });
       const resposta = await ler(await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id)));
       assert.equal(resposta.status, 502);
