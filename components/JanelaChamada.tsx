@@ -202,13 +202,13 @@ export default function JanelaChamada({
                   <span className="text-texto-claro/75">{NOME_DA_FASE[estado.fase]}</span>
                 </div>
 
-                <Orb
-                  estado={estadoOrb}
-                  volume={estadoOrb === "ouvindo" ? midia.volume : undefined}
-                  textoDuvida="Tenho uma pergunta"
-                  onClicarDuvida={onClicarPlin}
-                  className="absolute inset-0"
-                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Orb
+                    estado={estadoOrb}
+                    volume={estadoOrb === "ouvindo" ? midia.volume : 0}
+                    onClicarDuvida={onClicarPlin}
+                  />
+                </div>
 
                 <span className="absolute bottom-2.5 left-3 text-[11px] font-medium text-texto-claro/70">
                   Entrevistador
