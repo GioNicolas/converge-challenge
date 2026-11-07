@@ -2,11 +2,11 @@
 
 // Sala da entrevista de system design: o quadro em tela cheia e a janela de chamada no canto.
 // O enunciado não fica num painel: o agente escreve no próprio quadro.
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import dynamic from "next/dynamic";
 import JanelaChamada from "@/components/JanelaChamada";
 import type { Quadro } from "@/components/Canvas";
-import { criarSessao, type Fase, type Sessao } from "@/lib/sessao/cliente";
+import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 
 const Canvas = dynamic(() => import("@/components/Canvas"), {
@@ -15,42 +15,9 @@ const Canvas = dynamic(() => import("@/components/Canvas"), {
 });
 
 export default function SalaEntrevista() {
-  const [sessao, setSessao] = useState<Sessao | null>(null);
   const [quadro, setQuadro] = useState<Quadro | null>(null);
-  const [fase] = useState<Fase>("REQUISITOS");
-  const [iniciadaEm, setIniciadaEm] = useState<number | null>(null);
-  const enunciadoEscrito = useRef(false);
-
-  useEffect(() => {
-    criarSessao().then((s) => {
-      setSessao(s);
-      setIniciadaEm(Date.now());
-    });
-  }, []);
-
-  // O agente escreve o enunciado no quadro assim que a sessão e o quadro estão prontos.
-  useEffect(() => {
-    if (!sessao || !quadro || enunciadoEscrito.current) return;
-    enunciadoEscrito.current = true;
-    (async () => {
-      await quadro.agente.escrever({
-        id: "agente-enunciado-titulo",
-        grupo: "enunciado",
-        texto: sessao.problema.titulo,
-        x: 40,
-        y: 110,
-        tamanho: 32,
-      });
-      await quadro.agente.escrever({
-        id: "agente-enunciado-texto",
-        grupo: "enunciado",
-        texto: sessao.problema.enunciado,
-        x: 40,
-        y: 160,
-        tamanho: 20,
-      });
-    })();
-  }, [sessao, quadro]);
+  const entrevista = useEntrevista(quadro);
+  const { estado } = entrevista;
 
   function aoMudarDesenho(elementos: NonDeletedExcalidrawElement[]) {
     console.groupCollapsed(`[quadro] ${elementos.length} elemento(s)`);
@@ -59,13 +26,11 @@ export default function SalaEntrevista() {
         id: e.id,
         tipo: e.type,
         texto: "text" in e ? e.text : "",
-        x: Math.round(e.x),
-        y: Math.round(e.y),
         autor: e.customData?.autor ?? "candidato",
       })),
     );
-    console.log(elementos);
     console.groupEnd();
+    entrevista.desenhoMudou();
   }
 
   function aoQuadroPronto(q: Quadro) {
@@ -76,14 +41,50 @@ export default function SalaEntrevista() {
     }
   }
 
+  const prontoParaComecar = estado.fase === "AGUARDANDO" && quadro !== null && entrevista.sessao !== null;
+
   return (
     <main className="relative h-dvh w-full overflow-hidden bg-superficie">
       <Canvas onDesenhoMudou={aoMudarDesenho} onPronto={aoQuadroPronto} />
 
       {/* Acima do botão de ajuda do Excalidraw, no canto inferior direito. */}
       <div className="pointer-events-none absolute right-4 bottom-16 z-10">
-        <JanelaChamada fase={fase} iniciadaEm={iniciadaEm} />
+        <JanelaChamada
+          estado={estado}
+          iniciadaEm={entrevista.iniciadaEm}
+          onClicarPlin={entrevista.clicarPlin}
+          onTerminarResposta={entrevista.terminarResposta}
+          onEncerrar={entrevista.encerrar}
+        />
       </div>
+
+      {(estado.fase === "AGUARDANDO" || estado.fase === "ENCERRADA") && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-fundo/60 backdrop-blur-sm">
+          <div className="flex w-[360px] flex-col gap-4 rounded-padrao bg-superficie p-8 shadow-flutuante">
+            {estado.fase === "AGUARDANDO" ? (
+              <>
+                <h1 className="text-2xl font-semibold tracking-tight">Entrevista de system design</h1>
+                <p className="leading-relaxed text-texto-suave">
+                  O entrevistador vai apresentar o problema no quadro e acompanhar o seu desenho. Fale
+                  com ele sempre que quiser.
+                </p>
+                <button
+                  onClick={entrevista.comecar}
+                  disabled={!prontoParaComecar}
+                  className="rounded-full bg-marca px-5 py-2.5 font-medium text-white transition-opacity duration-150 ease-suave hover:opacity-90 disabled:opacity-40"
+                >
+                  Começar
+                </button>
+              </>
+            ) : (
+              <>
+                <h1 className="text-2xl font-semibold tracking-tight">Entrevista encerrada</h1>
+                <p className="leading-relaxed text-texto-suave">Obrigado! O relatório está sendo gerado.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

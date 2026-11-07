@@ -5,7 +5,7 @@
 import { useRef } from "react";
 import { Excalidraw, getSceneVersion } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import { criarCamadaAgente, type CamadaAgente } from "@/lib/excalidraw/agente";
+import { criarCamadaAgente, ehDoAgente, type CamadaAgente } from "@/lib/excalidraw/agente";
 import type {
   ExcalidrawImperativeAPI,
   NonDeletedExcalidrawElement,
@@ -18,7 +18,10 @@ export type Quadro = {
 };
 
 type Props = {
-  /** Chamado só quando o desenho muda de verdade (não a cada scroll ou zoom). */
+  /**
+   * Chamado só quando o desenho DO CANDIDATO muda (não em scroll, zoom, seleção
+   * nem quando o agente escreve). Recebe os elementos visíveis, inclusive os do agente.
+   */
   onDesenhoMudou?: (elementos: NonDeletedExcalidrawElement[]) => void;
   onPronto?: (quadro: Quadro) => void;
 };
@@ -30,8 +33,9 @@ export default function Canvas({ onDesenhoMudou, onPronto }: Props) {
   function aoMudar(elementos: readonly OrderedExcalidrawElement[]) {
     agente.current?.proteger(elementos);
 
-    // O onChange dispara também em scroll, zoom e seleção; a versão da cena só muda com o desenho.
-    const versao = getSceneVersion(elementos);
+    // O onChange dispara também em scroll, zoom e seleção; a versão só muda com o desenho.
+    // Conta só os elementos do candidato: o agente escrevendo não é mudança do candidato.
+    const versao = getSceneVersion(elementos.filter((e) => !ehDoAgente(e)));
     if (versao === ultimaVersao.current) return;
     ultimaVersao.current = versao;
     onDesenhoMudou?.(elementos.filter((e) => !e.isDeleted));
