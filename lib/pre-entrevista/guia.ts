@@ -6,7 +6,7 @@
  */
 import type { FocusArea } from "@/lib/contracts";
 import { NOME_AREA_FALA } from "./cobertura";
-import { RE_CONTEXTO, RE_SUJEITO_CANDIDATO } from "./frases";
+import { normalizarTexto, RE_CONTEXTO, RE_REQUISITO, RE_TOM } from "./frases";
 import type { Preferencias } from "./preferencias";
 import { listar } from "./rascunho";
 
@@ -58,20 +58,27 @@ export function montarGuia(e: EntradaGuia): string {
   const menos = [...new Set([...menosNoFoco, ...e.dispensadas])];
   if (menos.length) partes.push(`Menos importante: ${listar(menos.map((a) => NOME_AREA_FALA[a]))}.`);
 
+  // Tom e dicas: a citação de tom só vale com uma palavra de tom (amigável, tranquilo, desafiador…).
   const tomTxt = e.tom === "desafiador" ? "desafiador" : "amigável";
   const dicasTxt = { leves: "dica leve se travar", nenhuma: "sem dicas", livres: "dica quando ele pedir" }[e.dicas];
-  if (!e.origemTom && !e.origemDicas) {
+  const tomDito = e.origemTom && RE_TOM.test(e.origemTom) ? e.origemTom : undefined;
+  const dicasDitas = e.origemDicas;
+  if (!tomDito && !dicasDitas) {
     partes.push(`Tom ${tomTxt}, ${dicasTxt} (padrão).`);
-  } else if (e.origemTom && e.origemTom === e.origemDicas) {
-    partes.push(`Tom e dicas: ${tomTxt}, ${dicasTxt} (ela disse: ${citar(e.origemTom)}).`);
+  } else if (tomDito && tomDito === dicasDitas) {
+    partes.push(`Tom e dicas: ${tomTxt}, ${dicasTxt} (ela disse: ${citar(tomDito)}).`);
   } else {
-    partes.push(`Tom: ${tomTxt}${e.origemTom ? ` (ela disse: ${citar(e.origemTom)})` : " (padrão)"}.`);
-    partes.push(`Dicas: ${dicasTxt}${e.origemDicas ? ` (ela disse: ${citar(e.origemDicas)})` : " (padrão)"}.`);
+    partes.push(`Tom: ${tomTxt}${tomDito ? ` (ela disse: ${citar(tomDito)})` : " (padrão)"}.`);
+    partes.push(`Dicas: ${dicasTxt}${dicasDitas ? ` (ela disse: ${citar(dicasDitas)})` : " (padrão)"}.`);
   }
 
-  // Contexto só entra se o trecho fala do time, da empresa, do produto ou do momento da contratação.
-  if (e.contexto && RE_CONTEXTO.test(e.contexto) && !RE_SUJEITO_CANDIDATO.test(e.contexto))
+  // Contexto: fala do time ou da empresa, sem descrição de requisito ou de candidato, e sem repetir "O que mais importa".
+  const jaCitado = e.frasesImportantes.some(
+    (f) => normalizarTexto(f).includes(normalizarTexto(e.contexto)) || normalizarTexto(e.contexto).includes(normalizarTexto(f)),
+  );
+  if (e.contexto && RE_CONTEXTO.test(e.contexto) && !RE_REQUISITO.test(e.contexto) && !jaCitado) {
     partes.push(`Contexto: ${e.contexto.replace(/[.!?…]+$/, "")}.`);
+  }
 
   if (e.naoAvaliado.length) partes.push(`Não avaliado nesta entrevista: ${listar(e.naoAvaliado)}.`);
 

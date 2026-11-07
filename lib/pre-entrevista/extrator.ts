@@ -13,7 +13,7 @@ import { CATALOGO, criteriosIniciais, type CriterioModelo } from "./catalogo";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { acharEvidencia } from "./pesos";
-import { fraseComTrecho, normalizarTexto, RE_CONTEXTO, RE_LOGISTICA, RE_SUJEITO_CANDIDATO } from "./frases";
+import { fraseComTrecho, normalizarTexto, RE_CONTEXTO, RE_LOGISTICA, RE_REQUISITO } from "./frases";
 import { alinharPesos, mudarModo, Origem, Rascunho, type Turno } from "./rascunho";
 
 const TEMPERATURA = 0.2;
@@ -258,7 +258,7 @@ export function validarEvidencias(p: Patch, transcricao: Turno[], modo: Intervie
   const contexto =
     p.contexto === undefined
       ? undefined
-      : evContexto && RE_CONTEXTO.test(fraseContexto) && !RE_SUJEITO_CANDIDATO.test(fraseContexto)
+      : evContexto && RE_CONTEXTO.test(fraseContexto) && !RE_REQUISITO.test(fraseContexto)
         ? fraseContexto
         : (avisar(avisos, "contexto descartado: não é frase do time ou da empresa, ou descreve o candidato"), "");
   return { ...p, criteria, origens: p.criteria ? origens : undefined, eliminatorios, contexto };

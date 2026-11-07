@@ -8,7 +8,7 @@
  *  - "respondeu" (2) e "secundaria" (1) valem o máximo observado, e não rebaixam uma área declarada.
  */
 import { FocusArea } from "@/lib/contracts";
-import { fraseDaArea } from "./frases";
+import { fraseDaArea, limitarPalavras } from "./frases";
 
 /** Nível que o Jev dá a uma área na última fala. */
 export const NIVEIS_ENFASE = ["nao_falou", "dispensou", "secundaria", "respondeu", "central"] as const;
@@ -50,6 +50,15 @@ export function acumularEnfase(anterior: EstadoEnfase, niveis: Partial<Record<Fo
     }
   }
   return novo;
+}
+
+/**
+ * Troca de formato por causa de uma área é declaração de central: a área fica central, com a fala que motivou a troca
+ * como frase. Se a fala não tem a palavra da área, a fala inteira (limitada), porque é a própria fala da escolha.
+ */
+export function declararCentral(estado: EstadoEnfase, area: FocusArea, fala: string): EstadoEnfase {
+  const frase = fraseDaArea(fala, area) ?? limitarPalavras(fala);
+  return { ...estado, [area]: { ...estado[area], falou: true, declarado: "central", frase } };
 }
 
 /** Ênfase de uma área pelo estado: undefined se ela nunca falou; 0 se dispensou; 3 se central; senão o máximo. */

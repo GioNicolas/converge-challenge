@@ -33,9 +33,12 @@ export function fraseComPalavra(texto: string, palavra: RegExp): string | undefi
 }
 
 /** Palavras-chave das falas que mostram tom, dicas, eliminatório e contexto. */
-export const RE_TOM = /\btom\b|desafi|amig[aá]vel|tranquil|exigente|\bfirme\b/i;
+/** Palavra de tom: só frase que tem uma delas pode ser citada como tom. "Não precisa muita pressão" não é tom. */
+export const RE_TOM = /amig[aá]vel|tranquil|\bleve\b|desafiador|pressionar|questionar|\bduro\b|[aà] vontade/i;
 export const RE_DICAS = /\bdicas?\b|que se vire/i;
 export const RE_ELIMINATORIO = /eliminat|reprov|desclass/i;
+/** Frase que descreve requisito ou experiência do candidato: não é contexto do time. */
+export const RE_REQUISITO = /\b(experi[eê]ncia|vivenc\w*|saber|precisa|capacidade de|tem que ter|candidato\w*|ele)\b/i;
 /** Contexto só vale se fala do time, da empresa, do produto, dos clientes ou do momento da contratação. */
 export const RE_CONTEXTO = /\b(time|equipe|empresa|produto|clientes?|startup|pessoas|volume|momento|contrata\w*)\b/i;
 
@@ -53,9 +56,18 @@ export const PALAVRAS_AREA: Record<"tecnico" | "pressao" | "escala_produto" | "u
   uso_ia: /\bIA\b|LLM|agente|modelo|RAG|prompt/i,
 };
 
-/** A frase da fala que fala da área. Sem frase que case com a área, undefined: não se cita a fala inteira. */
+/**
+ * A oração da fala que contém a palavra da área: corta por frase e depois por vírgula ou ponto e vírgula.
+ * Sem oração que case com a área, undefined: não se cita a fala inteira.
+ */
 export function fraseDaArea(fala: string, area: keyof typeof PALAVRAS_AREA): string | undefined {
-  return frasesDe(fala).find((f) => PALAVRAS_AREA[area].test(f));
+  const oracoes = frasesDe(fala).flatMap((f) =>
+    f
+      .split(/[,;]\s*/)
+      .map((o) => o.trim())
+      .filter(Boolean),
+  );
+  return oracoes.find((o) => PALAVRAS_AREA[area].test(o));
 }
 
 /** Frase de logística (minutos, duração, tom, dicas, clima): não serve de evidência de critério de competência. */

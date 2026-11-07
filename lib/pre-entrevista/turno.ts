@@ -11,7 +11,7 @@
  */
 import { ROTULO_NAO_AVALIADO } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
-import { acumularEnfase } from "./enfase";
+import { acumularEnfase, declararCentral } from "./enfase";
 import { aberturaDoAgente, responder, tradeoffDaAbertura } from "./conversa";
 import { ErroChat } from "./llm";
 import { registrarEvento } from "./log";
@@ -122,6 +122,10 @@ function resolverTradeoff(sessao: Sessao): void {
     plano.trocaPendente = oferta.modoAlternativo;
   }
   sessao.plano = plano;
+  // Trocar de formato por causa de uma área declara essa área central, com a fala que motivou a troca.
+  if (decisao === "trocou") {
+    sessao.enfaseEstado = declararCentral(sessao.enfaseEstado, oferta.area, ultimaFalaDaRecrutadora(sessao.transcricao) ?? "");
+  }
 
   // O foco e as notas são refeitos depois, em `conduzirTurno`, com as decisões de agora.
   sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, decisoes, plano.modoEscolhido);
