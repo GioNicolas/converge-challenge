@@ -15,6 +15,12 @@ export type LlmArgs<T> = {
   nomeSchema: string;
   modelo?: string;
   maxTokens?: number;
+  /**
+   * Raciocínio interno do modelo. Padrão: desligado (loop ao vivo). Ligado, ele consome
+   * centenas de tokens de `max_tokens` antes da resposta (medido: ~450 de 600 no Haiku 5.5)
+   * e a resposta pode ser cortada; ao ligar, aumente `maxTokens`.
+   */
+  raciocinio?: boolean;
   sinal?: AbortSignal;
 };
 
@@ -108,8 +114,10 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
       const corpo = JSON.stringify({
         model: modelo,
         messages: [{ role: "system", content: sistema }, ...args.mensagens],
-        max_tokens: args.maxTokens ?? 600,
-        temperature: 0.2,
+        max_tokens: args.maxTokens ?? 800,
+        reasoning: { enabled: args.raciocinio ?? false },
+        // Sem `temperature`: os modelos Claude 5.x não aceitam o parâmetro e, com
+        // provider.require_parameters, o OpenRouter filtra todos os provedores (404).
         stream: false,
         response_format: {
           type: "json_schema",

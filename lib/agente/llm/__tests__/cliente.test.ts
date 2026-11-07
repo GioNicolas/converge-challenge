@@ -61,6 +61,8 @@ describe("criarClienteOpenRouter: formato da requisição", () => {
     const corpo = JSON.parse(chamadas[0].init.body as string);
     assert.equal(corpo.model, "anthropic/teste");
     assert.equal(corpo.max_tokens, 321);
+    assert.deepEqual(corpo.reasoning, { enabled: false });
+    assert.equal("temperature" in corpo, false);
     assert.deepEqual(corpo.messages[0].content[0], { type: "text", text: "ESTATICO", cache_control: { type: "ephemeral" } });
     assert.deepEqual(corpo.messages[0].content[1], { type: "text", text: "DINAMICO" });
     assert.equal(corpo.messages[0].role, "system");
