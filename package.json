@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.7.0",
+    "lucide-react": "^1.70.0",
+    "motion": "^14.10.1",
     "next": "15.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",

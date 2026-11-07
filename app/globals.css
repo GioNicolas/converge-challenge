@@ -1,26 +1,218 @@
 @import "tailwindcss";
 
+/*
+ * Tokens de design — fonte da verdade: docs/design.md (§3 a §7).
+ * Componentes usam SÓ classes de token (bg-superficie, text-texto-suave,
+ * rounded-padrao, shadow-flutuante, ease-suave...). Mudou a identidade?
+ * Muda só este arquivo. Modo escuro é o padrão (prioridade do projeto).
+ * `color-scheme: dark` deixa scrollbars e inputs nativos escuros.
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  /* Paleta (§3) */
+  --fundo: #0b0b0d;
+  --superficie: #1c1c1e;
+  --superficie-2: #2c2c2e;
+  --vidro: rgb(44 44 46 / 0.72);
+  --vidro-escuro: rgb(0 0 0 / 0.65);
+  --borda: rgb(255 255 255 / 0.1);
+  --texto: #f5f5f7;
+  --texto-suave: #98989d;
+  --texto-claro: #ffffff;
+  --marca: #0a84ff; /* também é a cor do agente */
+  --marca-suave: rgb(10 132 255 / 0.2);
+  /* Identidade do agente: só tons da própria marca (uma cor de destaque) */
+  --agente-nucleo: #061a3a;
+  --agente-claro: color-mix(in srgb, var(--marca) 45%, white);
+  --agente-ciano: color-mix(in srgb, var(--marca) 55%, #5ee6ff);
+  --agente-indigo: color-mix(in srgb, var(--marca) 60%, #5e5ce6);
+  --sucesso: #30d158;
+  --alerta: #ff9f0a;
+  --perigo: #ff453a;
+
+  /* Forma (§5) */
+  --raio-padrao: 18px; /* cards e janela de chamada */
+  --raio-controle: 10px; /* botões e inputs; pílula = rounded-full */
+  --sombra-cartao: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
+  --sombra-flutuante: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 56px rgb(0 0 0 / 0.55);
+  --desfoque-vidro: 24px;
+
+  /* Movimento (§6). A mola fica em lib/design/motion.ts */
+  --curva-suave: cubic-bezier(0.32, 0.72, 0, 1);
+  --curva-saida: cubic-bezier(0.22, 1, 0.36, 1);
+  --duracao-rapida: 160ms;
+  --duracao: 280ms;
+  --duracao-lenta: 480ms;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Cores: bg-fundo, text-texto-suave, border-borda, bg-marca... */
+  --color-fundo: var(--fundo);
+  --color-superficie: var(--superficie);
+  --color-superficie-2: var(--superficie-2);
+  --color-vidro: var(--vidro);
+  --color-vidro-escuro: var(--vidro-escuro);
+  --color-borda: var(--borda);
+  --color-texto: var(--texto);
+  --color-texto-suave: var(--texto-suave);
+  --color-texto-claro: var(--texto-claro);
+  --color-marca: var(--marca);
+  --color-agente: var(--marca);
+  --color-marca-suave: var(--marca-suave);
+  --color-sucesso: var(--sucesso);
+  --color-alerta: var(--alerta);
+  --color-perigo: var(--perigo);
+
+  /* Tamanhos de fonte: text-mini, text-codigo, text-corpo, text-corpo-grande, text-subtitulo */
+  --text-mini: 12px;
+  --text-codigo: 13px;
+  --text-corpo: 14px;
+  --text-corpo-grande: 15px;
+  --text-subtitulo: 17px;
+
+  /* Raios: rounded-padrao, rounded-controle */
+  --radius-padrao: var(--raio-padrao);
+  --radius-controle: var(--raio-controle);
+
+  /* Sombras: shadow-cartao, shadow-flutuante */
+  --shadow-cartao: var(--sombra-cartao);
+  --shadow-flutuante: var(--sombra-flutuante);
+
+  /* Curvas: ease-suave, ease-saida */
+  --ease-suave: var(--curva-suave);
+  --ease-saida: var(--curva-saida);
+
+  /* Fonte: do sistema (SF Pro no Mac), Inter de reserva */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter),
+    "Inter", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Durações: duration-rapida, duration-normal, duration-lenta */
+@utility duration-rapida {
+  transition-duration: var(--duracao-rapida);
+}
+@utility duration-normal {
+  transition-duration: var(--duracao);
+}
+@utility duration-lenta {
+  transition-duration: var(--duracao-lenta);
+}
+
+/* Vidro (§2.4): fundo translúcido + desfoque; sombra vem por classe */
+@utility vidro {
+  background-color: var(--vidro);
+  backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  border: 1px solid var(--borda);
+}
+@utility vidro-escuro {
+  background-color: var(--vidro-escuro);
+  color: var(--texto-claro);
+  backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--desfoque-vidro)) saturate(1.8);
+  border: 1px solid rgb(255 255 255 / 0.12);
+}
+
+/* Tipografia (§4) */
+@utility titulo {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+@utility label-pequena {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--texto-suave);
+}
+@utility numero {
+  font-variant-numeric: tabular-nums;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Movimento reduzido (§2.5): sem animação para quem pede */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Grifos do agente no Monaco (#6). Só tokens; o Monaco renderiza fora do React. */
+.agent-highlight {
+  background: var(--marca-suave);
+}
+.agent-highlight-bar {
+  background: var(--marca);
+  width: 3px !important;
+  margin-left: 3px;
+}
+.agent-glyph {
+  background: var(--marca);
+  border-radius: 9999px;
+  width: 8px !important;
+  height: 8px !important;
+  margin: 8px 0 0 6px;
+}
+.agent-inline-note {
+  color: var(--marca);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Orb do agente (docs/design.md §8.3): esfera de vidro com manchas de luz
+   em tons da marca, estilo Siri. Só transform/opacity animam. */
+@keyframes orb-giro {
+  to { transform: rotate(360deg); }
+}
+@keyframes orb-giro-inverso {
+  to { transform: rotate(-360deg); }
+}
+@keyframes orb-flutua {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6%, -6%) scale(1.15); }
+}
+@utility orb-esfera {
+  background: radial-gradient(circle at 50% 60%, var(--agente-indigo), var(--agente-nucleo) 75%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.14),
+    inset 0 -6px 14px rgb(0 0 0 / 0.35),
+    0 6px 20px color-mix(in srgb, var(--marca) 45%, transparent);
+}
+@utility orb-camada {
+  position: absolute;
+  inset: 0;
+  animation: orb-giro var(--orb-giro, 9s) linear infinite;
+}
+@utility orb-camada-inversa {
+  position: absolute;
+  inset: 0;
+  animation: orb-giro-inverso calc(var(--orb-giro, 9s) * 1.4) linear infinite;
+}
+@utility orb-mancha {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(7px);
+  mix-blend-mode: screen;
+  animation: orb-flutua 3.4s ease-in-out infinite;
+}
+@utility orb-reflexo {
+  background: radial-gradient(ellipse at 35% 22%, rgb(255 255 255 / 0.55), transparent 55%);
+}
+@utility orb-anel {
+  background: conic-gradient(from 0deg, transparent 0 55%, var(--agente-claro) 85%, var(--agente-ciano) 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
 }
