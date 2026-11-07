@@ -9,7 +9,7 @@ import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
 import { COMO_AVALIAMOS, mede, modoAlternativoQueMede } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
-import type { OferecerTradeoffPasso, Passo } from "./planejador";
+import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import type { Preferencias } from "./preferencias";
 import { DURACAO_PADRAO, duracaoDoRascunho, listar, type Rascunho, type Turno } from "./rascunho";
 import type { Sessao } from "./sessoes";
@@ -152,39 +152,64 @@ export function tradeoffDaAbertura(sessao: Sessao): OferecerTradeoffPasso | unde
   return undefined;
 }
 
-/** Fala da oferta de troca: o que o formato mostra bem, o que não mede e a alternativa. Sem o modelo. */
-function falaDoTradeoff(r: Rascunho, oferta: OferecerTradeoffPasso): string {
+/**
+ * Frase da oferta de troca na abertura: o que o formato mostra bem, o que não mede e a alternativa, numa frase só.
+ * O nível entra só quando já está confirmado (senão a pergunta de nível vem no fim da abertura). Função pura.
+ */
+function fraseDoTradeoff(r: Rascunho, oferta: OferecerTradeoffPasso, nivel?: string): string {
   const duasDeMaiorPeso = [...r.focus]
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 2)
     .map((f) => f.area);
   const mostradas = duasDeMaiorPeso.filter((a) => mede(r.mode, a)).map((a) => MOSTRA_BEM[a]);
-  const frente = mostradas.length ? `ele mostra bem ${listar(mostradas)}, mas não mede` : "não mede";
+  const frente = mostradas.length ? `que mostra bem ${listar(mostradas)} mas ` : "";
   const complemento = COMPLEMENTO_OFERTA[oferta.area];
+  const alternativa = `${FORMATO_CURTO[oferta.modoAlternativo]}${complemento ? ` ${complemento}` : ""}`;
   return (
-    `Pela vaga, pensei em ${FORMATO_CURTO[r.mode]} pra nível ${SENIORIDADE_FALA[r.seniority]}: ` +
-    `${frente} ${NAO_MEDE_FALA[oferta.area]}. ` +
-    `Se isso for central, um ${FORMATO_CURTO[oferta.modoAlternativo]}${complemento ? ` ${complemento}` : ""} avalia melhor. ` +
-    "Qual faz mais sentido?"
+    `Pensei em ${FORMATO_CURTO[r.mode]}${nivel ? ` pra nível ${nivel}` : ""}, ${frente}não mede ${NAO_MEDE_FALA[oferta.area]}; ` +
+    `se isso for central, ${alternativa} avalia melhor.`
   );
 }
 
 /**
- * Primeira fala do agente, montada sem LLM: apresenta formato, senioridade e os dois focos principais
- * numa fala só. Se o classificador não tem certeza do formato, pergunta qual formato em vez de sugerir.
- * Se o formato sugerido não mede uma das duas áreas de maior peso, apresenta o trade-off e pergunta.
+ * Primeira fala do agente, montada sem LLM, em até 4 frases: saudação com o cargo, o resumo da vaga (se houver),
+ * o formato e o foco (ou o trade-off, se o formato não mede uma área de peso) e a pergunta final.
+ * Nível não dito na vaga vira pergunta, não afirmação. Se o formato não está claro, a pergunta é o formato.
  */
 export function aberturaDoAgente(sessao: Sessao): string {
   const r = sessao.rascunho;
-  const saudacao = "Oi! Sou Totti, vou montar essa entrevista com você.";
-  const focos = listar(rotulosDoFoco(r, 2));
+  const frases = [`Oi! Sou Totti, vou montar a entrevista de ${r.roleTitle} com você.`];
+  // O resumo entra no meio da frase: a primeira letra vai para minúscula, sem mexer em sigla (APIs, iOS).
+  const resumo = sessao.resumoVaga?.replace(/^([A-ZÀ-Ú])(?=[a-zà-ú])/, (letra) => letra.toLowerCase());
+  if (resumo) frases.push(`Vi que a vaga gira em torno de ${resumo}.`);
+
+  const incerto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, r.confirmado.seniority);
   const nivel = SENIORIDADE_FALA[r.seniority];
+  const focos = listar(rotulosDoFoco(r, 2));
+  const perguntaNivel = "é júnior, pleno ou sênior?";
+
   if (sessao.classificacao.confirmar.includes("mode")) {
-    return `${saudacao} A vaga é de nível ${nivel}, olhando principalmente ${focos}. Você prefere live coding ou system design?`;
+    frases.push(incerto ? `Olhando principalmente ${focos}.` : `A vaga é de nível ${nivel}, olhando principalmente ${focos}.`);
+    frases.push(
+      incerto
+        ? `Você prefere live coding ou system design, e qual o nível: ${perguntaNivel}`
+        : "Você prefere live coding ou system design?",
+    );
+    return frases.join(" ");
   }
   const oferta = tradeoffDaAbertura(sessao);
-  if (oferta) return `${saudacao} ${falaDoTradeoff(r, oferta)}`;
-  return `${saudacao} Pela vaga, pensei em ${FORMATO_CURTO[r.mode]} pra nível ${nivel}, olhando principalmente ${focos}. É isso, ou quer focar em outra coisa?`;
+  if (oferta) {
+    frases.push(fraseDoTradeoff(r, oferta, incerto ? undefined : nivel));
+    frases.push(incerto ? `Qual faz mais sentido, e qual o nível: ${perguntaNivel}` : "Qual faz mais sentido?");
+    return frases.join(" ");
+  }
+  frases.push(
+    incerto
+      ? `Pensei em ${FORMATO_CURTO[r.mode]}, olhando principalmente ${focos}.`
+      : `Pensei em ${FORMATO_CURTO[r.mode]} pra nível ${nivel}, olhando principalmente ${focos}.`,
+  );
+  frases.push(incerto ? `O nível não está claro na vaga: ${perguntaNivel}` : "É isso, ou quer focar em outra coisa?");
+  return frases.join(" ");
 }
 
 /** O que já se sabe, em linguagem natural (sem JSON e sem rótulos internos). */
@@ -198,9 +223,12 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
   );
   const reduzidas = AREAS.filter((a) => sinal(`dispensa_${a}`) >= LIMIAR).map((a) => NOME_AREA_FALA[a]);
 
+  const nivelAberto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, r.confirmado.seniority);
   const linhas = [
     `- formato: ${FORMATO_FALA[r.mode]}`,
-    `- senioridade: ${SENIORIDADE_FALA[r.seniority]}`,
+    nivelAberto
+      ? `- senioridade: ainda não confirmada, a vaga não diz o nível (estimativa: ${SENIORIDADE_FALA[r.seniority]})`
+      : `- senioridade: ${SENIORIDADE_FALA[r.seniority]}`,
     `- foco, do mais pesado: ${nomesDoFoco(r)}`,
   ];
   if (pedidas.length) linhas.push(`- ela também quer avaliar: ${listar(pedidas)}`);
@@ -226,6 +254,11 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       return (
         `Ainda não ficou claro se ela concorda com a proposta (${FORMATO_CURTO[r.mode]} pra nível ${SENIORIDADE_FALA[r.seniority]}, ` +
         `olhando ${listar(rotulosDoFoco(r, 2))}). Pergunte de forma leve se é isso ou se ela quer focar em outra coisa. Uma pergunta só.`
+      );
+    case "perguntar_nivel":
+      return (
+        `A vaga não deixa o nível claro e ela ainda não disse. Pergunte só o nível, em uma frase curta: ` +
+        `'É júnior, pleno ou sênior?' (com as palavras da conversa). Não faça outra pergunta nem fale de formato ou foco.`
       );
     case "aprofundar": {
       // Depois de uma troca de formato, a primeira fala confirma a troca e já faz a pergunta.
