@@ -77,14 +77,116 @@ export type OpcoesApontar = {
   sinal?: AbortSignal;
 };
 
-export async function apontarEAnotar(o: OpcoesApontar) {
-  try {
-    await coreografar(o);
-  } catch (erro) {
-    if (!(erro instanceof Cancelada)) throw erro;
-  } finally {
-    o.cursor?.esconder();
-  }
+// A mão do agente faz uma coisa por vez: as ações entram numa fila.
+let fila: Promise<unknown> = Promise.resolve();
+function enfileirar<T>(acao: () => Promise<T>): Promise<T> {
+  const vez = fila.then(acao, acao);
+  fila = vez.catch(() => undefined);
+  return vez;
+}
+
+export function apontarEAnotar(o: OpcoesApontar) {
+  return enfileirar(async () => {
+    if (o.sinal?.aborted) return;
+    try {
+      await coreografar(o);
+    } catch (erro) {
+      if (!(erro instanceof Cancelada)) throw erro;
+    } finally {
+      o.cursor?.esconder();
+    }
+  });
+}
+
+/** Cor do texto escrito "a lápis" (enunciado e requisitos) e do check. */
+const COR_TEXTO = "#1e1e1e";
+const COR_CHECK = "#2f9e44";
+
+export type OpcoesRequisito = {
+  quadro: Quadro;
+  cursor: ControleCursor | null;
+  texto: string;
+  /** Posição do item na lista (0 = primeiro, que também escreve o título). */
+  indice: number;
+};
+
+/**
+ * Escreve um requisito combinado no quadro, abaixo do enunciado, e desenha um check ao lado.
+ * Não move a tela do candidato: se a área estiver fora de vista, escreve sem o cursor.
+ */
+export function anotarRequisito(o: OpcoesRequisito) {
+  return enfileirar(async () => {
+    const { quadro, cursor, indice } = o;
+    const grupo = "requisitos";
+    const enunciado = quadro.api.getSceneElements().find((e) => e.id === "agente-enunciado-texto");
+    const x = enunciado?.x ?? 40;
+    const topo = enunciado ? enunciado.y + enunciado.height + 34 : 260;
+    const linha = topo + 34 + indice * 30;
+    const textoX = x + 30;
+
+    const naTela = (p: Ponto) => cenaParaTela(p, vistaDe(quadro));
+    const visivel = estaVisivel({ x, y: topo, largura: 320, altura: linha - topo + 30 }, vistaDe(quadro), 0);
+    const mover = async (para: Ponto, semente: number) => {
+      if (!cursor || !visivel) return;
+      const de = cursor.posicao() ?? { x: innerWidth - 180, y: innerHeight - 160 };
+      const movimento = planejarMovimento(de, naTela(para), semente);
+      await animar(movimento.duracaoMs, (p) => cursor.mover(movimento.pontoEm(p)));
+    };
+
+    try {
+      await quadro.agente.esperarCandidatoLivre();
+      if (visivel) cursor?.mostrar();
+
+      if (indice === 0) {
+        await mover({ x, y: topo + 20 }, 11);
+        await quadro.agente.escrever({
+          id: "agente-requisitos-titulo",
+          grupo,
+          texto: "Requisitos combinados",
+          x,
+          y: topo,
+          tamanho: 18,
+          cor: "#868e96",
+          velocidade: 40,
+        });
+      }
+
+      // O item, escrito à mão.
+      await mover({ x: textoX, y: linha + 20 }, 23 + indice);
+      await quadro.agente.escrever({
+        id: `agente-requisito-${indice}`,
+        grupo,
+        texto: o.texto,
+        x: textoX,
+        y: linha,
+        tamanho: 18,
+        largura: 60,
+        cor: COR_TEXTO,
+        velocidade: 45,
+      });
+
+      // O check, desenhado de uma vez só, como um traço de caneta.
+      const check: Traco = { origem: { x: x + 2, y: linha + 10 }, pontos: [[0, 0], [6, 7], [18, -6]] };
+      await mover({ x: x + 2, y: linha + 10 }, 31 + indice);
+      await esperar(80);
+      await animar(260, (p) => {
+        const parte = parteDoTraco(check, suavizar(p));
+        quadro.agente.tracar({
+          id: `agente-requisito-${indice}-check`,
+          grupo,
+          origem: parte.origem,
+          pontos: parte.pontos,
+          espessura: 2.5,
+          semente: 101 + indice,
+          cor: COR_CHECK,
+        });
+        if (visivel) cursor?.mover(naTela(pontaDoTraco(parte)));
+      });
+      await esperar(300);
+    } finally {
+      cursor?.esconder();
+    }
+  });
 }
 
 

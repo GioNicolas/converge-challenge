@@ -51,6 +51,8 @@ export type OpcoesTraco = {
   espessura?: number;
   /** Fixa o "jeito" do traço entre um quadro e outro da animação. */
   semente: number;
+  /** Cor do traço. Padrão: a cor do agente. */
+  cor?: string;
 };
 
 export type CamadaAgente = {
@@ -202,7 +204,7 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
         width: Math.max(...xs) - Math.min(...xs),
         height: Math.max(...ys) - Math.min(...ys),
         points: pontos,
-        strokeColor: corDoAgente(),
+        strokeColor: o.cor ?? corDoAgente(),
         strokeWidth: o.espessura ?? 2,
         roughness: 0,
         roundness: null,

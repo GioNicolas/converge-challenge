@@ -7,7 +7,6 @@ import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import JanelaChamada from "@/components/JanelaChamada";
 import Legenda from "@/components/Legenda";
-import QuadroRequisitos from "@/components/QuadroRequisitos";
 import PainelConversa, { type MensagemConversa } from "@/components/PainelConversa";
 import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import type { Quadro } from "@/components/Canvas";
@@ -16,6 +15,7 @@ import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
+import { anotarRequisito } from "@/lib/presenca/coreografia";
 
 /** Demonstração: o que o agente pergunta, o que o candidato responde e o requisito que fica combinado. */
 const ROTEIRO_DEMO = [
@@ -98,6 +98,18 @@ export default function SalaEntrevista() {
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
   const demo = useDemoRequisitos();
+
+  // Cada requisito combinado é escrito pelo agente no próprio quadro, abaixo do enunciado.
+  const requisitosEscritos = useRef(0);
+  useEffect(() => {
+    if (!quadro) return;
+    while (requisitosEscritos.current < demo.requisitos.length) {
+      const indice = requisitosEscritos.current++;
+      void anotarRequisito({ quadro, cursor: cursor.current, texto: demo.requisitos[indice].texto, indice }).catch((erro) =>
+        console.warn("[requisitos]", erro),
+      );
+    }
+  }, [demo.requisitos, quadro]);
   const [conversaAberta, setConversaAberta] = useState(false);
   const fecharConversa = useCallback(() => setConversaAberta(false), []);
 
@@ -193,7 +205,6 @@ export default function SalaEntrevista() {
             </svg>
             Conversa
           </button>
-          <QuadroRequisitos requisitos={demo.requisitos} fase={estado.fase} />
         </div>
       )}
 
