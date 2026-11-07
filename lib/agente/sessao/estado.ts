@@ -8,7 +8,7 @@
 //
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
-import type { Fase, FalaRecente, Observacao, RespostaAnalise } from "./tipos";
+import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
 
 export type CicloPlin = "LIVRE" | "PLIN_PENDENTE" | "PERGUNTA_ATIVA";
 
@@ -82,6 +82,8 @@ export type EventoSessao =
   /** Passagem do tempo: avança a fase se o orçamento dela estourou. */
   | { tipo: "TICK" }
   | { tipo: "ENCERRAR" }
+  /** O quadro é dono da fase: o servidor acompanha. Só avança (alvo anterior ou igual é ignorado). */
+  | { tipo: "SINCRONIZAR_FASE"; fase: Fase }
   /** Resultado do /analisar (já passado por `filtrarResposta`). */
   | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise }
   /** O candidato mexeu nestes elementos (ids curtos do grafo). */
@@ -210,6 +212,11 @@ export function transicionar(
 
     case "ENCERRAR":
       return mudarFase(estado, "ENCERRADA", agora);
+
+    case "SINCRONIZAR_FASE":
+      return FASES.indexOf(evento.fase) > FASES.indexOf(estado.fase)
+        ? mudarFase(estado, evento.fase, agora)
+        : nada;
 
     case "ANALISE_RECEBIDA": {
       const { resposta } = evento;

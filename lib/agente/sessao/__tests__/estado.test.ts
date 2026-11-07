@@ -306,3 +306,16 @@ describe("serialização", () => {
     assert.equal(fim.estado.cobertura.dados.neutro, 1);
   });
 });
+
+describe("SINCRONIZAR_FASE", () => {
+  it("avança para a fase do quadro e nunca volta", () => {
+    const base = estadoInicial();
+    const a = transicionar(base, { tipo: "SINCRONIZAR_FASE", fase: "APROFUNDAMENTO" }, T0);
+    assert.equal(a.estado.fase, "APROFUNDAMENTO");
+    assert.deepEqual(a.efeitos, [{ tipo: "FASE_MUDOU", de: "AGUARDANDO", para: "APROFUNDAMENTO" }]);
+    const b = transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "REQUISITOS" }, T0 + 1);
+    assert.equal(b.estado.fase, "APROFUNDAMENTO");
+    assert.deepEqual(b.efeitos, []);
+    assert.equal(transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "ENCERRADA" }, T0).estado.fase, "ENCERRADA");
+  });
+});

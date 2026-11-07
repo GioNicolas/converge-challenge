@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:email": "tsx --test lib/email/__tests__/*.test.ts",
     "test:agente": "tsx --test lib/agente/__tests__/*.test.ts lib/agente/**/__tests__/*.test.ts",
+    "test:rotas": "tsx --test app/api/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",
     "test:kits": "tsx --test lib/agente/kits/__tests__/*.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts"
   },
