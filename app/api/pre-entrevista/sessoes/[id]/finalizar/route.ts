@@ -42,7 +42,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   await aguardarExtracao(sessao);
   if (lido.data.rascunho) substituirRascunho(sessao, lido.data.rascunho, "revisão manual");
 
-  const resultado = paraInterviewConfig(sessao.rascunho);
+  const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias);
   if (!resultado.ok) {
     registrarEvento(sessao, {
       tipo: "finalizacao",

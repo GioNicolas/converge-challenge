@@ -10,7 +10,8 @@ import { areasEmJogo, AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
 import { COMO_AVALIAMOS } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import type { Passo } from "./planejador";
-import { DURACAO_PADRAO, type Rascunho, type Turno } from "./rascunho";
+import type { Preferencias } from "./preferencias";
+import { DURACAO_PADRAO, duracaoDoRascunho, type Rascunho, type Turno } from "./rascunho";
 import type { Sessao } from "./sessoes";
 
 const TEMPERATURA_CONVERSA = 0.5;
@@ -42,7 +43,7 @@ Você soa como uma colega de RH experiente que conhece tecnologia: direta, simp�
 A fala vai ser ouvida em voz alta.
 
 Como falar:
-- Cada fala tem no máximo 2 frases curtas e uma pergunta só. A exceção é o resumo final, que pode ter até 4 frases curtas.
+- Cada fala tem no máximo 2 frases curtas e uma pergunta só. No resumo final, você escreve só as duas primeiras frases; o resto é acrescentado pelo sistema.
 - Reconheça a resposta dela em 2 a 4 palavras ("Boa.", "Faz sentido.", "Fechado.") ou vá direto para a pergunta.
   Não comece com "Entendi" e não repita a resposta dela palavra por palavra.
 - Fale com as palavras dela e da vaga. Nunca use nomes internos (tecnico, pressao, escala_produto, uso_ia, criterio, passo)
@@ -53,6 +54,7 @@ Como falar:
 - Você se apresenta só na abertura. Depois dela, nunca diga "sou Totti", "eu sou a Totti" nem repita seu nome.
   Evite adjetivos com gênero sobre você.
 - Varie as palavras: não repita de uma fala para a outra a mesma expressão de fechamento ou de tom.
+- Para pressão, diga "lidar com pressão e imprevistos" ou "manter a calma quando dá errado". Nunca diga "alta demanda": isso é escala.
 
 Exemplos de tom (não copie as palavras):
 - "Boa. Num problema de algoritmo, o que faz você achar um candidato ótimo e não só bom?"
@@ -161,6 +163,9 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
   return linhas.join("\n");
 }
 
+/** Lembrete em todo passo antes do resumo: duração, tom e dicas não são perguntados, só entram no resumo como padrão. */
+const SEM_LOGISTICA = "Não pergunte duração, tom nem dicas: isso fica para o resumo, que usa o padrão do formato.";
+
 /** Instrução específica para o passo escolhido pelo planejador. */
 function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
   const r = sessao.rascunho;
@@ -175,12 +180,13 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         return (
           `A última resposta dela sobre ${NOME_AREA_FALA[passo.area]} foi genérica. Não repita a pergunta anterior. ` +
           "Ofereça duas opções concretas, do que se vê na entrevista, em forma de pergunta curta, e deixe ela escolher. " +
-          "Não julgue a resposta dela."
+          "Não julgue a resposta dela. " +
+          SEM_LOGISTICA
         );
       }
       return (
         `Pergunte o que separa um candidato ótimo de um candidato fraco em ${NOME_AREA_FALA[passo.area]}, ` +
-        `de forma concreta e ligada ao cargo ${r.roleTitle}. Uma pergunta só.`
+        `de forma concreta e ligada ao cargo ${r.roleTitle}. Uma pergunta só. ${SEM_LOGISTICA}`
       );
     case "confirmar_mudanca_foco": {
       const partes: string[] = [];
@@ -189,7 +195,7 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         partes.push(`${listar(passo.sai.map((a) => NOME_AREA_FALA[a]))} deixa de ser prioridade ou pesa menos, como ela disse`);
       let texto = partes.length ? `Confirme a mudança numa frase, com as palavras dela: ${partes.join("; ")}.` : "";
       if (passo.duvida.length) {
-        texto += ` Pergunte se ${listar(passo.duvida.map((a) => NOME_AREA_FALA[a]))} ainda contam para a avaliação ou se ficam de lado. Uma pergunta só.`;
+        texto += ` Pergunte se ${listar(passo.duvida.map((a) => NOME_AREA_FALA[a]))} ainda contam para a avaliação ou se ficam de lado. Uma pergunta só. ${SEM_LOGISTICA}`;
       } else if (passo.proximo) {
         texto += ` Na mesma fala, emende a pergunta do próximo assunto: ${instrucaoDoPasso(passo.proximo, sessao)}`;
       }
@@ -203,16 +209,12 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
           "Depois pergunte se pode finalizar. Não faça outra pergunta."
         );
       }
+      // Só as duas primeiras frases vêm do modelo. Duração, tom, dicas e o fechamento são acrescentados pelo código.
       return (
-        "Faça o resumo falado, em no máximo 3 frases: formato e senioridade; o que vai ser avaliado, numa frase natural com as palavras dela " +
-        "(por exemplo: 'vou olhar como ele lida com picos de tráfego e falhas no meio do pagamento'; não copie esse exemplo); " +
-        "e tom e dicas. Duração: só se ela disse, ou o padrão do formato, dito de forma curta. " +
-        "Tom e dicas: se ela não falou, diga 'com uma dica leve se ele travar'; se pediu sem dicas, diga 'sem dicas'. " +
-        "Nunca diga 'você pode dar' nem peça dica à recrutadora. Se ela citou algo eliminatório, inclua. " +
-        "Termine com 'quer mudar algo ou posso finalizar?'. " +
-        "Modelo de resumo bom, só para a forma (não copie o conteúdo): 'Live coding de nível pleno, com foco em algoritmos e uso de IA: " +
-        "vou olhar como ele revisa o que a IA gera e explica a complexidade do que escreve. Clima tranquilo, com uma dica leve se ele travar. " +
-        "Quer mudar algo ou posso finalizar?'"
+        "Escreva só as duas primeiras frases do resumo, em voz alta: (1) formato e senioridade; (2) o que vai ser avaliado, " +
+        "numa frase natural com as palavras dela (por exemplo: 'vou olhar como ele lida com picos de tráfego e falhas no meio do pagamento'; " +
+        "não copie esse exemplo). Se ela citou algo eliminatório, inclua na segunda frase. " +
+        "Não fale de tom, de duração nem de dicas, e não faça pergunta: o sistema acrescenta essas partes."
       );
     case "responder_duvida":
       return [
@@ -266,6 +268,95 @@ const FALAS_DE_ENCERRAMENTO = [
 /** Fala de encerramento: fixa, escolhida ao acaso entre as variações. Não usa o modelo. */
 export function falaDeEncerramento(): string {
   return FALAS_DE_ENCERRAMENTO[Math.floor(Math.random() * FALAS_DE_ENCERRAMENTO.length)];
+}
+
+const NUMEROS_BAIXOS = [
+  "zero",
+  "um",
+  "dois",
+  "três",
+  "quatro",
+  "cinco",
+  "seis",
+  "sete",
+  "oito",
+  "nove",
+  "dez",
+  "onze",
+  "doze",
+  "treze",
+  "quatorze",
+  "quinze",
+  "dezesseis",
+  "dezessete",
+  "dezoito",
+  "dezenove",
+];
+const DEZENAS = ["", "", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa"];
+
+/** Número por extenso, em português (até 199; acima disso, algarismos). Função pura. */
+export function porExtenso(n: number): string {
+  if (!Number.isInteger(n) || n < 0 || n > 199) return String(n);
+  if (n < 20) return NUMEROS_BAIXOS[n];
+  if (n < 100) {
+    const unidade = n % 10;
+    return DEZENAS[Math.floor(n / 10)] + (unidade ? ` e ${NUMEROS_BAIXOS[unidade]}` : "");
+  }
+  if (n === 100) return "cem";
+  const resto = n - 100;
+  return `cento${resto ? ` e ${porExtenso(resto)}` : ""}`;
+}
+
+/**
+ * Frase do resumo sobre duração, tom e dicas, montada a partir do estado (sem o modelo).
+ * `variante` escolhe uma das três formas. Função pura.
+ */
+export function fraseLogistica(r: Rascunho, p: Preferencias, variante = 0): string {
+  const dur = porExtenso(duracaoDoRascunho(r, p));
+  const clima = p.tom === "desafiador" ? "tom mais desafiador" : "clima tranquilo";
+  const dica = p.dicas === "nenhuma" ? "sem dicas" : p.dicas === "livres" ? "com dicas se ele pedir" : "com uma dica leve se ele travar";
+  const formas = [
+    `São ${dur} minutos, num ${clima} e ${dica}.`,
+    `Vão ser ${dur} minutos, com ${clima} e ${dica}.`,
+    `Duração de ${dur} minutos, ${clima}, ${dica}.`,
+  ];
+  return formas[variante % formas.length];
+}
+
+const FECHAMENTOS = [
+  "Quer mudar algo ou posso finalizar?",
+  "Quer ajustar alguma coisa ou posso finalizar?",
+  "Quer mudar alguma coisa, ou posso finalizar?",
+];
+
+/** Pergunta final do resumo, em uma das variações. */
+export function fechamentoDoResumo(variante = Math.floor(Math.random() * FECHAMENTOS.length)): string {
+  return FECHAMENTOS[variante % FECHAMENTOS.length];
+}
+
+/**
+ * Confirmação da revisão quando a mudança é só de tom, dicas ou duração: sai pronta, sem o modelo.
+ * Compara com o último resumo falado. Se não houve essa mudança, devolve undefined e o modelo confirma.
+ */
+function confirmacaoDeterministica(sessao: Sessao): string | undefined {
+  const anterior = sessao.resumo;
+  if (!anterior) return undefined;
+  const atual = sessao.preferencias;
+  const partes: string[] = [];
+  if (atual.tom !== anterior.preferencias.tom) partes.push(atual.tom === "desafiador" ? "tom mais desafiador" : "tom amigável");
+  if (atual.dicas !== anterior.preferencias.dicas) {
+    partes.push(atual.dicas === "nenhuma" ? "sem dicas" : atual.dicas === "livres" ? "dicas quando ele pedir" : "dica leve se ele travar");
+  }
+  const duracao = duracaoDoRascunho(sessao.rascunho, sessao.preferencias);
+  if (duracao !== anterior.duracaoMin) partes.push(`${porExtenso(duracao)} minutos`);
+  if (partes.length === 0) return undefined;
+  const abertura = ["Anotado", "Fechado"][Math.floor(Math.random() * 2)];
+  return `${abertura}, ${partes.join(" e ")}. Posso finalizar?`;
+}
+
+/** Resposta sem modelo: mesma forma de `RespostaAgente`, com o provedor "fixa". */
+function respostaFixa(texto: string): RespostaAgente {
+  return { texto, provedor: "fixa", model: "-", ms: 0, fallback: false, tentativas: [], mensagens: [], respostaCrua: "" };
 }
 
 function formatarTranscricao(turnos: Turno[]): string {
@@ -336,18 +427,13 @@ export function contarFrases(texto: string): number {
 }
 
 export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaAgente> {
-  if (passo.tipo === "encerrar") {
-    return {
-      texto: falaDeEncerramento(),
-      provedor: "fixa",
-      model: "-",
-      ms: 0,
-      fallback: false,
-      tentativas: [],
-      mensagens: [],
-      respostaCrua: "",
-    };
+  if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
+  // Revisão de tom, dicas ou duração: a confirmação sai pronta. Mudança de foco ou de critério segue com o modelo.
+  if (passo.tipo === "resumo_final" && passo.revisao) {
+    const confirmacao = confirmacaoDeterministica(sessao);
+    if (confirmacao) return respostaFixa(confirmacao);
   }
+  const resumoCompleto = passo.tipo === "resumo_final" && !passo.revisao;
   const mensagens = montarMensagensConversa(sessao, passo);
   let resposta = await chat({
     alvos: alvosDaConversa(),
@@ -359,8 +445,9 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
   let ms = resposta.ms;
   let tentativas = resposta.tentativas;
   let respostaCrua = resposta.content;
-  // O resumo tem teto de 3 frases. Se passou, pede para reescrever uma vez.
-  if (texto && passo.tipo === "resumo_final" && contarFrases(texto) > 3) {
+  // O modelo escreve até 2 frases do resumo (ou 3 numa revisão). Se passou, pede para reescrever uma vez.
+  const teto = resumoCompleto ? 2 : 3;
+  if (texto && passo.tipo === "resumo_final" && contarFrases(texto) > teto) {
     const reescrita = await chat({
       alvos: alvosDaConversa(),
       messages: [
@@ -368,8 +455,7 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
         { role: "assistant", content: texto },
         {
           role: "user",
-          content:
-            "Reescreva o resumo em no máximo 3 frases curtas, mantendo o conteúdo. A dica é dada pela entrevista ('a entrevista dá uma dica leve'), nunca 'você'.",
+          content: `Reescreva em no máximo ${teto} frases curtas, mantendo o conteúdo. Não fale de tom, duração nem dicas, e não faça pergunta.`,
         },
       ],
       temperature: TEMPERATURA_CONVERSA,
@@ -380,6 +466,11 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     tentativas = [...tentativas, ...reescrita.tentativas];
     respostaCrua = `${respostaCrua}\n[reescrita]\n${reescrita.content}`;
     resposta = reescrita;
+  }
+  // No resumo, o código acrescenta duração, tom e dicas (do estado) e a pergunta final, em variações.
+  if (texto && resumoCompleto) {
+    const variante = Math.floor(Math.random() * 3);
+    texto = [texto, fraseLogistica(sessao.rascunho, sessao.preferencias, variante), fechamentoDoResumo()].join(" ");
   }
   if (!texto) throw new ErroChat(`Totti devolveu fala vazia (${resposta.provedor}/${resposta.model})`, resposta.tentativas);
 

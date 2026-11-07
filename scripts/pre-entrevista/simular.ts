@@ -199,6 +199,12 @@ function similaridade(a: string, b: string): number {
   return inter / (pa.size + pb.size - inter);
 }
 
+/** A parte da fala que é a pergunta: o trecho depois do último ponto. */
+function parteDaPergunta(texto: string): string {
+  const corte = texto.lastIndexOf(".");
+  return corte >= 0 ? texto.slice(corte + 1) : texto;
+}
+
 /** Perguntas (frases que terminam em ?) de cada fala da Totti. */
 function perguntasDe(texto: string): string[] {
   return texto.match(/[^.!?]*\?/g)?.map((s) => s.trim()) ?? [];
@@ -215,6 +221,14 @@ function checarRepeticao(sessao: Sessao): string[] {
           if (s > 0.6) avisos.push(`perguntas parecidas (${s.toFixed(2)}): "${pa}" x "${pb}"`);
         }
       }
+    }
+  }
+  // Cada fala contra as 3 anteriores, pela parte da pergunta (depois do último ponto).
+  const agentes = sessao.transcricao.map((t, i) => ({ i, t })).filter((x) => x.t.role === "agente");
+  for (let k = 1; k < agentes.length; k++) {
+    for (let j = Math.max(0, k - 3); j < k; j++) {
+      const s = similaridade(parteDaPergunta(agentes[k].t.text), parteDaPergunta(agentes[j].t.text));
+      if (s > 0.5) avisos.push(`fala ${agentes[k].i + 1} repete a pergunta da fala ${agentes[j].i + 1} (${s.toFixed(2)})`);
     }
   }
   for (const [id, n] of Object.entries(sessao.plano.perguntasPorTopico)) {
@@ -338,7 +352,7 @@ function imprimirTranscricao(persona: Persona, sessao: Sessao, registros: Regist
 
 function imprimirConfig(sessao: Sessao): void {
   console.log("\n--- config final (paraInterviewConfig) ---");
-  const resultado = paraInterviewConfig(sessao.rascunho);
+  const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias);
   if (!resultado.ok) {
     console.log(`  recusada:\n${resultado.erros.map((e) => `    - ${e}`).join("\n")}`);
     return;

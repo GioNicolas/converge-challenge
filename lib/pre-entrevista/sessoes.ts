@@ -19,6 +19,7 @@ import { ErroExtracao, extrair } from "./extrator";
 import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
 import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
+import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
 import { criarRascunho, type Rascunho, type Turno } from "./rascunho";
 
 export interface Sessao {
@@ -31,6 +32,10 @@ export interface Sessao {
   transcricao: Turno[];
   /** Sinais e contadores do planejador (ver `planejador.ts`). */
   plano: PlanoEstado;
+  /** Tom e dicas que a recrutadora pediu, atualizados a cada fala (ver `preferencias.ts`). */
+  preferencias: Preferencias;
+  /** Como estava o resumo da última vez que a Totti o falou. Serve para confirmar só o que mudou na revisão. */
+  resumo?: { preferencias: Preferencias; duracaoMin: number };
   logs: EventoLog[];
   status: { extraindo: boolean; versaoExtraida: number };
   configFinal?: InterviewConfig;
@@ -111,6 +116,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     rascunho,
     transcricao: [],
     plano: planoInicial(),
+    preferencias: { ...PREFERENCIAS_PADRAO },
     logs: [],
     status: { extraindo: false, versaoExtraida: 0 },
   };
@@ -198,7 +204,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
   const antes = sessao.rascunho;
   let etapa = "extracao";
   try {
-    const ext = await extrair(antes, transcricao);
+    const ext = await extrair(antes, transcricao, sessao.preferencias);
     const camposDoPatch = Object.keys(ext.patch).filter((k) => ext.patch[k as keyof typeof ext.patch] !== undefined);
     registrarEvento(sessao, {
       tipo: "extracao",

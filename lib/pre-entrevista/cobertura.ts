@@ -20,7 +20,7 @@ export const AREAS = FocusArea.options;
 /** Nome da área do jeito que a Totti fala. Nunca os rótulos internos. */
 export const NOME_AREA_FALA: Record<FocusArea, string> = {
   tecnico: "algoritmos e código",
-  pressao: "lidar com pressão",
+  pressao: "lidar com pressão e imprevistos",
   escala_produto: "escalabilidade",
   uso_ia: "uso de IA",
 };
@@ -182,6 +182,30 @@ function sinaisDo(): Pergunta[] {
         "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
       sinal_nao:
         "Não se ela deu um comportamento concreto ('ruim é colar o código sem entender'), escolheu entre opções concretas, ou respondeu outra coisa.",
+    },
+    {
+      id: "quer_tom_desafiador",
+      pergunta: "Na última fala, a recrutadora pediu um tom mais desafiador, exigente ou firme para a entrevista?",
+      sinal_sim: "Sim se ela pediu tom mais duro: 'mais desafiadora', 'quero um tom mais firme', 'bem exigente'.",
+      sinal_nao: "Não se ela não falou de tom, ou pediu tom mais leve.",
+    },
+    {
+      id: "quer_tom_amigavel",
+      pergunta: "Na última fala, a recrutadora pediu um tom mais amigável, leve ou tranquilo para a entrevista?",
+      sinal_sim: "Sim se ela pediu tom mais leve: 'mais amigável', 'tranquilo', 'sem clima pesado', 'mais de boa'.",
+      sinal_nao: "Não se ela não falou de tom, ou pediu tom mais duro.",
+    },
+    {
+      id: "quer_sem_dicas",
+      pergunta: "Na última fala, a recrutadora pediu que não haja dicas para o candidato, ou que se tire a dica?",
+      sinal_sim: "Sim se ela pediu sem dicas: 'tira a dica', 'sem dicas', 'que se vire', 'nada de dica'.",
+      sinal_nao: "Não se ela não falou de dicas, ou pediu dica leve ou dica se ele travar.",
+    },
+    {
+      id: "quer_dicas",
+      pergunta: "Na última fala, a recrutadora pediu que haja dicas para o candidato (leves, se ele travar, ou ajuda)?",
+      sinal_sim: "Sim se ela pediu dicas: 'dica leve se travar', 'pode dar uma dica', 'com dica'.",
+      sinal_nao: "Não se ela não falou de dicas, ou pediu para tirar.",
     },
     {
       id: "fez_pergunta",

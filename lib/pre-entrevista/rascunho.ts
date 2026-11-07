@@ -19,6 +19,14 @@ export const DURACAO_PADRAO: Record<InterviewMode, number> = {
   system_design: 45,
 };
 
+/**
+ * Duração que vale agora: a que ela disse na conversa (preferências, lida direto da fala), depois a do extrator,
+ * e por fim o padrão do formato.
+ */
+export function duracaoDoRascunho(r: { mode: InterviewMode; durationMin?: number }, preferencias?: { duracaoMin?: number }): number {
+  return preferencias?.duracaoMin ?? r.durationMin ?? DURACAO_PADRAO[r.mode];
+}
+
 /** Os candidatos escolhem a linguagem na IDE. */
 const LINGUAGENS = ["python", "cpp"];
 
@@ -106,7 +114,10 @@ function gerarId(): string {
 }
 
 /** Valida o rascunho e gera o `InterviewConfig`, ou devolve as mensagens de erro. */
-export function paraInterviewConfig(r: Rascunho): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
+export function paraInterviewConfig(
+  r: Rascunho,
+  preferencias?: { duracaoMin?: number },
+): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
   const erros: string[] = [];
 
   if (r.focus.length === 0) erros.push("focus: precisa de pelo menos uma área");
@@ -126,7 +137,7 @@ export function paraInterviewConfig(r: Rascunho): { ok: true; config: InterviewC
     criteria: r.criteria,
     problemId: r.problemId ?? PROBLEMA_PADRAO[r.mode],
     languages: LINGUAGENS,
-    durationMin: r.durationMin ?? DURACAO_PADRAO[r.mode],
+    durationMin: duracaoDoRascunho(r, preferencias),
   };
 
   const resultado = InterviewConfig.safeParse(candidato);

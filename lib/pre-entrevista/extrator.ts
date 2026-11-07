@@ -10,7 +10,9 @@
 import { z } from "zod";
 import { Criterion, FocusArea, InterviewMode } from "@/lib/contracts";
 import { CATALOGO, criteriosIniciais, type CriterioModelo } from "./catalogo";
+import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
+import { PREFERENCIAS_PADRAO, fraseTomEDicas, type Preferencias } from "./preferencias";
 import { alinharPesos, Rascunho, type Turno } from "./rascunho";
 
 const TEMPERATURA = 0.2;
@@ -107,18 +109,22 @@ Inclua apenas as chaves que mudaram.`;
 /** Acumula avisos de validação: vão para o console e para o retorno de `extrair` (e de lá para o log). */
 type Avisos = string[];
 
-/** Número ou tempo que a recrutadora pode ter dito: dígitos, dez a noventa, cem, "uma hora", "meia hora". */
-const TEMPO_NA_FALA =
-  /\d|\b(dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem)\b|\b(uma|duas|meia)\s+hora/i;
-
 /**
- * Só aceita `durationMin` se alguma fala da recrutadora tem número ou tempo. Sem isso, a duração veio da
- * Totti ou foi inventada pelo modelo, e descarta com aviso. Função pura quanto ao patch (devolve outro objeto).
+ * Só aceita `durationMin` se alguma fala da recrutadora, lida com `lerDuracao`, devolve exatamente esse valor
+ * (com `perguntouTempo` calculado pela fala anterior da Totti). Caso contrário, a duração veio do modelo sem
+ * base na fala, e descarta com aviso. "3 milhões de transações" não libera nada. Função pura quanto ao patch.
  */
 export function checarDuracao(patch: Patch, transcricao: Turno[], avisos: Avisos): Patch {
   if (patch.durationMin === undefined) return patch;
-  if (transcricao.some((t) => t.role === "recrutadora" && TEMPO_NA_FALA.test(t.text))) return patch;
-  avisar(avisos, `durationMin=${patch.durationMin} descartado: a recrutadora não falou de número ou tempo`);
+  let ultimaAgente: string | undefined;
+  for (const t of transcricao) {
+    if (t.role === "agente") {
+      ultimaAgente = t.text;
+      continue;
+    }
+    if (lerDuracao(t.text, { perguntouTempo: perguntouSobreTempo(ultimaAgente) }) === patch.durationMin) return patch;
+  }
+  avisar(avisos, `durationMin=${patch.durationMin} descartado: nenhuma fala da recrutadora diz essa duração`);
   return { ...patch, durationMin: undefined };
 }
 
@@ -302,7 +308,47 @@ export interface ResultadoExtracao {
   tentativas: Tentativa[];
 }
 
-export async function extrair(r: Rascunho, transcricao: Turno[]): Promise<ResultadoExtracao> {
+/** Frases de um texto, cortadas depois de cada pontuação final. */
+function frasesDe(texto: string): string[] {
+  return texto
+    .split(/(?<=[.!?])\s+/)
+    .map((f) => f.trim())
+    .filter(Boolean);
+}
+
+/** Palavras com mais de duas letras, sem acento, para comparar frases. */
+function palavrasDe(texto: string): Set<string> {
+  const normal = texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return new Set(normal.split(/[^a-z0-9]+/).filter((w) => w.length > 2));
+}
+
+/** Similaridade de palavras acima de 0,8 (Jaccard). */
+function quaseIgual(a: string, b: string): boolean {
+  const pa = palavrasDe(a);
+  const pb = palavrasDe(b);
+  if (pa.size === 0 || pb.size === 0) return false;
+  const inter = [...pa].filter((w) => pb.has(w)).length;
+  return inter / (pa.size + pb.size - inter) > 0.8;
+}
+
+/** Frase que fala de tom ou de dicas: essa parte vem do estado de preferências, não do texto livre. */
+const TOM_OU_DICA = /\b(tom|dica|dicas|clima)\b|amig|desafi/i;
+
+/**
+ * Limpa as notas da recrutadora. Tira as frases que são perguntas, as que repetem uma fala da Totti e as que
+ * falam de tom ou dicas. No lugar dessas últimas, acrescenta a frase gerada das preferências. Função pura.
+ */
+export function limparNotas(notas: string, falasDaTotti: string[], preferencias: Preferencias): string {
+  const ditas = falasDaTotti.flatMap(frasesDe);
+  const mantidas = frasesDe(notas).filter((f) => !f.endsWith("?") && !TOM_OU_DICA.test(f) && !ditas.some((d) => quaseIgual(f, d)));
+  return [...mantidas, fraseTomEDicas(preferencias)].join(" ");
+}
+
+export async function extrair(
+  r: Rascunho,
+  transcricao: Turno[],
+  preferencias: Preferencias = PREFERENCIAS_PADRAO,
+): Promise<ResultadoExtracao> {
   const avisos: Avisos = [];
   const tentativas: Tentativa[] = [];
   const tentativasJson: TentativaJson[] = [];
@@ -357,8 +403,10 @@ export async function extrair(r: Rascunho, transcricao: Turno[]): Promise<Result
 
     tentativasJson.push({ resposta: resposta.content });
     const aceito = checarDuracao(patch, transcricao, avisos);
+    const aplicado = aplicarPatch(r, aceito, avisos);
+    const falasDaTotti = transcricao.filter((t) => t.role === "agente").map((t) => t.text);
     return {
-      rascunho: aplicarPatch(r, aceito, avisos),
+      rascunho: { ...aplicado, recruiterNotes: limparNotas(aplicado.recruiterNotes, falasDaTotti, preferencias) },
       ms,
       provedor,
       model: modelo,

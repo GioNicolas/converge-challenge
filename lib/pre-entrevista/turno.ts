@@ -13,6 +13,9 @@ import { aberturaDoAgente, responder } from "./conversa";
 import { ErroChat } from "./llm";
 import { registrarEvento } from "./log";
 import { aplicarPasso, descreverPasso, proximoPasso, type EstadoPlanejamento, type Passo } from "./planejador";
+import { lerDuracao, perguntouSobreTempo } from "./duracao";
+import { atualizarPreferencias } from "./preferencias";
+import { duracaoDoRascunho } from "./rascunho";
 import { desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
 /** Estado que o planejador enxerga: o plano da sessão mais o foco e a cobertura do rascunho. */
@@ -30,6 +33,7 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
     });
     sessao.plano = { ...sessao.plano, sinais: cob.sinais };
+    sessao.preferencias = atualizarPreferencias(sessao.preferencias, cob.sinais);
     const emJogo = areasEmJogo(sessao.rascunho.focus, cob.sinais);
     sessao.rascunho = aplicarCobertura(sessao.rascunho, cob.cobertura, emJogo);
     registrarEvento(sessao, {
@@ -72,6 +76,9 @@ export function abrirConversa(sessao: Sessao): void {
  */
 export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ passo: Passo; fala: string }> {
   registrarFala(sessao, { role: "recrutadora", text: texto });
+  // Duração lida direto da fala, antes do planejador: o resumo não depende do extrator (lento) para saber o tempo.
+  const duracao = lerDuracao(texto, { perguntouTempo: perguntouSobreTempo(ultimaFalaDoAgente(sessao.transcricao)) });
+  if (duracao !== undefined) sessao.preferencias = { ...sessao.preferencias, duracaoMin: duracao };
   await atualizarCobertura(sessao);
 
   const estado = estadoDoPlanejamento(sessao);
@@ -89,6 +96,7 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
       mudancasPerguntadas: estado.mudancasPerguntadas,
       resumos: estado.resumos,
       ultimoPassoAnterior: estado.ultimoPasso,
+      preferencias: sessao.preferencias,
     },
   });
 
@@ -130,5 +138,9 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
     },
   );
   sessao.plano = aplicarPasso(sessao.plano, passo);
+  // Guarda como ficou o resumo, para a próxima revisão confirmar só o que mudou.
+  if (passo.tipo === "resumo_final") {
+    sessao.resumo = { preferencias: { ...sessao.preferencias }, duracaoMin: duracaoDoRascunho(sessao.rascunho, sessao.preferencias) };
+  }
   return { passo, fala: resposta.texto };
 }

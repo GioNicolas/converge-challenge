@@ -110,8 +110,9 @@ function aprofundarPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): Aprofundar
 
   const peso = (area: FocusArea) => e.focus.find((f) => f.area === area)?.weight ?? 0;
   const pedida = (area: FocusArea) => sinal(`quer_${area}`) >= LIMIAR;
+  // Área que já teve a dúvida "continua ou fica de lado?" fica com o peso atual e não é perguntada de novo.
   const candidatas = emJogo
-    .filter((a) => !coberto(criterio(a)) && perguntas(criterio(a)) === 0)
+    .filter((a) => !coberto(criterio(a)) && perguntas(criterio(a)) === 0 && perguntas(`duvida_${a}`) === 0)
     .sort((a, b) => Number(pedida(b)) - Number(pedida(a)) || peso(b) - peso(a));
   return candidatas[0] ? { tipo: "aprofundar", area: candidatas[0], motivo: "inicial" } : undefined;
 }
@@ -147,14 +148,6 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
     const duvida = focoAtual.filter((a) => indecisa(a) && perguntas(`duvida_${a}`) === 0);
     const proximo = duvida.length === 0 ? aprofundarPasso(e, emJogo) : undefined;
     return { tipo: "confirmar_mudanca_foco", entra, sai, duvida, ...(proximo ? { proximo } : {}) };
-  }
-
-  // 2b. Depois de uma mudança, quando a área que entrou já foi tratada, pergunta de novo as dúvidas que ficaram.
-  const entrou = emJogo.filter((a) => !focoAtual.includes(a));
-  const entradaTratada = entrou.every((a) => coberto(criterio(a)) || perguntas(criterio(a)) > 0);
-  const reperguntar = focoAtual.filter((a) => indecisa(a) && perguntas(`duvida_${a}`) === 1);
-  if (e.mudancasPerguntadas.length > 0 && entradaTratada && reperguntar.length > 0) {
-    return { tipo: "confirmar_mudanca_foco", entra: [], sai: [], duvida: reperguntar };
   }
 
   // 2c. Depois do resumo, ela pediu mudança: a Totti confirma só a mudança e pergunta se pode finalizar.
