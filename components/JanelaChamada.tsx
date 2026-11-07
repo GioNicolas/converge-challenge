@@ -304,7 +304,7 @@ export default function JanelaChamada({
 }
 
 /**
- * O convite do plin: uma bolha de fala no mesmo vidro escuro da janela, com a pontinha apontando para ela.
+ * O convite do plin: uma pílula no mesmo vidro escuro da janela.
  * Fica acima da janela (ou abaixo, se a janela estiver num canto de cima) e flutua de leve.
  */
 function BolhaDaPergunta({ visivel, emCima, onClicar }: { visivel: boolean; emCima: boolean; onClicar: () => void }) {
@@ -348,16 +348,6 @@ function BolhaDaPergunta({ visivel, emCima, onClicar }: { visivel: boolean; emCi
                 <span className="text-[13px] font-medium whitespace-nowrap">Tenho uma pergunta</span>
                 <span className="text-[11px] whitespace-nowrap text-texto-claro/55">Clique quando quiser ouvir</span>
               </span>
-              {/* A pontinha da bolha, apontando para a janela */}
-              <svg
-                aria-hidden
-                width="16"
-                height="8"
-                viewBox="0 0 16 8"
-                className={`absolute left-1/2 -translate-x-1/2 ${emCima ? "-top-2 rotate-180" : "-bottom-2"}`}
-              >
-                <path d="M0 0 H16 L9.2 7.2 Q8 8.4 6.8 7.2 Z" fill="var(--vidro-escuro)" />
-              </svg>
             </motion.span>
           </motion.button>
         )}
