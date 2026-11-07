@@ -2,7 +2,7 @@
 
 // O entrevistador na chamada: um anel fino de luz que ondula com a voz.
 //   ouvindo  → calmo e lento, branco, seguindo de leve o microfone do candidato
-//   falando  → mais vivo e rápido, azul
+//   falando  → mais vivo e rápido, azul (no fundo claro, tinta preta)
 //   pensando → branco, com um arco claro percorrendo o anel
 //   duvida   → azul, calmo, chamando atenção sem agitar
 // Ritmo, amplitude e cor mudam aos poucos entre um estado e outro (nada "pula").
@@ -31,14 +31,16 @@ const JEITO: Jeito = {
   duvida: { velocidade: 0.55, amplitude: 0.8, cor: AZUL, brilho: BRILHO_AZUL },
 };
 
-/** Fundo claro: o anel vira grafite (traço de caneta) e, falando, o azul da marca; brilho bem leve. */
-const GRAFITE: Cor = [27, 29, 31];
-const AZUL_CLARO: Cor = [0, 130, 243];
+/** Fundo claro (papel): o anel vira grafite, como traço de caneta; falando, a tinta fica mais escura e
+ *  o brilho é uma sombra quente bem leve. Sem azul: no papel o estado aparece no ritmo, não na cor. */
+const GRAFITE: Cor = [40, 38, 34];
+const TINTA: Cor = [17, 17, 17];
+const SOMBRA_PAPEL: Cor = [190, 182, 168];
 const JEITO_CLARO: Jeito = {
-  ouvindo: { ...JEITO.ouvindo, cor: GRAFITE, brilho: [180, 180, 175] },
-  falando: { ...JEITO.falando, cor: AZUL_CLARO, brilho: [120, 180, 240] },
-  pensando: { ...JEITO.pensando, cor: GRAFITE, brilho: [180, 180, 175] },
-  duvida: { ...JEITO.duvida, cor: AZUL_CLARO, brilho: [120, 180, 240] },
+  ouvindo: { ...JEITO.ouvindo, cor: GRAFITE, brilho: SOMBRA_PAPEL },
+  falando: { ...JEITO.falando, cor: TINTA, brilho: SOMBRA_PAPEL },
+  pensando: { ...JEITO.pensando, cor: GRAFITE, brilho: SOMBRA_PAPEL },
+  duvida: { ...JEITO.duvida, cor: TINTA, brilho: SOMBRA_PAPEL },
 };
 
 const mistura = (a: number, b: number, k: number) => a + (b - a) * k;

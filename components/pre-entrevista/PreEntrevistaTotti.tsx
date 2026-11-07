@@ -1,11 +1,13 @@
 "use client";
 
-// Pré-entrevista com a Totti, do lado do recrutador:
-//   vaga → a Totti lê → conversa + plano ao vivo → revisão → entrevista pronta (link para o candidato).
+// Pré-entrevista com o Totti, do lado do recrutador:
+//   vaga → o Totti lê → conversa + plano ao vivo → revisão → entrevista pronta (link para o candidato).
 // Os dados vêm de lib/pre-entrevista/tela/cliente.ts (rotas reais ou demonstração).
-import { useCallback, useEffect, useState } from "react";
+// No workspace (/vagas/nova) tudo acontece aqui, sem trocar de página; um rascunho salvo entra por
+// `vagaInicial`/`sessaoInicial` e o Totti começa lendo (ou volta direto para a conversa).
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronLeft } from "lucide-react";
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
@@ -22,9 +24,34 @@ import Passos from "./Passos";
 
 type Etapa = "vaga" | "lendo" | "conversa" | "pronta";
 
-export default function PreEntrevistaTotti() {
-  const [etapa, setEtapa] = useState<Etapa>("vaga");
-  const [vaga, setVaga] = useState<Vaga | null>(null);
+type Props = {
+  /** Vaga já cadastrada no workspace: começa direto com o Totti lendo. */
+  vagaInicial?: Vaga;
+  /** A pessoa enviou o formulário: a vaga vira rascunho antes de o Totti começar a ler. */
+  onComecar?: (vaga: Vaga) => void;
+  /** Sessão de antes, para retomar a conversa de onde parou. */
+  sessaoInicial?: string;
+  onSessao?: (id: string) => void;
+  onProgresso?: (feitos: number, total: number) => void;
+  onPronta?: (config: InterviewConfig) => void;
+  /** Volta para a lista de vagas. */
+  onSair?: () => void;
+  /** Ação principal da tela final (ex.: abrir a vaga publicada). */
+  final?: { rotulo: string; acao: () => void };
+};
+
+export default function PreEntrevistaTotti({
+  vagaInicial,
+  onComecar,
+  sessaoInicial,
+  onSessao,
+  onProgresso,
+  onPronta,
+  onSair,
+  final,
+}: Props = {}) {
+  const [etapa, setEtapa] = useState<Etapa>(vagaInicial ? "lendo" : "vaga");
+  const [vaga, setVaga] = useState<Vaga | null>(vagaInicial ?? null);
   const [estado, setEstado] = useState<EstadoSessao | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [pensando, setPensando] = useState(false);
@@ -39,7 +66,9 @@ export default function PreEntrevistaTotti() {
     setEstado(null);
     setEtapa("lendo");
     try {
-      setEstado(await criarSessao(v));
+      const novo = await criarSessao(v);
+      setEstado(novo);
+      onSessao?.(novo.id);
     } catch (e) {
       setErro(`Não consegui ler a vaga: ${e instanceof Error ? e.message : String(e)}`);
       setEtapa("vaga");
@@ -48,17 +77,32 @@ export default function PreEntrevistaTotti() {
 
   const abrirConversa = useCallback(() => setEtapa("conversa"), []);
 
+  // Workspace: retoma a sessão salva (se ainda existir) ou começa a leitura da vaga. Roda uma vez só.
+  const iniciou = useRef(false);
+  useEffect(() => {
+    if (!vagaInicial || iniciou.current) return;
+    iniciou.current = true;
+    void (async () => {
+      const anterior = sessaoInicial ? await buscarSessao(sessaoInicial).catch(() => null) : null;
+      if (anterior) {
+        setEstado(anterior);
+        setEtapa("conversa");
+      } else void comecar(vagaInicial);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function responder(texto: string) {
     if (!estado) return;
     setErro(null);
     setPensando(true);
-    // A fala aparece na hora; a resposta da Totti chega depois.
+    // A fala aparece na hora; a resposta do Totti chega depois.
     setEstado({ ...estado, transcricao: [...estado.transcricao, { role: "recrutadora", text: texto }] });
     try {
       setEstado(await enviarFala(estado.id, texto));
     } catch (e) {
       setEstado(estado);
-      setErro(`A Totti não respondeu: ${e instanceof Error ? e.message : String(e)}`);
+      setErro(`O Totti não respondeu: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setPensando(false);
     }
@@ -87,6 +131,7 @@ export default function PreEntrevistaTotti() {
       const r = await finalizar(estado.id, rascunho);
       if ("config" in r) {
         setConfig(r.config);
+        onPronta?.(r.config);
         setRevisando(false);
         setEtapa("pronta");
       } else setErrosRevisao(r.erros);
@@ -106,15 +151,35 @@ export default function PreEntrevistaTotti() {
 
   const combinados = estado?.topicos.filter((t) => t.coberto).length ?? 0;
   const total = estado?.topicos.length ?? 0;
+  useEffect(() => {
+    if (total > 0) onProgresso?.(combinados, total);
+  }, [combinados, total, onProgresso]);
   const tottiTerminou = estado?.planejamento.passo?.tipo === "encerrar";
 
   return (
     <main className="relative flex min-h-dvh flex-col">
+      {/* Voltar, fora da conversa (lá o cabeçalho já tem a seta de voltar) */}
+      {onSair && etapa !== "conversa" && (
+        <button
+          onClick={onSair}
+          aria-label="Voltar para as vagas"
+          className="group absolute top-5 left-5 z-10 flex items-center gap-1.5 rounded-controle px-2.5 py-1.5 text-[13.5px] text-texto-suave transition-colors hover:text-texto"
+        >
+          <ChevronLeft size={15} className="transition-transform group-hover:-translate-x-0.5" /> Vagas
+        </button>
+      )}
 
       <AnimatePresence mode="wait">
         {etapa === "vaga" && (
           <motion.div key="vaga" exit={{ opacity: 0, y: -8 }} className="relative flex flex-1 items-center px-4 py-12">
-            <EntradaVaga onEnviar={comecar} erro={erro} />
+            <EntradaVaga
+              onEnviar={(v) => {
+                onComecar?.(v);
+                void comecar(v);
+              }}
+              erro={erro}
+              inicial={vaga ?? undefined}
+            />
           </motion.div>
         )}
 
@@ -136,8 +201,8 @@ export default function PreEntrevistaTotti() {
             <header className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-1 rounded-padrao bg-superficie py-1.5 pr-4 pl-1.5">
                 <button
-                  onClick={novaEntrevista}
-                  aria-label="Começar de novo"
+                  onClick={onSair ?? novaEntrevista}
+                  aria-label={onSair ? "Voltar para as vagas" : "Começar de novo"}
                   className="flex size-8 items-center justify-center rounded-controle text-texto-suave transition-colors hover:bg-fundo hover:text-texto"
                 >
                   <ArrowLeft size={16} />
@@ -147,11 +212,13 @@ export default function PreEntrevistaTotti() {
                   {combinados}/{total} combinados
                 </span>
               </div>
-              <Passos atual={2} />
+              <Passos atual={3} />
               <button
                 onClick={() => setRevisando(true)}
                 className={`rounded-controle px-4 py-2.5 text-[14px] font-medium transition-colors duration-200 ${
-                  tottiTerminou ? "bg-[var(--destaque)] text-texto" : "bg-texto text-superficie hover:opacity-90"
+                  tottiTerminou
+                    ? "bg-texto text-texto-claro shadow-[0_0_0_4px_rgb(17_17_17/0.08)]"
+                    : "border border-texto/80 text-texto hover:bg-texto hover:text-texto-claro"
                 }`}
               >
                 Revisar e confirmar
@@ -167,7 +234,11 @@ export default function PreEntrevistaTotti() {
 
         {etapa === "pronta" && config && (
           <motion.div key="pronta" className="relative flex flex-1 items-center px-4 py-12">
-            <EntrevistaPronta config={config} onNova={novaEntrevista} />
+            <EntrevistaPronta
+              config={config}
+              onNova={final?.acao ?? onSair ?? novaEntrevista}
+              rotuloNova={final?.rotulo ?? (onSair ? "Voltar para as vagas" : undefined)}
+            />
           </motion.div>
         )}
       </AnimatePresence>

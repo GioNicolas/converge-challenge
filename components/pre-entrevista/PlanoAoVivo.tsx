@@ -1,22 +1,22 @@
 "use client";
 
-// O plano da entrevista se montando enquanto o recrutador conversa com a Totti.
+// O plano da entrevista se montando enquanto o recrutador conversa com o Totti.
 // No topo, o mapa da entrevista: o centro e os assuntos em volta, que acendem quando são combinados.
-// Embaixo, seções numeradas. O que a Totti sugeriu leva o rótulo "Sugerido"; o que foi confirmado,
-// "Confirmado" com marca-texto. Toda mudança pisca em amarelo claro, para ficar claro o que ela entendeu.
+// Embaixo, seções numeradas. O que o Totti sugeriu leva o rótulo "Sugerido"; o que foi confirmado,
+// "Confirmado" em azul. Toda mudança acende em azul, para ficar claro o que ele entendeu.
 import { AnimatePresence, motion } from "motion/react";
 import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
 import { curvaSuave } from "@/lib/design/motion";
 import { DESCRICAO_FORMATO, NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
 import Check from "./Check";
 
-/** Pisca em amarelo claro sempre que `chave` muda. */
+/** Acende em azul sempre que `chave` muda. */
 function Marcador({ chave, children, className }: { chave: string; children: React.ReactNode; className?: string }) {
   return (
     <motion.div
       key={chave}
-      initial={{ backgroundColor: "rgba(255,219,77,0.45)" }}
-      animate={{ backgroundColor: "rgba(255,219,77,0)" }}
+      initial={{ backgroundColor: "rgba(17,17,17,0.07)" }}
+      animate={{ backgroundColor: "rgba(17,17,17,0)" }}
       transition={{ duration: 1.8, ease: "easeOut" }}
       className={className}
     >
@@ -73,7 +73,7 @@ function Mapa({ topicos }: { topicos: EstadoSessao["topicos"] }) {
           />
         ))}
       </svg>
-      <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-controle border border-texto/80 bg-[var(--destaque)] px-2.5 py-1 text-[13px] text-texto">
+      <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-controle border border-marca bg-marca px-2.5 py-1 text-[13px] text-texto-claro">
         Entrevista
       </span>
       {pontos.map((p) => (

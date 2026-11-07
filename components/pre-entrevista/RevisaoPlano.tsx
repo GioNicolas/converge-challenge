@@ -7,7 +7,6 @@ import { Minus, Plus, X } from "lucide-react";
 import { FocusArea, type Criterion, type InterviewMode } from "@/lib/contracts";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
-import Passos from "./Passos";
 
 type Props = {
   rascunho: Rascunho;
@@ -101,7 +100,7 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       onClick={onFechar}
-      className="fixed inset-0 z-40 flex justify-end bg-texto/20"
+      className="fixed inset-0 z-40 flex justify-end bg-[rgb(17_17_17/0.28)]"
     >
       <motion.aside
         role="dialog"
@@ -116,8 +115,8 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
       >
         <header className="flex items-start justify-between gap-4 px-6 pt-5 pb-4">
           <div className="flex flex-col gap-3">
-            <Passos atual={3} />
-            <h2 className="text-[28px] leading-tight font-normal tracking-[-0.02em] text-texto">Revise e confirme</h2>
+            <span className="rotulo text-texto-suave">03 Plano · revisão final</span>
+            <h2 className="titulo-display text-[30px] text-texto">Revise e confirme</h2>
           </div>
           <button
             onClick={onFechar}
@@ -270,9 +269,9 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
             <button
               onClick={confirmar}
               disabled={enviando || r.criteria.length === 0 || soma === 0}
-              className="flex-1 rounded-controle bg-[var(--destaque)] px-4 py-3 text-[15px] font-medium text-texto transition-[filter,transform] duration-150 hover:brightness-95 active:scale-[0.98] disabled:opacity-40"
+              className="flex-1 rounded-controle bg-marca px-4 py-3 text-[15px] font-medium text-texto-claro transition-[filter,transform] duration-150 hover:opacity-85 active:scale-[0.98] disabled:opacity-40"
             >
-              {enviando ? "Gerando…" : "Confirmar e gerar link"}
+              {enviando ? "Publicando…" : "Confirmar e publicar a vaga"}
             </button>
           </div>
         </footer>

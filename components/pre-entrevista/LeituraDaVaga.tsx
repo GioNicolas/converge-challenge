@@ -1,6 +1,6 @@
 "use client";
 
-// Etapa intermediária: a Totti lendo a vaga. Os passos se marcam um a um e, quando a classificação
+// Etapa intermediária: o Totti lendo a vaga. Os passos se marcam um a um e, quando a classificação
 // chega, o resultado aparece com marca-texto antes de abrir a conversa.
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";

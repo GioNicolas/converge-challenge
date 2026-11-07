@@ -1,10 +1,10 @@
 "use client";
 
-// Etapa 1: o recrutador cola a vaga ou anexa o documento (PDF, TXT, Markdown).
-// O primeiro documento preenche a descrição (dá para conferir e editar); os seguintes viram contexto.
-import { useRef, useState, type DragEvent, type FormEvent } from "react";
+// Nova vaga: uma lista única, de cima para baixo — 01 Cargo, 02 Descrição (texto ou documento), 03 Contexto.
+// O documento (PDF, TXT, Markdown) é lido no navegador: o primeiro preenche a descrição, os outros viram contexto.
+import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, Upload } from "lucide-react";
+import { ArrowRight, Lock, Paperclip } from "lucide-react";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
 import { ACEITOS, lerDocumento, type Documento } from "@/lib/pre-entrevista/tela/documentos";
@@ -13,15 +13,39 @@ import Passos from "./Passos";
 import ListaDocumentos from "./ListaDocumentos";
 
 type Anexo = Documento & { uso: "descrição" | "contexto" };
-type Props = { onEnviar: (vaga: Vaga) => void; erro: string | null };
+type Props = {
+  onEnviar: (vaga: Vaga) => void;
+  erro: string | null;
+  /** Valores já conhecidos (ex.: a vaga do workspace, se a leitura falhou). */
+  inicial?: Vaga;
+  /** Link de volta, mostrado acima do título. */
+  voltar?: ReactNode;
+};
 
-const campo =
-  "w-full rounded-controle border border-borda bg-superficie-2 px-3 py-2.5 text-[15px] text-texto placeholder:text-texto-suave/60 outline-none transition-colors duration-150 focus:border-texto/40 focus:bg-superficie";
+const moldura =
+  "rounded-controle border border-borda bg-fundo transition-[border-color,box-shadow] duration-150 hover:border-texto/25 focus-within:border-texto focus-within:shadow-[0_0_0_3px_rgb(17_17_17/0.06)]";
+const campo = "w-full bg-transparent px-3 py-2.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/50";
 
-export default function EntradaVaga({ onEnviar, erro }: Props) {
-  const [cargo, setCargo] = useState("");
-  const [descricao, setDescricao] = useState("");
-  const [contexto, setContexto] = useState("");
+function Linha({ n, titulo, dica, opcional, children }: { n: string; titulo: string; dica: string; opcional?: boolean; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 border-t border-borda px-6 py-5 first:border-t-0">
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-baseline gap-2.5">
+          <span className="rotulo text-texto-suave/70">{n}</span>
+          <span className="text-[14.5px] font-medium text-texto">{titulo}</span>
+          {opcional && <span className="rotulo text-texto-suave/70">Opcional</span>}
+        </div>
+        <p className="pl-[30px] text-[13px] text-texto-suave">{dica}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) {
+  const [cargo, setCargo] = useState(inicial?.roleTitle ?? "");
+  const [descricao, setDescricao] = useState(inicial?.jobDescription ?? "");
+  const [contexto, setContexto] = useState(inicial?.context ?? "");
   const [anexos, setAnexos] = useState<Anexo[]>([]);
   const [lendo, setLendo] = useState(0);
   const [arrastando, setArrastando] = useState(false);
@@ -83,6 +107,7 @@ export default function EntradaVaga({ onEnviar, erro }: Props) {
   }
 
   const pronto = cargo.trim() && descricao.trim() && lendo === 0;
+  const falta = !cargo.trim() ? "Falta o cargo" : !descricao.trim() ? "Falta a descrição" : lendo > 0 ? "Lendo o documento…" : null;
 
   return (
     <motion.form
@@ -90,118 +115,127 @@ export default function EntradaVaga({ onEnviar, erro }: Props) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: curvaSuave }}
-      className="mx-auto flex w-full max-w-5xl flex-col gap-8"
+      className="mx-auto flex w-full max-w-[720px] flex-col gap-9"
     >
       <div className="flex flex-col gap-5">
+        {voltar}
         <Passos atual={1} />
-        <div className="flex flex-col gap-3">
-          <h1 className="text-[44px] leading-[1.05] font-normal tracking-[-0.025em] text-texto">Nova entrevista</h1>
-          <p className="max-w-xl text-[17px] leading-relaxed text-texto-suave">
-            Cole a vaga ou anexe o documento. A Totti lê, sugere o formato e monta a entrevista com você.
+        <div className="flex flex-col gap-2">
+          <h1 className="titulo-display text-[44px] text-texto">Nova vaga</h1>
+          <p className="max-w-xl text-[15px] leading-relaxed text-texto-suave">
+            Cole a descrição e o Totti assume: lê a vaga, sugere o formato e monta o plano da entrevista com você, aqui mesmo.
+            A vaga só aparece na sua lista depois que o plano estiver confirmado.
           </p>
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-[1.45fr_1fr]">
-        <section className="flex flex-col gap-4 rounded-padrao bg-superficie p-6">
-          <span className="rotulo text-texto-suave">Vaga</span>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[13.5px] text-texto-suave">Cargo</span>
+      <div className="rounded-padrao border border-borda bg-superficie">
+        <Linha n="01" titulo="Cargo" dica="Como a vaga aparece para o candidato.">
+          <div className={moldura}>
             <input
               value={cargo}
               onChange={(e) => setCargo(e.target.value)}
-              placeholder="Engenheira de Software Sênior — Backend"
+              placeholder="Ex.: Engenheira de Software Sênior — Backend"
               className={campo}
               required
             />
-          </label>
-          <label className="flex flex-1 flex-col gap-1.5">
-            <span className="text-[13.5px] text-texto-suave">Descrição</span>
+          </div>
+        </Linha>
+
+        <Linha n="02" titulo="Descrição" dica="Cole o texto da vaga ou anexe o documento. O arquivo é lido aqui e não sai da sua máquina.">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setArrastando(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setArrastando(false);
+            }}
+            onDrop={soltar}
+            className={`relative ${moldura} ${arrastando ? "border-marca bg-marca-suave" : ""}`}
+          >
             <textarea
               value={descricao}
               onChange={(e) => setDescricao(e.target.value)}
-              placeholder="Responsabilidades, requisitos, stack…"
-              rows={13}
-              className={`${campo} flex-1 resize-y leading-relaxed`}
+              placeholder="Responsabilidades, requisitos, ferramentas do dia a dia…"
+              rows={9}
+              className={`${campo} block resize-y leading-relaxed`}
               required
             />
-          </label>
-        </section>
-
-        <div className="flex flex-col gap-3">
-          <section className="flex flex-col gap-3 rounded-padrao bg-superficie p-6">
-            <span className="rotulo text-texto-suave">Documentos</span>
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setArrastando(true);
-              }}
-              onDragLeave={() => setArrastando(false)}
-              onDrop={soltar}
-              onClick={() => seletor.current?.click()}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && seletor.current?.click()}
-              className={`flex cursor-pointer flex-col items-center gap-2 rounded-controle border border-dashed px-4 py-7 text-center transition-colors duration-150 ${
-                arrastando ? "border-texto bg-marca-suave" : "border-texto/20 hover:border-texto/40 hover:bg-superficie-2"
-              }`}
-            >
-              <Upload size={18} strokeWidth={1.5} className="text-texto-suave" />
-              <span className="text-[14px] text-texto">
-                {lendo > 0 ? "Lendo o documento…" : "Arraste aqui ou escolha um arquivo"}
+            <div className="flex items-center justify-between gap-3 border-t border-borda px-1.5 py-1.5">
+              <button
+                type="button"
+                onClick={() => seletor.current?.click()}
+                className="flex items-center gap-1.5 rounded-[6px] px-2 py-1 text-[13px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
+              >
+                <Paperclip size={14} strokeWidth={1.75} />
+                {lendo > 0 ? "Lendo o documento…" : "Anexar documento"}
+                <span className="rotulo hidden text-texto-suave/60 sm:inline">PDF · TXT · MD · até 10 MB</span>
+              </button>
+              <span className="numero pr-2 text-[12px] text-texto-suave/70">
+                {descricao.length > 0 ? `${descricao.length.toLocaleString("pt-BR")} caracteres` : "ou arraste o arquivo para cá"}
               </span>
-              <span className="rotulo text-texto-suave">PDF · TXT · Markdown · até 10 MB</span>
-              <input
-                ref={seletor}
-                type="file"
-                accept={ACEITOS}
-                multiple
-                hidden
-                onChange={(e) => {
-                  if (e.target.files) void adicionar(e.target.files);
-                  e.target.value = "";
-                }}
-              />
             </div>
-            {anexos.length > 0 && <ListaDocumentos documentos={anexos} onRemover={remover} />}
-            {erroArquivo && <p className="text-[13.5px] text-perigo">{erroArquivo}</p>}
-            <p className="text-[13px] leading-relaxed text-texto-suave">
-              O arquivo é lido aqui no navegador. O primeiro preenche a descrição; os outros entram como contexto.
-            </p>
-          </section>
+            {arrastando && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-controle border border-dashed border-marca bg-fundo/85 text-[14px] text-texto">
+                Solte para anexar
+              </div>
+            )}
+            <input
+              ref={seletor}
+              type="file"
+              accept={ACEITOS}
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) void adicionar(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          {anexos.length > 0 && <ListaDocumentos documentos={anexos} onRemover={remover} />}
+          {erroArquivo && <p className="text-[13.5px] text-perigo">{erroArquivo}</p>}
+        </Linha>
 
-          <section className="flex flex-col gap-3 rounded-padrao bg-superficie p-6">
-            <span className="rotulo text-texto-suave">Contexto · opcional</span>
+        <Linha n="03" titulo="Contexto" opcional dica="O que não está na descrição: empresa, time, momento da contratação.">
+          <div className={moldura}>
             <textarea
               value={contexto}
               onChange={(e) => setContexto(e.target.value)}
-              placeholder="Empresa, time, momento da contratação…"
+              placeholder="Ex.: time de 5 pessoas, primeira contratação sênior, precisa de autonomia"
               rows={3}
-              className={`${campo} resize-y`}
+              className={`${campo} block resize-y leading-relaxed`}
             />
-          </section>
+          </div>
+        </Linha>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-padrao border-t border-borda bg-fundo/40 px-6 py-4">
+          <span className="flex items-center gap-1.5 text-[12.5px] text-texto-suave">
+            <Lock size={12} strokeWidth={1.75} />
+            Nada é publicado antes da sua revisão.
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={usarExemplo}
+              className="rounded-controle px-3.5 py-2 text-[14px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
+            >
+              Usar um exemplo
+            </button>
+            <button
+              type="submit"
+              disabled={!pronto}
+              title={falta ?? undefined}
+              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-texto-claro transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Começar com o Totti
+              <ArrowRight size={15} strokeWidth={1.75} />
+            </button>
+          </div>
         </div>
       </div>
 
       {erro && <p className="text-[14px] text-perigo">{erro}</p>}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="submit"
-          disabled={!pronto}
-          className="flex items-center gap-2 rounded-controle bg-[var(--destaque)] px-5 py-3 text-[15px] font-medium text-texto transition-[filter,transform] duration-150 hover:brightness-95 active:scale-[0.98] disabled:opacity-40"
-        >
-          Começar com a Totti
-          <ArrowRight size={16} strokeWidth={1.75} />
-        </button>
-        <button
-          type="button"
-          onClick={usarExemplo}
-          className="rounded-controle bg-superficie px-5 py-3 text-[15px] text-texto transition-colors duration-150 hover:bg-superficie-2"
-        >
-          Usar um exemplo
-        </button>
-      </div>
     </motion.form>
   );
 }

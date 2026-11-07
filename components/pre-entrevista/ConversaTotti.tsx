@@ -1,8 +1,8 @@
 "use client";
 
-// A conversa com a Totti. Sem balões coloridos: as falas dela em texto corrido, as do recrutador
+// A conversa com o Totti. Sem balões coloridos: as falas dele em texto corrido, as do recrutador
 // num bloco discreto à direita. Dá para anexar documentos (PDF, TXT, Markdown) pelo clipe:
-// o texto vai para a Totti; na tela aparece só o cartão do documento.
+// o texto vai para o Totti; na tela aparece só o cartão do documento.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUp, FileText, Paperclip } from "lucide-react";
@@ -186,8 +186,8 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
             onChange={(e) => setTexto(e.target.value)}
             onKeyDown={aoTeclar}
             rows={1}
-            placeholder={lendo ? "Lendo o documento…" : "Escreva para a Totti…"}
-            aria-label="Mensagem para a Totti"
+            placeholder={lendo ? "Lendo o documento…" : "Escreva para o Totti…"}
+            aria-label="Mensagem para o Totti"
             className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
           <button

@@ -1,16 +1,18 @@
 "use client";
 
-// Etapa final: a entrevista está criada. Resumo e o link para mandar ao candidato.
+// Etapa final: a entrevista está criada. O que importa agora é o link, então ele vem logo abaixo
+// do título; o resumo do que foi combinado fica embaixo, para conferência.
 import { useState } from "react";
 import { motion } from "motion/react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight } from "lucide-react";
 import type { InterviewConfig } from "@/lib/contracts";
 import { curvaSuave } from "@/lib/design/motion";
 import { NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
+import Passos from "./Passos";
 
-type Props = { config: InterviewConfig; onNova: () => void };
+type Props = { config: InterviewConfig; onNova: () => void; rotuloNova?: string };
 
-export default function EntrevistaPronta({ config, onNova }: Props) {
+export default function EntrevistaPronta({ config, onNova, rotuloNova = "Nova entrevista" }: Props) {
   const [copiado, setCopiado] = useState(false);
   const rota = config.mode === "system_design" ? "/entrevista/system-design" : "/entrevista";
   const link = `${typeof window === "undefined" ? "" : window.location.origin}${rota}?config=${encodeURIComponent(config.id)}`;
@@ -31,62 +33,65 @@ export default function EntrevistaPronta({ config, onNova }: Props) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: curvaSuave }}
-      className="mx-auto flex w-full max-w-2xl flex-col gap-8"
+      className="mx-auto flex w-full max-w-2xl flex-col gap-10"
     >
-      <div className="flex flex-col gap-3">
-        <span className="rotulo rotulo-destaque self-start">Entrevista criada</span>
-        <h1 className="text-[44px] leading-[1.05] font-normal tracking-[-0.025em] text-texto">Pronto. É só mandar o link.</h1>
-        <p className="text-[17px] leading-relaxed text-texto-suave">O entrevistador já sabe o que avaliar e como conduzir.</p>
+      <div className="flex flex-col gap-5">
+        <Passos atual={4} />
+        <div className="flex flex-col gap-3">
+          <h1 className="titulo-display text-[48px] text-texto">Pronto. É só mandar o link.</h1>
+          <p className="text-[16px] leading-relaxed text-texto-suave">
+            {config.roleTitle} já está na sua lista de vagas. O entrevistador sabe o que avaliar e como conduzir.
+          </p>
+        </div>
       </div>
 
-      <section className="flex flex-col rounded-padrao bg-superficie">
-        <div className="flex flex-col gap-1 px-6 py-5">
-          <span className="rotulo text-texto-suave">Vaga</span>
-          <span className="text-[22px] leading-tight tracking-[-0.015em] text-texto">{config.roleTitle}</span>
+      {/* 1º: o link */}
+      <div className="cartao flex flex-col gap-3 p-5">
+        <span className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Link para os candidatos</span>
+        <div className="flex items-center gap-3 rounded-2xl bg-superficie-2/60 py-1.5 pr-1.5 pl-4">
+          <span className="flex-1 truncate font-mono text-[12.5px] text-texto">{link}</span>
+          <button
+            onClick={copiar}
+            className="shrink-0 rounded-full bg-texto px-4 py-2 text-[13.5px] font-medium text-texto-claro transition-[opacity,transform] duration-150 hover:opacity-85 active:scale-[0.98]"
+          >
+            {copiado ? "Copiado" : "Copiar link"}
+          </button>
         </div>
-        <dl className="grid grid-cols-3 border-t border-borda">
+        <a href={rota} className="flex items-center gap-1 self-start text-[13px] text-texto-suave transition-colors hover:text-texto">
+          Ver como o candidato vê <ArrowUpRight size={13} />
+        </a>
+      </div>
+
+      {/* 2º: o que foi combinado */}
+      <section className="flex flex-col gap-3">
+        <span className="rotulo text-texto-suave">O que ficou combinado</span>
+        <dl className="grid grid-cols-3 gap-3">
           {[
             ["Formato", NOME_FORMATO[config.mode]],
             ["Senioridade", NOME_SENIORIDADE[config.seniority]],
             ["Duração", `${config.durationMin} min`],
-          ].map(([rotulo, valor], i) => (
-            <div key={rotulo} className={`flex flex-col gap-1 px-6 py-4 ${i > 0 ? "border-l border-borda" : ""}`}>
+          ].map(([rotulo, valor]) => (
+            <div key={rotulo} className="cartao flex flex-col gap-1.5 p-4">
               <dt className="rotulo text-texto-suave">{rotulo}</dt>
-              <dd className="text-[15px] text-texto">{valor}</dd>
+              <dd className="text-[16px] font-medium tracking-[-0.015em] text-texto">{valor}</dd>
             </div>
           ))}
         </dl>
-        <div className="flex flex-col gap-2 border-t border-borda px-6 py-4">
+        <div className="cartao flex flex-col gap-1.5 p-4">
           <span className="rotulo text-texto-suave">Foco · {config.criteria.length} critérios</span>
           <p className="text-[15px] text-texto">
             {foco.map((f) => `${NOME_AREA[f.area]} ${Math.round(f.weight * 100)}%`).join("  ·  ")}
           </p>
         </div>
-        <div className="flex items-center gap-2 border-t border-borda px-3 py-3">
-          <span className="flex-1 truncate px-3 font-mono text-[13px] text-texto-suave">{link}</span>
-          <button
-            onClick={copiar}
-            className="shrink-0 rounded-controle bg-[var(--destaque)] px-4 py-2.5 text-[14px] font-medium text-texto transition-[filter,transform] duration-150 hover:brightness-95 active:scale-[0.98]"
-          >
-            {copiado ? "Copiado" : "Copiar link"}
-          </button>
-        </div>
       </section>
 
-      <div className="flex flex-wrap gap-2">
-        <a
-          href={rota}
-          className="flex items-center gap-1.5 rounded-controle bg-texto px-5 py-3 text-[15px] text-superficie transition-opacity hover:opacity-90"
-        >
-          Ver como o candidato vê <ArrowUpRight size={16} strokeWidth={1.75} />
-        </a>
-        <button
-          onClick={onNova}
-          className="rounded-controle bg-superficie px-5 py-3 text-[15px] text-texto transition-colors hover:bg-superficie-2"
-        >
-          Nova entrevista
-        </button>
-      </div>
+      <button
+        onClick={onNova}
+        className="group flex h-11 items-center gap-2 self-start rounded-full bg-texto px-5 text-[14px] font-medium text-texto-claro transition-[opacity,transform] duration-150 hover:opacity-85 active:scale-[0.98]"
+      >
+        {rotuloNova}
+        <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
+      </button>
     </motion.div>
   );
 }
