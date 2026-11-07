@@ -2,17 +2,89 @@
 
 // Sala da entrevista no quadro: o quadro em tela cheia, a janela de chamada no canto e a legenda embaixo.
 // O enunciado não fica num painel: o agente escreve no próprio quadro.
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import JanelaChamada from "@/components/JanelaChamada";
 import Legenda from "@/components/Legenda";
+import QuadroRequisitos from "@/components/QuadroRequisitos";
+import PainelConversa, { type MensagemConversa } from "@/components/PainelConversa";
 import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
+import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
+
+/** Demonstração: o que o agente pergunta, o que o candidato responde e o requisito que fica combinado. */
+const ROTEIRO_DEMO = [
+  {
+    pergunta: "Quantas URLs novas vocês esperam por mês?",
+    resposta: "Acho que umas 100 milhões por mês.",
+    requisito: "100 milhões de URLs novas por mês",
+  },
+  {
+    pergunta: "E a proporção entre leitura e escrita?",
+    resposta: "A leitura é bem maior, umas 100 vezes. Dá uns 4 mil por segundo.",
+    requisito: "Leitura 100x maior que escrita (~4 mil/s)",
+  },
+  {
+    pergunta: "Por quanto tempo os links precisam continuar funcionando?",
+    resposta: "Vamos guardar por 5 anos.",
+    requisito: "Guardar por 5 anos",
+  },
+  {
+    pergunta: "Qual o tamanho do código curto?",
+    resposta: "7 caracteres devem bastar.",
+    requisito: "Código curto de 7 caracteres",
+  },
+];
+
+/** Simula a conversa e os requisitos até virem do servidor: cada clique encena um passo do roteiro. */
+function useDemoRequisitos() {
+  const [requisitos, setRequisitos] = useState<Requisito[]>([]);
+  const [mensagens, setMensagens] = useState<MensagemConversa[]>([]);
+  const [passo, setPasso] = useState(0);
+  const [encenando, setEncenando] = useState(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  const depois = (ms: number, fn: () => void) => timers.current.push(setTimeout(fn, ms));
+
+  function encenar() {
+    const item = ROTEIRO_DEMO[passo];
+    if (!item || encenando) return;
+    setEncenando(true);
+    setPasso((p) => p + 1);
+    const idPergunta = `demo-${passo}-agente`;
+    const idResposta = `demo-${passo}-candidato`;
+    setMensagens((m) => [...m, { id: idPergunta, quem: "agente", texto: item.pergunta, horario: Date.now() }]);
+
+    // A resposta chega aos poucos (parcial), como a transcrição da voz, e depois fica final.
+    const palavras = item.resposta.split(" ");
+    const inicio = 900;
+    palavras.forEach((_, i) => {
+      depois(inicio + i * 140, () => {
+        const texto = palavras.slice(0, i + 1).join(" ");
+        setMensagens((m) =>
+          m.some((x) => x.id === idResposta)
+            ? m.map((x) => (x.id === idResposta ? { ...x, texto } : x))
+            : [...m, { id: idResposta, quem: "candidato", texto, parcial: true, horario: Date.now() }],
+        );
+      });
+    });
+    const fim = inicio + palavras.length * 140 + 300;
+    depois(fim, () => {
+      setMensagens((m) => m.map((x) => (x.id === idResposta ? { ...x, parcial: false } : x)));
+      setRequisitos((r) => adicionar(r, item.requisito));
+      setEncenando(false);
+    });
+  }
+
+  return { requisitos, mensagens, encenar, encenando, acabou: passo >= ROTEIRO_DEMO.length };
+}
 
 const Canvas = dynamic(() => import("@/components/Canvas"), {
   ssr: false,
@@ -25,6 +97,9 @@ export default function SalaEntrevista() {
   const entrevista = useEntrevista(quadro, cursor);
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
+  const demo = useDemoRequisitos();
+  const [conversaAberta, setConversaAberta] = useState(false);
+  const fecharConversa = useCallback(() => setConversaAberta(false), []);
 
   // A resposta a um plin termina sozinha quando o candidato fala e depois fica em silêncio.
   useFimPorSilencio({
@@ -75,16 +150,59 @@ export default function SalaEntrevista() {
 
       <Legenda fala={entrevista.falaAtual} />
 
-      {/* Só para demonstração: dispara a pergunta do agente a qualquer momento. */}
+      {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
       {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
-        <button
-          onClick={entrevista.perguntaDemo}
-          disabled={estado.plin !== "LIVRE"}
-          className="absolute top-[72px] left-4 z-10 rounded-full border border-borda bg-vidro px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[opacity,transform] duration-150 ease-suave hover:text-texto active:scale-95 disabled:opacity-40"
-        >
-          Demo: fazer pergunta
-        </button>
+        <div className="absolute top-[72px] left-4 z-10 flex gap-2">
+          <button
+            onClick={entrevista.perguntaDemo}
+            disabled={estado.plin !== "LIVRE"}
+            className="rounded-full border border-borda bg-vidro px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[opacity,transform] duration-150 ease-suave hover:text-texto active:scale-95 disabled:opacity-40"
+          >
+            Demo: fazer pergunta
+          </button>
+          <button
+            onClick={demo.encenar}
+            disabled={demo.encenando || demo.acabou}
+            aria-label="Demonstração: combinar o próximo requisito"
+            className="rounded-full border border-borda bg-vidro px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[opacity,transform] duration-150 ease-suave outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95 disabled:opacity-40"
+          >
+            Demo: combinar requisito
+          </button>
+        </div>
       )}
+
+      {estado.fase !== "AGUARDANDO" && (
+        <div className="absolute top-[72px] right-4 z-10 flex items-start gap-2">
+          <button
+            onClick={() => setConversaAberta(true)}
+            aria-label="Abrir conversa"
+            aria-haspopup="dialog"
+            aria-expanded={conversaAberta}
+            className="flex items-center gap-1.5 rounded-full border border-borda bg-vidro px-3.5 py-2 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[color,transform] duration-150 ease-suave outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width={14}
+              height={14}
+              aria-hidden
+              className="fill-none stroke-current"
+              strokeWidth={1.5}
+              strokeLinejoin="round"
+            >
+              <path d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7l-3 2.5v-2.5h0.5a2 2 0 0 1-2-2Z" />
+            </svg>
+            Conversa
+          </button>
+          <QuadroRequisitos requisitos={demo.requisitos} fase={estado.fase} />
+        </div>
+      )}
+
+      <PainelConversa
+        aberto={conversaAberta}
+        onFechar={fecharConversa}
+        mensagens={demo.mensagens}
+        onVerNoQuadro={(id) => console.debug("[conversa] ver no quadro", id)}
+      />
 
       <CursorAgente
         onPronto={(c) => {
