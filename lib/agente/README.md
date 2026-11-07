@@ -103,7 +103,7 @@ Comandos: `/grafo scripts/exemplos/encurtador-ruim.txt` (carrega o desenho e rod
 
 ## Ainda NÃO está aqui
 
-- Rotas `/api/sessoes/...` (o contrato está em `docs/contrato-quadro-cerebro.md`). As funções `analisar` e `perguntar` já têm o formato certo para elas.
+- Rotas: já existem (ver `docs/cerebro-rotas.md`). Falta voz (`/api/falar`, `/api/stt-token`).
 - Persistência no banco (o estado já é JSON puro) e carregar kit/problema por avaliação.
 - Scorecard final (modelo `AGENTE_MODELO_FINAL`).
 - Voz (ElevenLabs, STT) e `/falar`.
