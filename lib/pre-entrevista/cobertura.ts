@@ -7,10 +7,12 @@
  *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
  * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo do Totti.
  */
-import { noul } from "@typesafe-ai/sdk";
+import { choice, noul } from "@typesafe-ai/sdk";
 import { FocusArea } from "@/lib/contracts";
+import { mede } from "./catalogo";
+import { NIVEIS_ENFASE, type NivelEnfase } from "./enfase";
 import { jev } from "./jev";
-import type { Rascunho, Turno } from "./rascunho";
+import { areasFora, type DecisoesTradeoff, type Rascunho, type Turno } from "./rascunho";
 
 /** Probabilidade a partir da qual um tópico está coberto e um sinal conta como verdadeiro. */
 export const LIMIAR = 0.6;
@@ -22,7 +24,7 @@ export const NOME_AREA_FALA: Record<FocusArea, string> = {
   tecnico: "algoritmos e código",
   pressao: "lidar com pressão e imprevistos",
   escala_produto: "escalabilidade",
-  uso_ia: "uso de IA",
+  uso_ia: "IA aplicada",
 };
 
 export interface Pergunta {
@@ -53,7 +55,7 @@ export interface ChamadaJev {
 export interface Cobertura extends ChamadaJev {
   /** Probabilidade acumulada de cada tópico estar coberto, por id. */
   cobertura: Record<string, number>;
-  /** Sinais deste turno (quer/dispensa por área, resposta vaga, aprovação do resumo), por id. */
+  /** Sinais deste turno (quer/dispensa/falou por área, resposta vaga, aprovação do resumo), por id. */
   sinais: Record<string, number>;
   /** Tópicos obrigatórios das áreas em jogo que ainda não estão cobertos. */
   faltando: Topico[];
@@ -77,21 +79,21 @@ const EXEMPLOS_CRITERIO: Record<FocusArea, string> = {
   pressao: "'bom é continuar explicando o raciocínio quando o requisito muda'; 'ruim é travar ou desistir quando algo muda no meio'",
   escala_produto:
     "'bom é resolver com solução simples e complexidade baixa'; 'ruim é complexidade muito alta que fica ruim com muitos dados'",
-  uso_ia: "'bom é revisar o código gerado e achar um problema antes de rodar'; 'ruim é colar a resposta sem entender'",
+  uso_ia: "'bom é mostrar onde o LLM entra no desenho e como o agente trata erro'; 'ruim é tratar a IA como caixa-preta'",
 };
 
 const EXEMPLOS_QUER: Record<FocusArea, string> = {
   tecnico: "'implementar bem os algoritmos', 'código limpo e testado', 'saber estrutura de dados'",
   pressao: "'quero ver como ele lida com prazo curto', 'ambiente acelerado, com prioridade mudando toda semana'",
   escala_produto: "'escalabilidade', 'algoritmo que aguente volume', 'soluções simples com complexidade baixa'",
-  uso_ia: "'IA', 'Copilot', 'Cursor', 'revisar o que a IA gera'",
+  uso_ia: "'IA aplicada', 'construir agentes', 'RAG e tool calling', 'integrar LLM no produto'",
 };
 
 const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
   tecnico: "'isso não é tão importante pra gente', 'pode diminuir a parte de algoritmo'",
   pressao: "'coloca menos pressão', 'pressão eu tiraria', 'não precisa ser muito rigoroso com prazo'",
   escala_produto: "'escala não é prioridade agora', 'pode tirar a parte de escalabilidade'",
-  uso_ia: "'pode tirar IA', 'uso de IA não pesa tanto'",
+  uso_ia: "'pode tirar IA', 'IA aplicada não pesa tanto'",
 };
 
 function criterioDaArea(area: FocusArea): Topico {
@@ -131,10 +133,13 @@ function dispensaDaArea(area: FocusArea): Pergunta {
   };
 }
 
-/** Tópicos de cobertura, na ordem: confirmação inicial → critério por área (área do foco primeiro) → opcionais. */
+/**
+ * Tópicos de cobertura, na ordem: confirmação inicial → critério por área (área do foco primeiro) → opcionais.
+ * Áreas que o formato não mede não têm critério, então não viram tópico.
+ */
 export function topicosDo(r: Rascunho): Topico[] {
   const doFoco = [...r.focus].sort((a, b) => b.weight - a.weight).map((f) => f.area);
-  const areas = [...new Set([...doFoco, ...AREAS])];
+  const areas = [...new Set([...doFoco, ...AREAS])].filter((a) => mede(r.mode, a));
   return [
     {
       id: "confirmou_inicio",
@@ -169,11 +174,47 @@ export function topicosDo(r: Rascunho): Topico[] {
   ];
 }
 
-/** Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança e aprovação do resumo. */
+/** Ela disse, nesta última fala, que algo reprova o candidato sozinho? Por turno, para o guia (ver `pesos.ts`). */
+const DISSE_ELIMINATORIO: Pergunta = {
+  id: "disse_eliminatorio",
+  pergunta: "Na última fala da recrutadora, ela disse que algo reprova o candidato sozinho, sem depender do resto (eliminatório)?",
+  sinal_sim:
+    "Sim se, nessa última fala, ela citou um ponto eliminatório: 'eliminatório', 'reprovo', 'desclassifica', ou um comportamento que reprova direto.",
+  sinal_nao: "Não se a última fala não citou nenhum ponto que reprove sozinho. Um critério de nota não é eliminatório.",
+};
+
+/**
+ * Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo e a escolha
+ * sobre a troca de formato (só faz sentido logo depois da oferta, mas o Jev responde sempre; o planejador decide se usa).
+ */
 function sinaisDo(): Pergunta[] {
   return [
     ...AREAS.map(quererDaArea),
     ...AREAS.map(dispensaDaArea),
+    DISSE_ELIMINATORIO,
+    {
+      id: "escolheu_trocar_formato",
+      pergunta:
+        "Na última fala, a recrutadora escolheu trocar para o outro formato de entrevista, o que o Totti ofereceu como alternativa?",
+      sinal_sim:
+        "Sim se ela escolheu o outro formato: 'vamos de system design', 'pode ser system design', 'troca pra system design', 'prefiro desenhar'.",
+      sinal_nao: "Não se ela escolheu manter o formato atual, deixou a área para depois, ou respondeu outra coisa, inclusive uma dúvida.",
+    },
+    {
+      id: "escolheu_proxima_etapa",
+      pergunta: "Na última fala, a recrutadora escolheu deixar a área que o formato não mede para a próxima etapa do processo?",
+      sinal_sim:
+        "Sim se ela disse que a área fica para depois, na próxima etapa ou fase do processo: 'deixa pra próxima etapa', 'IA fica pra depois', 'isso vai pra próxima fase'.",
+      sinal_nao: "Não se ela escolheu outro formato, disse que a área não precisa ser avaliada de jeito nenhum, ou respondeu outra coisa.",
+    },
+    {
+      id: "escolheu_seguir_sem",
+      pergunta: "Na última fala, a recrutadora escolheu seguir a entrevista sem essa área, sem avaliá-la nem deixá-la para depois?",
+      sinal_sim:
+        "Sim se ela disse para seguir sem a área, sem avaliar: 'segue sem isso', 'pode seguir sem IA', 'não precisa avaliar isso'.",
+      sinal_nao:
+        "Não se ela escolheu outro formato ou deixar para a próxima etapa, ou respondeu outra coisa. Deixar para a próxima etapa é outra escolha.",
+    },
     {
       id: "resposta_vaga",
       pergunta: "A última fala da recrutadora foi genérica, sem nenhum comportamento observável, como resposta à última fala do agente?",
@@ -181,7 +222,7 @@ function sinaisDo(): Pergunta[] {
         "Sim se ela respondeu de forma vaga: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', " +
         "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
       sinal_nao:
-        "Não se ela deu um comportamento concreto ('ruim é colar o código sem entender'), escolheu entre opções concretas, ou respondeu outra coisa.",
+        "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, ou respondeu outra coisa.",
     },
     {
       id: "quer_tom_desafiador",
@@ -248,15 +289,21 @@ export function mesclarCobertura(anterior: Record<string, number>, nova: Record<
 }
 
 /**
- * Áreas "em jogo" agora: as do foco do rascunho, mais as que ela quer avaliar, menos as que ela dispensou.
- * Usa os sinais mais recentes, então vale antes de o extrator (lento) atualizar o rascunho. Função pura.
+ * Áreas "em jogo" agora: as do foco do rascunho, mais as que ela quer avaliar, menos as que ela dispensou
+ * e menos as que ela deixou de fora pela troca de formato (`decisoes`). Usa os sinais mais recentes, então vale
+ * antes de o extrator (lento) atualizar o rascunho. Função pura.
  */
-export function areasEmJogo(focus: Array<{ area: FocusArea }>, sinais: Record<string, number>): FocusArea[] {
+export function areasEmJogo(
+  focus: Array<{ area: FocusArea }>,
+  sinais: Record<string, number>,
+  decisoes: DecisoesTradeoff = {},
+): FocusArea[] {
   const sinal = (id: string) => sinais[id] ?? 0;
   const noFoco = focus.map((f) => f.area);
   const pedidas = AREAS.filter((a) => sinal(`quer_${a}`) >= LIMIAR);
   const dispensadas = new Set(AREAS.filter((a) => sinal(`dispensa_${a}`) >= LIMIAR));
-  return [...new Set<FocusArea>([...noFoco, ...pedidas])].filter((a) => !dispensadas.has(a));
+  const deixadas = new Set(areasFora(decisoes));
+  return [...new Set<FocusArea>([...noFoco, ...pedidas])].filter((a) => !dispensadas.has(a) && !deixadas.has(a));
 }
 
 function faltandoDo(topicos: Topico[], cobertura: Record<string, number>, emJogo: FocusArea[]): Topico[] {
@@ -279,12 +326,16 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contex
       ultima_fala_do_agente: contexto.ultimaFalaAgente ?? "(nenhuma)",
       transcricao,
     },
-    questions: Object.fromEntries([...topicos, ...sinais].map((p) => [p.id, noul(p.pergunta, { true: p.sinal_sim, false: p.sinal_nao })])),
+    questions: {
+      ...Object.fromEntries([...topicos, ...sinais].map((p) => [p.id, noul(p.pergunta, { true: p.sinal_sim, false: p.sinal_nao })])),
+    },
   };
   const { answers, model, usage } = await jev().systemOne(request);
+  // As perguntas são `noul` (sim/não) ou `score` (nível de 0 a 3); o tipo do SDK não distingue, então lê-se aqui.
+  const respostas = answers as Record<string, { noul?: number; score?: number }>;
 
-  const cobertura = mesclarCobertura(r.cobertura, Object.fromEntries(topicos.map((t) => [t.id, answers[t.id].noul])));
-  const sinaisDoTurno: Record<string, number> = Object.fromEntries(sinais.map((s) => [s.id, answers[s.id].noul]));
+  const cobertura = mesclarCobertura(r.cobertura, Object.fromEntries(topicos.map((t) => [t.id, respostas[t.id].noul ?? 0])));
+  const sinaisDoTurno: Record<string, number> = Object.fromEntries(sinais.map((s) => [s.id, respostas[s.id].noul ?? 0]));
   const emJogo = areasEmJogo(r.focus, sinaisDoTurno);
 
   return {
@@ -306,4 +357,66 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contex
 export function aplicarCobertura(r: Rascunho, cobertura: Record<string, number>, emJogo = areasEmJogo(r.focus, {})): Rascunho {
   const pendencias = faltandoDo(topicosDo(r), cobertura, emJogo).map((t) => t.id);
   return { ...r, cobertura, pendencias };
+}
+
+/** Nível de ênfase de uma área na última fala da recrutadora. Os exemplos são os que o Jev usa para escolher. */
+function nivelDaFala(area: FocusArea) {
+  const nome = NOME_AREA_FALA[area];
+  return choice(`Na ÚLTIMA fala da recrutadora, o que ela disse sobre ${nome}?`, {
+    nao_falou: { quando: "a fala não tocou nessa área, nem de passagem." },
+    dispensou: {
+      quando: "disse que a área não precisa, que pode tirar, que é sem muita ênfase ou que não é tanto sobre ela.",
+      exemplos: "'não precisa', 'sem muita pressão', 'pode tirar', 'não é tanto sobre algoritmos'",
+    },
+    secundaria: {
+      quando: "disse que a área pesa menos, ou que também conta.",
+      exemplos: "'pesa menos', 'um pouco', 'também conta'",
+    },
+    respondeu: {
+      quando: "descreveu o que espera nessa área, inclusive ao responder uma pergunta do Totti sobre ela.",
+      exemplos: "'quero ver se implementam algoritmos de forma simples', 'vejo quando ele calcula o custo'",
+    },
+    central: {
+      quando: "disse que é o principal ou o mais importante, que é eliminatório, ou trouxe a área por conta própria como foco.",
+      exemplos: "'o principal é', 'o mais importante', 'é eliminatório', 'quero focar em idempotência e falhas'",
+    },
+  });
+}
+
+/** O que a última fala da recrutadora diz sobre cada área, e o que foi perguntado (ver `enfase.ts`). */
+export interface EnfaseFala {
+  niveis: Partial<Record<FocusArea, NivelEnfase>>;
+  ms: number;
+  model: string;
+  request: { state: unknown; questions: unknown };
+  answers: unknown;
+}
+
+/**
+ * Classifica só a última fala da recrutadora, com a última pergunta do Totti, em um nível por área.
+ * A conversa inteira não entra aqui: quem acumula é `acumularEnfase`.
+ */
+export async function avaliarEnfaseDaFala(transcricao: Turno[]): Promise<EnfaseFala> {
+  const dela = transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
+  const perguntaDaTotti = transcricao.filter((t) => t.role === "agente").at(-1)?.text ?? "(nenhuma)";
+  const request = {
+    state: {
+      tarefa:
+        "Você lê UMA fala da recrutadora numa pré-entrevista e diz o que ela disse sobre cada área, em relação à pergunta do Totti logo antes.",
+      ultima_pergunta_da_totti: perguntaDaTotti,
+      ultima_fala_da_recrutadora: dela ?? "(nenhuma)",
+    },
+    questions: Object.fromEntries(AREAS.map((area) => [`enfase_fala_${area}`, nivelDaFala(area)])),
+  };
+  if (!dela) return { niveis: {}, ms: 0, model: "", request, answers: {} };
+
+  const inicio = Date.now();
+  const { answers, model } = await jev().systemOne(request);
+  const respostas = answers as Record<string, { choice?: string }>;
+  const niveis: Partial<Record<FocusArea, NivelEnfase>> = {};
+  for (const area of AREAS) {
+    const escolhido = respostas[`enfase_fala_${area}`]?.choice;
+    niveis[area] = NIVEIS_ENFASE.includes(escolhido as NivelEnfase) ? (escolhido as NivelEnfase) : "nao_falou";
+  }
+  return { niveis, ms: Date.now() - inicio, model, request, answers };
 }

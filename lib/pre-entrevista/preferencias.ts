@@ -32,14 +32,3 @@ export function atualizarPreferencias(p: Preferencias, sinais: Record<string, nu
 
   return { ...p, tom, dicas };
 }
-
-/** Frase das notas sobre tom e dicas, ex.: "Tom amigável. Dica leve se travar." */
-export function fraseTomEDicas(p: Preferencias): string {
-  const tom = p.tom === "desafiador" ? "Tom desafiador" : "Tom amigável";
-  const dicas = {
-    leves: "Dica leve se travar.",
-    nenhuma: "Sem dicas.",
-    livres: "Dica quando ele pedir.",
-  }[p.dicas];
-  return `${tom}. ${dicas}`;
-}

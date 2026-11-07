@@ -7,16 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "postinstall": "node scripts/copy-vendor.mjs",
+    "predev": "node scripts/copy-vendor.mjs",
+    "prebuild": "node scripts/copy-vendor.mjs",
     "pre:classificar": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/classificar.ts",
     "pre:extrair": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/extrair.ts",
     "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.7.0",
+    "@elevenlabs/client": "^1.35.0",
+    "@monaco-editor/react": "^4.7.0",
     "lucide-react": "^1.70.0",
+    "monaco-editor": "^0.57.0",
     "motion": "^14.10.1",
     "next": "15.5.4",
     "pdfjs-dist": "6.4.299",
+    "pyodide": "^0.26.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "zod": "^3.25.76"

@@ -136,11 +136,17 @@ export function estadoInicialDemo(vaga: Vaga): EstadoSessao {
       confirmado: { mode: false, seniority: false, focus: false },
       cobertura: {},
       pendencias: TOPICOS.filter((t) => !t.opcional).map((t) => t.id),
+      origens: {},
+      eliminatorios: [],
+      contexto: "",
     },
     topicos: TOPICOS.map((t) => ({ ...t, cobertura: 0, coberto: false })),
     faltando: TOPICOS.filter((t) => !t.opcional).map((t) => t.id),
-    planejamento: { emJogo: areas, sinais: {}, perguntasPorTopico: {}, resumos: 0 },
+    planejamento: { emJogo: areas, sinais: {}, perguntasPorTopico: {}, resumos: 0, decisoesTradeoff: {} },
+    competencias: [],
+    naoAvaliado: [],
     status: { extraindo: false, versaoExtraida: 0 },
+    pesos: [],
     logs: [],
   };
 }

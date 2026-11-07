@@ -15,12 +15,15 @@ import { join } from "path";
 import { InterviewConfig, type FocusArea } from "@/lib/contracts";
 import type { Classificacao, Vaga } from "./classificador";
 import { aplicarCobertura, areasEmJogo, avaliarCobertura, mesclarCobertura, topicosDo, ultimaFalaDoAgente } from "./cobertura";
+import { type Competencia, type ResultadoCompetencias } from "./competencias";
 import { ErroExtracao, extrair } from "./extrator";
 import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
 import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
 import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
 import { criarRascunho, type Rascunho, type Turno } from "./rascunho";
+import { estadoInicialEnfase, type EstadoEnfase } from "./enfase";
+import { recalcularRascunho, type DetalhePeso } from "./pesos";
 
 export interface Sessao {
   id: string;
@@ -36,6 +39,20 @@ export interface Sessao {
   preferencias: Preferencias;
   /** Como estava o resumo da última vez que o Totti o falou. Serve para confirmar só o que mudou na revisão. */
   resumo?: { preferencias: Preferencias; duracaoMin: number };
+  /** Competências-chave da vaga e se o formato verifica cada uma (ver `competencias.ts`). Não viram pergunta. */
+  competencias: Competencia[];
+  /** O que esta entrevista não avalia: áreas deixadas para a próxima etapa e competências que o formato não verifica. */
+  naoAvaliado: string[];
+  /**
+   * Ênfase acumulada por área, a partir de cada fala da recrutadora (ver `enfase.ts`). Dispensa e central fixam o estado.
+   */
+  enfaseEstado: EstadoEnfase;
+  /** Fala dela que pediu o tom e fala que pediu as dicas, para o guia. */
+  origemPreferencias: { tom?: string; dicas?: string };
+  /** Falas dela em que disse algo eliminatório. Usadas quando o extrator não trouxe o trecho. */
+  eliminatorioFalas: string[];
+  /** Último detalhamento dos pesos por área (ver `pesosPelaEnfase`). */
+  pesosDetalhe: DetalhePeso[];
   logs: EventoLog[];
   status: { extraindo: boolean; versaoExtraida: number };
   configFinal?: InterviewConfig;
@@ -60,8 +77,14 @@ export interface EstadoSessao {
     sinais: Record<string, number>;
     perguntasPorTopico: Record<string, number>;
     resumos: number;
+    /** Decisão sobre a troca de formato por área (ver `planejador.ts`). */
+    decisoesTradeoff: PlanoEstado["decisoesTradeoff"];
   };
+  competencias: Competencia[];
+  naoAvaliado: string[];
   status: Sessao["status"];
+  /** Ênfase por área, se ela falou, nota da vaga e peso final (ver `pesos.ts`). */
+  pesos: DetalhePeso[];
   logs: EventoLog[];
   configFinal?: InterviewConfig;
 }
@@ -104,8 +127,11 @@ export function liberar(id: string): void {
   store.ocupadas.delete(id);
 }
 
-/** Cria a sessão com o rascunho inicial (tudo pendente) e grava os dois primeiros eventos. */
-export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number): Sessao {
+/**
+ * Cria a sessão com o rascunho inicial (tudo pendente) e grava os eventos iniciais: sessão, classificação
+ * e competências (com o motivo, se a extração das competências falhou).
+ */
+export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number, competencias: ResultadoCompetencias): Sessao {
   // Com cobertura vazia, todos os tópicos obrigatórios das áreas do foco entram em `pendencias`.
   const rascunho = aplicarCobertura(criarRascunho(vaga, classificacao), {});
   const sessao: Sessao = {
@@ -117,6 +143,12 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     transcricao: [],
     plano: planoInicial(),
     preferencias: { ...PREFERENCIAS_PADRAO },
+    competencias: competencias.competencias,
+    naoAvaliado: [],
+    enfaseEstado: estadoInicialEnfase(),
+    origemPreferencias: {},
+    eliminatorioFalas: [],
+    pesosDetalhe: [],
     logs: [],
     status: { extraindo: false, versaoExtraida: 0 },
   };
@@ -143,7 +175,60 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
       rascunhoInicial: rascunho,
     },
   });
+  const nomes = competencias.competencias.map((c) => c.nome).join(", ");
+  registrarEvento(sessao, {
+    tipo: "competencias",
+    nivel: competencias.erro ? "aviso" : "info",
+    resumo: competencias.erro
+      ? `sem competências (${competencias.erro})`
+      : `${competencias.competencias.length} competência(s): ${nomes || "nenhuma"}`,
+    ms: competencias.ms,
+    provedor: competencias.provedor,
+    model: competencias.model,
+    fallback: competencias.erro ? undefined : houveFallback(competencias.tentativas),
+    dados: {
+      mensagens: competencias.mensagens,
+      respostaCrua: competencias.respostaCrua,
+      competencias: competencias.competencias,
+      erro: competencias.erro,
+      tentativas: competencias.tentativas,
+    },
+  });
+  aplicarPesosNaSessao(sessao, "início");
   return sessao;
+}
+
+/** Notas da classificação da vaga por área (0 a 3). Valem para as áreas de que ela não falou. */
+function notasDaVaga(sessao: Sessao): Partial<Record<FocusArea, number>> {
+  return Object.fromEntries(sessao.classificacao.focusScores.map((f) => [f.area, f.score]));
+}
+
+/**
+ * Refaz o foco, os critérios, as origens e o guia a partir do estado da sessão (ênfase, falas, decisões e dispensas).
+ * Chamado ao criar a sessão, depois de cada leitura síncrona e na finalização. Registra no log o que cada área pesou.
+ */
+export function aplicarPesosNaSessao(sessao: Sessao, origem: string): void {
+  const antes = sessao.rascunho;
+  const decisoes = sessao.plano.decisoesTradeoff;
+  const { rascunho, detalhe } = recalcularRascunho(
+    sessao.rascunho,
+    { estado: sessao.enfaseEstado, notaVaga: notasDaVaga(sessao), decisoes },
+    {
+      preferencias: sessao.preferencias,
+      origemTom: sessao.origemPreferencias.tom,
+      origemDicas: sessao.origemPreferencias.dicas,
+      eliminatoriosFalas: sessao.eliminatorioFalas,
+      naoAvaliado: sessao.naoAvaliado,
+    },
+  );
+  sessao.rascunho = aplicarCobertura(rascunho, rascunho.cobertura, areasEmJogo(rascunho.focus, sessao.plano.sinais, decisoes));
+  sessao.pesosDetalhe = detalhe;
+  const noFoco = detalhe.filter((d) => d.noFoco).map((d) => `${d.area} ${d.peso.toFixed(2)}`);
+  registrarEvento(sessao, {
+    tipo: "cobertura",
+    resumo: `pesos (${origem}): ${noFoco.join(", ") || "nenhuma área"}`,
+    dados: { origem: "pesos", leitura: origem, pesos: detalhe, diff: diff(antes, sessao.rascunho) },
+  });
 }
 
 /** Acrescenta uma fala à transcrição e registra o evento correspondente. */
@@ -204,7 +289,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
   const antes = sessao.rascunho;
   let etapa = "extracao";
   try {
-    const ext = await extrair(antes, transcricao, sessao.preferencias);
+    const ext = await extrair(antes, transcricao, { modoEscolhido: sessao.plano.modoEscolhido });
     const camposDoPatch = Object.keys(ext.patch).filter((k) => ext.patch[k as keyof typeof ext.patch] !== undefined);
     registrarEvento(sessao, {
       tipo: "extracao",
@@ -249,10 +334,10 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
 
     // A cobertura síncrona (do turno) pode ter subido enquanto esta rodada rodava: mescla, sem perder nada.
     // Os sinais não entram aqui: quem decide o passo é a leitura do turno, que tem a transcrição mais recente.
-    const cobertura = mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura);
-    const novo = aplicarCobertura(ext.rascunho, cobertura, areasEmJogo(ext.rascunho.focus, sessao.plano.sinais));
-    const mudancas = diff(antes, novo);
-    sessao.rascunho = novo;
+    // O foco e as notas não vêm do extrator: são refeitos a partir do estado atual (ver `aplicarPesosNaSessao`).
+    sessao.rascunho = { ...ext.rascunho, cobertura: mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura) };
+    aplicarPesosNaSessao(sessao, "segundo plano");
+    const mudancas = diff(antes, sessao.rascunho);
     registrarEvento(sessao, {
       tipo: "rascunho_atualizado",
       resumo: resumoDiff(mudancas),
@@ -319,7 +404,7 @@ export async function aguardarExtracao(sessao: Sessao, limiteMs = 60_000): Promi
 
 export function estadoDaSessao(sessao: Sessao): EstadoSessao {
   const { classificacao, plano } = sessao;
-  const emJogo = areasEmJogo(sessao.rascunho.focus, plano.sinais);
+  const emJogo = areasEmJogo(sessao.rascunho.focus, plano.sinais, plano.decisoesTradeoff);
   return {
     id: sessao.id,
     criadaEm: sessao.criadaEm,
@@ -350,8 +435,12 @@ export function estadoDaSessao(sessao: Sessao): EstadoSessao {
       sinais: plano.sinais,
       perguntasPorTopico: plano.perguntasPorTopico,
       resumos: plano.resumos,
+      decisoesTradeoff: plano.decisoesTradeoff,
     },
+    competencias: sessao.competencias,
+    naoAvaliado: sessao.naoAvaliado,
     status: sessao.status,
+    pesos: sessao.pesosDetalhe,
     logs: sessao.logs,
     configFinal: sessao.configFinal,
   };

@@ -12,8 +12,9 @@ import { Criterion, FocusArea, InterviewMode } from "@/lib/contracts";
 import { CATALOGO, criteriosIniciais, type CriterioModelo } from "./catalogo";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
-import { PREFERENCIAS_PADRAO, fraseTomEDicas, type Preferencias } from "./preferencias";
-import { alinharPesos, Rascunho, type Turno } from "./rascunho";
+import { acharEvidencia } from "./pesos";
+import { fraseComTrecho, normalizarTexto, RE_CONTEXTO, RE_LOGISTICA, RE_REQUISITO } from "./frases";
+import { alinharPesos, mudarModo, Origem, Rascunho, type Turno } from "./rascunho";
 
 const TEMPERATURA = 0.2;
 const MAX_TOKENS_EXTRATOR = 12000;
@@ -40,18 +41,26 @@ export function alvosDoExtrator(): Alvo[] {
 }
 
 const ConfirmadoParcial = Rascunho.shape.confirmado.partial();
-const Foco = Rascunho.shape.focus.element;
 const Senioridade = Rascunho.shape.seniority;
 
-/** Campos que o modelo pode devolver. Todos opcionais; o que não vier fica como está. */
+/**
+ * Campos que o modelo pode devolver. Todos opcionais; o que não vier fica como está.
+ * O foco não vem do modelo: sai de `pesosPelaEnfase` (ver `pesos.ts`). As notas também não: saem de `montarGuia`.
+ */
 export interface Patch {
   mode?: InterviewMode;
   seniority?: z.infer<typeof Senioridade>;
-  focus?: Array<z.infer<typeof Foco>>;
   confirmado?: z.infer<typeof ConfirmadoParcial>;
   criteria?: Criterion[];
+  /** Trecho literal de fala dela que justifica cada critério personalizado ou novo, por id. Validado antes de aplicar. */
+  evidencias?: Record<string, string>;
+  /** Origem de cada critério do patch, depois da validação (`validarEvidencias`). */
+  origens?: Record<string, Origem>;
+  /** Trechos literais em que ela disse que algo reprova o candidato sozinho. Validados antes de aplicar. */
+  eliminatorios?: string[];
+  /** Trecho literal sobre o time, a empresa ou o momento da contratação. Validado antes de aplicar. */
+  contexto?: string;
   durationMin?: number;
-  recruiterNotes?: string;
   problemId?: string;
 }
 
@@ -66,24 +75,22 @@ Regras:
    ou corrigiu explicitamente ("pode ser", "isso mesmo", "na verdade são 60 minutos").
 3. Se ela mudou de ideia no meio da conversa, vale a última posição dela.
 4. criteria: devolva a lista COMPLETA e final de critérios, não só os que mudaram.
-   - Parta dos critérios do catálogo que forem enviados e personalize a description com o que ela disse.
+   - Parta dos critérios do catálogo que forem enviados. Personalize a description só com o que ela disse.
    - description sempre em comportamento observável, no formato "Bom: ... Ruim: ...", com 1 a 3 frases curtas em português.
      Evite termos vagos como "boa comunicação" ou "bom conhecimento"; diga o que se vê na entrevista.
    - Se ela descreveu só o lado bom (ou só o ruim), deduza o outro lado como o oposto razoável. Escreva sempre os dois lados.
-   - Se ela pediu algo que o catálogo não cobre, adicione um critério novo com id em snake_case.
-   - Se ela tirou uma área do foco, remova os critérios dessa área.
+   - Para cada critério personalizado ou novo, inclua "evidencia": um TRECHO LITERAL, copiado exatamente de uma fala da
+     RECRUTADORA (até 20 palavras), que justifica a description. Se você não tem um trecho literal dela, não personalize:
+     deixe a description do catálogo e não inclua evidencia.
+   - Se ela pediu algo que o catálogo não cobre, adicione um critério novo com id em snake_case e evidencia.
+   - Se ela tirou uma área, não inclua critérios dessa área.
    - Critério do catálogo sobre o qual ela não falou fica como está.
    - weight é maior que 0; use valores maiores para o que ela disse que pesa mais (base 1).
    - focus de cada critério deve ser uma das áreas do foco.
-5. focus: lista de { area, weight } com as áreas de foco. Os pesos devem somar 1 (aproxime; o código renormaliza).
-   - Se ela disse para tirar uma área, remova-a do foco.
-   - Se ela disse que uma área pesa menos, pode diminuir ou não importa muito, mantenha a área com cerca da metade do peso anterior.
-   - Área nova que ela pediu entra no foco, com pelo menos um critério personalizado com o que ela disse.
-6. recruiterNotes: texto curto em frases curtas. NÃO repita o que já tem campo próprio (modo, senioridade, foco,
-   duração, critérios). Guarde só tom, política de dicas, contexto do time/empresa e eliminatórios.
-   Devolva o texto COMPLETO. Se ela acrescentou algo, junte ao que já está. Se pediu para tirar ou trocar algo que já está
-   no texto, a versão nova substitui a antiga, sem as duas juntas: 'Tom amigável. Dica leve se travar.' + 'tira a dica'
-   vira 'Tom amigável. Sem dicas.'
+5. eliminatorios: lista de trechos LITERAIS (até 20 palavras) de falas da RECRUTADORA em que ela disse que algo reprova
+   o candidato sozinho. Lista completa. Se ela não disse nenhum, lista vazia.
+6. contexto: um trecho LITERAL (até 20 palavras) de uma fala da RECRUTADORA sobre o time, a empresa ou o momento da
+   contratação. Se ela não falou disso, omita o campo.
 7. confirmado: marque true só para mode, seniority ou focus que ela confirmou ou corrigiu explicitamente nesta conversa.
    Um "sim" a uma proposta que cobre formato, senioridade e foco de uma vez conta para os três.
 8. durationMin: inteiro, em minutos, só se ela disse.
@@ -93,16 +100,16 @@ Regras:
 Modos válidos: live_coding, system_design.
 Senioridades válidas: junior, pleno, senior.
 
-Dentro dos textos (description, recruiterNotes), não use aspas duplas: se precisar citar, use aspas simples.
+Dentro dos textos (description, eliminatorios, contexto), não use aspas duplas: se precisar citar, use aspas simples.
 Use o JSON válido: strings em uma linha só, sem vírgula sobrando.
 
 Formato de saída (apenas o JSON, sem texto antes ou depois, sem cercas de código):
 {
   "mode": "...", "seniority": "...",
-  "focus": [{"area": "...", "weight": 0.5}],
   "confirmado": {"mode": true, "seniority": true, "focus": true},
-  "criteria": [{"id": "...", "name": "...", "focus": "...", "weight": 1, "description": "Bom: ... Ruim: ..."}],
-  "durationMin": 40, "recruiterNotes": "...", "problemId": "..."
+  "criteria": [{"id": "...", "name": "...", "focus": "...", "weight": 1, "description": "Bom: ... Ruim: ...", "evidencia": "..."}],
+  "eliminatorios": ["..."], "contexto": "...",
+  "durationMin": 40, "problemId": "..."
 }
 Inclua apenas as chaves que mudaram.`;
 
@@ -162,41 +169,26 @@ function lista<T>(nome: string, item: z.ZodType<T, z.ZodTypeDef, unknown>, valor
   return itens;
 }
 
+/** Critério como o modelo devolve: o de `Criterion` mais a evidência (trecho dela), que não faz parte do critério. */
+const CriterioComEvidencia = Criterion.extend({ evidencia: z.string().optional() });
+
 function lerPatch(bruto: unknown, avisos: Avisos): Patch {
   if (!ehObjeto(bruto)) {
     avisar(avisos, "resposta não é um objeto JSON; nada aplicado");
     return {};
   }
+  const criterios = lista("criteria", CriterioComEvidencia, bruto.criteria, avisos);
   return {
     mode: campo("mode", InterviewMode, bruto.mode, avisos),
     seniority: campo("seniority", Senioridade, bruto.seniority, avisos),
-    focus: lista("focus", Foco, bruto.focus, avisos),
     confirmado: campo("confirmado", ConfirmadoParcial, bruto.confirmado, avisos),
-    criteria: lista("criteria", Criterion, bruto.criteria, avisos),
+    criteria: criterios?.map((c) => ({ id: c.id, name: c.name, description: c.description, weight: c.weight, focus: c.focus })),
+    evidencias: criterios && Object.fromEntries(criterios.flatMap((c) => (c.evidencia ? [[c.id, c.evidencia]] : []))),
+    eliminatorios: lista("eliminatorios", z.string().min(1), bruto.eliminatorios, avisos),
+    contexto: campo("contexto", z.string().min(1), bruto.contexto, avisos),
     durationMin: campo("durationMin", z.number().int().positive(), bruto.durationMin, avisos),
-    recruiterNotes: campo("recruiterNotes", z.string(), bruto.recruiterNotes, avisos),
     problemId: campo("problemId", z.string().min(1), bruto.problemId, avisos),
   };
-}
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-/**
- * Remove áreas repetidas, descarta peso zero (quando há outras áreas) e renormaliza
- * para somar 1. O arredondamento vai na primeira área.
- */
-function normalizarFoco(itens: Array<z.infer<typeof Foco>>): Array<z.infer<typeof Foco>> {
-  const unicos = [...new Map(itens.map((i) => [i.area, i])).values()];
-  const positivos = unicos.filter((i) => i.weight > 0);
-  const base = positivos.length > 0 ? positivos : unicos;
-  const soma = base.reduce((acc, i) => acc + i.weight, 0);
-  const pesos = base.map((i) => ({
-    area: i.area,
-    weight: soma > 0 ? round2(i.weight / soma) : round2(1 / base.length),
-  }));
-  const diff = round2(1 - pesos.reduce((acc, p) => acc + p.weight, 0));
-  pesos[0].weight = round2(pesos[0].weight + diff);
-  return pesos;
 }
 
 /** Garante ids únicos e focus dentro das áreas. Se nada sobrar, volta ao catálogo. */
@@ -217,29 +209,89 @@ function ajustarCriterios(criterios: Criterion[], areas: Set<FocusArea>, mode: I
   return [...porId.values()];
 }
 
-/** Aplica o patch ao rascunho. Não muta o rascunho original. Os avisos, se houver lista, são acumulados nela. */
+/**
+ * Confere cada critério com a fala dela que o justifica. Critério cujo trecho aparece numa fala da recrutadora
+ * fica com a origem nessa fala. Critério do catálogo sem trecho válido volta à name e à description do catálogo,
+ * com origem "catalogo". Critério novo sem trecho válido sai. Eliminatórios e contexto só valem se o trecho aparece.
+ * Função pura quanto ao patch.
+ */
+export function validarEvidencias(p: Patch, transcricao: Turno[], modo: InterviewMode, avisos: Avisos): Patch {
+  const origens: Record<string, Origem> = {};
+  const criteria = p.criteria?.flatMap((c) => {
+    const trecho = p.evidencias?.[c.id];
+    let ev = trecho !== undefined ? acharEvidencia(trecho, transcricao) : undefined;
+    // Frase de logística (minutos, tom, dicas) não prova critério de competência, a menos que cite o critério.
+    if (ev && trecho !== undefined) {
+      const frase = normalizarTexto(fraseComTrecho(transcricao[ev.turno - 1].text, trecho));
+      const palavrasDoCriterio = normalizarTexto(`${c.name} ${c.description}`)
+        .split(" ")
+        .filter((w) => w.length >= 5);
+      if (RE_LOGISTICA.test(frase) && !palavrasDoCriterio.some((w) => ` ${frase} `.includes(` ${w} `))) {
+        avisar(avisos, `evidência de "${c.id}" descartada: a frase é de logística (minutos, tom, dicas), não de competência`);
+        ev = undefined;
+      }
+    }
+    if (ev) {
+      origens[c.id] = ev;
+      return [c];
+    }
+    const base = CATALOGO[modo].find((x) => x.id === c.id);
+    if (!base) {
+      avisar(avisos, `critério novo "${c.id}" descartado: sem trecho dela que o justifique`);
+      return [];
+    }
+    if (c.name !== base.name || c.description !== base.description) {
+      avisar(avisos, `critério "${c.id}" volta à descrição do catálogo: sem trecho dela que o justifique`);
+    }
+    origens[c.id] = "catalogo";
+    return [{ ...c, name: base.name, description: base.description }];
+  });
+  const eliminatorios = p.eliminatorios?.flatMap((trecho) => {
+    const ev = acharEvidencia(trecho, transcricao);
+    if (ev) return [fraseComTrecho(transcricao[ev.turno - 1].text, trecho)];
+    avisar(avisos, `eliminatório descartado: o trecho não aparece nas falas dela`);
+    return [];
+  });
+  // Contexto: a frase tem de falar do time ou da empresa, e não descrever o candidato ideal ("ele", "tem que ter").
+  const evContexto = p.contexto === undefined ? undefined : acharEvidencia(p.contexto, transcricao);
+  const fraseContexto = evContexto && p.contexto !== undefined ? fraseComTrecho(transcricao[evContexto.turno - 1].text, p.contexto) : "";
+  const contexto =
+    p.contexto === undefined
+      ? undefined
+      : evContexto && RE_CONTEXTO.test(fraseContexto) && !RE_REQUISITO.test(fraseContexto)
+        ? fraseContexto
+        : (avisar(avisos, "contexto descartado: não é frase do time ou da empresa, ou descreve o candidato"), "");
+  return { ...p, criteria, origens: p.criteria ? origens : undefined, eliminatorios, contexto };
+}
+
+/**
+ * Aplica o patch ao rascunho. Não muta o rascunho original. O foco não muda aqui: quem decide é `pesosPelaEnfase`.
+ * Critério que ganha fala dela nesta leitura pesa 1,5×; o que perde a fala volta ao normal. Assim, repetir a leitura
+ * com a mesma fala não acumula o fator.
+ */
 export function aplicarPatch(r: Rascunho, p: Patch, avisos: Avisos = []): Rascunho {
   const modeMudou = p.mode !== undefined && p.mode !== r.mode;
   const mode = p.mode ?? r.mode;
-
-  let focus = r.focus;
-  if (p.focus !== undefined) {
-    const novo = normalizarFoco(p.focus);
-    if (novo.length > 0) focus = novo;
-    else avisar(avisos, "focus vazio; mantido o anterior");
-  }
-  const areas = new Set(focus.map((f) => f.area));
+  const areas = new Set(r.focus.map((f) => f.area));
 
   // Critérios: a lista do patch é a final. Se o modo mudou sem lista nova, parte do catálogo do novo modo.
   const base = p.criteria ?? (modeMudou ? criteriosIniciais(mode, [...areas]) : r.criteria);
+  const origensDoPatch: Record<string, Origem> = p.criteria ? (p.origens ?? {}) : modeMudou ? {} : r.origens;
+  const fala = (o: Origem | undefined) => o !== undefined && o !== "catalogo";
+  const comFator = p.criteria
+    ? base.map((c) => ({ ...c, weight: c.weight * ((fala(origensDoPatch[c.id]) ? 1.5 : 1) / (fala(r.origens[c.id]) ? 1.5 : 1)) }))
+    : base;
+  const criteria = alinharPesos(ajustarCriterios(comFator, areas, mode, avisos), r.focus);
+  const ids = new Set(criteria.map((c) => c.id));
 
   return {
     ...r,
     mode,
     seniority: p.seniority ?? r.seniority,
-    focus,
-    criteria: alinharPesos(ajustarCriterios(base, areas, mode, avisos), focus),
-    recruiterNotes: p.recruiterNotes ?? r.recruiterNotes,
+    criteria,
+    origens: Object.fromEntries(Object.entries(origensDoPatch).filter(([id]) => ids.has(id))),
+    eliminatorios: p.eliminatorios ?? r.eliminatorios,
+    contexto: p.contexto ?? r.contexto,
     durationMin: p.durationMin ?? r.durationMin,
     // Problema escolhido para o modo antigo não serve para o novo; volta ao padrão do modo.
     problemId: p.problemId ?? (modeMudou ? undefined : r.problemId),
@@ -308,47 +360,17 @@ export interface ResultadoExtracao {
   tentativas: Tentativa[];
 }
 
-/** Frases de um texto, cortadas depois de cada pontuação final. */
-function frasesDe(texto: string): string[] {
-  return texto
-    .split(/(?<=[.!?])\s+/)
-    .map((f) => f.trim())
-    .filter(Boolean);
+/** O que o extrator sabe além da conversa: o formato escolhido na troca, que prevalece sobre o que o patch trouxe. */
+export interface ContextoExtracao {
+  modoEscolhido?: InterviewMode;
 }
-
-/** Palavras com mais de duas letras, sem acento, para comparar frases. */
-function palavrasDe(texto: string): Set<string> {
-  const normal = texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-  return new Set(normal.split(/[^a-z0-9]+/).filter((w) => w.length > 2));
-}
-
-/** Similaridade de palavras acima de 0,8 (Jaccard). */
-function quaseIgual(a: string, b: string): boolean {
-  const pa = palavrasDe(a);
-  const pb = palavrasDe(b);
-  if (pa.size === 0 || pb.size === 0) return false;
-  const inter = [...pa].filter((w) => pb.has(w)).length;
-  return inter / (pa.size + pb.size - inter) > 0.8;
-}
-
-/** Frase que fala de tom ou de dicas: essa parte vem do estado de preferências, não do texto livre. */
-const TOM_OU_DICA = /\b(tom|dica|dicas|clima)\b|amig|desafi/i;
 
 /**
- * Limpa as notas da recrutadora. Tira as frases que são perguntas, as que repetem uma fala do Totti e as que
- * falam de tom ou dicas. No lugar dessas últimas, acrescenta a frase gerada das preferências. Função pura.
+ * Extrai o patch da conversa e aplica no rascunho. Antes de aplicar, cada trecho que o modelo citou é conferido
+ * com as falas dela (`validarEvidencias`). O foco e as notas não passam por aqui: ver `pesos.ts` e `guia.ts`.
  */
-export function limparNotas(notas: string, falasDaTotti: string[], preferencias: Preferencias): string {
-  const ditas = falasDaTotti.flatMap(frasesDe);
-  const mantidas = frasesDe(notas).filter((f) => !f.endsWith("?") && !TOM_OU_DICA.test(f) && !ditas.some((d) => quaseIgual(f, d)));
-  return [...mantidas, fraseTomEDicas(preferencias)].join(" ");
-}
-
-export async function extrair(
-  r: Rascunho,
-  transcricao: Turno[],
-  preferencias: Preferencias = PREFERENCIAS_PADRAO,
-): Promise<ResultadoExtracao> {
+export async function extrair(r: Rascunho, transcricao: Turno[], contexto: ContextoExtracao = {}): Promise<ResultadoExtracao> {
+  const modoEscolhido = contexto.modoEscolhido;
   const avisos: Avisos = [];
   const tentativas: Tentativa[] = [];
   const tentativasJson: TentativaJson[] = [];
@@ -402,11 +424,11 @@ export async function extrair(
     }
 
     tentativasJson.push({ resposta: resposta.content });
-    const aceito = checarDuracao(patch, transcricao, avisos);
+    const checado = checarDuracao(patch, transcricao, avisos);
+    const aceito = validarEvidencias(checado, transcricao, checado.mode ?? r.mode, avisos);
     const aplicado = aplicarPatch(r, aceito, avisos);
-    const falasDaTotti = transcricao.filter((t) => t.role === "agente").map((t) => t.text);
     return {
-      rascunho: { ...aplicado, recruiterNotes: limparNotas(aplicado.recruiterNotes, falasDaTotti, preferencias) },
+      rascunho: modoEscolhido ? mudarModo(aplicado, modoEscolhido) : aplicado,
       ms,
       provedor,
       model: modelo,

@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { registrarEvento } from "@/lib/pre-entrevista/log";
-import { aguardarExtracao, getSessao, salvarConfig, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
+import { aguardarExtracao, aplicarPesosNaSessao, getSessao, salvarConfig, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
+import { atualizarNaoAvaliado } from "@/lib/pre-entrevista/turno";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +43,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   await aguardarExtracao(sessao);
   if (lido.data.rascunho) substituirRascunho(sessao, lido.data.rascunho, "revisão manual");
 
-  const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias);
+  atualizarNaoAvaliado(sessao);
+  // Na finalização, o foco e o guia saem do estado (ênfase, falas, decisões), não da revisão à mão.
+  aplicarPesosNaSessao(sessao, "finalização");
+  const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias, sessao.naoAvaliado);
   if (!resultado.ok) {
     registrarEvento(sessao, {
       tipo: "finalizacao",
