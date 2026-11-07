@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import { afterEach, test } from "node:test";
+import { NextRequest } from "next/server";
+import { POST } from "../route";
+
+const fetchOriginal = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = fetchOriginal;
+  delete process.env.ELEVENLABS_API_KEY;
+  delete process.env.ELEVENLABS_VOICE_ID;
+});
+const pedido = (corpo: unknown) => new NextRequest("http://localhost/api/falar", { method: "POST", body: JSON.stringify(corpo) });
+const alinhamento = { characters: ["o", "i"], character_start_times_seconds: [0, 0.1], character_end_times_seconds: [0.1, 0.2] };
+
+test("sem chave responde 501 (o quadro usa a voz do navegador)", async () => {
+  assert.equal((await POST(pedido({ texto: "oi" }))).status, 501);
+});
+
+test("exige texto", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  assert.equal((await POST(pedido({ texto: "  " }))).status, 400);
+  assert.equal((await POST(pedido({ texto: "a".repeat(2001) }))).status, 400);
+});
+
+test("usa a voz configurada e devolve áudio com alinhamento", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  process.env.ELEVENLABS_VOICE_ID = "voz-x";
+  let url = "";
+  globalThis.fetch = (async (alvo: unknown) => {
+    url = String(alvo);
+    return Response.json({ audio_base64: "AAAA", alignment: alinhamento });
+  }) as typeof fetch;
+  const resposta = await POST(pedido({ texto: "oi" }));
+  assert.match(url, /text-to-speech\/voz-x\/with-timestamps/);
+  assert.deepEqual(await resposta.json(), { audio_base64: "AAAA", alinhamento });
+});
+
+test("falha ou resposta estranha do ElevenLabs vira 502", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  globalThis.fetch = (async () => new Response("x", { status: 401 })) as typeof fetch;
+  assert.equal((await POST(pedido({ texto: "oi" }))).status, 502);
+  globalThis.fetch = (async () => Response.json({ audio_base64: "AAAA", alignment: null })) as typeof fetch;
+  assert.equal((await POST(pedido({ texto: "oi" }))).status, 502);
+});
