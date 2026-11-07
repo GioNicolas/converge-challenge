@@ -86,6 +86,7 @@ function Prova({ prova, aoAbrirImagem }: { prova: ProvaVista; aoAbrirImagem: (ur
         <Icone nome="desenho" tamanho={15} />
       </span>
       <div className="flex flex-1 flex-col gap-2.5">
+        {prova.observacao && <p className="leading-relaxed text-texto">{prova.observacao}</p>}
         {prova.elementos.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {prova.elementos.map((nome, i) => (
@@ -95,7 +96,7 @@ function Prova({ prova, aoAbrirImagem }: { prova: ProvaVista; aoAbrirImagem: (ur
             ))}
           </div>
         ) : (
-          <p className="text-texto-suave">No desenho</p>
+          !prova.observacao && <p className="text-texto-suave">No desenho</p>
         )}
         {prova.imagem && (
           <button

@@ -7,7 +7,14 @@ import type { Recomendacao, Scorecard } from "./scorecard";
 
 export type ProvaVista =
   | { tipo: "fala"; momento: string | null; texto: string }
-  | { tipo: "desenho"; momento: string | null; elementos: string[]; imagem: string | null };
+  | {
+      tipo: "desenho";
+      momento: string | null;
+      elementos: string[];
+      imagem: string | null;
+      /** O que o entrevistador viu no desenho naquele momento (ex.: "banco único sem cache"). */
+      observacao: string | null;
+    };
 
 export type CriterioVisto = {
   id: string;
@@ -116,6 +123,7 @@ export function montarRelatorio(p: {
               momento: formatarMomento(e.horario, inicio),
               elementos: (e.elementos ?? []).map((id) => nomes.get(id) ?? id),
               imagem: e.imagem ?? imagemAte(e.horario),
+              observacao: e.texto?.trim() || null,
             },
       ),
     };

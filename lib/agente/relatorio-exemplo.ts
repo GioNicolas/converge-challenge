@@ -32,7 +32,7 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
       significado: "Os componentes principais estão lá e o fluxo de ponta a ponta faz sentido.",
       justificativa:
         "Desenhou cliente, API, gerador de códigos e banco, com o caminho do redirecionamento separado do de criação. Faltou explicar o que acontece quando o código não existe.",
-      provas: [{ tipo: "desenho", momento: "06:30", elementos: ["Cliente", "API", "Gerador de código", "Postgres"], imagem: null }],
+      provas: [{ tipo: "desenho", momento: "06:30", elementos: ["Cliente", "API", "Gerador de código", "Postgres"], imagem: null, observacao: "leitura e criação em caminhos separados" }],
     },
     {
       id: "escalabilidade",
@@ -42,7 +42,7 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
       justificativa:
         "O banco único só foi questionado depois da pergunta do entrevistador. A resposta trouxe um cache, sem dizer o que vai nele nem como é invalidado.",
       provas: [
-        { tipo: "desenho", momento: "12:05", elementos: ["Postgres"], imagem: null },
+        { tipo: "desenho", momento: "12:05", elementos: ["Postgres"], imagem: null, observacao: "banco único, sem cache, recebendo toda a leitura" },
         { tipo: "fala", momento: "13:20", texto: "Dá para colocar um Redis na frente... guardando os mais acessados." },
       ],
     },
