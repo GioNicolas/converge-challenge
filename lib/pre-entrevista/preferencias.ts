@@ -12,6 +12,8 @@ export interface Preferencias {
   dicas: "leves" | "nenhuma" | "livres";
   /** Duração que ela disse na última fala em que falou de tempo (ver `duracao.ts`). Tem prioridade sobre o extrator. */
   duracaoMin?: number;
+  /** Linguagens a que ela restringiu na última fala sobre isso (ver `linguagens.ts`). Sem valor: todas as da IDE. */
+  linguagens?: string[];
 }
 
 export const PREFERENCIAS_PADRAO: Preferencias = { tom: "amigavel", dicas: "leves" };

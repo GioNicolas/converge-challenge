@@ -11,6 +11,7 @@ import type { Classificacao, Vaga } from "./classificador";
 import { problems } from "@/lib/problems";
 import { selecionarProblema } from "@/lib/problems/selecao";
 import { criteriosIniciais, problemaPadrao } from "./catalogo";
+import { LINGUAGENS_IDE } from "./linguagens";
 
 /** Uma fala da conversa de pré-entrevista. */
 export type Turno = { role: "recrutadora" | "agente"; text: string };
@@ -47,8 +48,8 @@ export function duracaoDoRascunho(r: { mode: InterviewMode; durationMin?: number
   return preferencias?.duracaoMin ?? r.durationMin ?? DURACAO_PADRAO[r.mode];
 }
 
-/** Os candidatos escolhem a linguagem na IDE. */
-const LINGUAGENS = ["python", "cpp"];
+/** Sem restrição da recrutadora, o candidato escolhe na IDE entre todas as linguagens que ela roda. */
+const LINGUAGENS: string[] = [...LINGUAGENS_IDE];
 
 export const Foco = z.object({ area: FocusArea, weight: z.number().min(0).max(1) });
 export type Foco = z.infer<typeof Foco>;
@@ -244,7 +245,7 @@ function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil
  */
 export function paraInterviewConfig(
   r: Rascunho,
-  preferencias?: { duracaoMin?: number },
+  preferencias?: { duracaoMin?: number; linguagens?: string[] },
   naoAvaliado: string[] = [],
 ): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
   const erros: string[] = [];
@@ -265,7 +266,7 @@ export function paraInterviewConfig(
     recruiterNotes: acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado),
     criteria: r.criteria,
     ...escolherProblema(r),
-    languages: LINGUAGENS,
+    languages: preferencias?.linguagens?.length ? preferencias.linguagens : LINGUAGENS,
     durationMin: duracaoDoRascunho(r, preferencias),
   };
 

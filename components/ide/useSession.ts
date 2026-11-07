@@ -27,6 +27,7 @@ export function useSession(
   problemId: string = DEFAULT_CONFIG.problemId,
   configId: string = DEFAULT_CONFIG.id,
   durationMin: number = DEFAULT_CONFIG.durationMin,
+  initialLanguage: string = INITIAL_LANGUAGE,
 ) {
   const durationMs = durationMin * 60_000;
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -99,9 +100,9 @@ export function useSession(
       type: "session_started",
       configId,
       problemId,
-      language: INITIAL_LANGUAGE,
+      language: initialLanguage,
     });
-  }, [sendEvent, problemId, configId]);
+  }, [sendEvent, problemId, configId, initialLanguage]);
 
   // Polling de blip (GET /api/blip/pending): mostra o balão mesmo sem evento novo do candidato.
   useEffect(() => {

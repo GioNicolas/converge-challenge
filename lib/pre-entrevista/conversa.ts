@@ -10,6 +10,7 @@ import { areasEmJogo, AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
 import { COMO_AVALIAMOS, mede, modoAlternativoQueMede } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import type { OferecerTradeoffPasso, Passo } from "./planejador";
+import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
 import { DURACAO_PADRAO, duracaoDoRascunho, listar, type Rascunho, type Turno } from "./rascunho";
 import type { Sessao } from "./sessoes";
@@ -410,7 +411,15 @@ export function fraseLogistica(r: Rascunho, p: Preferencias, variante = 0): stri
     `Vão ser ${dur} minutos, com ${clima} e ${dica}.`,
     `Duração de ${dur} minutos, ${clima}, ${dica}.`,
   ];
-  return formas[variante % formas.length];
+  const linguagem = r.mode === "live_coding" ? fraseLinguagem(p) : "";
+  return [formas[variante % formas.length], linguagem].filter(Boolean).join(" ");
+}
+
+/** Linguagem só entra no resumo quando a recrutadora restringiu: "O código vai ser só em Python." */
+function fraseLinguagem(p: Preferencias): string {
+  const langs = p.linguagens;
+  if (!langs?.length || langs.length >= LINGUAGENS_IDE.length) return "";
+  return `O código vai ser só em ${nomesDasLinguagens(langs)}.`;
 }
 
 const FECHAMENTOS = [
@@ -439,6 +448,10 @@ function confirmacaoDeterministica(sessao: Sessao): string | undefined {
   }
   const duracao = duracaoDoRascunho(sessao.rascunho, sessao.preferencias);
   if (duracao !== anterior.duracaoMin) partes.push(`${porExtenso(duracao)} minutos`);
+  const langs = atual.linguagens ?? [...LINGUAGENS_IDE];
+  if (langs.join() !== (anterior.preferencias.linguagens ?? [...LINGUAGENS_IDE]).join()) {
+    partes.push(langs.length >= LINGUAGENS_IDE.length ? "linguagem livre" : `só ${nomesDasLinguagens(langs)}`);
+  }
   if (partes.length === 0) return undefined;
   const abertura = ["Anotado", "Fechado"][Math.floor(Math.random() * 2)];
   return `${abertura}, ${partes.join(" e ")}. Posso finalizar?`;

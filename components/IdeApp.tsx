@@ -59,12 +59,15 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
   const router = useRouter();
   // A questão vem da config da vaga (nível definido pelo agente); `problemId` só sobrescreve em testes.
   const problem = problemId ? getProblem(problemId) : resolveProblem(vaga);
-  const session = useSession(problem.id, vaga.id, vaga.durationMin);
+  // Abre na primeira linguagem da vaga que a questão tem (a recrutadora pode ter restringido, ex.: só C++).
+  const initialLanguage = vaga.languages.find((l) => l in problem.starters) ?? vaga.languages[0];
+  const session = useSession(problem.id, vaga.id, vaga.durationMin, initialLanguage);
   const capture = useCodeCapture({
     sendEvent: session.sendEvent,
     nowT: session.nowT,
     endedRef: session.endedRef,
     starters: problem.starters,
+    initialLanguage,
   });
 
   const [run, setRun] = useState<RunState>({ status: "idle" });

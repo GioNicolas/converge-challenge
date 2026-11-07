@@ -25,6 +25,7 @@ import {
   type PlanoEstado,
 } from "./planejador";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
+import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
 import { aplicarDecisoesTradeoff, duracaoDoRascunho } from "./rascunho";
 import { desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
@@ -151,6 +152,9 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
   // Duração lida direto da fala, antes do planejador: o resumo não depende do extrator (lento) para saber o tempo.
   const duracao = lerDuracao(texto, { perguntouTempo: perguntouSobreTempo(ultimaFalaDoAgente(sessao.transcricao)) });
   if (duracao !== undefined) sessao.preferencias = { ...sessao.preferencias, duracaoMin: duracao };
+  // Linguagem também: "só Python" vira restrição na config (no padrão o candidato escolhe entre todas).
+  const linguagens = lerLinguagens(texto);
+  if (linguagens) sessao.preferencias = { ...sessao.preferencias, linguagens };
   await atualizarCobertura(sessao);
   resolverTradeoff(sessao);
   atualizarNaoAvaliado(sessao);
