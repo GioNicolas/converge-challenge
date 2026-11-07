@@ -41,18 +41,48 @@ const ALVOS: Alvo[] = [
 const Competencias = z.array(
   z.object({
     nome: z.string().trim().min(1).max(60),
+    tipo: z.enum(["linguagem", "tecnologia", "conhecimento"]),
     verificavel: z.object({ live_coding: z.boolean(), system_design: z.boolean() }),
   }),
 );
 
+/**
+ * Rede de segurança: linguagens de programação comuns. Linguagem não vai para "não avaliado": no live coding o
+ * candidato escolhe a linguagem na IDE, e em system design linguagem não importa.
+ */
+const LINGUAGENS_COMUNS = new Set([
+  "python",
+  "typescript",
+  "javascript",
+  "go",
+  "golang",
+  "kotlin",
+  "java",
+  "c++",
+  "cpp",
+  "c#",
+  "csharp",
+  "rust",
+  "ruby",
+  "php",
+  "swift",
+  "scala",
+  "dart",
+  "elixir",
+]);
+
+const ehLinguagem = (c: { nome: string; tipo: string }) =>
+  c.tipo === "linguagem" || LINGUAGENS_COMUNS.has(c.nome.toLowerCase().replace(/\s+/g, ""));
+
 const PROMPT_SISTEMA = `Você lista, de uma vaga de tecnologia, até ${MAX_COMPETENCIAS} competências-chave: tecnologias ou conhecimentos específicos que a vaga exige (ex.: Kafka, React, Kubernetes, RAG, Python). Não liste habilidades gerais (comunicação, liderança) nem áreas genéricas (engenharia de IA).
+Para cada uma, diga o tipo: "linguagem" (Python, Go, TypeScript), "tecnologia" (Kafka, React, PostgreSQL, Kubernetes) ou "conhecimento" (RAG, sagas, idempotência).
 
 Para cada competência, diga se cada formato consegue verificá-la:
 - live_coding: um problema de algoritmo numa IDE. Verifica linguagens e código (Python, TypeScript, React, SQL ao escrever uma consulta). Não verifica ferramentas de infraestrutura nem de IA (Kafka, Kubernetes, RAG: não).
 - system_design: desenhar a arquitetura num quadro. Verifica tecnologias de infraestrutura, dados e arquitetura (Kafka, Redis, PostgreSQL, Kubernetes, RAG como parte do desenho). Não verifica sintaxe nem frameworks de interface (React, Python: não).
 
 Responda só com JSON, sem texto antes ou depois, sem cercas de código:
-[{"nome": "Kafka", "verificavel": {"live_coding": false, "system_design": true}}]`;
+[{"nome": "Kafka", "tipo": "tecnologia", "verificavel": {"live_coding": false, "system_design": true}}]`;
 
 /** Pega a lista JSON da resposta, tirando cercas de código e texto em volta. */
 function extrairLista(texto: string): unknown {
@@ -93,7 +123,9 @@ export async function extrairCompetencias(vaga: Vaga): Promise<ResultadoCompeten
   try {
     const lido = Competencias.safeParse(extrairLista(resposta.content));
     if (!lido.success) throw new Error(lido.error.issues[0]?.message ?? "formato inválido");
-    return { ...base, competencias: lido.data.slice(0, MAX_COMPETENCIAS) };
+    // Linguagem sai aqui: não entra nem no "não avaliado" nem na lista de competências.
+    const semLinguagem = lido.data.filter((c) => !ehLinguagem(c));
+    return { ...base, competencias: semLinguagem.slice(0, MAX_COMPETENCIAS) };
   } catch (err) {
     const motivo = err instanceof Error ? err.message : String(err);
     return { ...base, competencias: [], erro: `resposta inválida: ${motivo}` };

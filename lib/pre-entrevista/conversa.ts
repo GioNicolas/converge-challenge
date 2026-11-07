@@ -326,6 +326,19 @@ function perguntaParaRetomar(passo: Passo, sessao: Sessao): string {
   }
 }
 
+/** Frase que fala de dica, tom, clima ou duração (em minutos ou por extenso). */
+const LOGISTICA_NA_FALA = /\b(dicas?|tom|clima|minutos?|dura[çc][ãa]o|quinze|trinta|quarenta|quarenta e cinco|sessenta)\b|\d+\s*min/i;
+
+/**
+ * Tira da revisão feita pelo modelo as frases sobre dica, tom e duração. Se não sobrar nada, pergunta de novo se pode
+ * finalizar. Função pura.
+ */
+export function removerLogisticaDaRevisao(texto: string): string {
+  const frases = texto.split(/(?<=[.!?])\s+/).filter((f) => f.trim() && !LOGISTICA_NA_FALA.test(f));
+  const limpo = frases.join(" ").trim();
+  return limpo || "Certo. Quer mudar mais alguma coisa, ou posso finalizar?";
+}
+
 /**
  * Frase do resumo com o que fica de fora desta entrevista ("X e Y ficam pra próxima etapa."). Sem o modelo.
  * Sem itens, não há frase.
@@ -545,6 +558,10 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     resposta = reescrita;
   }
   // No resumo, o código acrescenta o que fica de fora, duração, tom e dicas (do estado) e a pergunta final, em variações.
+  // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
+  if (texto && passo.tipo === "resumo_final" && passo.revisao) {
+    texto = removerLogisticaDaRevisao(texto);
+  }
   if (texto && resumoCompleto) {
     const variante = Math.floor(Math.random() * 3);
     texto = [

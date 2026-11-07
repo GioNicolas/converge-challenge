@@ -162,6 +162,27 @@ export function aplicarDecisoesTradeoff(r: Rascunho, decisoes: DecisoesTradeoff,
   return novo;
 }
 
+/**
+ * Área que estava no foco e que o patch tirou sem pedido volta com o peso anterior: o foco é renormalizado e os
+ * critérios dela (que o patch também perdeu) voltam. Só pode sair do foco a área que `podeSair` aceita (dispensa
+ * observada ou decisão de troca). Devolve as áreas restauradas, para o aviso no log. Função pura.
+ */
+export function manterAreasSemPedido(
+  anterior: Rascunho,
+  novo: Rascunho,
+  podeSair: (area: FocusArea) => boolean,
+): { rascunho: Rascunho; restauradas: FocusArea[] } {
+  const noNovo = new Set(novo.focus.map((f) => f.area));
+  const restauradas = anterior.focus.filter((f) => !noNovo.has(f.area) && !podeSair(f.area));
+  if (restauradas.length === 0) return { rascunho: novo, restauradas: [] };
+  const focus = normalizarPesosDoFoco([...novo.focus, ...restauradas]);
+  const criteriosDeVolta = anterior.criteria.filter(
+    (c) => restauradas.some((f) => f.area === c.focus) && !novo.criteria.some((n) => n.id === c.id),
+  );
+  const criteria = alinharPesos([...novo.criteria, ...criteriosDeVolta], focus);
+  return { rascunho: { ...novo, focus, criteria }, restauradas: restauradas.map((f) => f.area) };
+}
+
 /** Texto da nota que lista as áreas e competências fora desta entrevista. Sempre a mesma frase, para não duplicar. */
 const PREFIXO_NAO_AVALIADO = "Não avaliado nesta entrevista:";
 

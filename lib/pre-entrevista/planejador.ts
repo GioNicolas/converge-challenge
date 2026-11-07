@@ -200,8 +200,13 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
     return { tipo: "responder_duvida", retomar: emCurso, seguidas: seguidas + 1 };
   }
 
+  // "Pediu mudança" só conta logo depois de um resumo. Depois de uma pergunta, a resposta é uma resposta.
+  // Sem passo conhecido, vale como antes (o caso normal é sempre um resumo antes do pedido).
+  const ultimaFala = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
+  const pediuMudanca = sinal("pediu_mudanca") >= LIMIAR && (ultimaFala === undefined || ultimaFala.tipo === "resumo_final");
+
   // 1. Ela aprovou o resumo sem pedir mudança: acabou.
-  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && sinal("pediu_mudanca") < LIMIAR) return { tipo: "encerrar" };
+  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && !pediuMudanca) return { tipo: "encerrar" };
 
   // 1b. Área que o formato não mede está em jogo: a Totti oferece a troca antes de qualquer outra mudança de foco.
   const oferta = tradeoffPasso(e, emJogo);
@@ -223,7 +228,7 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
 
   // 2c. Depois do resumo, ela pediu mudança: a Totti confirma só a mudança e pergunta se pode finalizar.
   // Com o limite de resumos atingido, encerra mesmo assim.
-  if (e.resumos > 0 && sinal("pediu_mudanca") >= LIMIAR) {
+  if (e.resumos > 0 && pediuMudanca) {
     return e.resumos < MAX_RESUMOS ? { tipo: "resumo_final", revisao: true } : { tipo: "encerrar" };
   }
 

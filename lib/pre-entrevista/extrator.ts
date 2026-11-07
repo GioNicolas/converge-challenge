@@ -10,10 +10,19 @@
 import { z } from "zod";
 import { Criterion, FocusArea, InterviewMode } from "@/lib/contracts";
 import { CATALOGO, criteriosIniciais, type CriterioModelo } from "./catalogo";
+import { LIMIAR } from "./cobertura";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { PREFERENCIAS_PADRAO, fraseTomEDicas, type Preferencias } from "./preferencias";
-import { aplicarDecisoesTradeoff, alinharPesos, Rascunho, type DecisoesTradeoff, type Turno } from "./rascunho";
+import {
+  aplicarDecisoesTradeoff,
+  alinharPesos,
+  areasFora,
+  manterAreasSemPedido,
+  Rascunho,
+  type DecisoesTradeoff,
+  type Turno,
+} from "./rascunho";
 
 const TEMPERATURA = 0.2;
 const MAX_TOKENS_EXTRATOR = 12000;
@@ -344,18 +353,30 @@ export function limparNotas(notas: string, falasDaTotti: string[], preferencias:
   return [...mantidas, fraseTomEDicas(preferencias)].join(" ");
 }
 
+/** O que o extrator sabe além da conversa: trocas de formato já feitas e o máximo observado de cada `dispensa_`. */
+export interface ContextoExtracao {
+  /** Áreas que ficaram de fora (saem do foco e dos critérios) ou que foram trocadas. */
+  decisoes?: DecisoesTradeoff;
+  /** Formato escolhido na troca: prevalece sobre o que o patch trouxe. */
+  modoEscolhido?: InterviewMode;
+  /** Máximo observado de `dispensa_<area>` na sessão. Só essa dispensa autoriza tirar a área do foco. */
+  dispensaMaxima?: Partial<Record<FocusArea, number>>;
+}
+
 /**
- * Extrai o patch da conversa e aplica no rascunho. `decisoes` e `modoEscolhido` são as trocas de formato já feitas:
- * áreas que ficaram de fora saem do foco e dos critérios, e o formato escolhido prevalece. Assim o modelo
- * nunca recoloca uma área que a recrutadora deixou de fora.
+ * Extrai o patch da conversa e aplica no rascunho. Três proteções depois do patch: áreas de fora e formato escolhido
+ * (ver `aplicarDecisoesTradeoff`), e a área do foco só sai se houve dispensa observada acima do limiar ou decisão
+ * de troca. Sem isso, a área volta com o peso anterior e o aviso vai para o log.
  */
 export async function extrair(
   r: Rascunho,
   transcricao: Turno[],
   preferencias: Preferencias = PREFERENCIAS_PADRAO,
-  decisoes: DecisoesTradeoff = {},
-  modoEscolhido?: InterviewMode,
+  contexto: ContextoExtracao = {},
 ): Promise<ResultadoExtracao> {
+  const decisoes = contexto.decisoes ?? {};
+  const modoEscolhido = contexto.modoEscolhido;
+  const dispensaMaxima = contexto.dispensaMaxima ?? {};
   const avisos: Avisos = [];
   const tentativas: Tentativa[] = [];
   const tentativasJson: TentativaJson[] = [];
@@ -410,7 +431,12 @@ export async function extrair(
 
     tentativasJson.push({ resposta: resposta.content });
     const aceito = checarDuracao(patch, transcricao, avisos);
-    const aplicado = aplicarDecisoesTradeoff(aplicarPatch(r, aceito, avisos), decisoes, modoEscolhido);
+    const comDecisoes = aplicarDecisoesTradeoff(aplicarPatch(r, aceito, avisos), decisoes, modoEscolhido);
+    const podeSair = (area: FocusArea) => areasFora(decisoes).includes(area) || (dispensaMaxima[area] ?? 0) >= LIMIAR;
+    const { rascunho: aplicado, restauradas } = manterAreasSemPedido(r, comDecisoes, podeSair);
+    for (const area of restauradas) {
+      avisar(avisos, `área "${area}" saiu do foco sem pedido dela; mantida com o peso anterior`);
+    }
     const falasDaTotti = transcricao.filter((t) => t.role === "agente").map((t) => t.text);
     return {
       rascunho: { ...aplicado, recruiterNotes: limparNotas(aplicado.recruiterNotes, falasDaTotti, preferencias) },

@@ -41,6 +41,8 @@ export interface Sessao {
   competencias: Competencia[];
   /** O que esta entrevista não avalia: áreas deixadas para a próxima etapa e competências que o formato não verifica. */
   naoAvaliado: string[];
+  /** Máximo observado de cada `dispensa_<area>` nesta sessão. Só dispensa acima do limiar tira área do foco. */
+  dispensaMaxima: Partial<Record<FocusArea, number>>;
   logs: EventoLog[];
   status: { extraindo: boolean; versaoExtraida: number };
   configFinal?: InterviewConfig;
@@ -131,6 +133,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     preferencias: { ...PREFERENCIAS_PADRAO },
     competencias: competencias.competencias,
     naoAvaliado: [],
+    dispensaMaxima: {},
     logs: [],
     status: { extraindo: false, versaoExtraida: 0 },
   };
@@ -237,7 +240,11 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
   const antes = sessao.rascunho;
   let etapa = "extracao";
   try {
-    const ext = await extrair(antes, transcricao, sessao.preferencias, sessao.plano.decisoesTradeoff, sessao.plano.modoEscolhido);
+    const ext = await extrair(antes, transcricao, sessao.preferencias, {
+      decisoes: sessao.plano.decisoesTradeoff,
+      modoEscolhido: sessao.plano.modoEscolhido,
+      dispensaMaxima: sessao.dispensaMaxima,
+    });
     const camposDoPatch = Object.keys(ext.patch).filter((k) => ext.patch[k as keyof typeof ext.patch] !== undefined);
     registrarEvento(sessao, {
       tipo: "extracao",

@@ -44,6 +44,10 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
     });
     sessao.plano = { ...sessao.plano, sinais: cob.sinais };
+    // Guarda o máximo de cada dispensa: é o que autoriza a extração a tirar a área do foco depois.
+    for (const area of AREAS) {
+      sessao.dispensaMaxima[area] = Math.max(sessao.dispensaMaxima[area] ?? 0, cob.sinais[`dispensa_${area}`] ?? 0);
+    }
     sessao.preferencias = atualizarPreferencias(sessao.preferencias, cob.sinais);
     const emJogo = areasEmJogo(sessao.rascunho.focus, cob.sinais, sessao.plano.decisoesTradeoff);
     sessao.rascunho = aplicarCobertura(sessao.rascunho, cob.cobertura, emJogo);
