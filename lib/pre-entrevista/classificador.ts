@@ -11,7 +11,7 @@
  * Decisões com confiança baixa voltam em `confirmar` — o agente de voz pergunta
  * em vez de sugerir.
  */
-import { choice, score } from "@typesafe-ai/sdk";
+import { choice, noul, score } from "@typesafe-ai/sdk";
 import type { FocusArea, InterviewMode, InterviewConfig } from "@/lib/contracts";
 import { jev } from "./jev";
 
@@ -43,6 +43,8 @@ export interface Classificacao {
   focusScores: FocoSugerido[];
   /** Áreas selecionadas com pesos que somam 1 — já no formato do `InterviewConfig`. */
   focus: InterviewConfig["focus"];
+  /** Probabilidade de a vaga deixar o nível explícito (0 a 1). Abaixo de 0,5, a senioridade vai para `confirmar`. */
+  nivelExplicito: number;
   /** Decisões que o agente deve perguntar em vez de sugerir. */
   confirmar: Array<"mode" | "seniority" | "focus">;
   usage: { inputTokens: number | null; ms: number };
@@ -56,6 +58,8 @@ export interface Classificacao {
 
 /** Abaixo disso, o agente pergunta em vez de sugerir. */
 export const CONFIANCA_MINIMA = 0.7;
+/** Abaixo disso, a vaga não deixa o nível claro: a senioridade vai para `confirmar`, mesmo com a confiança alta. */
+export const MINIMO_NIVEL_EXPLICITO = 0.5;
 /** Uma área entra no foco se a chance de ser "importante" ou "central" passa disso. */
 const P_MINIMA_FOCO = 0.5;
 /** Entre esses limites a área está em cima do muro: o agente confirma com a recrutadora. */
@@ -135,6 +139,25 @@ const SENIORIDADE = choice("Qual a senioridade desta vaga?", {
     ],
   },
 });
+
+/**
+ * A vaga deixa o nível claro? Sem isso, o Jev responde "pleno" com confiança alta mesmo quando a vaga não diz nada,
+ * então a Totti precisa perguntar em vez de afirmar (ver `confirmar` em `classificarVaga`).
+ */
+const NIVEL_EXPLICITO = noul(
+  "A vaga deixa claro o nível da pessoa? Ou seja: cita um nível (estágio, trainee, júnior, pleno, sênior, staff, principal, lead, arquiteto), " +
+    "anos de experiência, ou diz que a pessoa vai liderar ou mentorar outras?",
+  {
+    true:
+      "Sim se a vaga cita um nível ou anos de experiência (ex.: 'pleno', 'sênior', 'júnior', 'estágio', '6+ anos de backend'), " +
+      "ou se diz que a pessoa vai liderar, mentorar ou conduzir um time (ex.: 'liderar time de 6 pessoas', 'mentorar engenheiros'). " +
+      "Basta um desses sinais.",
+    false:
+      "Não se a vaga só descreve atividades e tecnologias, sem nenhum nível, nenhum ano de experiência e nenhum papel de liderança " +
+      "(ex.: 'desenvolver o app', 'participar do on-call', 'apresentar resultados para a diretoria'). " +
+      "Cargo sem nível, como 'Cientista de Dados' ou 'Analista de QA', também é não.",
+  },
+);
 
 /** Régua comum de 0 a 3, especializada por área. */
 function reguaFoco(nome: string, o_que_e: string, sinais: string[]) {
@@ -228,7 +251,7 @@ export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {
         ...(vaga.context ? { contexto_adicional: vaga.context } : {}),
       },
     },
-    questions: { modo: MODO, senioridade: SENIORIDADE, ...FOCOS },
+    questions: { modo: MODO, senioridade: SENIORIDADE, nivel_explicito: NIVEL_EXPLICITO, ...FOCOS },
   };
   const { answers, usage, model } = await jev().systemOne(request);
 
@@ -243,9 +266,10 @@ export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {
   const seniority = decisao<InterviewConfig["seniority"]>(answers.senioridade);
   const focus = pesosDoFoco(focusScores);
 
+  const nivelExplicito = answers.nivel_explicito.noul;
   const confirmar: Classificacao["confirmar"] = [];
   if (mode.confidence < CONFIANCA_MINIMA) confirmar.push("mode");
-  if (seniority.confidence < CONFIANCA_MINIMA) confirmar.push("seniority");
+  if (seniority.confidence < CONFIANCA_MINIMA || nivelExplicito < MINIMO_NIVEL_EXPLICITO) confirmar.push("seniority");
   if (focusScores.some((s) => s.pImportante > FAIXA_INCERTA[0] && s.pImportante < FAIXA_INCERTA[1])) confirmar.push("focus");
 
   return {
@@ -253,6 +277,7 @@ export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {
     seniority,
     focusScores,
     focus,
+    nivelExplicito,
     confirmar,
     usage: { inputTokens: usage.input_tokens, ms: Date.now() - inicio },
     request,
