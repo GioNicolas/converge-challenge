@@ -3,8 +3,8 @@
  * O conteúdo das perguntas vem do Analyst (lib/agents/analyst.ts), menos a pergunta de abertura.
  */
 import { isCovered } from "@/lib/agents/coverage";
+import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
-import { latestCode } from "@/lib/session/store";
 import type { QueuedQuestion, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
@@ -64,6 +64,12 @@ const IGNORED_RETRY_MS = 120_000;
 const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_closed", "session_started"]);
 /** Depois desse tempo sem evento novo, o candidato também conta como parado. */
 const IDLE_AFTER_MS = 8000;
+/** Escrevendo a primeira versão, só interrompe quem parou de mexer no código há esse tempo (provável travada). */
+const IMPLEMENTING_IDLE_MS = 20_000;
+/** Mexendo para melhorar uma solução que já funciona: só interrompe depois desse tempo sem mexer. */
+const OPTIMIZING_IDLE_MS = 45_000;
+/** Pergunta que não virou balão nesse tempo fica velha: o candidato já está pensando em outra coisa. */
+const QUESTION_MAX_AGE_MS = 90_000;
 
 const NO_BOOST = { boost: 0, reason: "" };
 
@@ -107,16 +113,6 @@ export function enqueueKickoff(session: SessionState, t: number): void {
     status: "queued",
     kickoff: true,
   });
-}
-
-/** Linhas não vazias do código atual que não estavam no código inicial da linguagem. */
-function linesWrittenBeyondStarter(session: SessionState): number {
-  const starter = getProblem(session.config.problemId).public.starters[session.language] ?? "";
-  const starterLines = new Set(starter.split("\n").map((l) => l.trim()));
-  return latestCode(session)
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l !== "" && !starterLines.has(l)).length;
 }
 
 /** Ótimo momento pra blip, pelo último run ou pausa da sessão. Sem evento relevante, sem boost. */
@@ -228,7 +224,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   }
 
   for (const q of candidates) {
-    if (isStale(session, q)) {
+    if (isStale(session, q, t)) {
       q.status = "stale";
       continue;
     }
@@ -296,6 +292,21 @@ function isSnoozed(q: QueuedQuestion, t: number): boolean {
 function waitReason(session: SessionState, t: number, q: QueuedQuestion): string | undefined {
   if (t < WARMUP_MS) return `esperando: aquecimento (faltam ${Math.ceil((WARMUP_MS - t) / 1000)} s)`;
 
+  // Cada fase tem seu ritmo: não corta quem está escrevendo a primeira versão nem quem está no meio de uma melhoria.
+  const fase = faseDaEntrevista(session);
+  const quiet = Math.floor((t - (session.codeHistory.at(-1)?.t ?? 0)) / 1000);
+  if (fase === "implementando" && q.keyMoment === undefined && quiet * 1000 < IMPLEMENTING_IDLE_MS) {
+    return `esperando: escrevendo a primeira versão (${quiet} s sem mexer, mín. ${IMPLEMENTING_IDLE_MS / 1000} s)`;
+  }
+  // Pergunta de foco (processo, sem código) não corta quem ainda está fazendo o código funcionar.
+  if (q.focusArea !== undefined && (fase === "implementando" || fase === "depurando") && session.config.durationMin * 60_000 - t > FINAL_STRETCH_MS) {
+    return `esperando: pergunta de foco só depois que o código funcionar (fase ${fase})`;
+  }
+  const exempt = q.kind === "retorno" || q.keyMoment !== undefined || isFinalStretchForAgenda(session, q, t);
+  if (fase === "otimizando" && !exempt && quiet * 1000 < OPTIMIZING_IDLE_MS) {
+    return `esperando: mexendo para melhorar a solução (${quiet} s sem mexer, mín. ${OPTIMIZING_IDLE_MS / 1000} s)`;
+  }
+
   // Prioridade alta, momento-chave e critério não explorado na reta final pulam a regra de 60 s entre blips.
   const skipsSpacing = q.priority >= HIGH_PRIORITY || q.keyMoment !== undefined || isFinalStretchForAgenda(session, q, t);
   const lastBlip = session.blips.at(-1);
@@ -313,10 +324,24 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
 }
 
 /**
- * Pergunta com grifo "velho": as linhas destacadas mudaram desde a versão do código em que ela foi criada.
- * Sem grifo, ou sem versão anterior ao createdAt, não há como comparar: não é obsoleta.
+ * Pergunta que perdeu o sentido: a entrevista mudou de fase desde que ela foi criada, ela esperou demais, ou
+ * as linhas grifadas mudaram. Retorno de desafio, pergunta de foco (de processo) e pergunta adiada pelo
+ * candidato não envelhecem pela fase nem pelo tempo.
  */
-function isStale(session: SessionState, q: QueuedQuestion): boolean {
+function isStale(session: SessionState, q: QueuedQuestion, t: number): boolean {
+  const ageless = q.kind === "retorno" || q.focusArea !== undefined || q.snoozedUntil !== undefined;
+  if (!ageless) {
+    if (q.fase !== undefined && q.fase !== faseDaEntrevista(session)) return true;
+    if (t - q.createdAt > QUESTION_MAX_AGE_MS) return true;
+  }
+  return linesChanged(session, q);
+}
+
+/**
+ * As linhas grifadas mudaram desde a versão do código em que a pergunta foi criada.
+ * Sem grifo, ou sem versão anterior ao createdAt, não há como comparar.
+ */
+function linesChanged(session: SessionState, q: QueuedQuestion): boolean {
   if (q.highlight === undefined) return false;
   const { startLine, endLine } = q.highlight;
   const createdVersion = session.codeHistory.filter((v) => v.t <= q.createdAt).at(-1);

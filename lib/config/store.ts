@@ -13,6 +13,8 @@ import { problems } from "@/lib/problems";
 import { hasProblem } from "@/problems";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
+/** Questão de toda entrevista, ignorando a seleção pela vaga. `undefined` volta a selecionar pelo banco. */
+const QUESTAO_FIXA: string | undefined = "two-sum";
 
 const globalForConfigs = globalThis as typeof globalThis & { __convergeConfigs?: Map<string, InterviewConfig> };
 const configs = (globalForConfigs.__convergeConfigs ??= new Map<string, InterviewConfig>());
@@ -28,6 +30,8 @@ const pasta = () => join(process.cwd(), "data", "configs");
  * falam da mesma questão (o `resolveProblem` da IDE vira só uma rede de segurança).
  */
 export function normalizarConfig(config: InterviewConfig): InterviewConfig {
+  // Temporário: enquanto afinamos a conversa do agente, toda entrevista é o Two Sum (o único pacote completo).
+  if (QUESTAO_FIXA) return { ...config, problemId: QUESTAO_FIXA, difficulty: problems[QUESTAO_FIXA]?.difficulty };
   const existe = hasProblem(config.problemId);
   if (existe && (!config.difficulty || problems[config.problemId]?.difficulty === config.difficulty)) return config;
   const escolhida = selecionarProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty, semente: config.roleTitle });

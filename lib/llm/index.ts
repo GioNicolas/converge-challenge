@@ -48,7 +48,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterEnv: "FAST_FALLBACK_MODEL",
     openrouterDefault: "openai/gpt-oss-120b",
     maxTokens: 800,
-    hedgeMs: 12_000,
+    // Filtro de fala fica no caminho de cada resposta do chat (normalmente ~1 s): esperar mais trava a conversa.
+    hedgeMs: 3_000,
   },
   evaluator: {
     featherlessEnv: "EVALUATOR_MODEL",
@@ -66,7 +67,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterDefault: "z-ai/glm-5.3-flash",
     maxTokens: 1500,
     reasoningEffort: "low",
-    hedgeMs: 8_000,
+    // O candidato está olhando o "digitando…": normalmente responde em ~2,5 s.
+    hedgeMs: 5_000,
   },
 };
 

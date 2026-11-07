@@ -25,6 +25,8 @@ export const FocusQuestion = z.object({
 export type FocusQuestion = z.infer<typeof FocusQuestion>;
 
 export const AnalystOutput = z.object({
+  /** O que o candidato provavelmente está tentando fazer agora, em uma frase, sem citar erro. */
+  candidateThinking: z.string().optional(),
   approach: z.string(),
   timeComplexity: z.string(),
   spaceComplexity: z.string(),

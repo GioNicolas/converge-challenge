@@ -2,6 +2,7 @@
  * Estado interno da sessão (só servidor) e a visão de debug que GET /api/state devolve.
  */
 import type { AnalystOutput } from "@/lib/agents/analystSchema";
+import type { Fase } from "@/lib/agents/fase";
 import type { HiddenTestsResult } from "@/lib/agents/hiddenTests";
 import type { Blip, FocusArea, InterviewConfig, LineRange, Report, SessionEvent } from "@/lib/contracts";
 import type { LlmStatsSnapshot } from "@/lib/llm";
@@ -72,6 +73,8 @@ export interface QueuedQuestion {
   checkInId?: string;
   /** Cópia de uma pergunta ignorada que voltou para a fila (só volta uma vez). */
   retried?: boolean;
+  /** Fase da entrevista quando a pergunta foi criada: mudou de fase, a pergunta perde o sentido. */
+  fase?: Fase;
 }
 
 /** Observação pra rubrica, acumulada ao longo da sessão (o Evaluator lê tudo). */

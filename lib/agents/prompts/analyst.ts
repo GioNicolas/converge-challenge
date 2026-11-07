@@ -4,6 +4,7 @@
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
 import type { FocusArea } from "@/lib/contracts";
+import { GUIA_DA_FASE, type Fase } from "@/lib/agents/fase";
 import { buildVagaContext, FOCUS_QUESTION_GUIDE } from "./vaga";
 
 export function buildAnalystSystem(config: InterviewConfig, problem: Problem): string {
@@ -32,6 +33,15 @@ ${approaches}
 
 Erros comuns (confidencial):
 ${mistakes}
+
+# Antes de perguntar: o que ele está pensando agora
+Um entrevistador humano só interrompe com uma pergunta que faz sentido PARA O CANDIDATO NAQUELE MOMENTO. Antes de escrever qualquer pergunta:
+1. Leia a FASE da entrevista (vem na mensagem, decidida pelo sistema) e o que ela diz sobre o momento dele.
+2. Olhe o TRECHO QUE ACABOU DE MUDAR e os eventos recentes: é ali que está a cabeça dele.
+3. Releia as CONVERSAS ANTERIORES: o que ele já disse que pretende fazer, o que já explicou, onde travou.
+4. Escreva em "candidateThinking", numa frase, o que ele provavelmente está tentando fazer agora (ex.: "montando o loop que testa cada par, como disse que faria"). Descreva a intenção dele, nunca um erro.
+Depois, cada pergunta tem que se ligar a isso: ao trecho que ele acabou de mexer, ao resultado que ele acabou de ver, ou a algo que ele disse. Se ele não entenderia por que você está perguntando aquilo agora, não pergunte. Pergunta genérica que poderia ser feita em qualquer momento ("me explica esse código") é pior que nenhuma.
+Use o que ele já disse: não pergunte de novo o que ele já respondeu; se ele contou um plano, pergunte sobre o passo do plano em que ele está (ex.: ele disse que faria força bruta e otimizaria depois, a solução funcionou → é hora do desafio de melhorar).
 
 # Tipos de pergunta (campo "kind")
 Toda pergunta explora UM critério (campo "criterionId", um dos ids acima) e tem um tipo:
@@ -65,7 +75,7 @@ A mensagem traz os critérios AINDA NÃO EXPLORADOS e o tempo restante. Todos os
 
 # Regras
 - No máximo 2 perguntas. Devolva "questions": [] SÓ se o código ainda não tem nenhuma ideia escrita (assinatura vazia) ou nada mudou desde a última pergunta feita. Código incompleto ou estranho, mas com uma ideia (um loop, uma condição, um return), já merece pergunta — ex.: "Me explica o que esse trecho faz."
-- Não repita perguntas já feitas (listadas na mensagem).
+- Não repita perguntas já feitas nem pergunte o que ele já respondeu nas conversas anteriores.
 - priority de 0 a 1: 0.9+ para colagem grande sem explicação, abordagem fechada e nunca justificada, ou desafio logo depois do primeiro run verde; 0.6–0.8 para perguntas boas; abaixo disso, não vale interromper.
 - startLine/endLine apontam a região sobre a qual a pergunta fala (para grifar), usando os números de linha do código.
 - evidence: observações para o relatório, cada uma com o criterionId. spontaneous = true só quando o candidato mostrou aquilo POR CONTA PRÓPRIA, sem o entrevistador perguntar (no código, ou numa fala que NÃO responde a uma pergunta do entrevistador). Resposta a pergunta é spontaneous = false: o entrevistador já registra como ele se saiu.
@@ -79,10 +89,18 @@ Também vale: não mencione o código, o problema nem a solução; é sobre a pe
 Sem FOCO PENDENTE na mensagem, "focusQuestion" = null.
 
 Responda SOMENTE com um objeto JSON, sem markdown, neste formato:
-{"approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string, "spontaneous": boolean}], "questions": [{"question": string, "kind": "explicar" | "sondar" | "desafio", "criterionId": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}], "focusQuestion": {"question": string, "followUpTopic": string, "topicLabel": string} | null}`;
+{"candidateThinking": string, "approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string, "spontaneous": boolean}], "questions": [{"question": string, "kind": "explicar" | "sondar" | "desafio", "criterionId": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}], "focusQuestion": {"question": string, "followUpTopic": string, "topicLabel": string} | null}`;
 }
 
 export interface AnalystTurnInput {
+  /** Fase da entrevista, decidida pelo código (ver `fase.ts`). */
+  fase: Fase;
+  /** Região do código que mudou desde a última análise ("linhas 4–7"), se mudou. */
+  changedRegion?: string;
+  /** Conversas que já aconteceram, já formatadas (pergunta + falas). */
+  conversations: string;
+  /** O que a análise anterior achou que ele estava pensando. */
+  previousThinking?: string;
   elapsedLabel: string; // "mm:ss"
   trigger: string;
   language: string;
@@ -90,7 +108,8 @@ export interface AnalystTurnInput {
   /** Eventos relevantes desde a última análise, já formatados ("[03:10] rodou: 2/3 passaram"). */
   recentEvents: string[];
   previousApproach?: string;
-  askedQuestions: string[];
+  /** Perguntas que já viraram balão e ainda não foram abertas. */
+  pendingQuestions: string[];
   /** Momento-chave que disparou esta análise ("primeiro run com todos os testes passando"), se houver. */
   keyMoment?: string;
   /** Foco da vaga ainda sem pergunta própria (decidido pelo código; ver `focoQuota.ts`). */
@@ -111,6 +130,10 @@ export function buildAnalystUser(input: AnalystTurnInput): string {
     ? `\nFOCO PENDENTE: ${input.focoPendente}. Objetivo da pergunta: ${guide.objetivo}. Estilo (não copie): ${guide.exemplos.map((e) => `"${e}"`).join(" · ")}\n`
     : "";
   return `Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Gatilho desta análise: ${input.trigger}. Linguagem: ${input.language}.
+
+FASE: ${input.fase}. ${GUIA_DA_FASE[input.fase]}
+Trecho que acabou de mudar: ${input.changedRegion ?? "(nada mudou desde a última análise)"}
+Na análise anterior, ele parecia estar: ${input.previousThinking ?? "(primeira análise)"}
 ${keyMoment}${foco}
 Critérios ainda não explorados:
 ${input.uncovered.length ? input.uncovered.map((c) => `- ${c}`).join("\n") : "(todos já explorados)"}
@@ -124,6 +147,9 @@ ${input.recentEvents.length ? input.recentEvents.join("\n") : "(nenhum)"}
 
 Abordagem detectada na análise anterior: ${input.previousApproach ?? "(primeira análise)"}
 
-Perguntas já feitas ao candidato:
-${input.askedQuestions.length ? input.askedQuestions.map((q) => `- ${q}`).join("\n") : "(nenhuma)"}`;
+Conversas anteriores com o candidato:
+${input.conversations}
+
+Perguntas já no balão, esperando ele abrir:
+${input.pendingQuestions.length ? input.pendingQuestions.map((q) => `- ${q}`).join("\n") : "(nenhuma)"}`;
 }
