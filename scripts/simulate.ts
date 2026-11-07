@@ -1,17 +1,19 @@
 /**
  * Entrevistas simuladas, do início ao relatório, sem a IDE. Mede o agente antes e depois de mexer nos prompts.
  * O código de cada perfil é roteirizado; as falas do candidato vêm de um LLM com a persona.
- * Uso: npx tsx scripts/simulate.ts [--only otimiza,trava] [--out sim-runs]
+ * Uso: npx tsx scripts/simulate.ts [--only otimiza,trava] [--out sim-runs] [--config config.json]
+ * Com --config, a entrevista usa o JSON dado (mesma normalização do /api/events) em vez do DEFAULT_CONFIG.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
-import type { Blip, ChatMessage, Report, SessionEvent } from "@/lib/contracts";
+import { normalizarConfig } from "@/lib/config/store";
+import { type Blip, type ChatMessage, InterviewConfig, type Report, type SessionEvent } from "@/lib/contracts";
 import { runPythonTests } from "@/lib/execution/python";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
@@ -22,7 +24,10 @@ import type { SessionState } from "@/lib/session/types";
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type EventInput = DistributiveOmit<SessionEvent, "sessionId" | "t">;
 
-const DURATION_MIN = 15;
+/** Configuração usada em todas as sessões simuladas: DEFAULT_CONFIG, ou o JSON de --config. */
+let CONFIG: InterviewConfig = DEFAULT_CONFIG;
+/** Duração do relógio simulado: 15 min, ou `CONFIG.durationMin` com --config. */
+let DURATION_MIN = 15;
 const TICK_MS = 5_000;
 const PAUSE_MS = 8_000;
 /** Cada fala (do candidato ou do agente) "custa" esse tempo de sessão. */
@@ -220,7 +225,7 @@ const CHECKIN_RE = /como foi|conseguiu|chegou (a|em) alguma|e aí,? (o que|como)
 async function simulate(persona: Persona): Promise<SimResult> {
   let simT = 0;
   const sessionId = `sim-${persona.key}-${Date.now()}`;
-  const session: SessionState = getOrCreateSession(sessionId, { ...DEFAULT_CONFIG, durationMin: DURATION_MIN });
+  const session: SessionState = getOrCreateSession(sessionId, { ...CONFIG, durationMin: DURATION_MIN });
   session.clock = () => simT;
 
   const res: SimResult = {
@@ -395,6 +400,13 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const only = args.includes("--only") ? args[args.indexOf("--only") + 1].split(",") : undefined;
   const outDir = args.includes("--out") ? args[args.indexOf("--out") + 1] : "sim-runs";
+  if (args.includes("--config")) {
+    const configPath = args[args.indexOf("--config") + 1];
+    if (!configPath) throw new Error("--config precisa de um caminho para o JSON");
+    const raw: unknown = JSON.parse(readFileSync(resolve(configPath), "utf8"));
+    CONFIG = normalizarConfig(InterviewConfig.parse(raw));
+    DURATION_MIN = CONFIG.durationMin;
+  }
   const personas = PERSONAS.filter((p) => !only || only.includes(p.key));
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -433,7 +445,7 @@ async function main(): Promise<void> {
       ...checks.map((c) => `           ${c.pass ? "✓" : "✗"} ${c.label}`),
     );
   }
-  const summary = rows.join("\n");
+  const summary = [`config: ${CONFIG.id} (${CONFIG.roleTitle})`, ...rows].join("\n");
   writeFileSync(join(dir, "resumo.txt"), summary);
   console.log(summary);
   console.log(`\ntranscrições em ${dir}/ · ${failed} checagem(ns) falhando`);

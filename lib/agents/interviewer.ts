@@ -55,6 +55,7 @@ export async function runInterviewerTurn(
         const c = session.config.criteria.find((item) => item.id === id)!;
         return `${c.id}: ${c.name} — ${c.description}`;
       }),
+    hintsPolicy: session.config.hints,
     analystNotes: analystNotesOf(session),
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(

@@ -10,7 +10,7 @@ import { Criterion, FocusArea, InterviewConfig, InterviewMode } from "@/lib/cont
 import type { Classificacao, Vaga } from "./classificador";
 import { problems } from "@/lib/problems";
 import { selecionarProblema } from "@/lib/problems/selecao";
-import { criteriosIniciais, problemaPadrao } from "./catalogo";
+import { CATALOGO, criteriosIniciais, problemaPadrao } from "./catalogo";
 import { LINGUAGENS_IDE } from "./linguagens";
 
 /** Uma fala da conversa de pré-entrevista. */
@@ -255,13 +255,26 @@ function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil
   return { problemId: escolhida.id, difficulty: escolhida.difficulty };
 }
 
+/** Live coding com área técnica precisa do critério "corretude" para receber o resultado dos testes. */
+function precisaCorretude(r: Rascunho): boolean {
+  return r.mode === "live_coding" && !r.criteria.some((c) => c.id === "corretude") && r.focus.some((f) => f.area === "tecnico");
+}
+
+/** Critério "corretude" do catálogo, com o menor peso dos critérios atuais (ou 1 se não há nenhum). Função pura. */
+function criterioCorretude(atuais: Criterion[]): Criterion {
+  const base = CATALOGO.live_coding.find((c) => c.id === "corretude");
+  if (!base) throw new Error("catálogo live_coding sem o critério corretude");
+  const peso = atuais.length > 0 ? Math.min(...atuais.map((c) => c.weight)) : 1;
+  return { ...base, weight: peso };
+}
+
 /**
  * Valida o rascunho e gera o `InterviewConfig`, ou devolve as mensagens de erro.
  * `naoAvaliado` entra nas notas finais como "Não avaliado nesta entrevista: ...".
  */
 export function paraInterviewConfig(
   r: Rascunho,
-  preferencias?: { duracaoMin?: number; linguagens?: string[] },
+  preferencias?: { duracaoMin?: number; linguagens?: string[]; tom?: "amigavel" | "desafiador"; dicas?: "leves" | "nenhuma" | "livres" },
   naoAvaliado: string[] = [],
 ): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
   const erros: string[] = [];
@@ -272,6 +285,9 @@ export function paraInterviewConfig(
     if (!areas.has(c.focus)) erros.push(`criteria.${c.id}: foco "${c.focus}" fora das áreas de foco`);
   }
 
+  // Sem o critério "corretude" o agente não recebe o resultado dos testes escondidos (ver coverage.ts).
+  const criteria = precisaCorretude(r) ? [...r.criteria, criterioCorretude(r.criteria)] : r.criteria;
+
   const candidato = {
     id: gerarId(),
     mode: r.mode,
@@ -280,7 +296,9 @@ export function paraInterviewConfig(
     seniority: r.seniority,
     focus: r.focus,
     recruiterNotes: acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado),
-    criteria: r.criteria,
+    tone: preferencias?.tom ?? "amigavel",
+    hints: preferencias?.dicas ?? "leves",
+    criteria,
     ...escolherProblema(r),
     languages: preferencias?.linguagens?.length ? preferencias.linguagens : LINGUAGENS,
     durationMin: duracaoDoRascunho(r, preferencias),

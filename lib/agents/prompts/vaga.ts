@@ -68,6 +68,16 @@ export function buildVagaContext(config: InterviewConfig, { modo }: VagaContextO
     );
   }
   linhas.push(SENIORITY_GUIDANCE[config.seniority]);
+  if (config.tone === "desafiador") {
+    linhas.push("Tom: desafiador (pedido da recrutadora). Aprofunde mais, peça justificativa de tudo, não alivie nem tranquilize; continue educado.");
+  } else if (config.tone === "amigavel") {
+    linhas.push("Tom: amigável. Acolhedor e tranquilo, sem deixar de pedir justificativas.");
+  }
+  if (config.hints === "nenhuma") {
+    linhas.push("Dicas: a recrutadora pediu SEM dicas. Nunca ofereça dica; se ele travar, peça para explicar onde travou.");
+  } else if (config.hints === "leves") {
+    linhas.push("Dicas: no máximo uma dica leve, só se ele travar.");
+  }
   if (modo === "perguntar" && focus.length > 1) {
     linhas.push(`As perguntas sobre o código seguem o que o candidato escreveu e favorecem os focos de maior peso; os focos de processo (pressão, escala, uso de IA) ganham uma pergunta própria quando o sistema pedir.`);
   }
