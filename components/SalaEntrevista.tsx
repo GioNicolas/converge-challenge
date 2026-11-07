@@ -14,6 +14,7 @@ import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
+import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
@@ -124,6 +125,19 @@ export default function SalaEntrevista() {
     aoTerminar: entrevista.terminarResposta,
   });
 
+  // Transcrição da fala do candidato: pausa enquanto o agente fala e fora da entrevista.
+  useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && !entrevista.agenteFalando && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA",
+    sessaoId: sessao?.sessao_id ?? null,
+    aoParcial: entrevista.setParcialDoCandidato,
+    aoFinal: entrevista.falaDoCandidato,
+  });
+  const legenda = entrevista.falaAtual
+    ?? (entrevista.parcialDoCandidato
+      ? { quem: "candidato" as const, texto: entrevista.parcialDoCandidato, ate: entrevista.parcialDoCandidato.length }
+      : null);
+
   function aoMudarDesenho(elementos: NonDeletedExcalidrawElement[]) {
     if (process.env.NODE_ENV === "development") {
       console.debug(`[quadro] ${elementos.length} elemento(s)`, elementos);
@@ -163,7 +177,7 @@ export default function SalaEntrevista() {
         />
       )}
 
-      <Legenda fala={entrevista.falaAtual} />
+      <Legenda fala={legenda} />
 
       {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
       {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (

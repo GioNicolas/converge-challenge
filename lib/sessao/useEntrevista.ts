@@ -384,8 +384,17 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     // A resposta pode mudar a avaliação: analisa de novo logo depois.
     setTimeout(() => gatilho.current?.dispararAgora(), 0);
   }, [enviar, registrar]);
+  /** Transcrição do candidato: o parcial vai para a legenda; a frase final entra na conversa e na linha do tempo. */
+  const [parcialDoCandidato, setParcialDoCandidato] = useState("");
+  const falaDoCandidato = useCallback((texto: string) => {
+    const limpo = texto.trim();
+    if (!limpo) return;
+    conversa.current.push({ quem: "candidato", texto: limpo });
+    registrar("fala", { quem: "candidato", texto: limpo });
+  }, [registrar]);
   const encerrar = useCallback(() => {
     silenciar();
+    setParcialDoCandidato("");
     enviar({ tipo: "ENCERRAR" });
     // Entrevista encerrada: o desenho salvo localmente não é mais necessário (a prova fica no servidor).
     try {
@@ -405,5 +414,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     perguntaDemo,
     terminarResposta,
     encerrar,
+    parcialDoCandidato,
+    setParcialDoCandidato,
+    falaDoCandidato,
   };
 }
