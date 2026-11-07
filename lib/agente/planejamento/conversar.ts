@@ -122,6 +122,9 @@ function validar(
   return { ok: true, r: { mensagem: s.mensagem.trim(), vaga, plano, pronto: !!plano && s.pronto } };
 }
 
+/** Abaixo disso o texto provavelmente não é uma vaga: aí o agente pode pedir o texto em vez de propor. */
+const TEXTO_MINIMO_PARA_PROPOR = 120;
+
 export const MSG_FALHA_PLANEJAMENTO =
   "Não consegui processar agora (o modelo falhou ou respondeu algo inválido). Tente enviar de novo.";
 
@@ -167,7 +170,21 @@ export async function conversarPlano(a: ArgsConversar): Promise<ResultadoConvers
       return { ...reserva, diagnostico };
     }
     const v = validar(saida, a.vagaAtual, a.descricao);
-    if (v.ok) return v.r;
+    if (v.ok) {
+      // Primeiro retorno sem plano para um texto de vaga de verdade: o produto manda propor, não perguntar.
+      if (!a.planoAtual && !v.r.plano && tentativa === 1 && a.descricao.trim().length >= TEXTO_MINIMO_PARA_PROPOR) {
+        mensagens.push(
+          { role: "assistant", content: JSON.stringify(saida) },
+          {
+            role: "user",
+            content:
+              "Não pergunte antes: proponha agora o plano completo, assumindo o mais plausível e declarando as premissas na mensagem. Termine só com a pergunta de fechamento (\"Quer ajustar algo ou posso aprovar?\").",
+          },
+        );
+        continue;
+      }
+      return v.r;
+    }
     diagnostico = `plano rejeitado pela validação: ${v.erros.join("; ")}`;
     console.warn(`[planejamento] ${diagnostico}`);
     if (tentativa === 1) {
