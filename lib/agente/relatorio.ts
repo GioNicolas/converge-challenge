@@ -98,12 +98,20 @@ export function montarRelatorio(p: {
   const nomes = nomesDosElementos(ordenados);
   const urlDaImagem = (n: number) => `/api/sessoes/${encodeURIComponent(sessao.id)}/imagens/${n}`;
   const imagens = [...p.imagens].sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
-  /** A foto do quadro mais recente até aquele momento (o que a recrutadora veria naquela hora). */
+  /**
+   * A foto do quadro daquele momento. A foto é tirada na análise, segundos DEPOIS do traço:
+   * vale a primeira a partir do momento (até 3 min); sem ela, a última antes.
+   */
   const imagemAte = (horario: string): string | null => {
     const t = Date.parse(horario);
-    let escolhida: number | null = null;
-    for (const i of imagens) if (Date.parse(i.horario) <= t + 1000) escolhida = i.numero;
-    return escolhida === null ? null : urlDaImagem(escolhida);
+    if (!Number.isFinite(t)) return null;
+    const depois = imagens.find((i) => {
+      const ti = Date.parse(i.horario);
+      return ti >= t - 1000 && ti <= t + 180_000;
+    });
+    if (depois) return urlDaImagem(depois.numero);
+    const antes = imagens.filter((i) => Date.parse(i.horario) < t).at(-1);
+    return antes ? urlDaImagem(antes.numero) : null;
   };
 
   const criterios: CriterioVisto[] = scorecard.criterios.map((c) => {
