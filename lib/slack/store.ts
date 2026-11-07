@@ -3,7 +3,7 @@
  * sobreviver ao hot reload do Next. Em serverless NÃO persiste entre
  * instâncias: trocar a implementação de `SlackStore` por banco quando precisar.
  */
-import type { DecisionRecord, StoredPlan, TestSession } from "./types";
+import type { BookedSlot, CandidateSession, DecisionRecord, StoredPlan, TestSession } from "./types";
 
 export interface SlackStore {
   getPlan(planId: string): StoredPlan | undefined;
@@ -13,12 +13,19 @@ export interface SlackStore {
   getTestSession(sessionId: string): TestSession | undefined;
   getTestSessionByToken(token: string): TestSession | undefined;
   saveTestSession(session: TestSession): void;
+  getCandidateSessionByToken(token: string): CandidateSession | undefined;
+  saveCandidateSession(session: CandidateSession): void;
+  /** Agenda global de entrevistas já marcadas, de todas as vagas. */
+  getBookedSlots(): BookedSlot[];
+  bookSlot(slot: BookedSlot): void;
 }
 
 class MemoryStore implements SlackStore {
   private plans = new Map<string, StoredPlan>();
   private decisions = new Map<string, DecisionRecord>();
   private tests = new Map<string, TestSession>();
+  private candidateSessions = new Map<string, CandidateSession>();
+  private bookedSlots: BookedSlot[] = [];
 
   getPlan = (id: string) => this.plans.get(id);
   savePlan = (p: StoredPlan) => void this.plans.set(p.planId, p);
@@ -27,6 +34,11 @@ class MemoryStore implements SlackStore {
   getTestSession = (id: string) => this.tests.get(id);
   getTestSessionByToken = (token: string) => [...this.tests.values()].find((t) => t.token === token);
   saveTestSession = (s: TestSession) => void this.tests.set(s.sessionId, s);
+  getCandidateSessionByToken = (token: string) =>
+    [...this.candidateSessions.values()].find((s) => s.token === token);
+  saveCandidateSession = (s: CandidateSession) => void this.candidateSessions.set(s.sessionId, s);
+  getBookedSlots = () => this.bookedSlots;
+  bookSlot = (slot: BookedSlot) => void this.bookedSlots.push(slot);
 }
 
 const g = globalThis as unknown as { __slackStore?: SlackStore };

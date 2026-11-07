@@ -4,7 +4,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { store } from "./store";
-import type { TestSession } from "./types";
+import type { CandidateSession, TestSession } from "./types";
 
 /** URL pública da sala. TODO: trocar quando o software de chamada estiver pronto. */
 export function buildInterviewUrl(token: string): string {
@@ -22,5 +22,21 @@ export function createTestSession(planId: string, createdBy: string): { session:
     createdAt: Date.now(),
   };
   store.saveTestSession(session);
+  return { session, url: buildInterviewUrl(session.token) };
+}
+
+/** Cria uma sessão real para um candidato ligada ao plano e devolve o link. */
+export function createCandidateSession(
+  candidateId: string,
+  planId: string,
+): { session: CandidateSession; url: string } {
+  const session: CandidateSession = {
+    sessionId: `cand-${randomUUID()}`,
+    token: randomUUID(),
+    planId,
+    candidateId,
+    createdAt: Date.now(),
+  };
+  store.saveCandidateSession(session);
   return { session, url: buildInterviewUrl(session.token) };
 }

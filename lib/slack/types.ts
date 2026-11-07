@@ -32,6 +32,21 @@ export interface TestSession {
   createdAt: number;
 }
 
+/** Sessão real de candidato: igual à de teste, mas ligada a um candidato de verdade. */
+export interface CandidateSession {
+  sessionId: string;
+  token: string;
+  planId: string;
+  candidateId: string;
+  createdAt: number;
+}
+
+/** Um horário de entrevista já ocupado (qualquer vaga), pra não colidir. */
+export interface BookedSlot {
+  startMs: number;
+  endMs: number;
+}
+
 export type DecisionStatus = "aguardando" | "aprovado" | "reprovado";
 
 export interface DecisionRecord {

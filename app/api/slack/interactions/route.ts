@@ -1,6 +1,8 @@
 import { after } from "next/server";
 import { handleInteraction } from "@/lib/slack/interactions";
 import { verifySlackSignature } from "@/lib/slack/verify";
+// Efeito colateral: registra onPlanApproved/onCandidateDecision no módulo de email.
+import "@/lib/slack/wire-email";
 
 export const runtime = "nodejs";
 
