@@ -51,8 +51,8 @@ export default function ConfirmarEncerrar({ aberto, onCancelar, onConfirmar }: P
               Encerrar a entrevista?
             </h2>
             <p id="texto-encerrar" className="text-sm leading-relaxed text-texto-suave">
-              Tem certeza que deseja finalizar a chamada? Depois de encerrar, não dá para voltar e o seu desenho é
-              enviado para avaliação.
+              Tem certeza que deseja finalizar a chamada? Depois de encerrar, não dá para voltar e o que você fez até
+              aqui é enviado para avaliação.
             </p>
             <div className="mt-4 flex gap-2">
               <button
