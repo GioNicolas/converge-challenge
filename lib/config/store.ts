@@ -8,13 +8,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { InterviewConfig } from "@/lib/contracts";
-import { selecionarProblema } from "@/lib/problems/selecao";
+import { selecionarProblema, sortearProblema } from "@/lib/problems/selecao";
 import { problems } from "@/lib/problems";
 import { hasProblem } from "@/problems";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
-/** Questão de toda entrevista, ignorando a seleção pela vaga. `undefined` volta a selecionar pelo banco. */
-const QUESTAO_FIXA: string | undefined = "two-sum";
 
 const globalForConfigs = globalThis as typeof globalThis & { __convergeConfigs?: Map<string, InterviewConfig> };
 const configs = (globalForConfigs.__convergeConfigs ??= new Map<string, InterviewConfig>());
@@ -26,12 +24,9 @@ const pasta = () => join(process.cwd(), "data", "configs");
  * questão de nível diferente do `difficulty` da config. Em vez de derrubar a sessão, escolhe do banco pela
  * própria config (senioridade e foco da vaga). O aviso fica no log do servidor.
  *
- * É o único lugar que decide a questão: IDE e agente recebem a config já normalizada, então os dois
- * falam da mesma questão (o `resolveProblem` da IDE vira só uma rede de segurança).
+ * IDE e agente recebem a config já normalizada; a questão de cada entrevista sai de `comQuestaoSorteada`.
  */
 export function normalizarConfig(config: InterviewConfig): InterviewConfig {
-  // Temporário: enquanto afinamos a conversa do agente, toda entrevista é o Two Sum (o único pacote completo).
-  if (QUESTAO_FIXA) return { ...config, problemId: QUESTAO_FIXA, difficulty: problems[QUESTAO_FIXA]?.difficulty };
   const existe = hasProblem(config.problemId);
   if (existe && (!config.difficulty || problems[config.problemId]?.difficulty === config.difficulty)) return config;
   const escolhida = selecionarProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty, semente: config.roleTitle });
@@ -45,6 +40,18 @@ export async function saveConfig(config: InterviewConfig): Promise<void> {
   configs.set(config.id, config);
   await mkdir(pasta(), { recursive: true });
   await writeFile(join(pasta(), `${config.id}.json`), JSON.stringify(config, null, 2), "utf8");
+}
+
+/**
+ * A questão desta entrevista: sorteada entre as que servem ao nível e ao foco da vaga (ver `sortearProblema`).
+ * Só a página da entrevista chama: ela passa a questão para a IDE, e a IDE manda o id no `session_started`,
+ * então o agente fala da mesma questão que o candidato vê (`withProblem` em /api/events).
+ */
+export function comQuestaoSorteada(config: InterviewConfig): InterviewConfig {
+  if (config.mode !== "live_coding") return config;
+  const sorteada = sortearProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty });
+  if (!hasProblem(sorteada.id)) return config;
+  return { ...config, problemId: sorteada.id, difficulty: sorteada.difficulty };
 }
 
 /** Config pelo id (memória, depois arquivo). Inexistente ou inválida: undefined. */
