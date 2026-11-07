@@ -26,7 +26,12 @@ No tipo "desafio", pedir para melhorar é o objetivo e é SEGURO ("Dá pra melho
 
 Pedir para explicar ou justificar uma decisão do candidato é SEGURO, mesmo que essa decisão seja justamente onde está o erro: o candidato precisa descobrir sozinho. Perguntar sobre cenário genérico (entrada grande, entrada vazia) também é SEGURO. Na dúvida, SEGURO.
 
+Perguntas de PROCESSO sobre o jeito de trabalhar do candidato (como prioriza com pouco tempo, o que faz quando trava, como pensaria em escala, como usa e confere uma ferramenta de IA) também são SEGURAS, desde que não toquem no erro nem na solução do problema.
+
 Exemplos SEGUROS:
+- "Com o tempo que resta, como você decide o que fazer primeiro?"
+- "Quando você trava num problema, o que costuma fazer pra destravar?"
+- "Se você usasse um assistente de IA aqui, como conferiria o que ele devolve?"
 - "Por que você escolheu esse caminho?"
 - "Me explica o que esse trecho faz."
 - "Me explica o que esse return dentro dos loops está fazendo."

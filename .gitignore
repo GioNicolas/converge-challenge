@@ -45,6 +45,9 @@ next-env.d.ts
 # vendor copiado por scripts/copy-vendor.mjs
 /public/pyodide/
 /public/monaco/
-sim-runs/
-# dados locais da pré-entrevista (configs salvas)
+
+# configs geradas pela pré-entrevista
 /data/
+
+# saídas de scripts/simulate.ts
+sim-runs/

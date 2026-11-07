@@ -4,6 +4,7 @@
  */
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
+import { buildVagaContext } from "./vaga";
 
 /** Escala pelo que aconteceu quando o critério foi explorado; o "bom" de cada critério vem do pacote do problema. */
 const SCALE = `4 — Mostrou por conta própria e certo; ou respondeu certo e com profundidade quando perguntado sobre um aspecto secundário (ex.: custo de memória).
@@ -27,7 +28,10 @@ export function buildEvaluatorSystem(config: InterviewConfig, problem: Problem, 
 
   return `Você é o avaliador de uma entrevista técnica para a vaga "${config.roleTitle}" (${config.seniority}).
 A entrevista acabou. Você lê a sessão inteira e dá a nota de cada critério para a recrutadora. Você nunca fala com o candidato.
-${config.recruiterNotes ? `\nNotas da recrutadora: ${config.recruiterNotes}\n` : ""}
+
+${buildVagaContext(config, { modo: "observar" })}
+Em summary, strengths, concerns e nextSteps, fale em termos do que a vaga pede (foco e notas da recrutadora); competências da vaga que esta entrevista não mede entram em nextSteps, não em concerns.
+
 # Problema: ${problem.public.title}
 ${problem.public.statement}
 

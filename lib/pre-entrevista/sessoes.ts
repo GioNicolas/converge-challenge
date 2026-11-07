@@ -41,6 +41,8 @@ export interface Sessao {
   resumo?: { preferencias: Preferencias; duracaoMin: number };
   /** Competências-chave da vaga e se o formato verifica cada uma (ver `competencias.ts`). Não viram pergunta. */
   competencias: Competencia[];
+  /** O que a vaga pede, em até 12 palavras, para a abertura da Totti (ver `competencias.ts`). Pode não existir. */
+  resumoVaga?: string;
   /** O que esta entrevista não avalia: áreas deixadas para a próxima etapa e competências que o formato não verifica. */
   naoAvaliado: string[];
   /**
@@ -144,6 +146,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     plano: planoInicial(),
     preferencias: { ...PREFERENCIAS_PADRAO },
     competencias: competencias.competencias,
+    resumoVaga: competencias.resumo,
     naoAvaliado: [],
     enfaseEstado: estadoInicialEnfase(),
     origemPreferencias: {},
@@ -181,7 +184,8 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     nivel: competencias.erro ? "aviso" : "info",
     resumo: competencias.erro
       ? `sem competências (${competencias.erro})`
-      : `${competencias.competencias.length} competência(s): ${nomes || "nenhuma"}`,
+      : `${competencias.competencias.length} competência(s): ${nomes || "nenhuma"}` +
+        (competencias.resumo ? ` | resumo: "${competencias.resumo}"` : " | sem resumo"),
     ms: competencias.ms,
     provedor: competencias.provedor,
     model: competencias.model,
@@ -190,6 +194,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
       mensagens: competencias.mensagens,
       respostaCrua: competencias.respostaCrua,
       competencias: competencias.competencias,
+      resumo: competencias.resumo,
       erro: competencias.erro,
       tentativas: competencias.tentativas,
     },
@@ -335,7 +340,11 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     // A cobertura síncrona (do turno) pode ter subido enquanto esta rodada rodava: mescla, sem perder nada.
     // Os sinais não entram aqui: quem decide o passo é a leitura do turno, que tem a transcrição mais recente.
     // O foco e as notas não vêm do extrator: são refeitos a partir do estado atual (ver `aplicarPesosNaSessao`).
-    sessao.rascunho = { ...ext.rascunho, cobertura: mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura) };
+    // Se ela disse o nível enquanto esta rodada rodava (turno em paralelo), o nível dela vale sobre o do extrator.
+    const nivelDeVolta = sessao.rascunho.confirmado.seniority
+      ? { seniority: sessao.rascunho.seniority, confirmado: { ...ext.rascunho.confirmado, seniority: true } }
+      : {};
+    sessao.rascunho = { ...ext.rascunho, ...nivelDeVolta, cobertura: mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura) };
     aplicarPesosNaSessao(sessao, "segundo plano");
     const mudancas = diff(antes, sessao.rascunho);
     registrarEvento(sessao, {
@@ -414,6 +423,7 @@ export function estadoDaSessao(sessao: Sessao): EstadoSessao {
       seniority: classificacao.seniority,
       focusScores: classificacao.focusScores,
       focus: classificacao.focus,
+      nivelExplicito: classificacao.nivelExplicito,
       confirmar: classificacao.confirmar,
       usage: classificacao.usage,
       model: classificacao.model,

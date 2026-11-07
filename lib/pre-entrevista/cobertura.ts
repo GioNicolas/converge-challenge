@@ -52,9 +52,34 @@ export interface ChamadaJev {
   usage: { input_tokens: number | null; output_tokens: number | null };
 }
 
+/** Nível que a recrutadora disse na última fala (ver `NIVEL_DITO`). */
+export type NivelDito = "nao_disse" | "junior" | "pleno" | "senior";
+
+/** A última fala dela diz o nível? Só a última fala conta: um nível dito antes já está em `rascunho.seniority`. */
+const NIVEL_DITO = choice("Na ÚLTIMA fala da recrutadora, ela disse qual é o nível da vaga?", {
+  nao_disse: {
+    quando: "a fala não diz nível nenhum: fala de formato, de foco, de duração, de tom ou outra coisa.",
+    exemplos: "'live coding', 'pode ser', 'foco em algoritmos', 'uns 40 minutos'",
+  },
+  junior: {
+    quando: "disse que é júnior, estágio, trainee ou nível inicial.",
+    exemplos: "'júnior', 'pode ser júnior', 'é estágio'",
+  },
+  pleno: {
+    quando: "disse que é pleno ou nível intermediário.",
+    exemplos: "'pleno', 'isso, pleno', 'nível II'",
+  },
+  senior: {
+    quando: "disse que é sênior, staff, principal ou lead, inclusive corrigindo outro nível.",
+    exemplos: "'sênior', 'é sênior, não pleno', 'staff'",
+  },
+});
+
 export interface Cobertura extends ChamadaJev {
   /** Probabilidade acumulada de cada tópico estar coberto, por id. */
   cobertura: Record<string, number>;
+  /** Nível que ela disse na última fala, se disse (ver `NIVEL_DITO`). */
+  nivelDito: NivelDito;
   /** Sinais deste turno (quer/dispensa/falou por área, resposta vaga, aprovação do resumo), por id. */
   sinais: Record<string, number>;
   /** Tópicos obrigatórios das áreas em jogo que ainda não estão cobertos. */
@@ -328,11 +353,15 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contex
     },
     questions: {
       ...Object.fromEntries([...topicos, ...sinais].map((p) => [p.id, noul(p.pergunta, { true: p.sinal_sim, false: p.sinal_nao })])),
+      nivel_dito: NIVEL_DITO,
     },
   };
   const { answers, model, usage } = await jev().systemOne(request);
-  // As perguntas são `noul` (sim/não) ou `score` (nível de 0 a 3); o tipo do SDK não distingue, então lê-se aqui.
-  const respostas = answers as Record<string, { noul?: number; score?: number }>;
+  // As perguntas são `noul` (sim/não), `score` ou `choice`; o tipo do SDK não distingue, então lê-se aqui.
+  const respostas = answers as Record<string, { noul?: number; score?: number; choice?: string }>;
+  const escolhidoNivel = respostas.nivel_dito?.choice;
+  const nivelDito: NivelDito =
+    escolhidoNivel === "junior" || escolhidoNivel === "pleno" || escolhidoNivel === "senior" ? escolhidoNivel : "nao_disse";
 
   const cobertura = mesclarCobertura(r.cobertura, Object.fromEntries(topicos.map((t) => [t.id, respostas[t.id].noul ?? 0])));
   const sinaisDoTurno: Record<string, number> = Object.fromEntries(sinais.map((s) => [s.id, respostas[s.id].noul ?? 0]));
@@ -340,6 +369,7 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contex
 
   return {
     cobertura,
+    nivelDito,
     sinais: sinaisDoTurno,
     faltando: faltandoDo(topicos, cobertura, emJogo),
     ms: Date.now() - inicio,

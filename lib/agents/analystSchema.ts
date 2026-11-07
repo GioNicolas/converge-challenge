@@ -16,6 +16,14 @@ export const AnalystQuestion = z.object({
 });
 export type AnalystQuestion = z.infer<typeof AnalystQuestion>;
 
+/** Pergunta do foco da vaga: de processo, sobre como o candidato trabalha, sem ligação com uma linha do código. */
+export const FocusQuestion = z.object({
+  question: z.string(),
+  followUpTopic: z.string(),
+  topicLabel: z.string(),
+});
+export type FocusQuestion = z.infer<typeof FocusQuestion>;
+
 export const AnalystOutput = z.object({
   approach: z.string(),
   timeComplexity: z.string(),
@@ -29,5 +37,7 @@ export const AnalystOutput = z.object({
     .array(z.object({ criterionId: z.string(), note: z.string(), spontaneous: z.boolean().optional() }))
     .max(5),
   questions: z.array(AnalystQuestion).max(2),
+  /** Só quando o prompt pede um FOCO PENDENTE. */
+  focusQuestion: FocusQuestion.nullable().optional(),
 });
 export type AnalystOutput = z.infer<typeof AnalystOutput>;
