@@ -4,6 +4,10 @@ import { TWO_SUM } from "./two-sum";
 
 const PROBLEMS: Record<string, Problem> = { [TWO_SUM.public.id]: TWO_SUM };
 
+export function hasProblem(id: string): boolean {
+  return id in PROBLEMS;
+}
+
 export function getProblem(id: string): Problem {
   const problem = PROBLEMS[id];
   if (!problem) throw new Error(`Problema desconhecido: ${id}`);

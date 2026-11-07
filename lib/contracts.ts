@@ -31,6 +31,8 @@ export type Criterion = z.infer<typeof Criterion>;
 export const InterviewConfig = z.object({
   id: z.string(),
   roleTitle: z.string(),
+  /** Descrição da vaga colada pela recrutadora na pré-entrevista. */
+  jobDescription: z.string().optional(),
   seniority: z.enum(["junior", "pleno", "senior"]),
   focus: z.array(z.object({ area: FocusArea, weight: z.number().min(0).max(1) })),
   /** Notas livres da recrutadora ("time pequeno, precisa de autonomia"). */

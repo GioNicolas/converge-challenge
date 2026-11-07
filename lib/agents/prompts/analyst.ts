@@ -3,16 +3,9 @@
  */
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
-
-const FOCUS_LABELS: Record<string, string> = {
-  tecnico: "domínio técnico (algoritmo, complexidade, corretude)",
-  pressao: "como lida com pressão, tempo curto e travadas",
-  escala_produto: "pensamento de escala e trade-offs de produto",
-  uso_ia: "uso de IA como ferramenta de trabalho",
-};
+import { buildVagaContext } from "./vaga";
 
 export function buildAnalystSystem(config: InterviewConfig, problem: Problem): string {
-  const focus = config.focus.map((f) => `- ${FOCUS_LABELS[f.area] ?? f.area} (peso ${f.weight})`).join("\n");
   const criteria = config.criteria.map((c) => `- ${c.id}: ${c.name} — ${c.description}`).join("\n");
   const approaches = problem.private.approaches
     .map((a) => `- ${a.name} (${a.time} tempo, ${a.space} memória): ${a.description}`)
@@ -22,9 +15,8 @@ export function buildAnalystSystem(config: InterviewConfig, problem: Problem): s
   return `Você é o analista silencioso de uma entrevista técnica para a vaga "${config.roleTitle}" (${config.seniority}).
 O candidato resolve um problema numa IDE. Você lê o código e prepara perguntas para o entrevistador fazer depois. Você nunca fala com o candidato.
 
-# Foco desta vaga (definido pela recrutadora)
-${focus}
-${config.recruiterNotes ? `Notas da recrutadora: ${config.recruiterNotes}\n` : ""}
+${buildVagaContext(config, { modo: "perguntar" })}
+
 # Critérios de avaliação
 ${criteria}
 

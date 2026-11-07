@@ -45,3 +45,6 @@ next-env.d.ts
 # vendor copiado por scripts/copy-vendor.mjs
 /public/pyodide/
 /public/monaco/
+
+# configs geradas pela pré-entrevista
+/data/

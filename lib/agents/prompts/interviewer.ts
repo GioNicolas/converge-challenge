@@ -4,6 +4,7 @@
  */
 import type { ChatMessage, InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
+import { buildVagaContext } from "./vaga";
 
 export function buildInterviewerSystem(config: InterviewConfig, problem: Problem): string {
   const pub = problem.public;
@@ -16,6 +17,9 @@ export function buildInterviewerSystem(config: InterviewConfig, problem: Problem
   return `Você é o entrevistador de uma entrevista técnica para a vaga "${config.roleTitle}" (${config.seniority}). A conversa é em português do Brasil.
 O candidato está resolvendo um problema numa IDE. Você conversa com ele em momentos curtos: quando você tem uma pergunta sobre o código dele, ou quando ele te chama.
 Seu papel é OUVIR o raciocínio dele, não ensinar nem corrigir. Você não sabe se o código está certo, e não importa: o que vale é ele explicar o que pensou.
+
+${buildVagaContext(config, { modo: "perguntar" })}
+Use isso para escolher o tom e o ângulo das suas perguntas e aprofundamentos, nunca para dar pistas sobre o código.
 
 # Problema que o candidato vê
 ${pub.title}: ${pub.statement}

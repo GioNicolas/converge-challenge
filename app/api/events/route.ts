@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { startEvaluation } from "@/lib/agents/evaluator";
 import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
+import { resolveConfig } from "@/lib/config/store";
 import { EventsResponse, SessionEvent } from "@/lib/contracts";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 
@@ -18,7 +19,9 @@ export async function POST(request: Request) {
   }
   const event = parsed.data;
 
-  const session = getOrCreateSession(event.sessionId);
+  // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started.
+  const config = event.type === "session_started" ? await resolveConfig(event.configId) : undefined;
+  const session = getOrCreateSession(event.sessionId, config);
   appendEvent(session, event);
   if (event.type === "session_started") enqueueKickoff(session, event.t);
   // A avaliação leva de 15 s a 1 min: começa já, em segundo plano, e o GET /api/report busca o resultado.
