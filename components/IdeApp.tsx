@@ -18,6 +18,7 @@ import PainelConversa, { LARGURA_PAINEL } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
+import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { postEncerramento } from "./ide/api";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
@@ -56,7 +57,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
   /** Pediu para finalizar e o agente abriu a última conversa: a sessão encerra quando ela fechar. */
   const [finalizando, setFinalizando] = useState(false);
   const encerramentoAbertoRef = useRef(false);
-  // Microfone só estético por enquanto: mexe a onda da pílula, nada é transcrito nem analisado.
+  // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
 
   const executorRef = useRef<CommandExecutor | null>(null);
@@ -74,6 +75,23 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
     sessionId: session.sessionId,
     sendEvent: session.sendEvent,
     applyCommands,
+  });
+
+  // Fala do candidato (Scribe, ou o navegador como reserva): com a conversa aberta vira a resposta dele;
+  // fora dela, entra só na linha do tempo da sessão.
+  const falaRef = useRef<(texto: string) => void>(() => {});
+  falaRef.current = (texto) => {
+    const limpo = texto.trim();
+    if (!limpo) return;
+    if (chat.open && !chat.busy && !chat.ended) chat.send(limpo);
+    else void session.sendEvent({ type: "speech", role: "candidate", text: limpo });
+  };
+  const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
+  useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && !session.ended && !finalizando,
+    sessaoId: session.sessionId,
+    aoFinal: aoFalar,
   });
 
   useEffect(() => warmUp(), []);
