@@ -83,6 +83,43 @@ test("máximo de 5 perguntas; a quinta resposta leva ao fechamento", () => {
   assert.equal(transicionar(cheio, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "LIVRE");
 });
 
+function noFechamento(): EstadoEntrevista {
+  return { ...estadoInicial(), fase: "FECHAMENTO", faseIniciadaEm: 0, perguntasFeitas: 5 };
+}
+
+test("fechamento aceita a dúvida final mesmo com 5 perguntas feitas e sem esperar 60s", () => {
+  const acabouDeResponder = { ...noFechamento(), ultimaRespostaEm: 10_000 };
+  let e = transicionar(acabouDeResponder, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 10_001);
+  assert.equal(e.plin, "PLIN_PENDENTE");
+  e = transicionar(e, { tipo: "PLIN_CLICADO" }, 10_002);
+  assert.equal(e.plin, "PERGUNTA_ATIVA");
+  assert.equal(e.perguntaAtiva?.numero, 6);
+  assert.equal(e.perguntaFinalFeita, true);
+  e = transicionar(e, { tipo: "RESPOSTA_TERMINOU" }, 20_000);
+  assert.equal(e.fase, "FECHAMENTO");
+  assert.equal(e.plin, "LIVRE");
+});
+
+test("fechamento faz a pergunta final uma vez só", () => {
+  const jaFeita = { ...noFechamento(), perguntaFinalFeita: true };
+  assert.equal(transicionar(jaFeita, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 999_999).plin, "LIVRE");
+});
+
+test("fechamento não atropela uma pergunta ativa e só aceita dúvida", () => {
+  const ativa = { ...noFechamento(), plin: "PERGUNTA_ATIVA" as const };
+  assert.equal(transicionar(ativa, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "PERGUNTA_ATIVA");
+  for (const status of ["dica", "redirecionar"] as const) {
+    const e = transicionar(noFechamento(), { tipo: "ANALISE_RECEBIDA", resposta: { ...duvida, status } }, 0);
+    assert.equal(e.plin, "LIVRE");
+  }
+});
+
+test("pergunta feita no aprofundamento não conta como a final", () => {
+  let e = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
+  e = transicionar(e, { tipo: "PLIN_CLICADO" }, 1);
+  assert.equal(e.perguntaFinalFeita, false);
+});
+
 test("visão geral só aceita redirecionar", () => {
   const altoNivel = { ...estadoInicial(), fase: "ALTO_NIVEL" as const };
   assert.equal(transicionar(altoNivel, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "LIVRE");

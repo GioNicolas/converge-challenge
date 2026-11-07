@@ -20,6 +20,8 @@ export type EstadoEntrevista = {
   /** A pergunta que o candidato está respondendo. */
   perguntaAtiva: PerguntaAtiva | null;
   perguntasFeitas: number;
+  /** A pergunta de encerramento (do FECHAMENTO) já foi feita? Ela é única. */
+  perguntaFinalFeita: boolean;
   /** Quando o candidato terminou a última resposta (o intervalo entre perguntas conta daqui). */
   ultimaRespostaEm: number | null;
 };
@@ -54,10 +56,14 @@ const PROXIMA_FASE: Partial<Record<Fase, Fase>> = {
   FECHAMENTO: "ENCERRADA",
 };
 
-/** Que tipos de plin cada fase aceita. Requisitos e fechamento não têm plin da análise. */
+/**
+ * Que tipos de plin cada fase aceita. Requisitos não tem plin da análise.
+ * O fechamento aceita uma única dúvida: a pergunta de encerramento ("o que mudaria com mais tempo?").
+ */
 const PLINS_DA_FASE: Partial<Record<Fase, RespostaAnalise["status"][]>> = {
   ALTO_NIVEL: ["redirecionar"],
   APROFUNDAMENTO: ["duvida", "dica", "redirecionar"],
+  FECHAMENTO: ["duvida"],
 };
 
 export function estadoInicial(): EstadoEntrevista {
@@ -69,6 +75,7 @@ export function estadoInicial(): EstadoEntrevista {
     pendenteDeDemo: false,
     perguntaAtiva: null,
     perguntasFeitas: 0,
+    perguntaFinalFeita: false,
     ultimaRespostaEm: null,
   };
 }
@@ -89,6 +96,8 @@ export function aceitaPlin(
   if (resposta.status === "ok" || !resposta.pergunta) return false;
   if (!PLINS_DA_FASE[estado.fase]?.includes(resposta.status)) return false;
   if (estado.plin === "PERGUNTA_ATIVA") return false;
+  // A pergunta de encerramento fica fora do limite de 5 e do intervalo de 60s, mas é uma só.
+  if (estado.fase === "FECHAMENTO") return !estado.perguntaFinalFeita;
   if (estado.perguntasFeitas >= regras.maxPerguntas) return false;
   if (
     estado.ultimaRespostaEm !== null &&
@@ -157,6 +166,7 @@ export function transicionar(
         perguntaAtiva: { ...estado.perguntaPendente, numero },
         perguntaPendente: null,
         perguntasFeitas: numero,
+        perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
       };
     }
 
