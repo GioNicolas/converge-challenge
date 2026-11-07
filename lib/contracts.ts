@@ -175,7 +175,8 @@ export const Evidence = z.object({ t: z.number(), text: z.string() });
 export const CriterionScore = z.object({
   id: z.string(),
   name: z.string(),
-  score: z.number().int().min(1).max(4),
+  /** null = critério não explorado na entrevista: fica de fora da média. */
+  score: z.number().int().min(1).max(4).nullable(),
   evidence: z.array(Evidence),
 });
 
@@ -184,7 +185,7 @@ export const Report = z.object({
   configId: z.string(),
   roleTitle: z.string(),
   recommendation: z.enum(["avancar", "talvez", "nao_avancar"]),
-  /** Média ponderada dos critérios, de 1 a 4. */
+  /** Média ponderada dos critérios explorados (score não nulo), de 1 a 4. */
   overallScore: z.number().min(1).max(4),
   criteria: z.array(CriterionScore),
   summary: z.string(),

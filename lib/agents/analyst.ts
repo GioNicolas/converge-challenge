@@ -4,6 +4,7 @@
  */
 import type { AnalystQuestion } from "@/lib/agents/analystSchema";
 import { AnalystOutput } from "@/lib/agents/analystSchema";
+import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
 import { allPassed } from "@/lib/agents/policy";
 import { checkQuestion } from "@/lib/agents/spoilerFilter";
@@ -137,6 +138,12 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         .filter((q) => q.status === "asked" || q.status === "blipped")
         .map((q) => q.question),
       keyMoment,
+      remainingLabel: formatElapsed(Math.max(0, session.config.durationMin * 60_000 - trigger.t)),
+      uncovered: uncoveredCriteria(session).map((id) => {
+        const c = session.config.criteria.find((item) => item.id === id)!;
+        return `${c.id}: ${c.name} — ${c.description}`;
+      }),
+      hasWorkingSolution: hasWorkingSolution(session),
     });
 
     const result = await completeJson({ role: "analyst", system, user, schema: AnalystOutput });
@@ -161,15 +168,29 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
       const duplicate = session.evidence.some((n) => n.criterionId === e.criterionId && n.note === e.note);
       if (!duplicate) {
         session.evidence.push({ t: trigger.t, criterionId: e.criterionId, note: e.note, source: "analyst" });
+        // Mostrou sozinho, sem pergunta: o critério sai da agenda.
+        if (e.spontaneous) {
+          recordOutcome(session, { t: trigger.t, criterionId: e.criterionId, kind: "espontaneo", note: e.note, source: "analyst" });
+        }
       }
     }
 
     const lineCount = code.split("\n").length;
-    const candidates = questions.map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
+    const criterionIds = new Set(session.config.criteria.map((c) => c.id));
+    const working = hasWorkingSolution(session);
+    const candidates = questions
+      // Desafio só com código funcionando: antes disso, "dá pra melhorar?" soaria como "tem erro".
+      .filter((q) => q.kind !== "desafio" || working)
+      .map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
     // O tema de aprofundamento também vai pro entrevistador, então passa pelo filtro junto.
     const verdicts = await Promise.all(
       candidates.map(({ question }) =>
-        checkQuestion(question.question, question.followUpTopic),
+        checkQuestion(question.question, question.followUpTopic, question.kind ?? "explicar", {
+          code,
+          candidateSaid: session.events.flatMap((e) =>
+            e.type === "speech" && e.role === "candidate" ? [e.text] : [],
+          ).slice(-6),
+        }),
       ),
     );
 
@@ -193,6 +214,8 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         createdAt: trigger.t,
         status: "queued",
         keyMoment,
+        kind: question.kind ?? "explicar",
+        criterionId: question.criterionId && criterionIds.has(question.criterionId) ? question.criterionId : undefined,
       });
     });
     analyst.lastOutcome = {
@@ -210,6 +233,11 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
   } finally {
     analyst.state = "idle";
   }
+}
+
+/** Já houve run com todos os testes visíveis passando. */
+function hasWorkingSolution(session: SessionState): boolean {
+  return session.events.some((e) => e.type === "run" && allPassed(e.result));
 }
 
 /**

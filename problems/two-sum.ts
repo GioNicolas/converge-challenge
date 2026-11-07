@@ -80,6 +80,13 @@ export const TWO_SUM: Problem = {
       { question: "Qual o tamanho máximo do array?", answer: "Até 10 mil elementos." },
       { question: "Posso usar bibliotecas?", answer: "Pode usar a biblioteca padrão da linguagem." },
     ],
+    probeGuides: {
+      abordagem: "Por que escolheu essa abordagem e o que pesou na decisão.",
+      complexidade:
+        "Depois que funcionar: a complexidade de tempo e, de forma secundária, a de memória. Se a solução não for a melhor conhecida, desafiar a melhorar o tempo.",
+      bordas: "Cenários genéricos: quando não existir par, números repetidos, negativos e zero.",
+      comunicacao: "Se explica o raciocínio com profundidade; é explorado junto com os outros critérios.",
+    },
     rubricNotes: {
       abordagem: "Bom: explica o plano antes de codar, sabe por que escolheu força bruta ou hashmap.",
       complexidade: "Bom: diz O(n²) vs O(n) e o custo de memória do dicionário sem ser provocado demais.",

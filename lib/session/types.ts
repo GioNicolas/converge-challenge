@@ -6,6 +6,45 @@ import type { HiddenTestsResult } from "@/lib/agents/hiddenTests";
 import type { Blip, InterviewConfig, LineRange, Report, SessionEvent } from "@/lib/contracts";
 import type { LlmStatsSnapshot } from "@/lib/llm";
 
+/**
+ * explicar: justificar uma decisão já tomada no código. sondar: perguntar direto sobre um critério
+ * (complexidade, bordas) sem insinuar erro. desafio: pedir para melhorar ou resolver um cenário, só com
+ * código funcionando. retorno: voltar a um desafio que o candidato topou ("e aí, como foi?").
+ */
+export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno";
+
+/** Como o candidato se saiu ao ser sondado num critério (ou se mostrou sozinho). */
+export type ProbeKind = "espontaneo" | "respondeu_bem" | "parcial" | "errou" | "nao_conseguiu" | "com_dica" | "recusou";
+
+export interface ProbeOutcome {
+  t: number;
+  criterionId: string;
+  kind: ProbeKind;
+  note: string;
+  questionId?: string;
+  source: "analyst" | "interviewer";
+}
+
+/** Agenda: cada critério da config precisa ser explorado ao menos uma vez. */
+export interface CriterionCoverage {
+  status: "nao_explorado" | "em_andamento" | "coberto";
+  outcomes: ProbeOutcome[];
+}
+
+/** Desafio que o candidato topou: o agente volta depois para ver como foi. */
+export interface CheckIn {
+  id: string;
+  /** Id da pergunta de desafio na fila. */
+  challengeId: string;
+  criterionId?: string;
+  /** O que foi pedido ("melhorar a complexidade de tempo"). */
+  challenge: string;
+  createdAt: number;
+  /** Versão do código quando o candidato topou: o retorno espera o código mudar. */
+  versionAtStart: number;
+  status: "aguardando" | "na_fila" | "feito";
+}
+
 /** Pergunta preparada pelo Analyst, ainda não necessariamente virou blip. */
 export interface QueuedQuestion {
   id: string;
@@ -24,6 +63,13 @@ export interface QueuedQuestion {
   keyMoment?: string;
   /** Candidato clicou "agora não": a pergunta só volta a partir deste t. */
   snoozedUntil?: number;
+  /** Critério da config que a pergunta explora. */
+  criterionId?: string;
+  kind?: QuestionKind;
+  /** Pergunta de retorno: o check-in que ela fecha. */
+  checkInId?: string;
+  /** Cópia de uma pergunta ignorada que voltou para a fila (só volta uma vez). */
+  retried?: boolean;
 }
 
 /** Observação pra rubrica, acumulada ao longo da sessão (o Evaluator lê tudo). */
@@ -83,7 +129,11 @@ export interface SessionState {
   evidence: EvidenceNote[];
   /** Quando a última conversa (blip ou chamada do candidato) terminou, em t da sessão. */
   lastConversationEndedAt?: number;
+  coverage: Record<string, CriterionCoverage>;
+  checkIns: CheckIn[];
   report?: ReportStatus;
+  /** Relógio da sessão em ms; só a simulação (scripts/simulate.ts) define. Senão, Date.now() - startedAt. */
+  clock?: () => number;
 }
 
 /** Resposta de GET /api/state?sessionId=... */
@@ -103,6 +153,8 @@ export interface SessionStateView {
   hintsUsed: number;
   ended: boolean;
   evidence: EvidenceNote[];
+  coverage: Record<string, CriterionCoverage>;
+  checkIns: CheckIn[];
   /** Estado da avaliação final (o relatório em si sai em GET /api/report). */
   report?: Omit<ReportStatus, "report">;
   /** Estatísticas dos LLMs (Featherless x OpenRouter) desde o start do servidor. */

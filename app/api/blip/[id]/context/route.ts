@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import type { BlipContext } from "@/lib/contracts";
-import { getSession, latestCode, numberCode } from "@/lib/session/store";
+import { getSession, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: "blip não encontrado" }, { status: 404 });
   }
 
-  const elapsedS = Math.round((Date.now() - session.startedAt) / 1000);
+  const elapsedS = Math.round(sessionNow(session) / 1000);
   const runs = session.events.filter((e) => e.type === "run").length;
   const pastes = session.events.filter((e) => e.type === "paste").length;
 

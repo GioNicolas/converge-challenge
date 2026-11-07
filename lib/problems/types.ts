@@ -33,6 +33,8 @@ export interface ProblemPrivate {
   clarifications: { question: string; answer: string }[];
   /** O que conta como "bom" por critério da rubrica (id do critério → texto). */
   rubricNotes: Record<string, string>;
+  /** O que vale sondar neste problema, por critério (sem a resposta). Vai para o Analyst e o entrevistador. */
+  probeGuides?: Record<string, string>;
 }
 
 export interface Problem {
