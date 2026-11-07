@@ -78,6 +78,7 @@ export default function JanelaChamada({
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const canto = useRef<Canto>("inferior-direito");
+  const [emCima, setEmCima] = useState(false);
 
   const encaixar = useCallback(
     (alvo: Canto, comMola = true) => {
@@ -94,6 +95,7 @@ export default function JanelaChamada({
       const nx = x.get() + (esquerda - r.left);
       const ny = y.get() + (topo - r.top);
       canto.current = alvo;
+      setEmCima(alvo.startsWith("superior"));
       if (comMola) {
         animate(x, nx, MOLA);
         animate(y, ny, MOLA);
@@ -158,6 +160,7 @@ export default function JanelaChamada({
       style={{ x, y }}
       className="pointer-events-auto fixed right-4 bottom-16 z-10 touch-none select-none"
     >
+      <BolhaDaPergunta visivel={temDuvida} emCima={emCima} onClicar={onClicarPlin} />
       <motion.div
         layout
         transition={MOLA}
@@ -184,7 +187,6 @@ export default function JanelaChamada({
               {/* O agente continua "vivo" na pílula: o mesmo anel, pequeno */}
               <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={32} />
               <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
-              {temDuvida && <span className="font-medium text-[#7cc4ff]">Tenho uma pergunta</span>}
               {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
               <span className={midia.microfoneLigado ? "text-texto-claro/70" : "text-perigo"}>
                 <Icone nome={midia.microfoneLigado ? "microfone" : "microfoneDesligado"} tamanho={15} />
@@ -219,26 +221,7 @@ export default function JanelaChamada({
                     temDuvida ? "cursor-pointer" : "cursor-default"
                   }`}
                 >
-                  <motion.span
-                    animate={{ y: temDuvida ? -10 : 0 }}
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                    className="block"
-                  >
-                    <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={124} />
-                  </motion.span>
-                  <AnimatePresence>
-                    {temDuvida && (
-                      <motion.span
-                        initial={{ opacity: 0, y: 6, filter: "blur(4px)" }}
-                        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                        exit={{ opacity: 0, y: 4, filter: "blur(4px)" }}
-                        transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-                        className="absolute bottom-3 rounded-full bg-white/95 px-3 py-1 text-[12px] font-medium whitespace-nowrap text-[#1c1c1e] shadow-padrao"
-                      >
-                        Tenho uma pergunta
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
+                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={124} />
                 </button>
 
                 <AnimatePresence>
@@ -317,6 +300,69 @@ export default function JanelaChamada({
         </AnimatePresence>
       </motion.div>
     </motion.div>
+  );
+}
+
+/**
+ * O convite do plin: uma bolha de fala no mesmo vidro escuro da janela, com a pontinha apontando para ela.
+ * Fica acima da janela (ou abaixo, se a janela estiver num canto de cima) e flutua de leve.
+ */
+function BolhaDaPergunta({ visivel, emCima, onClicar }: { visivel: boolean; emCima: boolean; onClicar: () => void }) {
+  return (
+    <div
+      className={`pointer-events-none absolute inset-x-0 flex justify-center ${
+        emCima ? "top-full pt-3" : "bottom-full pb-3"
+      }`}
+    >
+      <AnimatePresence>
+        {visivel && (
+          <motion.button
+            type="button"
+            onClick={onClicar}
+            aria-label="Ouvir a pergunta do entrevistador"
+            initial={{ opacity: 0, y: emCima ? -8 : 8, scale: 0.9, filter: "blur(6px)" }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: emCima ? -6 : 6, scale: 0.94, filter: "blur(4px)" }}
+            transition={{ type: "spring", stiffness: 420, damping: 30 }}
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            style={{ transformOrigin: emCima ? "top center" : "bottom center" }}
+            className="pointer-events-auto relative cursor-pointer"
+          >
+            {/* Flutua de leve, como quem espera a vez de falar */}
+            <motion.span
+              animate={{ y: [0, -3, 0] }}
+              transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+              className="relative flex items-center gap-3 rounded-[18px] bg-vidro-escuro py-2.5 pr-4 pl-3 text-left text-texto-claro shadow-flutuante ring-1 ring-white/10 backdrop-blur-xl"
+            >
+              <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-agente/20">
+                <motion.span
+                  aria-hidden
+                  className="absolute inset-0 rounded-full border border-agente"
+                  animate={{ scale: [1, 1.6], opacity: [0.7, 0] }}
+                  transition={{ duration: 1.6, repeat: Infinity, ease: [0.22, 1, 0.36, 1] }}
+                />
+                <span className="size-2.5 rounded-full bg-agente" />
+              </span>
+              <span className="flex flex-col leading-tight">
+                <span className="text-[13px] font-medium whitespace-nowrap">Tenho uma pergunta</span>
+                <span className="text-[11px] whitespace-nowrap text-texto-claro/55">Clique quando quiser ouvir</span>
+              </span>
+              {/* A pontinha da bolha, apontando para a janela */}
+              <svg
+                aria-hidden
+                width="16"
+                height="8"
+                viewBox="0 0 16 8"
+                className={`absolute left-1/2 -translate-x-1/2 ${emCima ? "-top-2 rotate-180" : "-bottom-2"}`}
+              >
+                <path d="M0 0 H16 L9.2 7.2 Q8 8.4 6.8 7.2 Z" fill="var(--vidro-escuro)" />
+              </svg>
+            </motion.span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
