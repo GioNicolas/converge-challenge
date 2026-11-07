@@ -18,6 +18,7 @@ import ConversaTotti from "./ConversaTotti";
 import PlanoAoVivo from "./PlanoAoVivo";
 import RevisaoPlano from "./RevisaoPlano";
 import EntrevistaPronta from "./EntrevistaPronta";
+import Passos from "./Passos";
 
 type Etapa = "vaga" | "lendo" | "conversa" | "pronta";
 
@@ -108,12 +109,7 @@ export default function PreEntrevistaTotti() {
   const tottiTerminou = estado?.planejamento.passo?.tipo === "encerrar";
 
   return (
-    <main className="relative flex min-h-dvh flex-col bg-fundo text-texto">
-      {/* Luz suave no topo, a assinatura da marca */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(60%_100%_at_50%_0%,var(--marca-suave),transparent)]"
-      />
+    <main className="relative flex min-h-dvh flex-col">
 
       <AnimatePresence mode="wait">
         {etapa === "vaga" && (
@@ -135,41 +131,34 @@ export default function PreEntrevistaTotti() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.36, ease: curvaSuave }}
-            className="relative flex h-dvh flex-col gap-4 px-4 py-4 lg:px-6"
+            className="relative flex h-dvh flex-col gap-3 p-3"
           >
             <header className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 rounded-padrao bg-superficie py-1.5 pr-4 pl-1.5">
                 <button
                   onClick={novaEntrevista}
                   aria-label="Começar de novo"
-                  className="flex size-9 items-center justify-center rounded-full text-texto-suave transition-colors duration-rapida hover:bg-superficie-2 hover:text-texto"
+                  className="flex size-8 items-center justify-center rounded-controle text-texto-suave transition-colors hover:bg-fundo hover:text-texto"
                 >
-                  <ArrowLeft size={18} />
+                  <ArrowLeft size={16} />
                 </button>
-                <div className="flex flex-col">
-                  <span className="titulo text-subtitulo text-texto">{estado.vaga.roleTitle}</span>
-                  <span className="text-mini text-texto-suave">
-                    {combinados} de {total} assuntos combinados
-                  </span>
-                </div>
+                <span className="text-[14px] text-texto">{estado.vaga.roleTitle}</span>
+                <span className="rotulo ml-3 text-texto-suave">
+                  {combinados}/{total} combinados
+                </span>
               </div>
-              <motion.button
+              <Passos atual={2} />
+              <button
                 onClick={() => setRevisando(true)}
-                animate={
-                  tottiTerminou
-                    ? { boxShadow: ["0 0 0 0 rgba(10,132,255,.55)", "0 0 0 8px rgba(10,132,255,0)"] }
-                    : { boxShadow: "0 0 0 0 rgba(10,132,255,0)" }
-                }
-                transition={tottiTerminou ? { duration: 1.6, repeat: Infinity } : { duration: 0.2 }}
-                className={`rounded-full px-4 py-2 text-corpo-grande font-medium transition-colors duration-normal ease-suave ${
-                  tottiTerminou ? "bg-marca text-texto-claro" : "bg-superficie-2 text-texto hover:bg-borda"
+                className={`rounded-controle px-4 py-2.5 text-[14px] font-medium transition-colors duration-200 ${
+                  tottiTerminou ? "bg-[var(--destaque)] text-texto" : "bg-texto text-superficie hover:opacity-90"
                 }`}
               >
                 Revisar e confirmar
-              </motion.button>
+              </button>
             </header>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,460px)_minmax(0,1fr)]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
               <ConversaTotti transcricao={estado.transcricao} pensando={pensando} erro={erro} onEnviar={responder} />
               <PlanoAoVivo estado={estado} />
             </div>

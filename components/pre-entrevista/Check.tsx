@@ -1,31 +1,40 @@
 "use client";
 
-// O check desenhado: o círculo enche e o traço se completa (o mesmo gesto dos requisitos no quadro).
+// Check de caixa marcada: o quadrado enche e o traço se completa, como uma caneta.
 import { motion, useReducedMotion } from "motion/react";
 
-export default function Check({ tamanho = 18 }: { tamanho?: number }) {
+export default function Check({ tamanho = 16, marcado = true }: { tamanho?: number; marcado?: boolean }) {
   const reduzido = useReducedMotion() ?? false;
+  if (!marcado) {
+    return (
+      <span
+        aria-hidden
+        className="block rounded-[3px] border-[1.5px] border-texto/25"
+        style={{ width: tamanho, height: tamanho }}
+      />
+    );
+  }
   return (
     <motion.svg
       width={tamanho}
       height={tamanho}
-      viewBox="0 0 20 20"
+      viewBox="0 0 16 16"
       aria-hidden
-      initial={reduzido ? false : { scale: 0.6, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: "spring", stiffness: 500, damping: 26 }}
+      initial={reduzido ? false : { scale: 0.7 }}
+      animate={{ scale: 1 }}
+      transition={{ type: "spring", stiffness: 520, damping: 26 }}
     >
-      <circle cx="10" cy="10" r="10" fill="var(--sucesso)" />
+      <rect width="16" height="16" rx="3" fill="var(--texto)" />
       <motion.path
-        d="M5.8 10.4 L8.7 13.2 L14.4 7.2"
+        d="M4.2 8.3 L6.9 10.9 L11.9 5.4"
         fill="none"
-        stroke="var(--fundo)"
-        strokeWidth="2.2"
+        stroke="var(--superficie)"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
         initial={reduzido ? false : { pathLength: 0 }}
         animate={{ pathLength: 1 }}
-        transition={{ duration: 0.32, delay: 0.1, ease: [0.32, 0.72, 0, 1] }}
+        transition={{ duration: 0.3, delay: 0.08, ease: [0.32, 0.72, 0, 1] }}
       />
     </motion.svg>
   );

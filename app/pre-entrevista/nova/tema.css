@@ -1,0 +1,59 @@
+/*
+ * Tema da pré-entrevista (lado do recrutador), com a Sable como referência:
+ * fundo claro e quente, cartões brancos chapados (sem sombra, sem vidro), cantos quase retos,
+ * texto grafite, rótulos monoespaçados em maiúsculas e um único destaque amarelo.
+ * Só redefine os tokens dentro de .tema-sable: os componentes continuam usando as mesmas classes.
+ */
+.tema-sable {
+  color-scheme: light;
+  --fundo: #f1f1ef;
+  --superficie: #ffffff;
+  --superficie-2: #f6f6f4;
+  --vidro: #ffffff;
+  --borda: rgb(27 29 31 / 0.1);
+  --texto: #1b1d1f;
+  --texto-suave: #6b6e70;
+  --texto-claro: #ffffff;
+  --marca: #1b1d1f;
+  --marca-suave: #fff3c2;
+  --destaque: #ffdb4d;
+  --sucesso: #1b1d1f;
+  --perigo: #c92a2a;
+  --raio-padrao: 6px;
+  --raio-controle: 4px;
+  --sombra-cartao: none;
+  --sombra-flutuante: 0 24px 64px rgb(27 29 31 / 0.14);
+
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: var(--font-grotesca), "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Rótulo monoespaçado em maiúsculas (ex.: "01 VAGA", "CONFIRMADO") */
+.tema-sable .rotulo {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 450;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+/* O mesmo rótulo com o marca-texto amarelo */
+.tema-sable .rotulo-destaque {
+  background: var(--destaque);
+  color: var(--texto);
+  padding: 1px 5px;
+}
+
+/* Rótulo apagado (ex.: "SUGERIDO") */
+.tema-sable .rotulo-neutro {
+  background: var(--fundo);
+  color: var(--texto-suave);
+  padding: 1px 5px;
+}
+
+.tema-sable ::selection {
+  background: var(--destaque);
+}
