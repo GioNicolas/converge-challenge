@@ -3,11 +3,14 @@
  * a recrutadora disse ou aceitou. O patch é validado campo a campo e aplicado
  * ao rascunho. O código, não o modelo, garante as invariantes (pesos, foco dos
  * critérios, unicidade de ids).
+ *
+ * Além do rascunho, devolve tudo o que foi preciso para reproduzir a rodada:
+ * as mensagens enviadas, as respostas cruas, o patch lido e os avisos de validação.
  */
 import { z } from "zod";
 import { Criterion, FocusArea, InterviewMode } from "@/lib/contracts";
 import { CATALOGO, criteriosIniciais, type CriterioModelo } from "./catalogo";
-import { chat, extrairJson, type Alvo, type Mensagem } from "./llm";
+import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { alinharPesos, Rascunho, type Turno } from "./rascunho";
 
 const TEMPERATURA = 0.2;
@@ -16,6 +19,7 @@ const MAX_TOKENS_EXTRATOR = 12000;
 /**
  * Alvos do extrator, em ordem: Featherless (principal) e, se configurado, OpenRouter (plano B).
  * O GLM vai com o raciocínio desligado: sem isso uma chamada levava ~170 s.
+ * Se o Featherless passar de 15 s, a chamada cai para a OpenRouter.
  */
 export function alvosDoExtrator(): Alvo[] {
   const alvos: Alvo[] = [
@@ -23,6 +27,7 @@ export function alvosDoExtrator(): Alvo[] {
       provedor: "featherless",
       model: process.env.EXTRACTOR_MODEL || "zai-org/GLM-5.2",
       extraBody: { chat_template_kwargs: { enable_thinking: false } },
+      timeoutMs: 15000,
     },
   ];
   const fallback = process.env.EXTRACTOR_FALLBACK_MODEL;
@@ -35,7 +40,7 @@ const Foco = Rascunho.shape.focus.element;
 const Senioridade = Rascunho.shape.seniority;
 
 /** Campos que o modelo pode devolver. Todos opcionais; o que não vier fica como está. */
-interface Patch {
+export interface Patch {
   mode?: InterviewMode;
   seniority?: z.infer<typeof Senioridade>;
   focus?: Array<z.infer<typeof Foco>>;
@@ -66,7 +71,8 @@ Regras:
    - weight é maior que 0; use valores maiores para o que ela disse que pesa mais (base 1).
    - focus de cada critério deve ser uma das áreas do foco.
 5. focus: lista de { area, weight } com as áreas de foco. Os pesos devem somar 1 (aproxime; o código renormaliza).
-6. recruiterNotes: texto curto com tom da entrevista, política de dicas, contexto do time e eliminatórios.
+6. recruiterNotes: texto curto em frases curtas. NÃO repita o que já tem campo próprio (modo, senioridade, foco,
+   duração, critérios). Guarde só tom, política de dicas, contexto do time/empresa e eliminatórios.
    Devolva o texto COMPLETO, acumulando o que já está em recruiterNotes com o que ela acrescentou.
 7. confirmado: marque true só para mode, seniority ou focus que ela confirmou ou corrigiu explicitamente nesta conversa.
 8. durationMin: inteiro, em minutos, só se ela disse.
@@ -89,7 +95,11 @@ Formato de saída (apenas o JSON, sem texto antes ou depois, sem cercas de códi
 }
 Inclua apenas as chaves que mudaram.`;
 
-function avisar(msg: string): void {
+/** Acumula avisos de validação: vão para o console e para o retorno de `extrair` (e de lá para o log). */
+type Avisos = string[];
+
+function avisar(avisos: Avisos, msg: string): void {
+  avisos.push(msg);
   console.warn(`[extrator] ${msg}`);
 }
 
@@ -98,44 +108,44 @@ function ehObjeto(valor: unknown): valor is Record<string, unknown> {
 }
 
 /** Valida um campo. Se for inválido, descarta com aviso e segue. */
-function campo<T>(nome: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, valor: unknown): T | undefined {
+function campo<T>(nome: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, valor: unknown, avisos: Avisos): T | undefined {
   if (valor === undefined || valor === null) return undefined;
   const r = schema.safeParse(valor);
   if (r.success) return r.data;
-  avisar(`campo "${nome}" descartado: ${r.error.issues[0]?.message ?? "inválido"}`);
+  avisar(avisos, `campo "${nome}" descartado: ${r.error.issues[0]?.message ?? "inválido"}`);
   return undefined;
 }
 
 /** Valida uma lista item a item: itens inválidos saem, os válidos ficam. */
-function lista<T>(nome: string, item: z.ZodType<T, z.ZodTypeDef, unknown>, valor: unknown): T[] | undefined {
+function lista<T>(nome: string, item: z.ZodType<T, z.ZodTypeDef, unknown>, valor: unknown, avisos: Avisos): T[] | undefined {
   if (valor === undefined || valor === null) return undefined;
   if (!Array.isArray(valor)) {
-    avisar(`campo "${nome}" não é uma lista; descartado`);
+    avisar(avisos, `campo "${nome}" não é uma lista; descartado`);
     return undefined;
   }
   const itens: T[] = [];
   valor.forEach((bruto, i) => {
     const r = item.safeParse(bruto);
     if (r.success) itens.push(r.data);
-    else avisar(`${nome}[${i}] descartado: ${r.error.issues[0]?.message ?? "inválido"}`);
+    else avisar(avisos, `${nome}[${i}] descartado: ${r.error.issues[0]?.message ?? "inválido"}`);
   });
   return itens;
 }
 
-function lerPatch(bruto: unknown): Patch {
+function lerPatch(bruto: unknown, avisos: Avisos): Patch {
   if (!ehObjeto(bruto)) {
-    avisar("resposta não é um objeto JSON; nada aplicado");
+    avisar(avisos, "resposta não é um objeto JSON; nada aplicado");
     return {};
   }
   return {
-    mode: campo("mode", InterviewMode, bruto.mode),
-    seniority: campo("seniority", Senioridade, bruto.seniority),
-    focus: lista("focus", Foco, bruto.focus),
-    confirmado: campo("confirmado", ConfirmadoParcial, bruto.confirmado),
-    criteria: lista("criteria", Criterion, bruto.criteria),
-    durationMin: campo("durationMin", z.number().int().positive(), bruto.durationMin),
-    recruiterNotes: campo("recruiterNotes", z.string(), bruto.recruiterNotes),
-    problemId: campo("problemId", z.string().min(1), bruto.problemId),
+    mode: campo("mode", InterviewMode, bruto.mode, avisos),
+    seniority: campo("seniority", Senioridade, bruto.seniority, avisos),
+    focus: lista("focus", Foco, bruto.focus, avisos),
+    confirmado: campo("confirmado", ConfirmadoParcial, bruto.confirmado, avisos),
+    criteria: lista("criteria", Criterion, bruto.criteria, avisos),
+    durationMin: campo("durationMin", z.number().int().positive(), bruto.durationMin, avisos),
+    recruiterNotes: campo("recruiterNotes", z.string(), bruto.recruiterNotes, avisos),
+    problemId: campo("problemId", z.string().min(1), bruto.problemId, avisos),
   };
 }
 
@@ -160,25 +170,25 @@ function normalizarFoco(itens: Array<z.infer<typeof Foco>>): Array<z.infer<typeo
 }
 
 /** Garante ids únicos e focus dentro das áreas. Se nada sobrar, volta ao catálogo. */
-function ajustarCriterios(criterios: Criterion[], areas: Set<FocusArea>, mode: InterviewMode): CriterioModelo[] {
+function ajustarCriterios(criterios: Criterion[], areas: Set<FocusArea>, mode: InterviewMode, avisos: Avisos): CriterioModelo[] {
   const porId = new Map<string, Criterion>();
   for (const c of criterios) {
     if (!areas.has(c.focus)) {
-      avisar(`critério "${c.id}" descartado: foco "${c.focus}" fora das áreas de foco`);
+      avisar(avisos, `critério "${c.id}" descartado: foco "${c.focus}" fora das áreas de foco`);
       continue;
     }
-    if (porId.has(c.id)) avisar(`id de critério repetido "${c.id}"; mantido o último`);
+    if (porId.has(c.id)) avisar(avisos, `id de critério repetido "${c.id}"; mantido o último`);
     porId.set(c.id, c);
   }
   if (porId.size === 0) {
-    avisar("nenhum critério válido; voltando aos critérios do catálogo");
+    avisar(avisos, "nenhum critério válido; voltando aos critérios do catálogo");
     return criteriosIniciais(mode, [...areas]);
   }
   return [...porId.values()];
 }
 
-/** Aplica o patch ao rascunho. Não muta o rascunho original. */
-export function aplicarPatch(r: Rascunho, p: Patch): Rascunho {
+/** Aplica o patch ao rascunho. Não muta o rascunho original. Os avisos, se houver lista, são acumulados nela. */
+export function aplicarPatch(r: Rascunho, p: Patch, avisos: Avisos = []): Rascunho {
   const modeMudou = p.mode !== undefined && p.mode !== r.mode;
   const mode = p.mode ?? r.mode;
 
@@ -186,7 +196,7 @@ export function aplicarPatch(r: Rascunho, p: Patch): Rascunho {
   if (p.focus !== undefined) {
     const novo = normalizarFoco(p.focus);
     if (novo.length > 0) focus = novo;
-    else avisar("focus vazio; mantido o anterior");
+    else avisar(avisos, "focus vazio; mantido o anterior");
   }
   const areas = new Set(focus.map((f) => f.area));
 
@@ -198,7 +208,7 @@ export function aplicarPatch(r: Rascunho, p: Patch): Rascunho {
     mode,
     seniority: p.seniority ?? r.seniority,
     focus,
-    criteria: alinharPesos(ajustarCriterios(base, areas, mode), focus),
+    criteria: alinharPesos(ajustarCriterios(base, areas, mode, avisos), focus),
     recruiterNotes: p.recruiterNotes ?? r.recruiterNotes,
     durationMin: p.durationMin ?? r.durationMin,
     // Problema escolhido para o modo antigo não serve para o novo; volta ao padrão do modo.
@@ -231,36 +241,84 @@ export function montarMensagens(r: Rascunho, transcricao: Turno[]): Mensagem[] {
   ];
 }
 
-export async function extrair(
-  r: Rascunho,
-  transcricao: Turno[],
-): Promise<{ rascunho: Rascunho; ms: number; provedor: string; model: string }> {
-  // A vaga fica de fora: o extrator só registra o que foi dito na conversa.
+/** Uma resposta do modelo que não virou patch válido (JSON quebrado), para o log. */
+export interface TentativaJson {
+  resposta: string;
+  erro?: string;
+}
+
+/** Falha da extração depois de esgotar as tentativas de JSON. Carrega o que foi enviado e recebido. */
+export class ErroExtracao extends Error {
+  constructor(
+    mensagem: string,
+    readonly detalhes: { mensagens: Mensagem[]; tentativasJson: TentativaJson[]; tentativas: Tentativa[]; avisos: Avisos },
+  ) {
+    super(mensagem);
+    this.name = "ErroExtracao";
+  }
+}
+
+export interface ResultadoExtracao {
+  rascunho: Rascunho;
+  /** Tempo somado de todas as chamadas ao modelo. */
+  ms: number;
+  provedor: string;
+  model: string;
+  /** Mensagens da última chamada enviada ao modelo (prompt completo, incluindo correção de JSON se houve). */
+  mensagens: Mensagem[];
+  /** Resposta crua da última chamada, a que originou o patch. */
+  respostaCrua: string;
+  /** Cada resposta lida ao tentar extrair o JSON, com o erro de parse quando houve. */
+  tentativasJson: TentativaJson[];
+  /** Patch já validado, como foi aplicado (só as chaves que vieram e passaram na validação). */
+  patch: Patch;
+  /** Avisos de validação (campos descartados, critérios ajustados). Os mesmos que foram ao console. */
+  avisos: Avisos;
+  /** Tentativas HTTP de todas as chamadas, na ordem. Mostra quando houve fallback de provedor. */
+  tentativas: Tentativa[];
+}
+
+export async function extrair(r: Rascunho, transcricao: Turno[]): Promise<ResultadoExtracao> {
+  const avisos: Avisos = [];
+  const tentativas: Tentativa[] = [];
+  const tentativasJson: TentativaJson[] = [];
   const mensagens: Mensagem[] = montarMensagens(r, transcricao);
 
   // Modelo às vezes erra o JSON (aspas não escapadas nos textos). Pede a correção uma vez.
   let ms = 0;
   let provedor = "";
   let modelo = "";
-  for (let tentativa = 1; ; tentativa++) {
-    const resposta = await chat({
-      alvos: alvosDoExtrator(),
-      messages: mensagens,
-      temperature: TEMPERATURA,
-      // Raciocínio consome tokens e segundos antes do JSON. Com ele desligado a chamada cai para poucos segundos.
-      maxTokens: MAX_TOKENS_EXTRATOR,
-    });
+  for (let rodada = 1; ; rodada++) {
+    const enviadas = mensagens.map((m) => ({ ...m }));
+    let resposta: Awaited<ReturnType<typeof chat>>;
+    try {
+      resposta = await chat({
+        alvos: alvosDoExtrator(),
+        messages: enviadas,
+        temperature: TEMPERATURA,
+        // Raciocínio consome tokens e segundos antes do JSON. Com ele desligado a chamada cai para poucos segundos.
+        maxTokens: MAX_TOKENS_EXTRATOR,
+      });
+    } catch (err) {
+      if (err instanceof ErroChat) tentativas.push(...err.tentativas);
+      throw err;
+    }
+    tentativas.push(...resposta.tentativas);
     ms += resposta.ms;
-    if (resposta.provedor !== "featherless") avisar(`respondeu ${resposta.provedor}/${resposta.model}`);
+    if (resposta.provedor !== "featherless") avisar(avisos, `respondeu ${resposta.provedor}/${resposta.model}`);
     provedor = resposta.provedor;
     modelo = resposta.model;
+
+    let patch: Patch;
     try {
-      const patch = lerPatch(extrairJson(resposta.content));
-      return { rascunho: aplicarPatch(r, patch), ms, provedor, model: modelo };
+      patch = lerPatch(extrairJson(resposta.content), avisos);
     } catch (err) {
-      if (tentativa >= 2) throw err;
       const motivo = err instanceof Error ? err.message : String(err);
-      avisar(`JSON inválido na tentativa ${tentativa}; pedindo correção (${motivo.slice(0, 120)})`);
+      tentativasJson.push({ resposta: resposta.content, erro: motivo });
+      if (rodada >= 2) {
+        throw new ErroExtracao(motivo, { mensagens: enviadas, tentativasJson, tentativas, avisos });
+      }
+      avisar(avisos, `JSON inválido na tentativa ${rodada}; pedindo correção (${motivo.slice(0, 120)})`);
       mensagens.push(
         { role: "assistant", content: resposta.content },
         {
@@ -270,6 +328,21 @@ export async function extrair(
             "Não use aspas duplas dentro dos textos e não quebre linhas dentro das strings.",
         },
       );
+      continue;
     }
+
+    tentativasJson.push({ resposta: resposta.content });
+    return {
+      rascunho: aplicarPatch(r, patch, avisos),
+      ms,
+      provedor,
+      model: modelo,
+      mensagens: enviadas,
+      respostaCrua: resposta.content,
+      tentativasJson,
+      patch,
+      avisos,
+      tentativas,
+    };
   }
 }

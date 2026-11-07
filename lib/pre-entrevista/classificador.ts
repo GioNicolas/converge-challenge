@@ -46,6 +46,12 @@ export interface Classificacao {
   /** Decisões que o agente deve perguntar em vez de sugerir. */
   confirmar: Array<"mode" | "seniority" | "focus">;
   usage: { inputTokens: number | null; ms: number };
+  /** Request exato enviado ao Jev (state + perguntas), para o log. */
+  request: { state: unknown; questions: unknown };
+  /** Respostas cruas do Jev por pergunta, como o SDK devolveu. */
+  answers: unknown;
+  /** Modelo que respondeu, como o Jev informou. */
+  model: string;
 }
 
 /** Abaixo disso, o agente pergunta em vez de sugerir. */
@@ -212,7 +218,7 @@ export function pesosDoFoco(scores: FocoSugerido[]): InterviewConfig["focus"] {
 
 export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {
   const inicio = Date.now();
-  const { answers, usage } = await jev().systemOne({
+  const request = {
     state: {
       tarefa: TAREFA,
       vaga: {
@@ -222,7 +228,8 @@ export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {
       },
     },
     questions: { modo: MODO, senioridade: SENIORIDADE, ...FOCOS },
-  });
+  };
+  const { answers, usage, model } = await jev().systemOne(request);
 
   const focusScores: FocoSugerido[] = (Object.keys(FOCOS) as FocusArea[])
     .map((area) => {
@@ -247,5 +254,8 @@ export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {
     focus,
     confirmar,
     usage: { inputTokens: usage.input_tokens, ms: Date.now() - inicio },
+    request,
+    answers,
+    model,
   };
 }

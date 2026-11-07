@@ -1,0 +1,63 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
+import { registrarEvento } from "@/lib/pre-entrevista/log";
+import { aguardarExtracao, getSessao, salvarConfig, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const Corpo = z.object({ rascunho: Rascunho.optional() });
+
+/**
+ * Gera o InterviewConfig a partir do rascunho. Se vier `rascunho` no corpo, é a versão revisada
+ * à mão e substitui o da sessão (com diff no log). Espera a extração em curso terminar antes.
+ */
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const sessao = getSessao(id);
+  if (!sessao) return NextResponse.json({ erro: "sessão não encontrada" }, { status: 404 });
+
+  const texto = await req.text();
+  let bruto: unknown = {};
+  if (texto.trim()) {
+    try {
+      bruto = JSON.parse(texto);
+    } catch {
+      return NextResponse.json({ erro: "corpo não é JSON válido" }, { status: 400 });
+    }
+  }
+  const lido = Corpo.safeParse(bruto);
+  if (!lido.success) {
+    const erros = lido.error.issues.map((i) => `${i.path.join(".") || "(raiz)"}: ${i.message}`);
+    registrarEvento(sessao, {
+      tipo: "finalizacao",
+      nivel: "aviso",
+      resumo: `revisão inválida: ${erros.length} erro(s)`,
+      dados: { ok: false, erros },
+    });
+    return NextResponse.json({ ok: false, erros }, { status: 422 });
+  }
+
+  await aguardarExtracao(sessao);
+  if (lido.data.rascunho) substituirRascunho(sessao, lido.data.rascunho, "revisão manual");
+
+  const resultado = paraInterviewConfig(sessao.rascunho);
+  if (!resultado.ok) {
+    registrarEvento(sessao, {
+      tipo: "finalizacao",
+      nivel: "aviso",
+      resumo: `recusada: ${resultado.erros.length} erro(s)`,
+      dados: { ok: false, erros: resultado.erros, rascunho: sessao.rascunho },
+    });
+    return NextResponse.json({ ok: false, erros: resultado.erros }, { status: 422 });
+  }
+
+  await salvarConfig(sessao, resultado.config);
+  registrarEvento(sessao, {
+    tipo: "finalizacao",
+    resumo: `config ${resultado.config.id} salva (${resultado.config.criteria.length} critérios, ${resultado.config.durationMin} min)`,
+    dados: { ok: true, config: resultado.config, rascunho: sessao.rascunho },
+  });
+  return NextResponse.json({ ok: true, config: resultado.config });
+}

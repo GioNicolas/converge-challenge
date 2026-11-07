@@ -51,13 +51,35 @@ export interface ChatOpcoes {
   timeoutMs?: number;
 }
 
+/** Uma tentativa contra um provedor/modelo. Quem não respondeu traz `erro`. */
+export interface Tentativa {
+  provedor: Provedor;
+  model: string;
+  ms: number;
+  erro?: string;
+}
+
 export interface ChatResposta {
+  /** Resposta crua do modelo, sem o trim de espaços das bordas. */
   content: string;
   /** Tempo total, somando todas as tentativas e alvos. */
   ms: number;
   /** Provedor e modelo que de fato responderam. */
   provedor: Provedor;
   model: string;
+  /** Todas as tentativas, na ordem: as que falharam antes da que respondeu. */
+  tentativas: Tentativa[];
+}
+
+/** Nenhum alvo respondeu (ou um alvo falhou sem recuperação). Carrega as tentativas feitas. */
+export class ErroChat extends Error {
+  constructor(
+    mensagem: string,
+    readonly tentativas: Tentativa[],
+  ) {
+    super(mensagem);
+    this.name = "ErroChat";
+  }
 }
 
 interface RespostaChat {
@@ -130,20 +152,32 @@ export async function chat({
   temperature,
   timeoutMs = TIMEOUT_PADRAO_MS,
 }: ChatOpcoes): Promise<ChatResposta> {
-  if (alvos.length === 0) throw new Error("chat: nenhum alvo configurado");
+  if (alvos.length === 0) throw new ErroChat("chat: nenhum alvo configurado", []);
   const inicio = Date.now();
+  const tentativas: Tentativa[] = [];
   const falhas: string[] = [];
 
   for (const alvo of alvos) {
+    const inicioAlvo = Date.now();
     try {
       const content = await tentarAlvo(alvo, { messages, maxTokens, timeoutMs, temperature });
-      return { content, ms: Date.now() - inicio, provedor: alvo.provedor, model: alvo.model };
+      const ms = Date.now() - inicioAlvo;
+      tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms });
+      return { content, ms: Date.now() - inicio, provedor: alvo.provedor, model: alvo.model, tentativas };
     } catch (err) {
-      if (!(err instanceof FalhaRecuperavel)) throw err;
-      falhas.push(`${alvo.provedor}/${alvo.model}: ${err.message}`);
+      const mensagem = err instanceof Error ? err.message : String(err);
+      tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms: Date.now() - inicioAlvo, erro: mensagem });
+      // Erro não recuperável (ex.: 4xx que não é 429): não adianta tentar o próximo alvo.
+      if (!(err instanceof FalhaRecuperavel)) throw new ErroChat(mensagem, tentativas);
+      falhas.push(`${alvo.provedor}/${alvo.model}: ${mensagem}`);
     }
   }
-  throw new Error(`nenhum provedor respondeu. ${falhas.join(" | ")}`);
+  throw new ErroChat(`nenhum provedor respondeu. ${falhas.join(" | ")}`, tentativas);
+}
+
+/** Houve fallback quando alguma tentativa anterior falhou antes da que respondeu. */
+export function houveFallback(tentativas: Tentativa[]): boolean {
+  return tentativas.some((t) => t.erro !== undefined);
 }
 
 /** Pega o objeto JSON de uma resposta do modelo, tirando cercas de código e texto em volta. */

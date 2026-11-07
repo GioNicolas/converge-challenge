@@ -20,7 +20,17 @@ export interface Topico {
   sinal_nao: string;
 }
 
-export interface Cobertura {
+/** Pergunta/resposta crua do Jev, guardada no log para reproduzir a avaliação. */
+export interface ChamadaJev {
+  /** Exatamente o que foi enviado: `state` (contexto) e `questions` (as perguntas). */
+  request: { state: unknown; questions: unknown };
+  /** Respostas cruas do Jev, por nome de pergunta, como o SDK devolveu. */
+  answers: unknown;
+  model: string;
+  usage: { input_tokens: number | null; output_tokens: number | null };
+}
+
+export interface Cobertura extends ChamadaJev {
   /** Probabilidade de cada tópico estar coberto, por id. */
   cobertura: Record<string, number>;
   /** Tópicos ainda não cobertos, na ordem de prioridade. */
@@ -141,14 +151,15 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[]): Promi
   const topicos = topicosDo(r);
   const inicio = Date.now();
 
-  const { answers } = await jev().systemOne({
+  const request = {
     state: {
       tarefa: TAREFA_COBERTURA,
       rascunho_atual: { mode: r.mode, seniority: r.seniority, focus: r.focus },
       transcricao,
     },
     questions: Object.fromEntries(topicos.map((t) => [t.id, noul(t.pergunta, { true: t.sinal_sim, false: t.sinal_nao })])),
-  });
+  };
+  const { answers, model, usage } = await jev().systemOne(request);
 
   const cobertura: Record<string, number> = { ...r.cobertura };
   for (const t of topicos) cobertura[t.id] = Math.max(r.cobertura[t.id] ?? 0, answers[t.id].noul);
@@ -157,6 +168,10 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[]): Promi
     cobertura,
     faltando: topicos.filter((t) => cobertura[t.id] < LIMIAR_COBERTURA),
     ms: Date.now() - inicio,
+    request,
+    answers,
+    model,
+    usage,
   };
 }
 
