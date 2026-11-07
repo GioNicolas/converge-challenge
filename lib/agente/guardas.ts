@@ -99,3 +99,51 @@ export function eEnchimento(texto: string): boolean {
   const n = normalizar(texto);
   return n === "" || FALAS_SEM_RESPOSTA.has(n);
 }
+
+/** A fala cita a "ficha" (material interno que o candidato não deve saber que existe)? */
+export function mencionaFicha(texto: string): boolean {
+  return normalizar(texto).split(" ").some((p) => p === "ficha" || p === "fichas");
+}
+
+/** A fala termina com "?" (contra-pergunta)? */
+export function terminaEmPergunta(texto: string): boolean {
+  return /\?["')\]\s]*$/.test(texto.trim());
+}
+
+/**
+ * Limpa de forma determinística a fala do entrevistador do loop rápido:
+ *  - "A ficha diz que X" / "Segundo a ficha, X" -> "X" (sem citar a ficha);
+ *  - remove frases finais que sejam pergunta (contra-pergunta).
+ * Devolve `texto` limpo e quais ajustes foram feitos. Se, depois de limpar, ainda restar
+ * menção a "ficha" ou não sobrar texto, devolve texto "" (o chamador fica mudo).
+ */
+export function limparFalaEntrevistador(texto: string): {
+  texto: string;
+  ajustes: Array<"cita_ficha" | "contra_pergunta">;
+} {
+  const ajustes: Array<"cita_ficha" | "contra_pergunta"> = [];
+  let t = texto.trim();
+
+  if (mencionaFicha(t)) {
+    ajustes.push("cita_ficha");
+    t = t
+      // "Segundo a ficha, ..." / "De acordo com a ficha, ..." / "Conforme a ficha, ..."
+      .replace(/(^|[.!?]\s+)(segundo|conforme|de acordo com|pela|na)\s+(a\s+)?fichas?\s*,?\s*(\S)/gi,
+        (_m, ini: string, _p, _a, prox: string) => ini + prox)
+      // "A ficha diz que ..." / "A ficha informa que ..."
+      .replace(/(^|[.!?]\s+)(a\s+)?fichas?\s+(diz|dizem|informa|indica|mostra|fala|traz|aponta|define|especifica|tem|consta)(\s+que)?\s+(\S)/gi,
+        (_m, ini: string, _a, _v, _q, prox: string) => ini + prox);
+    // Capitaliza o início de cada frase afetada.
+    t = t.replace(/(^|[.!?]\s+)([a-zà-ÿ])/g, (_m, ini: string, c: string) => ini + c.toUpperCase());
+    if (mencionaFicha(t)) return { texto: "", ajustes };
+  }
+
+  if (terminaEmPergunta(t)) {
+    ajustes.push("contra_pergunta");
+    const frases = (t.match(/[^.!?]+[.!?]*/g) ?? []).map((f) => f.trim()).filter(Boolean);
+    while (frases.length && terminaEmPergunta(frases[frases.length - 1])) frases.pop();
+    t = frases.join(" ").trim();
+  }
+
+  return { texto: t, ajustes };
+}

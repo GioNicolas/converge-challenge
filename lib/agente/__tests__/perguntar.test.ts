@@ -61,3 +61,97 @@ describe("perguntar", () => {
     assert.equal(r.estado.conversa.length, 1);
   });
 });
+
+describe("perguntar: defesas contra quebra de personagem", () => {
+  const roda = async (texto: string, requisito: string | null = null) => {
+    const logs: Array<[string, unknown]> = [];
+    const llm = criarClienteFalso([{ responder: true, texto, requisito }]);
+    const r = await perguntar(
+      { llm, kit: kitDemo, problema, log: (e: string, m: unknown) => logs.push([e, m]) } as never,
+      estado,
+      { fase: "REQUISITOS", texto: "Qual o prazo de confirmação?" },
+      AGORA,
+    );
+    return { r, logs };
+  };
+
+  it("'A ficha diz que...' é reescrito sem citar a ficha e registra o ajuste", async () => {
+    const { r, logs } = await roda("A ficha diz que a confirmação precisa sair em menos de 2 segundos.", "Confirmação < 2 s");
+    assert.equal(r.responder, true);
+    assert.equal(r.texto, "A confirmação precisa sair em menos de 2 segundos.");
+    assert.equal(r.requisito, "Confirmação < 2 s");
+    assert.ok(!/ficha/i.test(r.estado.conversa.at(-1)!.texto));
+    assert.ok(logs.some(([e, m]) => e === "perguntar_ajuste" && (m as { ajuste: string }).ajuste === "cita_ficha"));
+  });
+
+  it("'Segundo a ficha,' também é reescrito", async () => {
+    const { r } = await roda("Segundo a ficha, são 5 anos de retenção.");
+    assert.equal(r.texto, "São 5 anos de retenção.");
+  });
+
+  it("menção à ficha que não dá para limpar com segurança: fica quieto", async () => {
+    const { r, logs } = await roda("Isso não está na ficha, pode assumir algo.");
+    assert.equal(r.responder, false);
+    assert.equal(r.texto, "");
+    assert.ok(logs.some(([e, m]) => e === "perguntar_ajuste" && (m as { ajuste: string }).ajuste === "cita_ficha"));
+  });
+
+  it("contra-pergunta no final é removida, mantendo a resposta", async () => {
+    const { r, logs } = await roda("O pico é de 40 mil por segundo. Como você garante isso no desenho?", "Pico: 40 mil/s");
+    assert.equal(r.responder, true);
+    assert.equal(r.texto, "O pico é de 40 mil por segundo.");
+    assert.ok(!r.texto.includes("?"));
+    assert.ok(logs.some(([e, m]) => e === "perguntar_ajuste" && (m as { ajuste: string }).ajuste === "contra_pergunta"));
+  });
+
+  it("só uma pergunta, sem resposta: fica quieto", async () => {
+    const { r } = await roda("Como você garante isso?");
+    assert.equal(r.responder, false);
+  });
+
+  it("resposta normal não é alterada nem gera log de ajuste", async () => {
+    const { r, logs } = await roda("A gente espera uns 4 mil acessos por segundo. O time quer isso com 99,9% de disponibilidade.", "Leitura: ~4 mil/s");
+    assert.equal(r.texto, "A gente espera uns 4 mil acessos por segundo. O time quer isso com 99,9% de disponibilidade.");
+    assert.equal(logs.length, 0);
+  });
+
+  it("o prompt estático não instrui a citar a ficha e proíbe pergunta", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Ok, 5 anos.", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?" }, AGORA);
+    const p = llm.chamadas[0].sistema.estatico;
+    // "ficha" só pode aparecer dentro da proibição entre aspas.
+    const semProibicao = p.replace(/"ficha"/g, "");
+    assert.ok(!/ficha/i.test(semProibicao), "o prompt ainda usa o termo 'ficha' fora da proibição");
+    assert.match(p, /NUNCA cite "ficha"/);
+    assert.match(p, /NUNCA faça pergunta/);
+    assert.match(p, /SEMPRE preencha/);
+  });
+
+  it("o prompt orienta recusa curta e variada, convite sem '?', assumir só se faltar dado e resposta só do perguntado", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Ok, 5 anos.", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?" }, AGORA);
+    const p = llm.chamadas[0].sistema.estatico;
+    assert.match(p, /UMA frase curta e natural/);
+    assert.match(p, /VARIE a redação/);
+    assert.match(p, /convite sem interrogação/);
+    assert.match(p, /SOMENTE quando a pergunta do candidato é sobre um dado que não existe/);
+    assert.match(p, /Nunca use essa orientação em recusas/);
+    assert.match(p, /Responda SOMENTE o que foi perguntado/);
+    assert.ok(!/o time espera/i.test(p), "o prompt não deve sugerir 'o time espera'");
+    // Sem texto fixo de recusa para copiar.
+    assert.ok(!/Não posso compartilhar/i.test(p));
+  });
+
+  it("recusa que termina em convite sem '?' passa intacta pela limpeza", async () => {
+    const t = "Isso prefiro ouvir de você. Me conta como você abordaria o problema.";
+    const { r, logs } = await roda(t);
+    assert.equal(r.responder, true);
+    assert.equal(r.texto, t);
+    assert.equal(logs.length, 0);
+  });
+
+  it("recusa seguida de pergunta ainda tem a pergunta cortada", async () => {
+    const { r } = await roda("Não posso te dar a resposta pronta. Como você abordaria o problema?");
+    assert.equal(r.texto, "Não posso te dar a resposta pronta.");
+  });
+});

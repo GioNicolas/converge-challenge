@@ -1,6 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
-import { eEnchimento, limitarFrases, temLinguagemAvaliativa } from "./guardas";
+import { eEnchimento, limitarFrases, limparFalaEntrevistador, temLinguagemAvaliativa } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import {
@@ -81,8 +81,15 @@ export async function perguntar(
     return mudo();
   }
 
-  const texto = limitarFrases(saida.texto, 2);
-  if (!saida.responder || !texto) return mudo();
+  if (!saida.responder) return mudo();
+  // Limpa antes de limitar a 2 frases, para uma contra-pergunta na 3ª frase não atrapalhar a resposta.
+  const limpo = limparFalaEntrevistador(saida.texto);
+  for (const ajuste of limpo.ajustes) {
+    log("perguntar_ajuste", { sessao_id: entrada.sessao_id, ajuste });
+  }
+  // O corte em 2 frases pode deixar uma pergunta no fim; limpa de novo (sem novo log).
+  const texto = limparFalaEntrevistador(limitarFrases(limpo.texto, 2)).texto;
+  if (!texto) return mudo();
   if (temLinguagemAvaliativa(texto)) {
     log("perguntar_ajuste", { sessao_id: entrada.sessao_id, ajuste: "linguagem_avaliativa" });
     return mudo();
