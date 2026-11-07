@@ -1,7 +1,9 @@
 /**
  * Estado interno da sessão (só servidor) e a visão de debug que GET /api/state devolve.
  */
+import type { AnalystOutput } from "@/lib/agents/analystSchema";
 import type { Blip, InterviewConfig, LineRange, SessionEvent } from "@/lib/contracts";
+import type { LlmStatsSnapshot } from "@/lib/llm";
 
 /** Pergunta preparada pelo Analyst, ainda não necessariamente virou blip. */
 export interface QueuedQuestion {
@@ -19,6 +21,12 @@ export interface AnalystStatus {
   lastTrigger?: SessionEvent["type"];
   lastRunAt?: number; // t da sessão
   runs: number;
+  /** Última análise do LLM (sem as perguntas, que vão pra fila). */
+  insights?: Omit<AnalystOutput, "questions">;
+  lastError?: string;
+  lastDurationMs?: number;
+  /** Custo acumulado em US$ reportado pela Featherless. */
+  costUsd: number;
 }
 
 export interface CodeVersion {
@@ -59,4 +67,6 @@ export interface SessionStateView {
   pendingBlipId?: string;
   hintsUsed: number;
   ended: boolean;
+  /** Estatísticas dos LLMs (Featherless x OpenRouter) desde o start do servidor. */
+  llm?: LlmStatsSnapshot;
 }

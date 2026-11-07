@@ -3,6 +3,7 @@
  */
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import type { InterviewConfig, SessionEvent } from "@/lib/contracts";
+import { getLlmStats } from "@/lib/llm";
 import type { SessionState, SessionStateView } from "@/lib/session/types";
 
 const globalForSessions = globalThis as typeof globalThis & {
@@ -25,7 +26,7 @@ export function getOrCreateSession(sessionId: string, config: InterviewConfig = 
     events: [],
     codeHistory: [],
     language: config.languages[0],
-    analyst: { state: "idle", runs: 0 },
+    analyst: { state: "idle", runs: 0, costUsd: 0 },
     queue: [],
     blips: [],
     hintsUsed: 0,
@@ -91,6 +92,7 @@ export function toView(session: SessionState): SessionStateView {
     pendingBlipId: session.pendingBlipId,
     hintsUsed: session.hintsUsed,
     ended: session.ended,
+    llm: getLlmStats(),
   };
 }
 

@@ -1,6 +1,6 @@
 // STUB: será substituído pelo Interviewer com LLM.
 import { NextResponse } from "next/server";
-import { AVAILABLE_HINT, findBlipQuestion } from "@/lib/agents/policy";
+import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { ChatRequest, type ChatResponse, type EditorCommand } from "@/lib/contracts";
 import { appendEvent, getSession } from "@/lib/session/store";
 
@@ -46,14 +46,23 @@ export async function POST(request: Request) {
   } else if (ANSWER_RE.test(lastCandidate)) {
     response = { reply: REFUSAL, commands: [], end: false };
   } else if (HINT_RE.test(lastCandidate)) {
-    appendEvent(session, {
-      type: "hint",
-      sessionId,
-      t: Date.now() - session.startedAt,
-      level: 1,
-      text: AVAILABLE_HINT,
-    });
-    response = { reply: AVAILABLE_HINT, commands: [], end: false };
+    const hint = nextHint(session);
+    if (hint) {
+      appendEvent(session, {
+        type: "hint",
+        sessionId,
+        t: Date.now() - session.startedAt,
+        level: session.hintsUsed + 1,
+        text: hint,
+      });
+      response = { reply: hint, commands: [], end: false };
+    } else {
+      response = {
+        reply: "Já te dei as dicas que eu tinha. Tenta me explicar onde você travou?",
+        commands: [],
+        end: false,
+      };
+    }
   } else if (agentTurns + 1 >= 3) {
     response = {
       reply: "Beleza, obrigado! Pode seguir.",
