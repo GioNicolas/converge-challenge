@@ -103,7 +103,9 @@ export default function PaginaVaga() {
       .then(setEstado)
       .catch((e) => setErro(`Não consegui ler o estado: ${e.message}`));
   }, []);
-  useEffect(() => fim.current?.scrollIntoView({ block: "nearest" }), [historico, ocupado]);
+  useEffect(() => {
+    fim.current?.scrollIntoView({ block: "nearest" });
+  }, [historico, ocupado]);
 
   function gerarExemplo() {
     setDescricao(vagaDeExemplo(indiceExemplo).texto);
