@@ -24,6 +24,8 @@ export interface AnalystStatus {
   /** Última análise do LLM (sem as perguntas, que vão pra fila). */
   insights?: Omit<AnalystOutput, "questions">;
   lastError?: string;
+  /** Resultado da última tentativa, em português ("2 perguntas, 1 barrada pelo filtro", "pulada: código igual"). */
+  lastOutcome?: { t: number; text: string };
   lastDurationMs?: number;
   /** Custo acumulado em US$ reportado pela Featherless. */
   costUsd: number;

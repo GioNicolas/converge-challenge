@@ -51,6 +51,11 @@ function AnalysisBlock({ analyst }: { analyst: AnalystStatus }) {
   return (
     <Block title="análise">
       {analyst.lastError !== undefined && <li className="break-words text-red-400">erro: {analyst.lastError}</li>}
+      {analyst.lastOutcome !== undefined && (
+        <li className="break-words text-neutral-300">
+          último resultado: {analyst.lastOutcome.text} ({formatMs(analyst.lastOutcome.t)})
+        </li>
+      )}
       {insights === undefined ? (
         <li className="text-neutral-600">ainda sem análise</li>
       ) : (

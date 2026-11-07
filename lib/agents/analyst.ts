@@ -20,18 +20,25 @@ interface AnalystBookkeeping {
   /** Código e t do gatilho da última análise concluída com sucesso. */
   lastCompletedCode?: string;
   lastCompletedT?: number;
-  /** Contador de ids da fila: nunca reaproveita um id, mesmo com itens stale. */
-  nextQuestionNo: number;
+  /** Pause adiado pela janela de 15 s: no máximo um por sessão (um novo substitui o anterior). */
+  deferredTimer?: ReturnType<typeof setTimeout>;
 }
+
+type PauseEvent = Extract<SessionEvent, { type: "pause" }>;
 
 const PAUSE_MIN_GAP_MS = 15_000;
 
-const bookkeeping = new WeakMap<SessionState, AnalystBookkeeping>();
+// Em globalThis, como o store: o Next em dev recarrega o módulo ao compilar outra rota, e um
+// WeakMap local zeraria no meio da sessão (já causou ids de pergunta repetidos).
+const globalWithBook = globalThis as typeof globalThis & {
+  __analystBookkeeping?: WeakMap<SessionState, AnalystBookkeeping>;
+};
+const bookkeeping = (globalWithBook.__analystBookkeeping ??= new WeakMap<SessionState, AnalystBookkeeping>());
 
 function bookkeepingFor(session: SessionState): AnalystBookkeeping {
   let book = bookkeeping.get(session);
   if (!book) {
-    book = { running: false, nextQuestionNo: 0 };
+    book = { running: false };
     bookkeeping.set(session, book);
   }
   return book;
@@ -60,10 +67,19 @@ export async function runAnalyst(session: SessionState, trigger: SessionEvent): 
 /** Uma análise. Nunca lança: erros viram `analyst.lastError`. */
 async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trigger: SessionEvent): Promise<void> {
   const code = latestCode(session);
-  if (code.trim() === "") return;
-  if ((trigger.type === "pause" || trigger.type === "paste") && code === book.lastCompletedCode) return;
+  if (code.trim() === "") {
+    session.analyst.lastOutcome = { t: trigger.t, text: "pulada: código vazio" };
+    return;
+  }
+  if ((trigger.type === "pause" || trigger.type === "paste") && code === book.lastCompletedCode) {
+    session.analyst.lastOutcome = { t: trigger.t, text: "pulada: código igual à última análise" };
+    return;
+  }
   const lastStartedAt = session.analyst.lastRunAt;
-  if (trigger.type === "pause" && lastStartedAt !== undefined && trigger.t - lastStartedAt < PAUSE_MIN_GAP_MS) return;
+  if (trigger.type === "pause" && lastStartedAt !== undefined && trigger.t - lastStartedAt < PAUSE_MIN_GAP_MS) {
+    deferPause(session, book, trigger, PAUSE_MIN_GAP_MS - (trigger.t - lastStartedAt));
+    return;
+  }
 
   const analyst = session.analyst;
   analyst.state = "running";
@@ -108,20 +124,22 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     // O tema de aprofundamento também vai pro entrevistador, então passa pelo filtro junto.
     const verdicts = await Promise.all(
       candidates.map(({ question }) =>
-        checkQuestion(`${question.question} (tema para aprofundar depois: ${question.followUpTopic})`),
+        checkQuestion(question.question, question.followUpTopic),
       ),
     );
 
+    let blocked = 0;
     candidates.forEach(({ question, lines }, i) => {
       const verdict = verdicts[i];
       analyst.costUsd += verdict.costUsd;
       if (!verdict.safe) {
+        blocked += 1;
         console.info(`[analyst] pergunta rejeitada (${verdict.reason}): ${question.question}`);
         return;
       }
-      book.nextQuestionNo += 1;
+      // A fila nunca perde itens (stale continua lá), então o tamanho dá um id único.
       session.queue.push({
-        id: `q-${book.nextQuestionNo}`,
+        id: `q-${session.queue.length + 1}`,
         question: question.question,
         followUpTopic: question.followUpTopic,
         priority: question.priority,
@@ -130,13 +148,38 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         status: "queued",
       });
     });
+    analyst.lastOutcome = {
+      t: trigger.t,
+      text:
+        questions.length === 0
+          ? "o modelo achou que não valia perguntar agora"
+          : `${questions.length} perguntas geradas, ${blocked} barradas pelo filtro`,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     analyst.lastError = message;
+    analyst.lastOutcome = { t: trigger.t, text: `erro: ${truncate(message, 80)}` };
     console.error("[analyst] falha na análise:", message);
   } finally {
     analyst.state = "idle";
   }
+}
+
+/**
+ * Adia um pause que caiu dentro da janela de 15 s: a análise roda uma vez, quando a janela fechar,
+ * com o t avançado pelo tempo esperado. Se a sessão acabar antes, o timer não roda.
+ */
+function deferPause(session: SessionState, book: AnalystBookkeeping, trigger: PauseEvent, waitMs: number): void {
+  clearTimeout(book.deferredTimer);
+  session.analyst.lastOutcome = {
+    t: trigger.t,
+    text: `adiada: menos de 15 s desde a última (roda em ${Math.ceil(waitMs / 1000)}s)`,
+  };
+  book.deferredTimer = setTimeout(() => {
+    book.deferredTimer = undefined;
+    if (session.ended) return;
+    void runAnalyst(session, { ...trigger, t: trigger.t + waitMs });
+  }, waitMs);
 }
 
 /** Mantém o grifo dentro das linhas do código e com endLine >= startLine. */

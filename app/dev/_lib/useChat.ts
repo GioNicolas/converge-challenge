@@ -33,6 +33,8 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
       const id = activeBlipRef.current;
       activeBlipRef.current = undefined;
       if (id !== undefined) void sendEvent({ type: "blip_closed", blipId: id, reason });
+      // Fechou a conversa, os grifos da pergunta saem junto (qualquer motivo).
+      applyCommands([{ type: "clear_highlights" }]);
       setOpen(false);
       setBlipId(undefined);
       setMessages([]);
@@ -40,7 +42,7 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
       setError(null);
       setBusy(false);
     },
-    [sendEvent],
+    [sendEvent, applyCommands],
   );
 
   const close = useCallback(() => closeChat("button"), [closeChat]);

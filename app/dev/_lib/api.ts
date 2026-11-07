@@ -13,6 +13,16 @@ export async function postEvent(event: SessionEvent): Promise<EventsResponse> {
   return EventsResponse.parse(await res.json());
 }
 
+/** GET /api/blip/pending (polling da IDE). 404 (sessão desconhecida) vira "sem blip". */
+export async function getPendingBlip(sessionId: string): Promise<EventsResponse> {
+  const res = await fetch(`/api/blip/pending?sessionId=${encodeURIComponent(sessionId)}`, {
+    cache: "no-store",
+  });
+  if (res.status === 404) return {};
+  if (!res.ok) throw new Error(`GET /api/blip/pending respondeu ${res.status}`);
+  return EventsResponse.parse(await res.json());
+}
+
 /** GET /api/state. Devolve null em 404 (antes do primeiro evento). */
 export async function getState(sessionId: string): Promise<SessionStateView | null> {
   const res = await fetch(`/api/state?sessionId=${encodeURIComponent(sessionId)}`, {

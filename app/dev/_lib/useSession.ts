@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import type { Blip, SessionEvent } from "@/lib/contracts";
-import { postEvent } from "./api";
+import { getPendingBlip, postEvent } from "./api";
 import { INITIAL_LANGUAGE } from "./problem";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -18,6 +18,8 @@ export interface LogEntry {
 
 const DURATION_MS = DEFAULT_CONFIG.durationMin * 60_000;
 const LOG_LIMIT = 200;
+/** Com o candidato parado, o blip só aparece por polling: a cada 3 s. */
+const PENDING_POLL_MS = 3000;
 
 /**
  * Sessão: id, relógio (t), cronômetro, fim de sessão e o único ponto de envio (sendEvent).
@@ -86,6 +88,25 @@ export function useSession() {
       language: INITIAL_LANGUAGE,
     });
   }, [sendEvent]);
+
+  // Polling de blip (GET /api/blip/pending): mostra o balão mesmo sem evento novo do candidato.
+  useEffect(() => {
+    if (sessionId === null || ended) return;
+    let alive = true;
+    const id = setInterval(() => {
+      getPendingBlip(sessionId)
+        .then((res) => {
+          if (alive && res.blip !== undefined) setIncomingBlip(res.blip);
+        })
+        .catch(() => {
+          // falha transitória do polling: tenta de novo no próximo tick
+        });
+    }, PENDING_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [sessionId, ended]);
 
   // Cronômetro: atualiza o tempo decorrido e encerra por timeout.
   useEffect(() => {

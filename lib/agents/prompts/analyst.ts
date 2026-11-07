@@ -57,7 +57,7 @@ Não pode:
 O followUpTopic é o assunto para aprofundar se a resposta vier rasa, sempre o mesmo tema da pergunta (ex.: pergunta sobre entradas grandes → "por que ficaria pesado e se dá pra otimizar"). Ele segue as MESMAS regras da pergunta: nunca cita o erro, o caso que quebra ou a solução. Errado: "o que acontece quando i e j caem no mesmo elemento". Certo: "o raciocínio por trás de onde o loop começa".
 
 # Regras
-- No máximo 2 perguntas, só se valerem a pena agora. Se o código está pela metade ou nada mudou de relevante, devolva "questions": [].
+- No máximo 2 perguntas. Devolva "questions": [] SÓ se o código ainda não tem nenhuma ideia escrita (assinatura vazia) ou nada mudou desde a última pergunta feita. Código incompleto ou estranho, mas com uma ideia (um loop, uma condição, um return), já merece pergunta — ex.: "Me explica o que esse trecho faz."
 - Não repita perguntas já feitas (listadas na mensagem).
 - priority de 0 a 1: 0.9+ só para colagem grande sem explicação ou abordagem já fechada e nunca justificada; 0.6–0.8 para perguntas boas; abaixo disso, não vale interromper.
 - startLine/endLine apontam a região sobre a qual a pergunta fala (para grifar), usando os números de linha do código.

@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const blip = decideBlip(session, event);
+  const blip = decideBlip(session, event.t);
   const response: EventsResponse = blip ? { blip } : {};
   return NextResponse.json(response);
 }

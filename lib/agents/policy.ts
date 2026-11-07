@@ -20,7 +20,20 @@ export function nextHint(session: SessionState): string | undefined {
   return getProblem(session.config.problemId).private.hints[session.hintsUsed];
 }
 
-export function decideBlip(session: SessionState, event: SessionEvent): Blip | undefined {
+/** Tipos que deixam o candidato parado: ele não está digitando nem rodando nada agora. */
+const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_closed", "session_started"]);
+/** Depois desse tempo sem evento novo, o candidato também conta como parado. */
+const IDLE_AFTER_MS = 8000;
+
+/** Candidato parado em t (ms de sessão): só o polling de blips (GET /api/blip/pending) usa isso. */
+export function isCandidateIdle(session: SessionState, t: number): boolean {
+  const last = session.events.at(-1);
+  if (last === undefined) return true;
+  return IDLE_EVENT_TYPES.has(last.type) || t - last.t > IDLE_AFTER_MS;
+}
+
+/** Decide se a fila vira um blip agora (t em ms de sessão). Não aparece com outro blip pendente. */
+export function decideBlip(session: SessionState, t: number): Blip | undefined {
   if (session.pendingBlipId) return undefined;
 
   const candidate = session.queue
@@ -29,7 +42,7 @@ export function decideBlip(session: SessionState, event: SessionEvent): Blip | u
   if (!candidate) return undefined;
 
   const lastBlip = session.blips.at(-1);
-  const cooldownOver = !lastBlip || event.t - lastBlip.createdAt >= 60000;
+  const cooldownOver = !lastBlip || t - lastBlip.createdAt >= 60000;
   if (!cooldownOver && candidate.priority < 0.9) return undefined;
 
   candidate.status = "blipped";
@@ -37,7 +50,7 @@ export function decideBlip(session: SessionState, event: SessionEvent): Blip | u
     id: candidate.id,
     preview: "Tenho uma pergunta sobre seu código",
     priority: candidate.priority,
-    createdAt: event.t,
+    createdAt: t,
     highlight: candidate.highlight,
   };
   session.blips.push(blip);
