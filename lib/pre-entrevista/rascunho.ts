@@ -54,6 +54,13 @@ const LINGUAGENS: string[] = [...LINGUAGENS_IDE];
 export const Foco = z.object({ area: FocusArea, weight: z.number().min(0).max(1) });
 export type Foco = z.infer<typeof Foco>;
 
+/**
+ * De onde veio um critério: a fala da recrutadora que o justifica (`turno` é o número da fala na transcrição,
+ * 1 = abertura da Totti), ou o catálogo, quando ela não falou dele. Interno: não vai no InterviewConfig.
+ */
+export const Origem = z.union([z.object({ fala: z.string(), turno: z.number().int() }), z.literal("catalogo")]);
+export type Origem = z.infer<typeof Origem>;
+
 export const Rascunho = z.object({
   mode: InterviewMode,
   roleTitle: z.string(),
@@ -70,6 +77,12 @@ export const Rascunho = z.object({
   cobertura: z.record(z.string(), z.number()).default({}),
   /** Ids de tópicos ainda não cobertos na conversa (derivado de `cobertura`). */
   pendencias: z.array(z.string()),
+  /** Origem de cada critério (interno). Ver `pesos.ts`. */
+  origens: z.record(z.string(), Origem).default({}),
+  /** Trechos literais em que ela disse que algo reprova o candidato sozinho (interno; vão para o guia). */
+  eliminatorios: z.array(z.string()).default([]),
+  /** Trecho literal em que ela falou do time, da empresa ou do momento da contratação (interno; vai para o guia). */
+  contexto: z.string().default(""),
 });
 export type Rascunho = z.infer<typeof Rascunho>;
 
@@ -219,6 +232,9 @@ export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
     confirmado: { mode: false, seniority: false, focus: false },
     cobertura: {},
     pendencias: [],
+    origens: {},
+    eliminatorios: [],
+    contexto: "",
   };
 }
 
