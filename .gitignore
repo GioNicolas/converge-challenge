@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 !.env.example
+
+# vendor copiado por scripts/copy-vendor.mjs
+/public/pyodide/
+/public/monaco/
