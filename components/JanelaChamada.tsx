@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/Icone";
-import AgentePresenca, { type EstadoAgente } from "@/components/AgentePresenca";
+import OndaDeVoz from "@/components/agente/OndaDeVoz";
+import type { EstadoAgente } from "@/lib/presenca/energia";
 import type { Fase } from "@/lib/sessao/cliente";
 import type { EstadoEntrevista } from "@/lib/sessao/estados";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
@@ -170,16 +171,12 @@ export default function JanelaChamada({
               animate={{ opacity: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0, filter: "blur(6px)" }}
               transition={{ duration: 0.18 }}
-              className="flex h-11 cursor-pointer items-center gap-2.5 px-4 text-sm"
+              className="flex h-11 cursor-pointer items-center gap-2.5 pr-4 pl-2 text-sm"
             >
-              <span className={`size-2 rounded-full ${ativa ? "bg-sucesso" : "bg-texto-claro/30"}`} />
+              {/* O agente continua "vivo" na pílula: o mesmo anel, pequeno */}
+              <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={32} />
               <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
-              {temDuvida && (
-                <span className="flex items-center gap-1.5 text-texto-claro/90">
-                  <span className="size-2 animate-pulse rounded-full bg-agente" />
-                  Pergunta
-                </span>
-              )}
+              {temDuvida && <span className="font-medium text-[#7cc4ff]">Tenho uma pergunta</span>}
               {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
               <span className={midia.microfoneLigado ? "text-texto-claro/70" : "text-perigo"}>
                 <Icone nome={midia.microfoneLigado ? "microfone" : "microfoneDesligado"} tamanho={15} />
@@ -203,14 +200,38 @@ export default function JanelaChamada({
                   <span className="text-texto-claro/75">{NOME_DA_FASE[estado.fase]}</span>
                 </div>
 
-                {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato. */}
-                <div className="absolute inset-y-0 left-0 right-[108px] flex items-center justify-center pb-3">
-                  <AgentePresenca
-                    estado={estadoAgente}
-                    volume={estadoAgente === "ouvindo" ? midia.volume : 0}
-                    onClicarDuvida={onClicarPlin}
-                  />
-                </div>
+                {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato.
+                    Na dúvida, a área inteira vira o botão da pergunta. */}
+                <button
+                  type="button"
+                  disabled={!temDuvida}
+                  onClick={temDuvida ? onClicarPlin : undefined}
+                  aria-label={temDuvida ? "Ouvir a pergunta do entrevistador" : "Entrevistador"}
+                  className={`absolute inset-y-0 left-0 right-[108px] flex items-center justify-center ${
+                    temDuvida ? "cursor-pointer" : "cursor-default"
+                  }`}
+                >
+                  <motion.span
+                    animate={{ y: temDuvida ? -10 : 0 }}
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    className="block"
+                  >
+                    <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={124} />
+                  </motion.span>
+                  <AnimatePresence>
+                    {temDuvida && (
+                      <motion.span
+                        initial={{ opacity: 0, y: 6, filter: "blur(4px)" }}
+                        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                        exit={{ opacity: 0, y: 4, filter: "blur(4px)" }}
+                        transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+                        className="absolute bottom-3 rounded-full bg-white/95 px-3 py-1 text-[12px] font-medium whitespace-nowrap text-[#1c1c1e] shadow-padrao"
+                      >
+                        Tenho uma pergunta
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </button>
 
                 <AnimatePresence>
                   {!temDuvida && (

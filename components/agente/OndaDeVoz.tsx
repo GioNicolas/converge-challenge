@@ -2,6 +2,7 @@
 
 // Versão B, onda de voz: um anel fino de luz que ondula com a fala.
 // Pensando: um arco mais claro percorre o anel. Dúvida: o anel fica azul e um ponto pulsa no centro.
+// O desenho é feito num espaço de 132×132 e escalado para o `tamanho` pedido (ex.: 30 na pílula minimizada).
 import { useRef } from "react";
 import { useReducedMotion } from "motion/react";
 import { useLacoDeEnergia, type EstadoAgente } from "@/lib/presenca/energia";
@@ -10,7 +11,15 @@ const LADO = 132;
 const RAIO = 34;
 const PONTOS = 180;
 
-export default function OndaDeVoz({ estado, volume = 0 }: { estado: EstadoAgente; volume?: number }) {
+export default function OndaDeVoz({
+  estado,
+  volume = 0,
+  tamanho = LADO,
+}: {
+  estado: EstadoAgente;
+  volume?: number;
+  tamanho?: number;
+}) {
   const reduzido = useReducedMotion() ?? false;
   const tela = useRef<HTMLCanvasElement>(null);
 
@@ -22,11 +31,12 @@ export default function OndaDeVoz({ estado, volume = 0 }: { estado: EstadoAgente
       const ctx = canvas?.getContext("2d");
       if (!canvas || !ctx) return;
       const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== LADO * dpr) {
-        canvas.width = LADO * dpr;
-        canvas.height = LADO * dpr;
+      const k = tamanho / LADO;
+      if (canvas.width !== Math.round(tamanho * dpr)) {
+        canvas.width = Math.round(tamanho * dpr);
+        canvas.height = Math.round(tamanho * dpr);
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.setTransform(dpr * k, 0, 0, dpr * k, 0, 0);
       ctx.clearRect(0, 0, LADO, LADO);
       const c = LADO / 2;
       const duvida = estado === "duvida";
@@ -55,7 +65,7 @@ export default function OndaDeVoz({ estado, volume = 0 }: { estado: EstadoAgente
           else ctx.lineTo(x, y);
         }
         ctx.strokeStyle = `rgba(${cor},${alfa})`;
-        ctx.lineWidth = largura;
+        ctx.lineWidth = Math.max(largura, 1.1 / k); // pelo menos ~1px na tela, mesmo pequeno
         ctx.shadowColor = brilho;
         ctx.shadowBlur = 10 + energia * 14;
         ctx.stroke();
@@ -88,5 +98,5 @@ export default function OndaDeVoz({ estado, volume = 0 }: { estado: EstadoAgente
     reduzido,
   );
 
-  return <canvas ref={tela} aria-hidden style={{ width: LADO, height: LADO }} />;
+  return <canvas ref={tela} aria-hidden style={{ width: tamanho, height: tamanho }} />;
 }
