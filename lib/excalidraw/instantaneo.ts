@@ -24,7 +24,7 @@ export type Secao = Readonly<{
 export type Instantaneo = Readonly<{
   componentes: readonly Componente[];
   conexoes: readonly Conexao[];
-  anotacoes: readonly Readonly<{ id: string; texto: string }>[];
+  anotacoes: readonly Readonly<{ id: string; texto: string; dentroDe?: string | null }>[];
   secoes: readonly Secao[];
   desenhos: readonly Readonly<{ id: string; tipo: "freedraw" | "image" }>[];
 }>;
