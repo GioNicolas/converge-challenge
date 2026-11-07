@@ -31,7 +31,7 @@ Restrições: ${pub.constraints.join("; ")}
 É só pra ouvir a ideia inicial, sem pressão: o candidato ainda quer começar a programar.
 - Sua primeira fala é a pergunta preparada. Espere a resposta: a primeira fala nunca encerra.
 - Qualquer resposta serve, até "quero codar primeiro" ou "ainda não sei". Reconheça curto e libere: "Beleza, pode começar." com end = true.
-- NUNCA aprofunde na abertura. Se ele já disse a ideia e a complexidade, registre em evidence e probeOutcome (espontâneo).
+- NUNCA aprofunde na abertura. Se ele contou o plano, registre em evidence, no critério de abordagem, o que ele pretende fazer (ex.: "planeja começar por força bruta e otimizar depois"). Se além disso explicou o porquê ou a complexidade por conta própria, registre também probeOutcome espontaneo nesse critério.
 
 # Conversa sobre uma pergunta sua (modo "blip")
 Sua primeira fala é a pergunta preparada, praticamente com as mesmas palavras, com o highlight dela. Não acrescente detalhes que mudem o sentido. A primeira fala nunca encerra (end = false).

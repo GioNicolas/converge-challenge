@@ -61,7 +61,8 @@ export async function runInterviewerTurn(
     output = await generate(session, system, user);
     // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
     const opening = found !== undefined && req.messages.length === 0;
-    {
+    // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
+    if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
       const verdict = await checkReply(output.reply, candidateLines, hint, code);
       session.analyst.costUsd += verdict.costUsd;
       if (!verdict.safe) {
@@ -155,12 +156,24 @@ async function generate(session: SessionState, system: string, user: string): Pr
   return result.data;
 }
 
+function words(text: string): string[] {
+  return text.toLowerCase().match(/[a-zà-ú]{4,}/g) ?? [];
+}
+
 /** A fala traz a dica: boa parte das palavras da dica aparecem nela. */
 function containsHint(reply: string, hint: string): boolean {
-  const words = (text: string) => text.toLowerCase().match(/[a-zà-ú]{4,}/g) ?? [];
   const said = new Set(words(reply));
   const hintWords = words(hint);
   return hintWords.length > 0 && hintWords.filter((w) => said.has(w)).length / hintWords.length >= 0.6;
+}
+
+/** A fala é praticamente a pergunta preparada: quase todas as palavras dela e quase nada a mais. */
+function isAboutTheSame(reply: string, question: string): boolean {
+  const asked = new Set(words(question));
+  const said = words(reply);
+  if (asked.size === 0 || said.length === 0) return false;
+  const extra = said.filter((w) => !asked.has(w)).length;
+  return containsHint(reply, question) && extra <= 2;
 }
 
 function elapsedMs(session: SessionState): number {
