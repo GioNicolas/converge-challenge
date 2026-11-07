@@ -7,6 +7,7 @@
 // Tudo que o agente desenha entra no grupo da pergunta, para ele apagar depois.
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
+import { quebrarLinhas } from "@/lib/excalidraw/texto";
 import {
   caixaDosElementos,
   cenaParaTela,
@@ -86,37 +87,77 @@ export async function apontarEAnotar(o: OpcoesApontar) {
   }
 }
 
+
+/** Caixa que envolve os pontos de um traço, na cena. */
+function caixaDoTraco(t: Traco): Caixa {
+  const xs = t.pontos.map((p) => t.origem.x + p[0]);
+  const ys = t.pontos.map((p) => t.origem.y + p[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, largura: Math.max(...xs) - x, altura: Math.max(...ys) - y };
+}
+
+/**
+ * A parte da vista onde dá para escrever: sem a barra de ferramentas (em cima), os controles (embaixo)
+ * e a janela de chamada (no canto em que ela estiver).
+ */
+function areaLivre(v: Vista): Caixa {
+  const area = areaVisivel(v);
+  const topo = 84 / v.zoom;
+  const base = 72 / v.zoom;
+  let { x, largura } = area;
+  const janela = document.querySelector("[data-janela-chamada]")?.getBoundingClientRect();
+  if (janela && janela.width > 0) {
+    if (janela.left + janela.width / 2 > v.largura / 2) {
+      largura -= (v.largura - janela.left + 16) / v.zoom;
+    } else {
+      x += (janela.right + 16) / v.zoom;
+      largura -= (janela.right + 16) / v.zoom;
+    }
+  }
+  return { x, y: area.y + topo, largura: Math.max(120, largura), altura: Math.max(80, area.altura - topo - base) };
+}
+
+const FONTE = 20;
+const POR_LINHA = 26;
+const PADDING = { x: 14, y: 10 };
+
 async function coreografar(o: OpcoesApontar) {
   const { quadro, cursor, grupo, sinal } = o;
+
+  // Não disputa o quadro: se o candidato está no meio de um traço, espera ele soltar.
+  await quadro.agente.esperarCandidatoLivre();
+
   const cena = quadro.api.getSceneElements();
   const elementosAlvo = cena.filter((e) => o.alvos.includes(e.id));
+  const temAlvo = elementosAlvo.length > 0;
   const doCandidato = cena.filter((e) => e.customData?.autor !== "agente");
   const alvo =
     caixaDosElementos(elementosAlvo, 4) ??
     caixaDosElementos(doCandidato, 4) ?? { x: 40, y: 260, largura: 160, altura: 80 };
+  if (temAlvo) quadro.agente.ancorar(grupo, o.alvos);
 
   // 1. A tela desliza até o alvo, se preciso.
-  let vista = vistaDe(quadro);
-  if (!estaVisivel(alvo, vista, 80)) {
-    const de = { x: vista.scrollX, y: vista.scrollY };
-    const para = scrollParaCentralizar(alvo, vista);
+  const inicial = vistaDe(quadro);
+  if (!estaVisivel(alvo, inicial, 80)) {
+    const de = { x: inicial.scrollX, y: inicial.scrollY };
+    const para = scrollParaCentralizar(alvo, inicial);
     await animar(
-      520,
+      560,
       (p) => {
         const k = suavizar(p);
         quadro.agente.rolar(de.x + (para.scrollX - de.x) * k, de.y + (para.scrollY - de.y) * k);
       },
       sinal,
     );
-    vista = vistaDe(quadro);
   }
 
-  const naTela = (p: Ponto) => cenaParaTela(p, vista);
+  // A vista é lida a cada quadro: se o candidato rolar ou der zoom no meio, o cursor continua no lugar certo.
+  const naTela = (p: Ponto) => cenaParaTela(p, vistaDe(quadro));
   const moverCursor = async (para: Ponto, semente: number) => {
     if (!cursor) return;
     const de = cursor.posicao() ?? { x: innerWidth - 180, y: innerHeight - 160 }; // sai da janela de chamada
-    const destino = naTela(para);
-    const movimento = planejarMovimento(de, destino, semente);
+    const movimento = planejarMovimento(de, naTela(para), semente);
     await animar(movimento.duracaoMs, (p) => cursor.mover(movimento.pontoEm(p)), sinal);
   };
   const desenhar = async (id: string, traco: Traco, tipo: "linha" | "seta", duracaoMs: number) => {
@@ -133,37 +174,51 @@ async function coreografar(o: OpcoesApontar) {
 
   cursor?.mostrar();
 
-  // 2 e 3. Vai até o alvo e circula.
-  const temAlvo = elementosAlvo.length > 0;
+  // 2 e 3. Vai até o alvo, mira por um instante e circula.
+  let ocupado = alvo;
   if (temAlvo) {
     const circulo = circuloAMao(alvo, o.semente);
+    ocupado = caixaDoTraco(circulo);
     await moverCursor(circulo.origem, o.semente);
-    await esperar(90);
-    await desenhar(`agente-${grupo}-circulo`, circulo, "linha", 900);
-    await esperar(120);
+    await esperar(150);
+    await desenhar(`agente-${grupo}-circulo`, circulo, "linha", 820);
+    await esperar(140);
   }
 
-  // 4. Seta da nota até o alvo. Tamanho da nota estimado pela fonte do quadro (20px).
-  const linhas = Math.ceil(o.nota.length / 28);
-  const tamanhoNota = { largura: Math.min(o.nota.length, 28) * 11, altura: linhas * 25 };
-  const lugar = posicionarNota(alvo, tamanhoNota, areaVisivel(vista));
+  // 4. Lugar da nota: ao lado do círculo, numa área livre da tela. Tamanho pela fonte do quadro.
+  const texto = quebrarLinhas(o.nota, POR_LINHA);
+  const linhas = texto.split("\n");
+  const largura = Math.max(...linhas.map((l) => l.length)) * FONTE * 0.55 + PADDING.x * 2;
+  const altura = linhas.length * FONTE * 1.25 + PADDING.y * 2;
+  const lugar = posicionarNota(ocupado, { largura, altura }, areaLivre(vistaDe(quadro)));
+
   if (temAlvo) {
     const seta = setaAMao(lugar.setaPara, lugar.setaDe, o.semente + 1);
     await moverCursor(seta.origem, o.semente + 2);
+    await esperar(80);
     await desenhar(`agente-${grupo}-seta`, seta, "seta", 420);
     await esperar(100);
   }
 
-  // 5. Escreve a nota; o cursor acompanha o começo do texto e depois sai.
-  await moverCursor({ x: lugar.nota.x, y: lugar.nota.y + 22 }, o.semente + 3);
+  // 5. A moldura aparece, o texto é escrito dentro dela e o cursor sai de cena.
+  await moverCursor({ x: lugar.nota.x + PADDING.x, y: lugar.nota.y + altura - PADDING.y }, o.semente + 3);
+  await quadro.agente.emoldurar({
+    id: `agente-${grupo}-moldura`,
+    grupo,
+    x: lugar.nota.x,
+    y: lugar.nota.y,
+    largura,
+    altura,
+  });
   await quadro.agente.escrever({
     id: `agente-${grupo}-nota`,
     grupo,
     texto: o.nota,
-    x: lugar.nota.x,
-    y: lugar.nota.y,
-    largura: 28,
+    x: lugar.nota.x + PADDING.x,
+    y: lugar.nota.y + PADDING.y,
+    tamanho: FONTE,
+    largura: POR_LINHA,
     sinal,
   });
-  await esperar(500);
+  await esperar(450);
 }

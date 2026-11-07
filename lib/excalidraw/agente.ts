@@ -15,6 +15,7 @@ import {
   newElementWith,
 } from "@excalidraw/excalidraw";
 import type { ExcalidrawElement, ExcalidrawImperativeAPI } from "@/lib/excalidraw/tipos";
+import { quebrarLinhas } from "@/lib/excalidraw/texto";
 
 export const AUTOR_AGENTE = "agente";
 
@@ -57,9 +58,17 @@ export type CamadaAgente = {
   tracar(opcoes: OpcoesTraco): void;
   /** Move a vista do quadro (fora do histórico). */
   rolar(scrollX: number, scrollY: number): void;
+  /** Moldura da nota (um "post-it" na cor do agente), que aparece com fade. */
+  emoldurar(opcoes: { id: string; grupo: string; x: number; y: number; largura: number; altura: number }): Promise<void>;
+  /** Faz o grupo acompanhar os elementos do candidato: se ele arrastar o alvo, a anotação vai junto. */
+  ancorar(grupo: string, idsAlvo: string[]): void;
+  /** O candidato está no meio de um traço, arraste ou digitação? */
+  candidatoOcupado(): boolean;
+  /** Espera o candidato terminar o que está fazendo (até `limiteMs`). */
+  esperarCandidatoLivre(limiteMs?: number): Promise<void>;
   /** Apaga (com esmaecer) todos os elementos de um grupo. */
   apagarGrupo(grupo: string): Promise<void>;
-  /** Chamar a cada onChange: restaura o que o candidato tiver mexido. */
+  /** Chamar a cada onChange: restaura o que o candidato tiver mexido e reposiciona as anotações ancoradas. */
   proteger(cena: readonly ExcalidrawElement[]): void;
 };
 
@@ -68,19 +77,19 @@ function corDoAgente() {
   return cor || "#0071e3";
 }
 
-export function quebrarLinhas(texto: string, largura: number) {
-  const linhas: string[] = [];
-  let atual = "";
-  for (const palavra of texto.split(/\s+/)) {
-    if (atual && (atual + " " + palavra).length > largura) {
-      linhas.push(atual);
-      atual = palavra;
-    } else {
-      atual = atual ? `${atual} ${palavra}` : palavra;
-    }
-  }
-  if (atual) linhas.push(atual);
-  return linhas.join("\n");
+/** Mistura uma cor hexadecimal com branco (0 = a cor, 1 = branco). */
+function clarear(hex: string, quanto: number) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return "#eef5fd";
+  const canal = (c: string) => Math.round(parseInt(c, 16) + (255 - parseInt(c, 16)) * quanto);
+  return `#${[m[1], m[2], m[3]].map((c) => canal(c).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Canto superior esquerdo dos elementos (ou null se nenhum estiver na cena). */
+function cantoDe(cena: readonly ExcalidrawElement[], ids: string[]) {
+  const vivos = cena.filter((e) => ids.includes(e.id) && !e.isDeleted);
+  if (vivos.length === 0) return null;
+  return { x: Math.min(...vivos.map((e) => e.x)), y: Math.min(...vivos.map((e) => e.y)) };
 }
 
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -102,7 +111,26 @@ function foiMexido(oficial: ExcalidrawElement, atual: ExcalidrawElement) {
 export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
   // Cópia oficial dos elementos do agente: é ela que vale se a cena divergir.
   const oficiais = new Map<string, ExcalidrawElement>();
+  /** Grupo → elementos do candidato que ele anota e onde eles estavam. */
+  const ancoras = new Map<string, { ids: string[]; canto: { x: number; y: number } }>();
+  /** Quanto cada grupo já foi deslocado (para o que ainda está sendo desenhado ir junto). */
+  const deslocamento = new Map<string, { dx: number; dy: number }>();
+  const desloc = (grupo: string) => deslocamento.get(grupo) ?? { dx: 0, dy: 0 };
   let restaurando = false;
+
+  function candidatoOcupado() {
+    const s = api.getAppState();
+    return !!(
+      s.newElement ||
+      s.multiElement ||
+      s.resizingElement ||
+      s.editingTextElement ||
+      s.selectedElementsAreBeingDragged ||
+      s.isResizing ||
+      s.isRotating ||
+      s.cursorButton === "down"
+    );
+  }
 
   function aplicar(novos: ExcalidrawElement[], removidos: string[] = []) {
     const porId = new Map(novos.map((e) => [e.id, e]));
@@ -126,8 +154,8 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
         {
           type: "text",
           id: o.id,
-          x: o.x,
-          y: o.y,
+          x: o.x + desloc(o.grupo).dx,
+          y: o.y + desloc(o.grupo).dy,
           text: texto,
           fontSize: o.tamanho ?? 20,
           fontFamily: FONT_FAMILY.Excalifont,
@@ -166,8 +194,8 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
       const ys = pontos.map((p) => p[1]);
       const comum = {
         id: o.id,
-        x: o.origem.x,
-        y: o.origem.y,
+        x: o.origem.x + desloc(o.grupo).dx,
+        y: o.origem.y + desloc(o.grupo).dy,
         // Largura e altura pelos pontos (o conversor do Excalidraw não calcula sozinho).
         width: Math.max(...xs) - Math.min(...xs),
         height: Math.max(...ys) - Math.min(...ys),
@@ -193,6 +221,53 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
       api.updateScene({ appState: { scrollX, scrollY }, captureUpdate: CaptureUpdateAction.NEVER });
     },
 
+    async emoldurar(o) {
+      const cor = corDoAgente();
+      const criar = (opacidade: number) => {
+        const [el] = convertToExcalidrawElements(
+          [
+            {
+              type: "rectangle",
+              id: o.id,
+              x: o.x + desloc(o.grupo).dx,
+              y: o.y + desloc(o.grupo).dy,
+              width: o.largura,
+              height: o.altura,
+              strokeColor: cor,
+              backgroundColor: clarear(cor, 0.9),
+              fillStyle: "solid",
+              strokeWidth: 1,
+              roughness: 1,
+              roundness: { type: 3 },
+              opacity: opacidade,
+              seed: 7,
+              locked: true,
+              version: (oficiais.get(o.id)?.version ?? 0) + 1,
+              customData: { autor: AUTOR_AGENTE, grupo: o.grupo },
+            },
+          ],
+          { regenerateIds: false },
+        );
+        return el;
+      };
+      for (const opacidade of [20, 45, 70, 90, 100]) {
+        aplicar([criar(opacidade)]);
+        await esperar(35);
+      }
+    },
+
+    ancorar(grupo, idsAlvo) {
+      const canto = cantoDe(api.getSceneElements(), idsAlvo);
+      if (canto) ancoras.set(grupo, { ids: idsAlvo, canto });
+    },
+
+    candidatoOcupado,
+
+    async esperarCandidatoLivre(limiteMs = 4000) {
+      const inicio = Date.now();
+      while (candidatoOcupado() && Date.now() - inicio < limiteMs) await esperar(120);
+    },
+
     async apagarGrupo(grupo) {
       const doGrupo = [...oficiais.values()].filter((e) => e.customData?.grupo === grupo);
       if (doGrupo.length === 0) return;
@@ -202,10 +277,37 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
         await esperar(30);
       }
       aplicar([], doGrupo.map((e) => e.id));
+      ancoras.delete(grupo);
+      deslocamento.delete(grupo);
     },
 
     proteger(cena) {
       if (restaurando || oficiais.size === 0) return;
+
+      // O candidato arrastou um elemento anotado: a anotação acompanha.
+      const deslocados: ExcalidrawElement[] = [];
+      for (const [grupo, ancora] of ancoras) {
+        const canto = cantoDe(cena, ancora.ids);
+        if (!canto) continue;
+        const dx = canto.x - ancora.canto.x;
+        const dy = canto.y - ancora.canto.y;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+        ancora.canto = canto;
+        const atual = desloc(grupo);
+        deslocamento.set(grupo, { dx: atual.dx + dx, dy: atual.dy + dy });
+        for (const e of oficiais.values()) {
+          if (e.customData?.grupo === grupo) deslocados.push(newElementWith(e, { x: e.x + dx, y: e.y + dy }));
+        }
+      }
+      if (deslocados.length > 0) {
+        restaurando = true;
+        queueMicrotask(() => {
+          aplicar(deslocados);
+          restaurando = false;
+        });
+        return;
+      }
+
       const atuais = new Map(cena.map((e) => [e.id, e]));
       const mexidos: ExcalidrawElement[] = [];
       for (const oficial of oficiais.values()) {

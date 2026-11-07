@@ -139,6 +139,7 @@ export default function JanelaChamada({
   return (
     <motion.div
       ref={caixa}
+      data-janela-chamada
       drag
       dragControls={controles}
       dragListener={false}

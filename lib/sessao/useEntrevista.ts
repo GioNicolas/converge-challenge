@@ -10,6 +10,7 @@ import {
   criarSessao,
   enviarEventos,
   falar,
+  type FalaNaTela,
   type FalaRecente,
   type PedidoAnalise,
   type Sessao,
@@ -47,16 +48,18 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   }, [estado]);
 
   // O que o agente está falando agora (para o orb e a legenda).
-  const [falaAtual, setFalaAtual] = useState<FalaRecente | null>(null);
+  const [falaAtual, setFalaAtual] = useState<FalaNaTela | null>(null);
   const [agenteFalando, setAgenteFalando] = useState(false);
   const fimDaLegenda = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dizer = useCallback(async (texto: string) => {
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
-    setFalaAtual({ quem: "agente", texto });
+    setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(true);
     linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
-    await falar(texto);
+    await falar(texto, (ate) =>
+      setFalaAtual((atual) => (atual && atual.texto === texto && atual.ate !== ate ? { ...atual, ate } : atual)),
+    );
     setAgenteFalando(false);
     // A legenda fica um pouco depois da voz, para dar tempo de terminar de ler.
     fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 1800);

@@ -24,6 +24,9 @@ export type Sessao = {
 
 export type FalaRecente = { quem: "candidato" | "agente"; texto: string };
 
+/** Fala em andamento na legenda: `ate` = quantos caracteres já foram falados. */
+export type FalaNaTela = FalaRecente & { ate: number };
+
 export type PedidoAnalise = {
   sessao_id: string;
   fase: Fase;
@@ -128,16 +131,40 @@ export async function enviarEventos(sessaoId: string, lote: { horario: string; t
 
 // --- Voz provisória: a síntese do próprio navegador (depois vira o /falar da ElevenLabs) ---
 
-export function falar(texto: string): Promise<void> {
+/**
+ * Fala o texto. `aoProgresso(n)` recebe quantos caracteres já foram falados (para a legenda andar junto).
+ * Se a voz falhar, resolve mesmo assim: a pergunta continua escrita na legenda e no quadro.
+ */
+export function falar(texto: string, aoProgresso?: (caracteres: number) => void): Promise<void> {
   return new Promise((resolver) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return resolver();
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      aoProgresso?.(texto.length);
+      return resolver();
+    }
     const fala = new SpeechSynthesisUtterance(texto);
     fala.lang = "pt-BR";
     fala.rate = 1.05;
     const voz = speechSynthesis.getVoices().find((v) => v.lang.startsWith("pt"));
     if (voz) fala.voice = voz;
-    fala.onend = () => resolver();
-    fala.onerror = () => resolver();
+
+    // Nem toda voz avisa as palavras (onboundary): até o primeiro aviso, estima pelo tempo (~15 caracteres/s).
+    let comAviso = false;
+    const inicio = performance.now();
+    const estimativa = setInterval(() => {
+      if (!comAviso) aoProgresso?.(Math.min(texto.length, Math.round(((performance.now() - inicio) / 1000) * 15)));
+    }, 80);
+    fala.onboundary = (e) => {
+      comAviso = true;
+      const fimDaPalavra = texto.indexOf(" ", e.charIndex + 1);
+      aoProgresso?.(fimDaPalavra === -1 ? texto.length : fimDaPalavra);
+    };
+    const terminar = () => {
+      clearInterval(estimativa);
+      aoProgresso?.(texto.length);
+      resolver();
+    };
+    fala.onend = terminar;
+    fala.onerror = terminar;
     speechSynthesis.cancel();
     speechSynthesis.speak(fala);
   });
