@@ -88,8 +88,14 @@ export function findBlipQuestion(
   return blip && question ? { blip, question } : undefined;
 }
 
-/** Próxima dica leve do problema, ou undefined quando as dicas acabaram. */
+/**
+ * Próxima dica leve do problema, ou undefined quando as dicas acabaram ou a recrutadora não quer dica.
+ * Política (config.hints): "nenhuma" nunca dá; "leves" dá só uma; livres ou sem valor seguem todas as do problema.
+ */
 export function nextHint(session: SessionState): string | undefined {
+  const politica = session.config.hints;
+  if (politica === "nenhuma") return undefined;
+  if (politica === "leves" && session.hintsUsed >= 1) return undefined;
   return getProblem(session.config.problemId).private.hints[session.hintsUsed];
 }
 

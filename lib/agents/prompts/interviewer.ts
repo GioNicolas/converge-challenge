@@ -129,11 +129,22 @@ export interface InterviewerTurnInput {
   questionHighlight?: { startLine: number; endLine: number };
   /** Dica leve disponível agora, ou undefined se já acabaram. */
   availableHint?: string;
+  /** Política de dicas da recrutadora (ver `InterviewConfig.hints`). Sem valor = livres. */
+  hintsPolicy?: "livres" | "leves" | "nenhuma";
   /** O que o Analyst viu, pra o entrevistador não contradizer nem entregar (uso interno). */
   analystNotes?: string;
   /** Conversas anteriores já formatadas (pergunta + falas), pra dar continuidade e não repetir. */
   previousConversations: string;
   messages: ChatMessage[];
+}
+
+/** Texto quando não há dica para oferecer: o motivo depende da política da recrutadora. */
+function dicaSemValor(politica: InterviewerTurnInput["hintsPolicy"]): string {
+  if (politica === "nenhuma") {
+    return "(nenhuma: a recrutadora pediu entrevista sem dicas. Não ofereça dica; se ele travar, pergunte o que ele já tentou e onde travou)";
+  }
+  if (politica === "leves") return "(nenhuma: a recrutadora permitiu só uma dica e ela já foi dada)";
+  return "(nenhuma: já foram todas)";
 }
 
 export function buildInterviewerUser(input: InterviewerTurnInput): string {
@@ -152,7 +163,7 @@ Aprofundamentos já feitos nesta conversa: ${Math.max(0, input.messages.filter((
 
   return `Modo: ${input.mode}. Fase: ${input.fase}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
 ${blip}
-Dica leve disponível: ${input.availableHint ?? "(nenhuma: já foram todas)"}
+Dica leve disponível: ${input.availableHint ?? dicaSemValor(input.hintsPolicy)}
 Notas internas do analista: ${input.analystNotes ?? "(nenhuma)"}
 Conversas anteriores:
 ${input.previousConversations}

@@ -69,7 +69,7 @@ export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
       focus: "pressao",
       weight: 1,
       description:
-        "Bom: mantém a clareza com tempo curto e quando o requisito muda. Ruim: trava, se perde ou desiste quando o requisito muda.",
+        "Bom: mantém a calma quando um teste falha ou trava, prioriza com o tempo curto e comunica o que vai tentar. Ruim: trava, se perde ou desiste quando algo dá errado.",
     },
   ],
   system_design: [

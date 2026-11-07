@@ -42,6 +42,10 @@ export const InterviewConfig = z.object({
   focus: z.array(z.object({ area: FocusArea, weight: z.number().min(0).max(1) })),
   /** Notas livres da recrutadora ("time pequeno, precisa de autonomia"). */
   recruiterNotes: z.string().default(""),
+  /** Tom que a recrutadora pediu. Sem valor = amigável. */
+  tone: z.enum(["amigavel", "desafiador"]).optional(),
+  /** Política de dicas: livres = todas as do problema; leves = no máximo 1; nenhuma = nenhuma. Sem valor = livres. */
+  hints: z.enum(["livres", "leves", "nenhuma"]).optional(),
   criteria: z.array(Criterion).min(1),
   /** Nível das questões, definido pelo agente conforme a vaga (ver `lib/problems.ts`). */
   difficulty: z.enum(["facil", "medio"]).optional(),

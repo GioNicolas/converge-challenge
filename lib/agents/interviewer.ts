@@ -48,6 +48,7 @@ export async function runInterviewerTurn(
     challengeSummary: checkIn?.challenge,
     questionHighlight: found?.question.highlight,
     availableHint: hint,
+    hintsPolicy: session.config.hints,
     analystNotes: analystNotesOf(session),
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(
