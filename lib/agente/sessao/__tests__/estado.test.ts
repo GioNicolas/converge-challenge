@@ -128,7 +128,7 @@ describe("fases: orçamento de tempo", () => {
 
 describe("ciclo do plin", () => {
   it("LIVRE → PLIN_PENDENTE → PERGUNTA_ATIVA → LIVRE", () => {
-    let e = emFase("APROFUNDAMENTO");
+    const e = emFase("APROFUNDAMENTO");
     let r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN);
     assert.equal(r.estado.plin, "PLIN_PENDENTE");
     assert.deepEqual(r.efeitos.map((f) => f.tipo), ["PLIN_PENDENTE"]);
@@ -158,7 +158,7 @@ describe("ciclo do plin", () => {
   });
 
   it("dúvida nova substitui a pendente (uma por vez)", () => {
-    let e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: "Primeira?" }) });
+    const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: "Primeira?" }) });
     const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: "Segunda?" }) }, T0 + 5000);
     assert.equal(r.estado.perguntaPendente?.pergunta, "Segunda?");
     const efeito = r.efeitos[0];

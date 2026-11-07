@@ -1,26 +1,81 @@
 @import "tailwindcss";
 
+/*
+  Tokens de design: a única fonte de cores, fontes, raios, sombras e animação.
+  Direção: clean, no estilo Apple, com animações fluidas.
+  Componentes usam só estas classes (bg-superficie, text-texto-suave, ease-suave...),
+  nunca valores soltos. Para mudar a identidade visual, mude aqui.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Fundo e superfícies */
+  --fundo: #f5f5f7;
+  --superficie: #ffffff;
+  --superficie-2: #f0f0f2;
+  --vidro: rgb(255 255 255 / 0.72);
+  --vidro-escuro: rgb(28 28 30 / 0.72);
+  --borda: rgb(0 0 0 / 0.08);
+
+  /* Texto */
+  --texto: #1d1d1f;
+  --texto-suave: #6e6e73;
+  --texto-claro: #f5f5f7;
+
+  /* Marca e agente */
+  --marca: #0071e3;
+  --marca-suave: #e8f1fc;
+  --agente: #0071e3;
+
+  /* Estados */
+  --sucesso: #34c759;
+  --alerta: #ff9f0a;
+  --perigo: #ff3b30;
+
+  /* Forma */
+  --raio: 18px;
+  --raio-pequeno: 10px;
+  --sombra: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 20px rgb(0 0 0 / 0.06);
+  --sombra-flutuante: 0 2px 6px rgb(0 0 0 / 0.06), 0 18px 48px rgb(0 0 0 / 0.16);
+
+  /* Animação */
+  --curva-suave: cubic-bezier(0.32, 0.72, 0, 1);
+  --curva-saida: cubic-bezier(0.22, 1, 0.36, 1);
+  --duracao-rapida: 160ms;
+  --duracao: 280ms;
+  --duracao-lenta: 480ms;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-fundo: var(--fundo);
+  --color-superficie: var(--superficie);
+  --color-superficie-2: var(--superficie-2);
+  --color-vidro: var(--vidro);
+  --color-vidro-escuro: var(--vidro-escuro);
+  --color-borda: var(--borda);
+  --color-texto: var(--texto);
+  --color-texto-suave: var(--texto-suave);
+  --color-texto-claro: var(--texto-claro);
+  --color-marca: var(--marca);
+  --color-marca-suave: var(--marca-suave);
+  --color-agente: var(--agente);
+  --color-sucesso: var(--sucesso);
+  --color-alerta: var(--alerta);
+  --color-perigo: var(--perigo);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-padrao: var(--raio);
+  --radius-pequeno: var(--raio-pequeno);
+  --shadow-padrao: var(--sombra);
+  --shadow-flutuante: var(--sombra-flutuante);
+
+  --ease-suave: var(--curva-suave);
+  --ease-saida: var(--curva-saida);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", var(--font-geist-mono), monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }

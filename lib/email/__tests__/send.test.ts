@@ -13,7 +13,7 @@ const saved = { key: env.RESEND_API_KEY, node: env.NODE_ENV };
 type SendResult = Awaited<ReturnType<EmailClient["emails"]["send"]>>;
 
 function fakeClient(result: SendResult) {
-  const send = mock.fn(async (_p: Parameters<EmailClient["emails"]["send"]>[0]) => result);
+  const send = mock.fn(async (..._args: Parameters<EmailClient["emails"]["send"]>) => result);
   return { client: { emails: { send } } as EmailClient, send };
 }
 
