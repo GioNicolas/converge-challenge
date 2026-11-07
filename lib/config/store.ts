@@ -8,6 +8,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { InterviewConfig } from "@/lib/contracts";
+import { selecionarProblema } from "@/lib/problems/selecao";
 import { hasProblem } from "@/problems";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
@@ -18,13 +19,15 @@ const configs = (globalForConfigs.__convergeConfigs ??= new Map<string, Intervie
 const pasta = () => join(process.cwd(), "data", "configs");
 
 /**
- * A pré-entrevista pode pedir uma questão que o agente ainda não tem no banco privado.
- * Em vez de derrubar a sessão, cai na questão padrão (e o aviso fica no log do servidor).
+ * Config com questão que o agente não tem (id desconhecido, ou formato sem IDE, como system design):
+ * em vez de derrubar a sessão, escolhe do banco pela própria config (senioridade e foco da vaga).
+ * O aviso fica no log do servidor.
  */
 export function normalizarConfig(config: InterviewConfig): InterviewConfig {
   if (hasProblem(config.problemId)) return config;
-  console.warn(`[config] ${config.id}: problema "${config.problemId}" não existe no banco do agente; usando "${DEFAULT_CONFIG.problemId}"`);
-  return { ...config, problemId: DEFAULT_CONFIG.problemId, difficulty: DEFAULT_CONFIG.difficulty };
+  const escolhida = selecionarProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty, semente: config.roleTitle });
+  console.warn(`[config] ${config.id}: problema "${config.problemId}" não existe no banco do agente; usando "${escolhida.id}"`);
+  return { ...config, problemId: escolhida.id, difficulty: escolhida.difficulty };
 }
 
 export async function saveConfig(config: InterviewConfig): Promise<void> {

@@ -8,6 +8,8 @@
 import { z } from "zod";
 import { Criterion, FocusArea, InterviewConfig, InterviewMode } from "@/lib/contracts";
 import type { Classificacao, Vaga } from "./classificador";
+import { problems } from "@/lib/problems";
+import { selecionarProblema } from "@/lib/problems/selecao";
 import { criteriosIniciais, problemaPadrao } from "./catalogo";
 
 /** Uma fala da conversa de pré-entrevista. */
@@ -224,6 +226,19 @@ function gerarId(): string {
 }
 
 /**
+ * Questão da entrevista. Se a recrutadora pediu uma específica, vale a dela. Senão, em live coding o agente
+ * escolhe do banco pelo nível da senioridade e pelo foco da vaga (ver `lib/problems/selecao.ts`).
+ */
+function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil" | "medio" } {
+  if (r.mode !== "live_coding") {
+    return { problemId: r.problemId ?? problemaPadrao(r.mode, r.focus.map((f) => f.area)) };
+  }
+  if (r.problemId) return { problemId: r.problemId, difficulty: problems[r.problemId]?.difficulty };
+  const escolhida = selecionarProblema({ seniority: r.seniority, focus: r.focus, semente: r.roleTitle });
+  return { problemId: escolhida.id, difficulty: escolhida.difficulty };
+}
+
+/**
  * Valida o rascunho e gera o `InterviewConfig`, ou devolve as mensagens de erro.
  * `naoAvaliado` entra nas notas finais como "Não avaliado nesta entrevista: ...".
  */
@@ -249,12 +264,7 @@ export function paraInterviewConfig(
     focus: r.focus,
     recruiterNotes: acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado),
     criteria: r.criteria,
-    problemId:
-      r.problemId ??
-      problemaPadrao(
-        r.mode,
-        r.focus.map((f) => f.area),
-      ),
+    ...escolherProblema(r),
     languages: LINGUAGENS,
     durationMin: duracaoDoRascunho(r, preferencias),
   };
