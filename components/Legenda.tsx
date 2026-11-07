@@ -3,7 +3,9 @@
 // Legenda ao vivo, centralizada embaixo: a fala do agente aparecendo no ritmo da voz.
 // O que já foi falado fica claro; o resto, apagado. Falas longas andam em blocos de até ~2 linhas.
 import { AnimatePresence, motion } from "motion/react";
-import type { FalaNaTela } from "@/lib/sessao/cliente";
+
+/** Fala em andamento: `ate` = quantos caracteres já foram falados (a parte clara da legenda). */
+export type FalaNaTela = { quem: "agente" | "candidato"; texto: string; ate: number };
 
 const MAX_BLOCO = 110;
 

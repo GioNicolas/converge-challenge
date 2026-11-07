@@ -9,19 +9,7 @@ import { AnimatePresence, animate, motion, useDragControls, useMotionValue } fro
 import Icone from "@/components/Icone";
 import OndaDeVoz from "@/components/agente/OndaDeVoz";
 import type { EstadoAgente } from "@/lib/presenca/energia";
-import type { Fase } from "@/lib/sessao/cliente";
-import type { EstadoEntrevista } from "@/lib/sessao/estados";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
-
-const NOME_DA_FASE: Record<Fase, string> = {
-  AGUARDANDO: "Aguardando",
-  APRESENTACAO: "Apresentação",
-  REQUISITOS: "Requisitos",
-  ALTO_NIVEL: "Visão geral",
-  APROFUNDAMENTO: "Aprofundamento",
-  FECHAMENTO: "Fechamento",
-  ENCERRADA: "Encerrada",
-};
 
 const MOLA = { type: "spring", stiffness: 400, damping: 34 } as const;
 const MARGEM = 16;
@@ -46,8 +34,17 @@ function useCronometro(iniciadaEm: number | null, ativo: boolean) {
   return iniciadaEm === null ? 0 : Math.max(0, Math.floor((agora - iniciadaEm) / 1000));
 }
 
+// Componente de design, igual para todos os espaços de entrevista (quadro, código...):
+// não conhece a máquina de estados de nenhum deles, só recebe o que mostrar.
 type Props = {
-  estado: EstadoEntrevista;
+  /** Nome da fase já pronto para exibir (ex.: "Aprofundamento"). */
+  fase: string;
+  /** O agente tem uma pergunta esperando o clique (mostra a bolha e deixa o agente azul). */
+  duvidaPendente: boolean;
+  /** O candidato está respondendo uma pergunta (mostra "Terminei de responder"). */
+  respondendo: boolean;
+  /** A entrevista acabou (para o tempo e some o botão de encerrar). */
+  encerrada: boolean;
   iniciadaEm: number | null;
   midia: ReturnType<typeof useMidiaLocal>;
   agenteFalando: boolean;
@@ -57,7 +54,10 @@ type Props = {
 };
 
 export default function JanelaChamada({
-  estado,
+  fase,
+  duvidaPendente,
+  respondendo,
+  encerrada,
   iniciadaEm,
   midia,
   agenteFalando,
@@ -66,9 +66,9 @@ export default function JanelaChamada({
   onEncerrar,
 }: Props) {
   const [minimizada, setMinimizada] = useState(false);
-  const ativa = iniciadaEm !== null && estado.fase !== "ENCERRADA";
+  const ativa = iniciadaEm !== null && !encerrada;
   const segundos = useCronometro(iniciadaEm, ativa);
-  const temDuvida = estado.plin === "PLIN_PENDENTE";
+  const temDuvida = duvidaPendente;
 
   const estadoAgente: EstadoAgente = temDuvida ? "duvida" : agenteFalando ? "falando" : "ouvindo";
 
@@ -207,7 +207,7 @@ export default function JanelaChamada({
                   <span className={`size-1.5 rounded-full ${ativa ? "bg-sucesso" : "bg-texto-claro/30"}`} />
                   <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
                   <span className="text-texto-claro/50">·</span>
-                  <span className="text-texto-claro/75">{NOME_DA_FASE[estado.fase]}</span>
+                  <span className="text-texto-claro/75">{fase}</span>
                 </div>
 
                 {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato.
@@ -254,7 +254,7 @@ export default function JanelaChamada({
                 </div>
               </div>
 
-              {estado.plin === "PERGUNTA_ATIVA" && (
+              {respondendo && (
                 <div className="px-2 pt-2">
                   <button
                     onClick={onTerminarResposta}

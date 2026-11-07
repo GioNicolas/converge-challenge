@@ -12,6 +12,7 @@ import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import ConfirmarEncerrar from "@/components/ConfirmarEncerrar";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
+import type { Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
@@ -87,6 +88,16 @@ function useDemoRequisitos() {
   return { requisitos, mensagens, encenar, encenando, acabou: passo >= ROTEIRO_DEMO.length };
 }
 
+const NOME_DA_FASE: Record<Fase, string> = {
+  AGUARDANDO: "Aguardando",
+  APRESENTACAO: "Apresentação",
+  REQUISITOS: "Requisitos",
+  ALTO_NIVEL: "Visão geral",
+  APROFUNDAMENTO: "Aprofundamento",
+  FECHAMENTO: "Fechamento",
+  ENCERRADA: "Encerrada",
+};
+
 const Canvas = dynamic(() => import("@/components/Canvas"), {
   ssr: false,
   loading: () => <div className="h-full w-full animate-pulse bg-superficie-2" />,
@@ -153,7 +164,10 @@ export default function SalaEntrevista() {
 
       {estado.fase !== "AGUARDANDO" && (
         <JanelaChamada
-          estado={estado}
+          fase={NOME_DA_FASE[estado.fase]}
+          duvidaPendente={estado.plin === "PLIN_PENDENTE"}
+          respondendo={estado.plin === "PERGUNTA_ATIVA"}
+          encerrada={estado.fase === "ENCERRADA"}
           iniciadaEm={entrevista.iniciadaEm}
           midia={midia}
           agenteFalando={entrevista.agenteFalando}
