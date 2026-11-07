@@ -19,6 +19,7 @@ import {
   aplicarPasso,
   decidirTradeoff,
   descreverPasso,
+  nivelEmAberto,
   ofertaEmCurso,
   proximoPasso,
   type EstadoPlanejamento,
@@ -32,9 +33,20 @@ import { aplicarDecisoesTradeoff, duracaoDoRascunho, type Turno } from "./rascun
 import { fraseComPalavra, limitarPalavras, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
-/** Estado que o planejador enxerga: o plano da sessão mais o foco, a cobertura e o formato do rascunho. */
+/**
+ * Estado que o planejador enxerga: o plano da sessão mais o foco, a cobertura e o formato do rascunho.
+ * Enquanto o nível está em aberto, o início não conta como coberto: a Totti só fecha o início depois do nível.
+ */
 function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
-  return { ...sessao.plano, focus: sessao.rascunho.focus, cobertura: sessao.rascunho.cobertura, mode: sessao.rascunho.mode };
+  const aberto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, sessao.rascunho.confirmado.seniority);
+  const cobertura = aberto ? { ...sessao.rascunho.cobertura, confirmou_inicio: 0 } : sessao.rascunho.cobertura;
+  return {
+    ...sessao.plano,
+    focus: sessao.rascunho.focus,
+    cobertura,
+    mode: sessao.rascunho.mode,
+    nivelEmAberto: aberto,
+  };
 }
 
 /** Última fala dela na transcrição, se houver. */
@@ -74,6 +86,18 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
     }
     sessao.preferencias = atualizarPreferencias(sessao.preferencias, cob.sinais);
     sessao.rascunho = { ...sessao.rascunho, cobertura: cob.cobertura };
+    // O nível que ela disse nesta fala vale sobre a sugestão do classificador, e confirma a senioridade.
+    if (cob.nivelDito !== "nao_disse") {
+      sessao.rascunho = {
+        ...sessao.rascunho,
+        seniority: cob.nivelDito,
+        confirmado: { ...sessao.rascunho.confirmado, seniority: true },
+      };
+    }
+    // Enquanto o nível está em aberto, o início não fica coberto (nem na tela, nem para o planejador).
+    if (nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, sessao.rascunho.confirmado.seniority)) {
+      sessao.rascunho = { ...sessao.rascunho, cobertura: { ...sessao.rascunho.cobertura, confirmou_inicio: 0 } };
+    }
 
     registrarEvento(sessao, {
       tipo: "cobertura",
@@ -92,6 +116,7 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
         sinais: cob.sinais,
         niveisDaFala: porFala.niveis,
         enfaseEstado: sessao.enfaseEstado,
+        nivelDito: cob.nivelDito,
       },
     });
   } catch (err) {

@@ -7,6 +7,7 @@
  *  - follow-up só quando a última resposta foi genérica (`resposta_vaga`);
  *  - cada mudança de foco (e cada área ainda sem definição depois de uma mudança) é perguntada uma vez;
  *  - área que o formato atual não mede e que está em jogo: a Totti oferece a troca de formato, uma vez por área;
+ *  - nível em aberto (a vaga não disse e ela não respondeu): a Totti pergunta só o nível, antes do resto;
  *  - dúvida dela sobre a entrevista (`fez_pergunta`): a Totti responde e retoma o passo em curso, sem contar como pergunta nova;
  *  - o resumo vem quando não há mais o que perguntar; depois dele, a Totti só resume de novo se ela pedir mudança;
  *  - encerra só depois do resumo aprovado e sem pedido de mudança.
@@ -52,6 +53,8 @@ export interface ResponderDuvidaPasso {
 
 export type Passo =
   | { tipo: "confirmar_inicio" }
+  /** A vaga não disse o nível e ela ainda não respondeu: a Totti pergunta só o nível, em uma frase. */
+  | { tipo: "perguntar_nivel" }
   | AprofundarPasso
   | OferecerTradeoffPasso
   | {
@@ -73,7 +76,7 @@ export type Passo =
 export interface PlanoEstado {
   /** Sinais do último turno (quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo, escolha de formato). */
   sinais: Record<string, number>;
-  /** Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `criterio_<area>`, `duvida_<area>`, `tradeoff_<area>`). */
+  /** Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `nivel`, `criterio_<area>`, `duvida_<area>`, `tradeoff_<area>`). */
   perguntasPorTopico: Record<string, number>;
   /** Áreas que já entraram numa confirmação de mudança de foco ou numa dúvida. */
   mudancasPerguntadas: FocusArea[];
@@ -99,6 +102,8 @@ export function planoInicial(): PlanoEstado {
 export interface EstadoPlanejamento extends PlanoEstado {
   focus: Foco[];
   cobertura: Record<string, number>;
+  /** Nível em aberto agora (ver `nivelEmAberto`): enquanto estiver, o início não conta como coberto. */
+  nivelEmAberto?: boolean;
   /**
    * Formato atual. Sem ele (testes antigos), nenhuma área é tratada como não medida e não há oferta de troca.
    */
@@ -183,6 +188,14 @@ export function ofertaEmCurso(plano: PlanoEstado): OferecerTradeoffPasso | undef
   return passo?.tipo === "oferecer_tradeoff" ? passo : undefined;
 }
 
+/**
+ * Nível em aberto: o classificador não tinha certeza do nível (a senioridade está em `confirmar`), ela ainda não disse
+ * o nível e a Totti ainda não perguntou duas vezes. Depois disso, a conversa segue com a estimativa. Função pura.
+ */
+export function nivelEmAberto(plano: PlanoEstado, confirmar: string[], nivelConfirmado: boolean): boolean {
+  return confirmar.includes("seniority") && !nivelConfirmado && (plano.perguntasPorTopico.nivel ?? 0) < MAX_PERGUNTAS_POR_TOPICO;
+}
+
 /** Decide o próximo passo. Função pura. */
 export function proximoPasso(e: EstadoPlanejamento): Passo {
   const coberto = (id: string) => (e.cobertura[id] ?? 0) >= LIMIAR;
@@ -207,6 +220,10 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
 
   // 1. Ela aprovou o resumo sem pedir mudança: acabou.
   if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && !pediuMudanca) return { tipo: "encerrar" };
+
+  // 1a. Nível em aberto: a Totti pergunta só o nível. Enquanto ele estiver em aberto, o início não conta como coberto
+  // (ver `estadoDoPlanejamento` em `turno.ts`), então este passo vem antes do início e das demais perguntas.
+  if (e.resumos === 0 && e.nivelEmAberto) return { tipo: "perguntar_nivel" };
 
   // 1b. Área que o formato não mede está em jogo: a Totti oferece a troca antes de qualquer outra mudança de foco.
   const oferta = tradeoffPasso(e, emJogo);
@@ -260,6 +277,9 @@ export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
     case "confirmar_inicio":
       contar("confirmou_inicio");
       break;
+    case "perguntar_nivel":
+      contar("nivel");
+      break;
     case "aprofundar":
       contar(criterio(passo.area));
       break;
@@ -288,6 +308,8 @@ export function descreverPasso(passo: Passo): string {
   switch (passo.tipo) {
     case "confirmar_inicio":
       return "confirmar_inicio";
+    case "perguntar_nivel":
+      return "perguntar_nivel";
     case "aprofundar":
       return `aprofundar ${passo.area} (${passo.motivo})${passo.confirmaTroca ? ` com troca confirmada para ${passo.confirmaTroca}` : ""}`;
     case "oferecer_tradeoff":
