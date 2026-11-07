@@ -25,8 +25,9 @@ export const DEFAULT_CONFIG: InterviewConfig = InterviewConfig.parse({
     { id: "comunicacao", name: "Comunicação e resposta a dicas", focus: "tecnico", weight: 1.25,
       description: "Explicou o raciocínio com profundidade e usou bem as dicas que pediu." },
   ],
-  difficulty: "medio", // pleno → nível médio
-  problemId: "maximum-subarray",
+  // O agente só tem o pacote privado do Two Sum (problems/two-sum.ts).
+  difficulty: "facil",
+  problemId: "two-sum",
   languages: ["python", "cpp", "c"],
   durationMin: 30,
 });

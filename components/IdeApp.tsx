@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
 import { Download, Flag, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import type { EditorCommand } from "@/lib/contracts";
+import { entrada } from "@/lib/design/motion";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { numberCode } from "@/lib/format";
@@ -166,6 +168,14 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
     }
   }
 
+  /** "Agora não": tira a pergunta da tela; o servidor decide quando ela volta. */
+  function adiarPergunta() {
+    const blip = session.incomingBlip;
+    if (!blip) return;
+    session.setIncomingBlip(null);
+    void session.sendEvent({ type: "blip_snoozed", blipId: blip.id });
+  }
+
   function fecharConversa() {
     void voice.stop();
     chat.close();
@@ -272,29 +282,44 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
         )}
 
         {/* O agente "ao vivo": sempre no canto inferior direito. Com dúvida, a rodela gira e mostra a pergunta. */}
-        <button
-          type="button"
-          onClick={chat.open ? fecharConversa : abrirConversa}
-          aria-label={chat.open ? "Fechar conversa" : "Chamar o entrevistador"}
-          className="vidro-escuro absolute bottom-4 right-4 z-20 flex max-w-[300px] items-center gap-3 rounded-full py-2 pl-2 pr-4 text-left shadow-flutuante transition-transform duration-normal ease-suave hover:scale-[1.02]"
-        >
-          <Orb state={orb} size={48} />
-          <span className="flex min-w-0 flex-col">
-            <span className="flex items-center gap-1.5 text-mini font-medium text-texto-suave">
-              <span className="relative flex size-1.5">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-sucesso opacity-70" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-sucesso" />
+        <div className="absolute bottom-4 right-4 z-20 flex items-center gap-2">
+          <AnimatePresence initial={false}>
+            {session.incomingBlip && !chat.open && (
+              <motion.button
+                key="agora-nao"
+                {...entrada}
+                type="button"
+                onClick={adiarPergunta}
+                className="vidro rounded-full px-3 py-2 font-medium text-texto-suave shadow-cartao"
+              >
+                Agora não
+              </motion.button>
+            )}
+          </AnimatePresence>
+          <button
+            type="button"
+            onClick={chat.open ? fecharConversa : abrirConversa}
+            aria-label={chat.open ? "Fechar conversa" : "Chamar o entrevistador"}
+            className="vidro-escuro flex max-w-[300px] items-center gap-3 rounded-full py-2 pl-2 pr-4 text-left shadow-flutuante transition-transform duration-normal ease-suave hover:scale-[1.02]"
+          >
+            <Orb state={orb} size={48} />
+            <span className="flex min-w-0 flex-col">
+              <span className="flex items-center gap-1.5 text-mini font-medium text-texto-suave">
+                <span className="relative flex size-1.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-sucesso opacity-70" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-sucesso" />
+                </span>
+                Ao vivo
               </span>
-              Ao vivo
+              <span className="truncate text-corpo font-semibold titulo">
+                {session.incomingBlip ? session.incomingBlip.preview : orbLabel(orb)}
+              </span>
             </span>
-            <span className="truncate text-corpo font-semibold titulo">
-              {session.incomingBlip ? session.incomingBlip.preview : orbLabel(orb)}
-            </span>
-          </span>
-        </button>
+          </button>
+        </div>
 
         <Caption text={caption} />
-        <Composer busy={chat.busy} disabled={session.ended} onSend={chat.send} />
+        <Composer busy={chat.busy} disabled={session.ended || chat.ended} onSend={chat.send} />
 
         {process.env.NODE_ENV !== "production" && (
           <button

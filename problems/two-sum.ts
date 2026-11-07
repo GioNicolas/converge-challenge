@@ -1,4 +1,5 @@
 import type { Problem } from "@/lib/problems/types";
+import { problems as IDE_PROBLEMS } from "@/lib/problems";
 
 export const TWO_SUM: Problem = {
   public: {
@@ -17,10 +18,8 @@ export const TWO_SUM: Problem = {
       "-10^9 <= target <= 10^9",
       "Existe exatamente uma resposta válida.",
     ],
-    starters: {
-      python: "def two_sum(nums, target):\n    pass",
-      cpp: "#include <vector>\nusing namespace std;\n\nvector<int> twoSum(vector<int>& nums, int target) {\n    \n}",
-    },
+    // Os mesmos starters que a IDE mostra: a política compara o código com eles.
+    starters: IDE_PROBLEMS["two-sum"].starters,
     visibleTests: [
       { input: { nums: [2, 7, 11, 15], target: 9 }, expected: [0, 1] },
       { input: { nums: [3, 2, 4], target: 6 }, expected: [1, 2] },
