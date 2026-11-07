@@ -97,10 +97,23 @@ test("limite padrão de 84 mantém o texto em blocos completos", () => {
   assert.equal(blocos.at(-1)?.fim, palavras(a).at(-1)?.fim);
 });
 
-test("limite impossível é rejeitado sem cortar uma palavra", () => {
-  assert.throws(() => blocosDeLegenda(alinhar("ação"), 3), RangeError);
-  for (const limite of [0, -1, 1.5, NaN, Infinity]) assert.throws(() => blocosDeLegenda(alinhar("sim"), limite), RangeError);
+test("palavra longa fica inteira em bloco próprio sem derrubar a legenda", () => {
+  const url = "https://exemplo.com/" + "caminho".repeat(20);
+  const a = alinhar(`Veja ${url} agora.`);
+  const p = palavras(a);
+  assert.deepEqual(blocosDeLegenda(a, 10), [
+    { texto: "Veja", inicio: p[0].inicio, fim: p[0].fim },
+    { texto: url, inicio: p[1].inicio, fim: p[1].fim },
+    { texto: "agora.", inicio: p[2].inicio, fim: p[2].fim },
+  ]);
+  assert.deepEqual(blocosDeLegenda(alinhar("ação"), 3).map((b) => b.texto), ["ação"]);
   assert.deepEqual(blocosDeLegenda(alinhar("ação"), 4).map((b) => b.texto), ["ação"]);
+});
+
+test("limite inválido não lança erro e usa o padrão; limite fracionário é arredondado para baixo", () => {
+  const a = alinhar("não ação agora");
+  for (const limite of [0, -1, NaN, Infinity]) assert.deepEqual(blocosDeLegenda(a, limite), blocosDeLegenda(a));
+  assert.deepEqual(blocosDeLegenda(a, 7.9).map((b) => b.texto), ["não", "ação", "agora"]);
 });
 
 test("alinhamento vazio e texto só de espaços não produzem palavras ou blocos", () => {

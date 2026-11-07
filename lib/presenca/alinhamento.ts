@@ -74,19 +74,14 @@ export function momentoDoTrecho(a: Alinhamento, trecho: string): number | null {
 
 /**
  * Blocos com palavras inteiras e espaços simples entre elas.
- * Rejeita limite inválido ou menor que uma palavra, para nunca cortá-la nem excedê-lo.
+ * Palavras maiores que o limite ficam sozinhas; limites inválidos usam o padrão 84.
  */
 export function blocosDeLegenda(a: Alinhamento, maxCaracteres = 84): BlocoLegenda[] {
-  if (!Number.isSafeInteger(maxCaracteres) || maxCaracteres <= 0) {
-    throw new RangeError("O limite de caracteres deve ser um inteiro positivo.");
-  }
+  const limite = Number.isFinite(maxCaracteres) && maxCaracteres >= 1 ? Math.floor(maxCaracteres) : 84;
   const resultado: BlocoLegenda[] = [];
   let atual: BlocoLegenda | null = null;
   for (const palavra of palavras(a)) {
-    if (palavra.texto.length > maxCaracteres) {
-      throw new RangeError("O limite de caracteres é menor que uma palavra inteira.");
-    }
-    if (atual && atual.texto.length + 1 + palavra.texto.length <= maxCaracteres) {
+    if (atual && atual.texto.length + 1 + palavra.texto.length <= limite) {
       atual.texto += ` ${palavra.texto}`;
       atual.fim = palavra.fim;
     } else {
