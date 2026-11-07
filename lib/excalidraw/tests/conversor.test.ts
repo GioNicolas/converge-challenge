@@ -52,7 +52,7 @@ test("mantém IDs, resolve as duas direções e não reaproveita IDs após remo�
 
 test("usa pontas absolutas e distância até o retângulo para setas sem binding", () => {
   const resultado = criarConversor().converter(cenaVisual);
-  assert.deepEqual(resultado.instantaneo.conexoes[0], { id: "s1", tipo: "arrow", de: "r1", para: "l1", rotulo: "" });
+  assert.deepEqual(resultado.instantaneo.conexoes[0], { id: "s1", tipo: "arrow", de: "r1", para: "l1", seta: "→", rotulo: "" });
   assert.match(resultado.texto, /\[s1\] \[r1\] → Decisão/);
   const longe = alterar(cenaVisual, "solta", { points: [[0, 0], [2000, 0]] } as unknown as Partial<ExcalidrawElement>);
   assert.match(criarConversor().converter(longe).texto, /→ \? \(seta solta\)/);

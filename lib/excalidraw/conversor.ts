@@ -2,7 +2,7 @@ import type { ExcalidrawElement } from "./tipos";
 import {
   descreverConexao, entreAspas, nomeDoElemento, normalizarTexto,
   textoCurto, tiposEmPortugues,
-  type Componente, type Instantaneo, type Secao,
+  type Componente, type Conexao, type Instantaneo, type Secao,
 } from "./instantaneo";
 
 export type { Instantaneo } from "./instantaneo";
@@ -197,7 +197,7 @@ export function criarConversor(): {
         !menor || Math.abs(outro.width * outro.height) < Math.abs(menor.width * menor.height) ? outro : menor, undefined);
       return { id: id(e.id), tipo: e.type, nome: nome(e.id), dentroDe: pai ? id(pai.id) : null };
     });
-    const conexoes = linhasVisiveis.map((e) => {
+    const conexoes = linhasVisiveis.map((e): Conexao => {
       function ponta(binding: typeof e.startBinding, indice: number): string | null {
         // Um vínculo explícito a um elemento ignorado nunca vira vínculo por proximidade.
         if (binding) return ids.get(absorvidos.get(binding.elementId) ?? binding.elementId) ?? null;
@@ -206,7 +206,18 @@ export function criarConversor(): {
         const proximo = maisProximo([e.x + ponto[0], e.y + ponto[1]], caixas, 40);
         return proximo ? id(proximo.id) : null;
       }
-      return { id: id(e.id), tipo: e.type, de: ponta(e.startBinding, 0), para: ponta(e.endBinding, e.points.length - 1), rotulo: nome(e.id) };
+      const comeco = ponta(e.startBinding, 0);
+      const fim = ponta(e.endBinding, e.points.length - 1);
+      const cabecaNoComeco = !!e.startArrowhead;
+      const cabecaNoFim = !!e.endArrowhead;
+      // Em system design a direção importa (quem chama quem): ponta só no começo inverte a leitura.
+      const inverter = cabecaNoComeco && !cabecaNoFim;
+      const seta = cabecaNoComeco && cabecaNoFim ? "↔" : cabecaNoComeco || cabecaNoFim ? "→" : "—";
+      return {
+        id: id(e.id), tipo: e.type,
+        de: inverter ? fim : comeco, para: inverter ? comeco : fim,
+        seta, rotulo: nome(e.id),
+      };
     });
     const anotacoes = soltos.filter((e) => !absorvidos.has(e.id)).map((e) => ({
       id: id(e.id), texto: normalizarTexto(e.text), dentroDe: dentroDe.has(e.id) ? id(dentroDe.get(e.id)!) : null,
