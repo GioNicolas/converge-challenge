@@ -372,3 +372,23 @@ test("imagem com erro não impede pedido e espera pode ser cancelada", async () 
   controle.abort();
   await assert.rejects(esperando, { name: "AbortError" });
 });
+
+// Por último: o 501 desliga a voz do servidor para o módulo inteiro até a próxima sessão.
+test("voz não implementada (501) não é pedida de novo até a próxima sessão", async (t) => {
+  ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "1" });
+  const falas = vozDoNavegador(t);
+  t.mock.method(console, "warn", () => {});
+  const rotas: string[] = [];
+  t.mock.method(globalThis, "fetch", async (rota: string) => {
+    rotas.push(rota);
+    if (rota === "/api/falar") return Response.json({ erro: "voz ainda não implementada" }, { status: 501 });
+    return Response.json({ sessao_id: "real", area: "system design", problema: { titulo: "Links", enunciado: "Projete" }, tempos: {} });
+  });
+  await falar("Oi");
+  await falar("Tudo bem?");
+  assert.deepEqual(rotas, ["/api/falar"]);
+  assert.equal(falas.length, 2);
+  await criarSessao();
+  await falar("De novo");
+  assert.deepEqual(rotas, ["/api/falar", "/api/sessoes", "/api/falar"]);
+});

@@ -1,0 +1,11 @@
+COMPONENTES
+- [r1] Cliente (retângulo)
+- [r2] API (retângulo)
+- [e1] Postgres (elipse)
+CONEXÕES
+- [s1] Cliente → API
+- [s2] API → Postgres ("lê e grava")
+ANOTAÇÕES SOLTAS
+- [t1] "gera código aleatório"
+ORDEM NA TELA (esquerda → direita)
+- Cliente, API, Postgres

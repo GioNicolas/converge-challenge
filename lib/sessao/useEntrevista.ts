@@ -11,6 +11,7 @@ import {
   duvidaDeDemonstracao,
   enviarEventos,
   falar,
+  finalizarSessao,
   falarComMarcas,
   usarServidor,
   type FalaNaTela,
@@ -130,6 +131,18 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       linhaDoTempo.current?.registrar(...args),
     [],
   );
+  /**
+   * Manda já o que está na fila (sem esperar o lote de 5s). Pergunta e resposta mudam o estado
+   * do servidor, e a análise seguinte precisa chegar depois delas. O prazo evita travar a análise.
+   */
+  const descarregarJa = useCallback((prazoMs = 1500) => {
+    const linha = linhaDoTempo.current;
+    if (!linha) return Promise.resolve();
+    return Promise.race([
+      linha.descarregar().catch(() => {}),
+      new Promise<void>((resolver) => setTimeout(resolver, prazoMs)),
+    ]);
+  }, []);
 
   useEffect(() => {
     let cancelado = false;
@@ -153,8 +166,13 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
 
   useEffect(() => {
     if (estado.fase !== "AGUARDANDO") registrar("fase", { fase: estado.fase });
-    if (estado.fase === "ENCERRADA") void linhaDoTempo.current?.descarregar().catch(() => {});
-  }, [estado.fase, registrar]);
+    if (estado.fase !== "ENCERRADA" || !sessao) return;
+    // Primeiro a linha do tempo inteira chega ao servidor; só depois ele gera o scorecard com ela.
+    const linha = linhaDoTempo.current;
+    void (linha ? linha.descarregar().catch(() => {}) : Promise.resolve())
+      .then(() => finalizarSessao(sessao.sessao_id))
+      .catch((erro) => console.warn("[fim] não foi possível gerar o relatório:", erro));
+  }, [estado.fase, registrar, sessao]);
 
   // Gatilho da análise.
   useEffect(() => {
@@ -291,6 +309,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       .filter((id): id is string => !!id);
 
     registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos });
+    void descarregarJa();
     const controle = new AbortController();
     let coreografia: Promise<void> | null = null;
     const desenhar = () => {
@@ -316,7 +335,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       controle.abort();
       void (coreografia ?? Promise.resolve()).then(() => quadro.agente.apagarGrupo(grupo));
     };
-  }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar]);
+  }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar, descarregarJa]);
 
   // Candidato travado (~2 min sem mexer no desenho): força uma análise, que pode virar uma dica (escada de ajuda).
   const ultimaMudanca = useRef(Date.now());
@@ -378,12 +397,12 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     const { texto } = conversor.current.converter(quadro.api.getSceneElements());
     enviar({ tipo: "PLIN_DEMO", resposta: duvidaDeDemonstracao(texto) });
   }, [enviar, quadro]);
-  const terminarResposta = useCallback(() => {
-    registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero });
+  const terminarResposta = useCallback((texto?: unknown) => {
+    registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero, quem: "candidato", ...(typeof texto === "string" && texto.trim() ? { texto: texto.trim() } : {}) });
     enviar({ tipo: "RESPOSTA_TERMINOU" });
-    // A resposta pode mudar a avaliação: analisa de novo logo depois.
-    setTimeout(() => gatilho.current?.dispararAgora(), 0);
-  }, [enviar, registrar]);
+    // A resposta pode mudar a avaliação: analisa de novo logo depois que o servidor souber dela.
+    void descarregarJa().then(() => gatilho.current?.dispararAgora());
+  }, [descarregarJa, enviar, registrar]);
   /** Transcrição do candidato: o parcial vai para a legenda; a frase final entra na conversa e na linha do tempo. */
   const [parcialDoCandidato, setParcialDoCandidato] = useState("");
   const falaDoCandidato = useCallback((texto: string) => {

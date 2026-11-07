@@ -15,9 +15,13 @@ export type EstadoEntrevista = {
   plin: CicloPlin;
   /** A dúvida esperando o clique do candidato. */
   perguntaPendente: RespostaAnalise | null;
+  /** A dúvida pendente veio do botão de demonstração (um "ok" da análise não a cancela). */
+  pendenteDeDemo: boolean;
   /** A pergunta que o candidato está respondendo. */
   perguntaAtiva: PerguntaAtiva | null;
   perguntasFeitas: number;
+  /** A pergunta de encerramento (do FECHAMENTO) já foi feita? Ela é única. */
+  perguntaFinalFeita: boolean;
   /** Quando o candidato terminou a última resposta (o intervalo entre perguntas conta daqui). */
   ultimaRespostaEm: number | null;
 };
@@ -52,10 +56,14 @@ const PROXIMA_FASE: Partial<Record<Fase, Fase>> = {
   FECHAMENTO: "ENCERRADA",
 };
 
-/** Que tipos de plin cada fase aceita. Requisitos e fechamento não têm plin da análise. */
+/**
+ * Que tipos de plin cada fase aceita. Requisitos não tem plin da análise.
+ * O fechamento aceita uma única dúvida: a pergunta de encerramento ("o que mudaria com mais tempo?").
+ */
 const PLINS_DA_FASE: Partial<Record<Fase, RespostaAnalise["status"][]>> = {
   ALTO_NIVEL: ["redirecionar"],
   APROFUNDAMENTO: ["duvida", "dica", "redirecionar"],
+  FECHAMENTO: ["duvida"],
 };
 
 export function estadoInicial(): EstadoEntrevista {
@@ -64,8 +72,10 @@ export function estadoInicial(): EstadoEntrevista {
     faseIniciadaEm: null,
     plin: "LIVRE",
     perguntaPendente: null,
+    pendenteDeDemo: false,
     perguntaAtiva: null,
     perguntasFeitas: 0,
+    perguntaFinalFeita: false,
     ultimaRespostaEm: null,
   };
 }
@@ -86,6 +96,8 @@ export function aceitaPlin(
   if (resposta.status === "ok" || !resposta.pergunta) return false;
   if (!PLINS_DA_FASE[estado.fase]?.includes(resposta.status)) return false;
   if (estado.plin === "PERGUNTA_ATIVA") return false;
+  // A pergunta de encerramento fica fora do limite de 5 e do intervalo de 60s, mas é uma só.
+  if (estado.fase === "FECHAMENTO") return !estado.perguntaFinalFeita;
   if (estado.perguntasFeitas >= regras.maxPerguntas) return false;
   if (
     estado.ultimaRespostaEm !== null &&
@@ -132,9 +144,9 @@ export function transicionar(
       const { resposta } = evento;
       if (aceitaPlin(estado, resposta, agora, regras)) {
         // Uma dúvida nova substitui a pendente: a mais recente é a mais relevante.
-        return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta };
+        return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta, pendenteDeDemo: false };
       }
-      if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE") {
+      if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo) {
         // O candidato resolveu sozinho antes de clicar: a dúvida pendente perdeu o sentido.
         return { ...estado, plin: "LIVRE", perguntaPendente: null };
       }
@@ -143,7 +155,7 @@ export function transicionar(
 
     case "PLIN_DEMO":
       if (estado.fase === "AGUARDANDO" || estado.plin === "PERGUNTA_ATIVA") return estado;
-      return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: evento.resposta };
+      return { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: evento.resposta, pendenteDeDemo: true };
 
     case "PLIN_CLICADO": {
       if (estado.plin !== "PLIN_PENDENTE" || !estado.perguntaPendente) return estado;
@@ -154,6 +166,7 @@ export function transicionar(
         perguntaAtiva: { ...estado.perguntaPendente, numero },
         perguntaPendente: null,
         perguntasFeitas: numero,
+        perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
       };
     }
 

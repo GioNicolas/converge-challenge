@@ -2,7 +2,7 @@ import type { ExcalidrawElement } from "./tipos";
 import {
   descreverConexao, entreAspas, nomeDoElemento, normalizarTexto,
   textoCurto, tiposEmPortugues,
-  type Componente, type Instantaneo, type Secao,
+  type Componente, type Conexao, type Instantaneo, type Secao,
 } from "./instantaneo";
 
 export type { Instantaneo } from "./instantaneo";
@@ -17,6 +17,14 @@ type Caixa = Extract<ExcalidrawElement, { type: Componente["tipo"] }>;
 type Linha = Extract<ExcalidrawElement, { type: "arrow" | "line" }>;
 type Texto = Extract<ExcalidrawElement, { type: "text" }>;
 type Ponto = readonly [number, number];
+
+/**
+ * O que o candidato digitou. `text` vem com as quebras que o Excalidraw põe para caber na forma
+ * ("Postgres" numa elipse estreita vira "Postgr\nes"); `originalText` não.
+ */
+function textoDigitado(elemento: Texto): string {
+  return normalizarTexto(elemento.originalText || elemento.text);
+}
 
 function ehCaixa(elemento: ExcalidrawElement): elemento is Caixa {
   return elemento.type in tiposEmPortugues;
@@ -151,7 +159,7 @@ export function criarConversor(): {
     for (const e of visiveis) {
       if (e.type !== "text" || !e.containerId) continue;
       const lista = textos.get(e.containerId) ?? [];
-      lista.push(normalizarTexto(e.text));
+      lista.push(textoDigitado(e));
       textos.set(e.containerId, lista);
     }
     const vinculados = new Set([...textos].filter(([, lista]) => lista.some(Boolean)).map(([real]) => real));
@@ -161,7 +169,7 @@ export function criarConversor(): {
     const absorvidos = new Map<string, string>();
     const dentroDe = new Map<string, string>();
     for (const texto of soltos) {
-      if (!normalizarTexto(texto.text)) continue;
+      if (!textoDigitado(texto)) continue;
       const ponto = centro(texto);
       const recipiente = caixas.filter((c) => contemTexto(c, ponto)).reduce<Caixa | undefined>((menor, c) =>
         !menor || areaDaForma(c) < areaDaForma(menor) ? c : menor, undefined);
@@ -183,7 +191,7 @@ export function criarConversor(): {
     }
     for (const texto of soltos) {
       const destino = absorvidos.get(texto.id);
-      if (destino) textos.set(destino, [...(textos.get(destino) ?? []), normalizarTexto(texto.text)]);
+      if (destino) textos.set(destino, [...(textos.get(destino) ?? []), textoDigitado(texto)]);
     }
     const representados = visiveis.filter((e) => e.type !== "text" || (!e.containerId && !absorvidos.has(e.id)));
     const ids = new Map(representados.map((e) => [e.id, atribuirId(e)]));
@@ -197,7 +205,7 @@ export function criarConversor(): {
         !menor || Math.abs(outro.width * outro.height) < Math.abs(menor.width * menor.height) ? outro : menor, undefined);
       return { id: id(e.id), tipo: e.type, nome: nome(e.id), dentroDe: pai ? id(pai.id) : null };
     });
-    const conexoes = linhasVisiveis.map((e) => {
+    const conexoes = linhasVisiveis.map((e): Conexao => {
       function ponta(binding: typeof e.startBinding, indice: number): string | null {
         // Um vínculo explícito a um elemento ignorado nunca vira vínculo por proximidade.
         if (binding) return ids.get(absorvidos.get(binding.elementId) ?? binding.elementId) ?? null;
@@ -206,10 +214,21 @@ export function criarConversor(): {
         const proximo = maisProximo([e.x + ponto[0], e.y + ponto[1]], caixas, 40);
         return proximo ? id(proximo.id) : null;
       }
-      return { id: id(e.id), tipo: e.type, de: ponta(e.startBinding, 0), para: ponta(e.endBinding, e.points.length - 1), rotulo: nome(e.id) };
+      const comeco = ponta(e.startBinding, 0);
+      const fim = ponta(e.endBinding, e.points.length - 1);
+      const cabecaNoComeco = !!e.startArrowhead;
+      const cabecaNoFim = !!e.endArrowhead;
+      // Em system design a direção importa (quem chama quem): ponta só no começo inverte a leitura.
+      const inverter = cabecaNoComeco && !cabecaNoFim;
+      const seta = cabecaNoComeco && cabecaNoFim ? "↔" : cabecaNoComeco || cabecaNoFim ? "→" : "—";
+      return {
+        id: id(e.id), tipo: e.type,
+        de: inverter ? fim : comeco, para: inverter ? comeco : fim,
+        seta, rotulo: nome(e.id),
+      };
     });
     const anotacoes = soltos.filter((e) => !absorvidos.has(e.id)).map((e) => ({
-      id: id(e.id), texto: normalizarTexto(e.text), dentroDe: dentroDe.has(e.id) ? id(dentroDe.get(e.id)!) : null,
+      id: id(e.id), texto: textoDigitado(e), dentroDe: dentroDe.has(e.id) ? id(dentroDe.get(e.id)!) : null,
     }));
     const secoes: Secao[] = [];
     const grupos = new Set<string>();

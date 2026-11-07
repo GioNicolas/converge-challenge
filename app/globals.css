@@ -29,6 +29,10 @@
   --sucesso: #34c759;
   --alerta: #ff9f0a;
   --perigo: #ff3b30;
+  /* Texto sobre fundo claro (os de cima são para preenchimento e ícones) */
+  --sucesso-texto: #248a3d;
+  --alerta-texto: #b25000;
+  --perigo-texto: #d70015;
 
   /* Forma */
   --raio: 18px;
@@ -60,6 +64,9 @@
   --color-sucesso: var(--sucesso);
   --color-alerta: var(--alerta);
   --color-perigo: var(--perigo);
+  --color-sucesso-texto: var(--sucesso-texto);
+  --color-alerta-texto: var(--alerta-texto);
+  --color-perigo-texto: var(--perigo-texto);
 
   --radius-padrao: var(--raio);
   --radius-pequeno: var(--raio-pequeno);

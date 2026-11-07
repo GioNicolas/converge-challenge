@@ -7,7 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:email": "tsx --test lib/email/__tests__/*.test.ts"
+    "test:email": "tsx --test lib/email/__tests__/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:agente": "tsx --test lib/agente/__tests__/*.test.ts lib/agente/**/__tests__/*.test.ts",
+    "test:rotas": "tsx --test app/api/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",
+    "test:entrevista-texto": "tsx --test lib/dev/entrevista-texto/__tests__/*.test.ts lib/agente/__tests__/scorecard.test.ts app/api/__tests__/entrevista-texto.test.ts",
+    "test:scorecard": "tsx --test lib/agente/__tests__/scorecard*.test.ts",
+    "eval:scorecard": "node --env-file-if-exists=.env.local --import tsx scripts/eval-scorecard.ts",
+    "test:kits": "tsx --test lib/agente/kits/__tests__/*.test.ts",
+    "test:vagas": "tsx --test lib/agente/kits/__tests__/vagas-*.test.ts app/api/__tests__/avaliacoes.test.ts",
+    "agente:chat": "tsx scripts/agente-chat.ts"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",
@@ -17,11 +26,11 @@
     "next": "15.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "resend": "^6.37.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

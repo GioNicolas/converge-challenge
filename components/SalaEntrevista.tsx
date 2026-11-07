@@ -12,6 +12,7 @@ import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import ConfirmarEncerrar from "@/components/ConfirmarEncerrar";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
+import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
@@ -88,6 +89,16 @@ function useDemoRequisitos() {
   return { requisitos, mensagens, encenar, encenando, acabou: passo >= ROTEIRO_DEMO.length };
 }
 
+const NOME_DA_FASE: Record<Fase, string> = {
+  AGUARDANDO: "Aguardando",
+  APRESENTACAO: "Apresentação",
+  REQUISITOS: "Requisitos",
+  ALTO_NIVEL: "Visão geral",
+  APROFUNDAMENTO: "Aprofundamento",
+  FECHAMENTO: "Fechamento",
+  ENCERRADA: "Encerrada",
+};
+
 const Canvas = dynamic(() => import("@/components/Canvas"), {
   ssr: false,
   loading: () => <div className="h-full w-full animate-pulse bg-superficie-2" />,
@@ -148,7 +159,7 @@ export default function SalaEntrevista() {
   function aoQuadroPronto(q: Quadro) {
     setQuadro(q);
     // Só para depurar no console do navegador durante o desenvolvimento.
-    if (process.env.NODE_ENV === "development") {
+    if (process.env.NODE_ENV === "development" || process.env.NEXT_PUBLIC_E2E === "1") {
       (window as unknown as { quadro: Quadro }).quadro = q;
     }
   }
@@ -167,7 +178,11 @@ export default function SalaEntrevista() {
 
       {estado.fase !== "AGUARDANDO" && (
         <JanelaChamada
-          estado={estado}
+          fase={NOME_DA_FASE[estado.fase]}
+          duvidaPendente={estado.plin === "PLIN_PENDENTE"}
+          respondendo={estado.plin === "PERGUNTA_ATIVA"}
+          encerrada={estado.fase === "ENCERRADA"}
+          marcadores={{ fase: estado.fase, plin: estado.plin }}
           iniciadaEm={entrevista.iniciadaEm}
           midia={midia}
           agenteFalando={entrevista.agenteFalando}
@@ -288,7 +303,21 @@ export default function SalaEntrevista() {
               ) : (
                 <>
                   <h1 className="text-2xl font-semibold tracking-tight">Entrevista encerrada</h1>
-                  <p className="leading-relaxed text-texto-suave">Obrigado! O relatório está sendo gerado.</p>
+                  <p className="leading-relaxed text-texto-suave">
+                    Obrigado pelo seu tempo. A equipe de recrutamento recebe o resultado e entra em contato com
+                    você.
+                  </p>
+                  {/* Só para demonstração: em produção, a recrutadora recebe o link pelo painel dela. */}
+                  {sessao && usarServidor() && (
+                    <a
+                      href={`/relatorio/${encodeURIComponent(sessao.sessao_id)}`}
+                      target="_blank"
+                      rel="noopener"
+                      className="mt-1 w-fit rounded-full border border-borda px-3.5 py-1.5 text-xs font-medium text-texto-suave outline-none transition-[color,transform] duration-150 ease-suave hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95"
+                    >
+                      Demo: ver o relatório da recrutadora
+                    </a>
+                  )}
                 </>
               )}
             </motion.div>

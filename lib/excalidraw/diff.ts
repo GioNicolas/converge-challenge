@@ -1,6 +1,6 @@
 import {
   descreverConexao, entreAspas, nomeDoElemento, textoCurto, tiposEmPortugues,
-  type Instantaneo, type Secao,
+  type Conexao, type Instantaneo, type Secao,
 } from "./instantaneo";
 
 export type { Instantaneo } from "./instantaneo";
@@ -13,6 +13,17 @@ function indice<T extends { id: string }>(itens: readonly T[]): Map<string, T> {
 
 function secao(s: Secao): string {
   return `${s.tipo === "grupo" ? "grupo" : `[${s.id}] ${textoCurto(s.nome) || "moldura sem nome"}`}: ${s.membros.map((id) => `[${id}]`).join(", ")}`;
+}
+
+/** Liga as mesmas duas pontas, em qualquer ordem. */
+function mesmoPar(a: Conexao, b: Conexao): boolean {
+  return (a.de === b.de && a.para === b.para) || (a.de === b.para && a.para === b.de);
+}
+
+/** Mesma leitura: mesma seta e mesma ordem (a ordem só importa quando há uma ponta só). */
+function mesmoSentido(a: Conexao, b: Conexao): boolean {
+  if (a.seta !== b.seta) return false;
+  return (a.de === b.de && a.para === b.para) || (a.seta !== "→" && a.de === b.para && a.para === b.de);
 }
 
 function mesmosMembros(a: Secao, b: Secao): boolean {
@@ -43,16 +54,25 @@ export function descreverMudancas(anterior: Instantaneo | null, atual: Instantan
   }
   const conexoesAntes = indice(antes.conexoes);
   const conexoesAgora = indice(atual.conexoes);
-  const mesmaLigacao = (a: Instantaneo["conexoes"][number], b: Instantaneo["conexoes"][number]) => a.de === b.de && a.para === b.para && a.tipo === b.tipo;
   const rotulo = (texto: string) => texto ? ` (${entreAspas(texto)})` : "";
   for (const c of antes.conexoes) {
     const novo = conexoesAgora.get(c.id);
-    if (!novo || !mesmaLigacao(c, novo)) linhas.push(`- desconectou ${descreverConexao(antes, c)}${rotulo(c.rotulo)}`);
+    if (!novo || !mesmoPar(c, novo)) linhas.push(`- desconectou ${descreverConexao(antes, c)}${rotulo(c.rotulo)}`);
   }
   for (const c of atual.conexoes) {
     const antigo = conexoesAntes.get(c.id);
-    if (!antigo || !mesmaLigacao(antigo, c)) linhas.push(`+ conectou ${descreverConexao(atual, c)}${rotulo(c.rotulo)}`);
-    else if (antigo.rotulo !== c.rotulo) linhas.push(`~ mudou o rótulo de ${descreverConexao(atual, c)}: ${entreAspas(antigo.rotulo)} → ${entreAspas(c.rotulo)}`);
+    if (!antigo || !mesmoPar(antigo, c)) {
+      linhas.push(`+ conectou ${descreverConexao(atual, c)}${rotulo(c.rotulo)}`);
+      continue;
+    }
+    // Mesmas pontas, outra direção: a seta foi invertida ou ganhou/perdeu uma cabeça.
+    const eraAssim = descreverConexao(antes, antigo);
+    const ficouAssim = descreverConexao(atual, c);
+    if (!mesmoSentido(antigo, c) && eraAssim !== ficouAssim) {
+      const verbo = antigo.seta === "→" && c.seta === "→" ? "inverteu a seta" : "mudou a seta";
+      linhas.push(`~ ${verbo}: ${eraAssim} passou a ${ficouAssim}`);
+    }
+    if (antigo.rotulo !== c.rotulo) linhas.push(`~ mudou o rótulo de ${ficouAssim}: ${entreAspas(antigo.rotulo)} → ${entreAspas(c.rotulo)}`);
   }
   const notasAntes = indice(antes.anotacoes);
   const notasAgora = indice(atual.anotacoes);

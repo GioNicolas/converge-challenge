@@ -13,7 +13,7 @@ const saved = { key: env.RESEND_API_KEY, node: env.NODE_ENV };
 type SendResult = Awaited<ReturnType<EmailClient["emails"]["send"]>>;
 
 function fakeClient(result: SendResult) {
-  const send = mock.fn(async (_p: Parameters<EmailClient["emails"]["send"]>[0]) => result);
+  const send = mock.fn(async (..._args: Parameters<EmailClient["emails"]["send"]>) => result);
   return { client: { emails: { send } } as EmailClient, send };
 }
 
@@ -88,5 +88,51 @@ describe("sendEmail", () => {
       assert.ok(!l.includes("maria@"), l);
       assert.ok(!l.includes("Assunto"), l);
     }
+  });
+});
+
+describe("cliente padrão (Resend via fetch)", () => {
+  beforeEach(() => {
+    env.RESEND_API_KEY = "re_test";
+    env.NODE_ENV = "test";
+  });
+  afterEach(() => {
+    mock.restoreAll();
+    if (saved.key === undefined) delete env.RESEND_API_KEY;
+    else env.RESEND_API_KEY = saved.key;
+    if (saved.node === undefined) delete env.NODE_ENV;
+    else env.NODE_ENV = saved.node;
+  });
+
+  it("declara charset=utf-8, preserva acentos no corpo e mapeia replyTo para reply_to", async () => {
+    const chamadas: { url: string; init: RequestInit }[] = [];
+    mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+      chamadas.push({ url, init });
+      return new Response(JSON.stringify({ id: "em_123" }), { status: 200 });
+    });
+    const r = await sendEmail({ ...args, template: createElement("p", null, "Olá, João — avaliação concluída") });
+    assert.deepEqual(r, { status: "sent", id: "em_123" });
+
+    const [{ url, init }] = chamadas;
+    const headers = init.headers as Record<string, string>;
+    assert.equal(url, "https://api.resend.com/emails");
+    assert.equal(headers["Content-Type"], "application/json; charset=utf-8");
+    assert.equal(headers.Authorization, "Bearer re_test");
+    const corpo = JSON.parse(String(init.body));
+    assert.ok(corpo.html.includes("Olá, João — avaliação concluída"));
+    assert.ok(typeof corpo.text === "string" && corpo.text.includes("avaliação"));
+    assert.ok(!("replyTo" in corpo));
+  });
+
+  it("resposta de erro do Resend vira EmailDeliveryError com a mensagem da API", async () => {
+    mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ message: "domínio não verificado" }), { status: 403 }));
+    mock.method(console, "error", () => {});
+    await assert.rejects(sendEmail(args), (e: unknown) => e instanceof EmailDeliveryError && /domínio não verificado/.test(e.message));
+  });
+
+  it("resposta sem JSON não derruba com erro de parse: vira EmailDeliveryError", async () => {
+    mock.method(globalThis, "fetch", async () => new Response("<html>502</html>", { status: 502 }));
+    mock.method(console, "error", () => {});
+    await assert.rejects(sendEmail(args), EmailDeliveryError);
   });
 });

@@ -10,7 +10,9 @@ const cena = encurtador as unknown as readonly ExcalidrawElement[];
 const cenaVisual = visual as unknown as readonly ExcalidrawElement[];
 
 function alterar(elementos: readonly ExcalidrawElement[], id: string, campos: Partial<ExcalidrawElement>) {
-  return elementos.map((e) => e.id === id ? { ...e, ...campos } as ExcalidrawElement : e);
+  // Editar um texto no Excalidraw muda os dois campos.
+  const comOriginal = "text" in campos ? { ...campos, originalText: campos.text } : campos;
+  return elementos.map((e) => e.id === id ? { ...e, ...comOriginal } as ExcalidrawElement : e);
 }
 
 test("descreve o encurtador no contrato e omite elementos ignorados e seus textos", () => {
@@ -52,7 +54,7 @@ test("mantém IDs, resolve as duas direções e não reaproveita IDs após remo�
 
 test("usa pontas absolutas e distância até o retângulo para setas sem binding", () => {
   const resultado = criarConversor().converter(cenaVisual);
-  assert.deepEqual(resultado.instantaneo.conexoes[0], { id: "s1", tipo: "arrow", de: "r1", para: "l1", rotulo: "" });
+  assert.deepEqual(resultado.instantaneo.conexoes[0], { id: "s1", tipo: "arrow", de: "r1", para: "l1", seta: "→", rotulo: "" });
   assert.match(resultado.texto, /\[s1\] \[r1\] → Decisão/);
   const longe = alterar(cenaVisual, "solta", { points: [[0, 0], [2000, 0]] } as unknown as Partial<ExcalidrawElement>);
   assert.match(criarConversor().converter(longe).texto, /→ \? \(seta solta\)/);
@@ -227,4 +229,12 @@ test("diff usa textos completos mesmo quando a parte alterada ultrapassa o corte
   const antes = conversor.converter(alterar(cena, "nome-api", { text: "x".repeat(100) + "a" })).instantaneo;
   const agora = conversor.converter(alterar(cena, "nome-api", { text: "x".repeat(100) + "b" })).instantaneo;
   assert.equal(houveMudancaRelevante(antes, agora), true);
+});
+
+test("nome da forma usa o texto digitado, não as quebras automáticas do Excalidraw", () => {
+  // Como o Excalidraw guarda: `text` quebrado para caber na elipse, `originalText` como foi digitado.
+  const quebrado = cena.map((e) => e.id === "nome-postgres" ? { ...e, text: "Postgr\nes", originalText: "Postgres" } as ExcalidrawElement : e);
+  const { texto } = criarConversor().converter(quebrado);
+  assert.match(texto, /- \[e1\] Postgres \(elipse\)/);
+  assert.doesNotMatch(texto, /Postgr es/);
 });
