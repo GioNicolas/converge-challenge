@@ -16,7 +16,8 @@ import { abrirConversa, conduzirTurno } from "@/lib/pre-entrevista/turno";
 
 /** Teto de falas da recrutadora por conversa (segurança). */
 const MAX_FALAS_RECRUTADORA = 14;
-const MODELO_RECRUTADORA = "google/gemini-2.5-flash-lite";
+/** Outro modelo que o do produto (gemini-flash-lite), para não disputar o limite de taxa do fallback. */
+const MODELO_RECRUTADORA = "meta-llama/llama-3.3-70b-instruct";
 
 interface Persona {
   id: string;
@@ -89,12 +90,22 @@ async function falaDaRecrutadora(persona: Persona, descricaoVaga: string, sessao
   for (const t of sessao.transcricao) {
     mensagens.push({ role: t.role === "agente" ? "user" : "assistant", content: t.text });
   }
-  const resposta = await chat({
-    alvos: [{ provedor: "openrouter", model: MODELO_RECRUTADORA }],
-    messages: mensagens,
-    temperature: 0.8,
-    maxTokens: 200,
-  });
+  const pedir = () =>
+    chat({
+      alvos: [{ provedor: "openrouter", model: MODELO_RECRUTADORA }],
+      messages: mensagens,
+      temperature: 0.8,
+      maxTokens: 200,
+    });
+  let resposta: Awaited<ReturnType<typeof pedir>>;
+  try {
+    resposta = await pedir();
+  } catch (err) {
+    // Limite de taxa do upstream: espera 3 s e tenta uma vez só.
+    if (!(err instanceof Error) || !/HTTP 429/.test(err.message)) throw err;
+    await new Promise((r) => setTimeout(r, 3000));
+    resposta = await pedir();
+  }
   return resposta.content
     .replace(/^\s*recrutadora\s*:\s*/i, "")
     .trim()

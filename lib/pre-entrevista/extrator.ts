@@ -32,6 +32,8 @@ export function alvosDoExtrator(): Alvo[] {
   ];
   const fallback = process.env.EXTRACTOR_FALLBACK_MODEL || "google/gemini-2.5-flash-lite";
   alvos.push({ provedor: "openrouter", model: fallback });
+  // Terceiro alvo: outro modelo na Featherless, com mais tempo, para quando o GLM e a OpenRouter falham.
+  alvos.push({ provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 20000 });
   return alvos;
 }
 
@@ -102,6 +104,21 @@ Inclua apenas as chaves que mudaram.`;
 
 /** Acumula avisos de validação: vão para o console e para o retorno de `extrair` (e de lá para o log). */
 type Avisos = string[];
+
+/** Número ou tempo que a recrutadora pode ter dito: dígitos, dez a noventa, cem, "uma hora", "meia hora". */
+const TEMPO_NA_FALA =
+  /\d|\b(dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem)\b|\b(uma|duas|meia)\s+hora/i;
+
+/**
+ * Só aceita `durationMin` se alguma fala da recrutadora tem número ou tempo. Sem isso, a duração veio da
+ * Totti ou foi inventada pelo modelo, e descarta com aviso. Função pura quanto ao patch (devolve outro objeto).
+ */
+export function checarDuracao(patch: Patch, transcricao: Turno[], avisos: Avisos): Patch {
+  if (patch.durationMin === undefined) return patch;
+  if (transcricao.some((t) => t.role === "recrutadora" && TEMPO_NA_FALA.test(t.text))) return patch;
+  avisar(avisos, `durationMin=${patch.durationMin} descartado: a recrutadora não falou de número ou tempo`);
+  return { ...patch, durationMin: undefined };
+}
 
 function avisar(avisos: Avisos, msg: string): void {
   avisos.push(msg);
@@ -337,15 +354,16 @@ export async function extrair(r: Rascunho, transcricao: Turno[]): Promise<Result
     }
 
     tentativasJson.push({ resposta: resposta.content });
+    const aceito = checarDuracao(patch, transcricao, avisos);
     return {
-      rascunho: aplicarPatch(r, patch, avisos),
+      rascunho: aplicarPatch(r, aceito, avisos),
       ms,
       provedor,
       model: modelo,
       mensagens: enviadas,
       respostaCrua: resposta.content,
       tentativasJson,
-      patch,
+      patch: aceito,
       avisos,
       tentativas,
     };

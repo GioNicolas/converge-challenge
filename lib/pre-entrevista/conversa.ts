@@ -31,6 +31,8 @@ function alvosDaConversa(): Alvo[] {
       model: process.env.CONVERSA_FALLBACK_MODEL || "google/gemini-2.5-flash-lite",
       timeoutMs: TIMEOUT_OPENROUTER_MS,
     },
+    // Terceiro alvo: outro modelo da OpenRouter, diferente do flash-lite, para não cair junto com ele.
+    { provedor: "openrouter", model: "openai/gpt-4o-mini", timeoutMs: TIMEOUT_OPENROUTER_MS },
   ];
 }
 
@@ -199,11 +201,11 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         );
       }
       return (
-        "Faça o resumo falado, em no máximo 4 frases curtas: formato, senioridade e, numa frase natural com as palavras dela, " +
+        "Faça o resumo falado, em no máximo 3 frases curtas: formato, senioridade e, numa frase natural com as palavras dela, " +
         "o que vai ser avaliado (por exemplo: 'vou olhar como ele lida com picos de tráfego e falhas no meio do pagamento, e se escreve código limpo'; " +
-        "não copie esse exemplo). Depois diga a duração (se ela não disse, o padrão do formato). " +
-        "Se ela não falou de tom nem de dicas, diga que a entrevista é amigável e que pode dar uma dica leve se o candidato travar: " +
-        "quem dá a dica é a entrevista, não ela. Se ela citou algo eliminatório, inclua. " +
+        "não copie esse exemplo). Duração: só se ela disse, ou o padrão do formato, dito de forma curta. " +
+        "Tom e dicas: se ela não falou, diga que a entrevista é amigável e que a entrevista dá uma dica leve se o candidato travar " +
+        "(a dica vem da entrevista; nunca diga 'você pode dar' nem peça dica à recrutadora). Se ela citou algo eliminatório, inclua. " +
         'Termine com "quer mudar algo ou posso finalizar?".'
       );
     case "encerrar":
@@ -273,25 +275,55 @@ export interface RespostaAgente {
 }
 
 /** Gera a fala da Totti para o passo escolhido. Lança `ErroChat` se nenhum alvo responder. */
+/** Número de frases de uma fala (pelos sinais de pontuação). */
+export function contarFrases(texto: string): number {
+  return texto.split(/[.!?]+/).filter((s) => s.trim()).length;
+}
+
 export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaAgente> {
   const mensagens = montarMensagensConversa(sessao, passo);
-  const resposta = await chat({
+  let resposta = await chat({
     alvos: alvosDaConversa(),
     messages: mensagens,
     temperature: TEMPERATURA_CONVERSA,
     maxTokens: MAX_TOKENS_CONVERSA,
   });
-  const texto = limparFala(resposta.content);
+  let texto = limparFala(resposta.content);
+  let ms = resposta.ms;
+  let tentativas = resposta.tentativas;
+  let respostaCrua = resposta.content;
+  // O resumo tem teto de 3 frases. Se passou, pede para reescrever uma vez.
+  if (texto && passo.tipo === "resumo_final" && contarFrases(texto) > 3) {
+    const reescrita = await chat({
+      alvos: alvosDaConversa(),
+      messages: [
+        ...mensagens,
+        { role: "assistant", content: texto },
+        {
+          role: "user",
+          content:
+            "Reescreva o resumo em no máximo 3 frases curtas, mantendo o conteúdo. A dica é dada pela entrevista ('a entrevista dá uma dica leve'), nunca 'você'.",
+        },
+      ],
+      temperature: TEMPERATURA_CONVERSA,
+      maxTokens: MAX_TOKENS_CONVERSA,
+    });
+    texto = limparFala(reescrita.content) || texto;
+    ms += reescrita.ms;
+    tentativas = [...tentativas, ...reescrita.tentativas];
+    respostaCrua = `${respostaCrua}\n[reescrita]\n${reescrita.content}`;
+    resposta = reescrita;
+  }
   if (!texto) throw new ErroChat(`Totti devolveu fala vazia (${resposta.provedor}/${resposta.model})`, resposta.tentativas);
 
   return {
     texto,
     provedor: resposta.provedor,
     model: resposta.model,
-    ms: resposta.ms,
-    fallback: resposta.tentativas.some((t) => t.erro !== undefined),
-    tentativas: resposta.tentativas,
+    ms,
+    fallback: tentativas.some((t) => t.erro !== undefined),
+    tentativas,
     mensagens,
-    respostaCrua: resposta.content,
+    respostaCrua,
   };
 }
