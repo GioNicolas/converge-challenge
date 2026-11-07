@@ -90,6 +90,20 @@ type RespostaOpenRouter = {
   };
 };
 
+/**
+ * Motivo do erro segundo o provedor (`error.message`), truncado. Ajuda a diagnosticar 400/402/404
+ * sem registrar o corpo inteiro: não repassa nada além desse campo e a chave nunca aparece nele.
+ */
+async function detalheDoErro(res: Response): Promise<string> {
+  try {
+    const j = (await res.json()) as { error?: { message?: unknown } };
+    const m = typeof j?.error?.message === "string" ? j.error.message.replace(/\s+/g, " ").trim() : "";
+    return m ? ` — ${m.slice(0, 300)}` : "";
+  } catch {
+    return "";
+  }
+}
+
 export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmCliente {
   const chave = opcoes.apiKey ?? process.env.OPENROUTER_API_KEY;
   const modeloPadrao =
@@ -164,7 +178,7 @@ export function criarClienteOpenRouter(opcoes: OpcoesOpenRouter = {}): LlmClient
 
         if (!res.ok) {
           log("llm_http", { modelo, status: res.status, tentativa, ms: Date.now() - inicio });
-          ultimo = new ErroLlm("http", `LLM respondeu HTTP ${res.status}`, res.status);
+          ultimo = new ErroLlm("http", `LLM respondeu HTTP ${res.status}${await detalheDoErro(res)}`, res.status);
           if (res.status === 429 || res.status >= 500) continue;
           throw ultimo;
         }
