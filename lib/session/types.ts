@@ -3,7 +3,7 @@
  */
 import type { AnalystOutput } from "@/lib/agents/analystSchema";
 import type { HiddenTestsResult } from "@/lib/agents/hiddenTests";
-import type { Blip, InterviewConfig, LineRange, Report, SessionEvent } from "@/lib/contracts";
+import type { Blip, FocusArea, InterviewConfig, LineRange, Report, SessionEvent } from "@/lib/contracts";
 import type { LlmStatsSnapshot } from "@/lib/llm";
 
 /** Pergunta preparada pelo Analyst, ainda não necessariamente virou blip. */
@@ -22,6 +22,8 @@ export interface QueuedQuestion {
   kickoff?: boolean;
   /** Momento-chave que gerou a pergunta ("primeiro run verde"): tem algo pra falar ali, então ganha passagem. */
   keyMoment?: string;
+  /** Pergunta de foco da vaga (pressão, escala, uso de IA): é de processo, sem trecho de código. */
+  focusArea?: FocusArea;
   /** Candidato clicou "agora não": a pergunta só volta a partir deste t. */
   snoozedUntil?: number;
 }

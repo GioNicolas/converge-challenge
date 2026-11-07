@@ -3,7 +3,8 @@
  */
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
-import { buildVagaContext } from "./vaga";
+import type { FocusArea } from "@/lib/contracts";
+import { buildVagaContext, FOCUS_QUESTION_GUIDE } from "./vaga";
 
 export function buildAnalystSystem(config: InterviewConfig, problem: Problem): string {
   const criteria = config.criteria.map((c) => `- ${c.id}: ${c.name} — ${c.description}`).join("\n");
@@ -59,8 +60,14 @@ O followUpTopic é o assunto para aprofundar se a resposta vier rasa, sempre o m
 - suspiciousLines e evidence são para uso interno (relatório), seja objetivo.
 - Respostas curtas: cada campo de texto com no máximo uma frase.
 
+# Pergunta de foco (só quando a mensagem trouxer "FOCO PENDENTE")
+O foco da vaga nem sempre aparece no código, então, quando houver FOCO PENDENTE, devolva também "focusQuestion": uma pergunta de PROCESSO sobre esse foco, independente do trecho de código. Ela é uma conversa curta sobre como o candidato trabalha, não sobre uma linha dele.
+Mesmas regras de estilo das outras: natural, em português do Brasil, curta, uma pergunta só, sem elogiar, sem insinuar que há erro ou algo melhor, sem entregar a solução nem uma entrada que exponha bug, sem pedir para bolar testes.
+Também vale: não mencione o código, o problema nem a solução; é sobre a pessoa e o jeito dela de trabalhar. followUpTopic e topicLabel seguem as mesmas regras (topicLabel de 2 a 5 palavras, como "como você prioriza").
+Sem FOCO PENDENTE na mensagem, "focusQuestion" = null.
+
 Responda SOMENTE com um objeto JSON, sem markdown, neste formato:
-{"approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string}], "questions": [{"question": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}]}`;
+{"approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string}], "questions": [{"question": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}], "focusQuestion": {"question": string, "followUpTopic": string, "topicLabel": string} | null}`;
 }
 
 export interface AnalystTurnInput {
@@ -74,14 +81,20 @@ export interface AnalystTurnInput {
   askedQuestions: string[];
   /** Momento-chave que disparou esta análise ("primeiro run com todos os testes passando"), se houver. */
   keyMoment?: string;
+  /** Foco da vaga ainda sem pergunta própria (decidido pelo código; ver `focoQuota.ts`). */
+  focoPendente?: FocusArea;
 }
 
 export function buildAnalystUser(input: AnalystTurnInput): string {
   const keyMoment = input.keyMoment
     ? `\nMOMENTO-CHAVE: ${input.keyMoment}. O candidato com certeza tem algo a dizer agora. Gere UMA pergunta sobre exatamente isso, com priority 0.85 ou mais, nas mesmas regras de estilo (sem entregar nada).\n`
     : "";
+  const guide = input.focoPendente ? FOCUS_QUESTION_GUIDE[input.focoPendente] : undefined;
+  const foco = guide
+    ? `\nFOCO PENDENTE: ${input.focoPendente}. Objetivo da pergunta: ${guide.objetivo}. Estilo (não copie): ${guide.exemplos.map((e) => `"${e}"`).join(" · ")}\n`
+    : "";
   return `Tempo de sessão: ${input.elapsedLabel}. Gatilho desta análise: ${input.trigger}. Linguagem: ${input.language}.
-${keyMoment}
+${keyMoment}${foco}
 Código atual:
 ${input.numberedCode || "(vazio)"}
 

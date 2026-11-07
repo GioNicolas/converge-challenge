@@ -35,6 +35,8 @@ const MIN_GAP_BETWEEN_BLIPS_MS = 60_000;
 const MIN_GAP_AFTER_CONVERSATION_MS = 30_000;
 /** Máximo de blips do Analyst por sessão (a abertura não conta). */
 const MAX_ANALYST_BLIPS = 8;
+/** Preferência da pergunta de foco da vaga na fila, para ela não ficar sempre atrás das perguntas sobre o código. */
+const FOCUS_QUESTION_BONUS = 0.1;
 /** Boost pro primeiro run com todos os casos passando: bom momento pra pergunta de complexidade. */
 const BOOST_FIRST_GREEN_RUN = 0.15;
 /** Boost pra um run que falhou: o candidato pode estar travado. */
@@ -184,7 +186,11 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   const candidates = session.queue
     .filter((q) => q.status === "queued" && !isSnoozed(q, t) && q.priority + boost >= BLIP_THRESHOLD)
     // Momento-chave primeiro (o candidato tem certeza que há o que falar), depois a prioridade.
-    .sort((a, b) => Number(b.keyMoment !== undefined) - Number(a.keyMoment !== undefined) || b.priority - a.priority);
+    .sort(
+      (a, b) =>
+        Number(b.keyMoment !== undefined) - Number(a.keyMoment !== undefined) ||
+        b.priority + (b.focusArea ? FOCUS_QUESTION_BONUS : 0) - (a.priority + (a.focusArea ? FOCUS_QUESTION_BONUS : 0)),
+    );
   if (candidates.length === 0) {
     const waiting = session.queue.filter((q) => q.status === "queued");
     if (waiting.length === 0) return { reason: "sem pergunta na fila" };

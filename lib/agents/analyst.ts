@@ -5,9 +5,11 @@
 import type { AnalystQuestion } from "@/lib/agents/analystSchema";
 import { AnalystOutput } from "@/lib/agents/analystSchema";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
+import { focoPendente } from "@/lib/agents/focoQuota";
 import { allPassed } from "@/lib/agents/policy";
 import { checkQuestion } from "@/lib/agents/spoilerFilter";
-import type { LineRange, SessionEvent } from "@/lib/contracts";
+import { PRIORIDADE_FOCO } from "@/lib/agents/focoQuota";
+import type { FocusArea, LineRange, SessionEvent } from "@/lib/contracts";
 import { completeJson } from "@/lib/llm";
 import { latestCode, numberCode } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
@@ -121,6 +123,8 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
 
   try {
     const since = book.lastCompletedT ?? -1;
+    // Só pede pergunta de foco quando já há ideia no código (como as outras perguntas) e o foco ainda não teve a sua.
+    const focoParaPedir = code.trim() === "" ? undefined : focoPendente(session);
     const problem = getProblem(session.config.problemId);
     const system = buildAnalystSystem(session.config, problem);
     const user = buildAnalystUser({
@@ -137,16 +141,17 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         .filter((q) => q.status === "asked" || q.status === "blipped")
         .map((q) => q.question),
       keyMoment,
+      focoPendente: focoParaPedir,
     });
 
     const result = await completeJson({ role: "analyst", system, user, schema: AnalystOutput });
-    const { questions, ...insights } = result.data;
+    const { questions, focusQuestion, ...insights } = result.data;
 
     // Cada análise substitui a fila, mas sobrevivem: pergunta adiada pelo candidato ("agora não") e
     // pergunta de momento-chave ainda esperando uma regra (senão a análise seguinte a derrubaria antes
     // de ela aparecer). Pra essas, vale só a checagem de frescor das linhas.
     for (const q of session.queue) {
-      const keep = q.kickoff || q.snoozedUntil !== undefined || q.keyMoment !== undefined;
+      const keep = q.kickoff || q.snoozedUntil !== undefined || q.keyMoment !== undefined || q.focusArea !== undefined;
       if (q.status === "queued" && !keep) q.status = "stale";
     }
     analyst.insights = insights;
@@ -165,7 +170,12 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     }
 
     const lineCount = code.split("\n").length;
-    const candidates = questions.map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
+    const candidates: { question: Omit<AnalystQuestion, "startLine" | "endLine" | "priority"> & { priority: number }; lines?: LineRange; focusArea?: FocusArea }[] =
+      questions.map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
+    // Pergunta de foco: só vale se o código pediu (focoParaPedir) e o modelo devolveu; sem trecho de código.
+    if (focoParaPedir && focusQuestion?.question.trim()) {
+      candidates.push({ question: { ...focusQuestion, priority: PRIORIDADE_FOCO }, focusArea: focoParaPedir });
+    }
     // O tema de aprofundamento também vai pro entrevistador, então passa pelo filtro junto.
     const verdicts = await Promise.all(
       candidates.map(({ question }) =>
@@ -174,7 +184,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     );
 
     let blocked = 0;
-    candidates.forEach(({ question, lines }, i) => {
+    candidates.forEach(({ question, lines, focusArea }, i) => {
       const verdict = verdicts[i];
       analyst.costUsd += verdict.costUsd;
       if (!verdict.safe) {
@@ -192,15 +202,16 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         highlight: lines,
         createdAt: trigger.t,
         status: "queued",
-        keyMoment,
+        keyMoment: focusArea ? undefined : keyMoment,
+        focusArea,
       });
     });
     analyst.lastOutcome = {
       t: trigger.t,
       text:
-        questions.length === 0
+        candidates.length === 0
           ? "o modelo achou que não valia perguntar agora"
-          : `${questions.length} perguntas geradas, ${blocked} barradas pelo filtro`,
+          : `${candidates.length} perguntas geradas, ${blocked} barradas pelo filtro`,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

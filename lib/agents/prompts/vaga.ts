@@ -69,7 +69,33 @@ export function buildVagaContext(config: InterviewConfig, { modo }: VagaContextO
   }
   linhas.push(SENIORITY_GUIDANCE[config.seniority]);
   if (modo === "perguntar" && focus.length > 1) {
-    linhas.push(`Distribua as perguntas pelos focos acima, favorecendo os de maior peso, e sempre ligadas ao código que o candidato escreveu.`);
+    linhas.push(`As perguntas sobre o código seguem o que o candidato escreveu e favorecem os focos de maior peso; os focos de processo (pressão, escala, uso de IA) ganham uma pergunta própria quando o sistema pedir.`);
   }
   return linhas.join("\n");
 }
+
+/** Como perguntar cada foco de processo. Exemplos são do estilo, não para copiar palavra por palavra. */
+export const FOCUS_QUESTION_GUIDE: Record<FocusArea, { objetivo: string; exemplos: string[] }> = {
+  tecnico: { objetivo: "domínio técnico", exemplos: [] },
+  pressao: {
+    objetivo: "como ele organiza o trabalho com tempo curto: o que prioriza, como decide o que fazer primeiro e o que faz quando trava",
+    exemplos: [
+      "Com o tempo que resta, como você decide o que fazer primeiro?",
+      "Quando você trava num problema, o que costuma fazer pra destravar?",
+    ],
+  },
+  escala_produto: {
+    objetivo: "como ele pensa em escala e evolução: o que mudaria com muito mais dados ou usuários, e que trade-off aceitaria",
+    exemplos: [
+      "Se isso rodasse com milhões de registros por dia, o que você mudaria no seu raciocínio?",
+      "Que trade-off você aceitou nessa solução, e quando valeria a pena aceitar outro?",
+    ],
+  },
+  uso_ia: {
+    objetivo: "como ele usa IA no trabalho e confere o que ela devolve",
+    exemplos: [
+      "Se você tivesse um assistente de IA aqui, como usaria e como conferiria o que ele devolve?",
+      "Quando uma IA te dá um código, o que você olha antes de confiar nele?",
+    ],
+  },
+};
