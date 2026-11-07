@@ -26,7 +26,11 @@ React ou do navegador. As funções não alteram a entrada nem resultados anteri
 
 Decisões de representação:
 
-- Setas usam `→`; linhas usam `—`. Os IDs de ambas compartilham o prefixo `s`.
+- A direção vem das pontas desenhadas: `A → B` (ponta só no fim), `B → A` (ponta só
+  no começo: a leitura é invertida), `A ↔ B` (pontas nos dois lados) e `A — B` (nenhuma
+  ponta, como numa linha). Os IDs de setas e linhas compartilham o prefixo `s`.
+- No diff, mudar a ponta com as mesmas duas pontas ligadas vira
+  `~ inverteu a seta: A → B passou a B → A` ou `~ mudou a seta: A → B passou a A ↔ B`.
 - O limiar inclusivo das pontas sem binding é 40 px até o retângulo da caixa.
   Empates preservam a ordem do array. Um binding explícito a um elemento
   ignorado produz `?`, sem tentativa de inferir outro destino.

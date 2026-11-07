@@ -5,11 +5,19 @@ export type Componente = Readonly<{
   dentroDe: string | null;
 }>;
 
+/**
+ * Sentido da conexão, pelas pontas desenhadas:
+ * "→" de `de` para `para` (uma ponta só; se ela estava no começo, `de` e `para` já vêm trocados),
+ * "↔" ponta nos dois lados, "—" nenhuma ponta (linha ou seta sem cabeça).
+ */
+export type Seta = "→" | "↔" | "—";
+
 export type Conexao = Readonly<{
   id: string;
   tipo: "arrow" | "line";
   de: string | null;
   para: string | null;
+  seta: Seta;
   rotulo: string;
 }>;
 
@@ -61,5 +69,5 @@ export function nomeDoElemento(instantaneo: Instantaneo, id: string | null): str
 }
 
 export function descreverConexao(instantaneo: Instantaneo, conexao: Conexao): string {
-  return `${nomeDoElemento(instantaneo, conexao.de)} ${conexao.tipo === "line" ? "—" : "→"} ${nomeDoElemento(instantaneo, conexao.para)}`;
+  return `${nomeDoElemento(instantaneo, conexao.de)} ${conexao.seta} ${nomeDoElemento(instantaneo, conexao.para)}`;
 }

@@ -54,7 +54,12 @@ Pedido:
 - Seções: `COMPONENTES`, `CONEXÕES`, `ANOTAÇÕES SOLTAS`, `SEÇÕES` (molduras e grupos), `DESENHOS SEM TEXTO` e `ORDEM NA TELA`. As vazias não aparecem, exceto as duas primeiras.
 - IDs curtos e estáveis: `r` retângulo, `e` elipse, `l` losango, `s` seta/linha, `t` texto, `m` moldura, `f` desenho à mão, `i` imagem. O mesmo elemento mantém o ID a entrevista toda.
 - `— dentro de [x]` indica que um elemento está dentro de outro, pela posição.
-- `(seta solta)` indica uma ponta que não liga em nada.
+- Conexões dizem a direção pelas pontas desenhadas (em system design, quem chama quem):
+  - `A → B`: ponta só no fim (o padrão do Excalidraw). Seta com ponta só no começo é lida ao contrário e já chega como `B → A`.
+  - `A ↔ B`: ponta nos dois lados.
+  - `A — B`: nenhuma ponta (linha, ou seta sem cabeça).
+- `(seta solta)` indica uma ponta que não liga em nada (o lado solto aparece como `?`).
+- Em `mudancas`, trocar a ponta de uma conexão que liga as mesmas duas coisas aparece como `~ inverteu a seta: A → B passou a B → A` ou `~ mudou a seta: A → B passou a A ↔ B`. Ligar em outra coisa continua como `- desconectou` + `+ conectou`.
 - Texto escrito por cima de uma forma já vira o nome dela.
 - O que o agente escreveu (enunciado, requisitos, anotações) **nunca** aparece no grafo.
 - `imagem_url`: PNG do desenho (quando der tempo de subir), útil quando há `DESENHOS SEM TEXTO`.
