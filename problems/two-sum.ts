@@ -11,6 +11,12 @@ export const TWO_SUM: Problem = {
       { input: "nums = [2, 7, 11, 15], target = 9", output: "[0, 1]", explanation: "nums[0] + nums[1] == 9" },
       { input: "nums = [3, 2, 4], target = 6", output: "[1, 2]" },
     ],
+    constraints: [
+      "2 <= nums.length <= 10^4",
+      "-10^9 <= nums[i] <= 10^9",
+      "-10^9 <= target <= 10^9",
+      "Existe exatamente uma resposta válida.",
+    ],
     starters: {
       python: "def two_sum(nums, target):\n    pass",
       cpp: "#include <vector>\nusing namespace std;\n\nvector<int> twoSum(vector<int>& nums, int target) {\n    \n}",
@@ -60,6 +66,15 @@ export const TWO_SUM: Problem = {
     hints: [
       "Pra cada número que você olha, você sabe exatamente qual outro número precisaria encontrar. Isso ajuda em alguma coisa?",
       "Tem alguma estrutura de dados que te deixa checar se um número já apareceu sem percorrer a lista toda?",
+    ],
+    clarifications: [
+      { question: "Pode ter números negativos ou zero?", answer: "Pode, tanto em nums quanto no target." },
+      { question: "Pode ter números repetidos?", answer: "Pode. Só não vale usar a mesma posição duas vezes." },
+      { question: "O array vem ordenado?", answer: "Não, a ordem é qualquer uma." },
+      { question: "A ordem dos índices na resposta importa?", answer: "Não, [0, 1] e [1, 0] valem igual." },
+      { question: "E se não existir par?", answer: "O enunciado garante que sempre existe exatamente uma resposta." },
+      { question: "Qual o tamanho máximo do array?", answer: "Até 10 mil elementos." },
+      { question: "Posso usar bibliotecas?", answer: "Pode usar a biblioteca padrão da linguagem." },
     ],
     rubricNotes: {
       abordagem: "Bom: explica o plano antes de codar, sabe por que escolheu força bruta ou hashmap.",

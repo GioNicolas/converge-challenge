@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { runAnalyst } from "@/lib/agents/analyst";
-import { decideBlip } from "@/lib/agents/policy";
+import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { EventsResponse, SessionEvent } from "@/lib/contracts";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 
@@ -19,6 +19,7 @@ export async function POST(request: Request) {
 
   const session = getOrCreateSession(event.sessionId);
   appendEvent(session, event);
+  if (event.type === "session_started") enqueueKickoff(session, event.t);
   if (ANALYZED_TRIGGERS.has(event.type)) {
     try {
       await runAnalyst(session, event);

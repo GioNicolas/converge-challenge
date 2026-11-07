@@ -19,7 +19,7 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "evaluator" | "fast";
+export type LlmRole = "analyst" | "evaluator" | "fast" | "interviewer";
 
 interface RoleConfig {
   featherlessEnv: string;
@@ -56,6 +56,15 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterEnv: "EVALUATOR_FALLBACK_MODEL",
     openrouterDefault: "z-ai/glm-5.2",
     maxTokens: 6000,
+  },
+  interviewer: {
+    featherlessEnv: "INTERVIEWER_MODEL",
+    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    openrouterEnv: "INTERVIEWER_FALLBACK_MODEL",
+    openrouterDefault: "z-ai/glm-5.3-flash",
+    maxTokens: 1500,
+    reasoningEffort: "low",
+    hedgeMs: 8_000,
   },
 };
 
@@ -102,8 +111,15 @@ const emptyProvider = (): ProviderStore => ({
 const globalWithLlm = globalThis as typeof globalThis & { __llmState?: LlmState };
 const state: LlmState = (globalWithLlm.__llmState ??= {
   providers: { featherless: emptyProvider(), openrouter: emptyProvider() },
-  roles: { analyst: { consecutiveSlow: 0 }, fast: { consecutiveSlow: 0 }, evaluator: { consecutiveSlow: 0 } },
+  roles: {
+    analyst: { consecutiveSlow: 0 },
+    fast: { consecutiveSlow: 0 },
+    evaluator: { consecutiveSlow: 0 },
+    interviewer: { consecutiveSlow: 0 },
+  },
 });
+// Estado criado por uma versão anterior do módulo pode não ter papéis novos (aconteceu com "interviewer").
+for (const role of Object.keys(ROLE_CONFIG) as LlmRole[]) state.roles[role] ??= { consecutiveSlow: 0 };
 
 export interface ProviderStatsSnapshot {
   calls: number;
@@ -153,6 +169,7 @@ export function getLlmStats(): LlmStatsSnapshot {
       analyst: roleSnapshot(state.roles.analyst, now),
       fast: roleSnapshot(state.roles.fast, now),
       evaluator: roleSnapshot(state.roles.evaluator, now),
+      interviewer: roleSnapshot(state.roles.interviewer, now),
     },
   };
 }

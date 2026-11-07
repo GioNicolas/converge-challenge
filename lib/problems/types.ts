@@ -12,6 +12,7 @@ export interface ProblemPublic {
   title: string;
   statement: string;
   examples: { input: string; output: string; explanation?: string }[];
+  constraints: string[];
   /** Código inicial por linguagem ("python", "cpp", ...). */
   starters: Record<string, string>;
   visibleTests: ProblemTest[];
@@ -23,6 +24,8 @@ export interface ProblemPrivate {
   commonMistakes: string[];
   /** Dicas leves, usadas só quando o candidato pede ajuda. Nunca dizem a solução. */
   hints: string[];
+  /** Respostas pra perguntas de esclarecimento do candidato sobre o enunciado. Nunca falam da solução. */
+  clarifications: { question: string; answer: string }[];
   /** O que conta como "bom" por critério da rubrica (id do critério → texto). */
   rubricNotes: Record<string, string>;
 }

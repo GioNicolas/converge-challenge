@@ -110,7 +110,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     const { questions, ...insights } = result.data;
 
     for (const q of session.queue) {
-      if (q.status === "queued") q.status = "stale";
+      if (q.status === "queued" && !q.kickoff) q.status = "stale";
     }
     analyst.insights = insights;
     analyst.costUsd += result.costUsd;
@@ -118,6 +118,14 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     analyst.lastError = undefined;
     book.lastCompletedCode = code;
     book.lastCompletedT = trigger.t;
+
+    // Observações pra rubrica: sem duplicata exata (mesmo critério e mesma nota).
+    for (const e of result.data.evidence) {
+      const duplicate = session.evidence.some((n) => n.criterionId === e.criterionId && n.note === e.note);
+      if (!duplicate) {
+        session.evidence.push({ t: trigger.t, criterionId: e.criterionId, note: e.note, source: "analyst" });
+      }
+    }
 
     const lineCount = code.split("\n").length;
     const candidates = questions.map((q) => ({ question: q, lines: clampLines(q, lineCount) }));
@@ -142,6 +150,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         id: `q-${session.queue.length + 1}`,
         question: question.question,
         followUpTopic: question.followUpTopic,
+        topicLabel: question.topicLabel,
         priority: question.priority,
         highlight: lines,
         createdAt: trigger.t,

@@ -109,9 +109,12 @@ function LlmBlock({ llm }: { llm: LlmStatsSnapshot }) {
   );
 }
 
+/** GET /api/state acrescenta o motivo da última decisão de blip (lastBlipDecision). */
+type StateView = SessionStateView & { blipDecision?: string };
+
 /** Painel de estado do agente. Faz polling de GET /api/state a cada 1 s (404 é ignorado). */
 export function StatePanel({ sessionId, elapsedMs, blipContext }: StatePanelProps) {
-  const [view, setView] = useState<SessionStateView | null>(null);
+  const [view, setView] = useState<StateView | null>(null);
   const [codeSeen, setCodeSeen] = useState<CodeSeen | null>(null);
   const [nowMs, setNowMs] = useState(0);
 
@@ -189,17 +192,32 @@ export function StatePanel({ sessionId, elapsedMs, blipContext }: StatePanelProp
       {view.llm !== undefined && <LlmBlock llm={view.llm} />}
 
       <Block title={`fila de perguntas (${view.queue.length})`}>
+        <li className="text-neutral-400">decisão do blip: {view.blipDecision ?? "-"}</li>
         {view.queue.length === 0 && <li className="text-neutral-600">vazia</li>}
         {view.queue.map((q) => (
           <li key={q.id}>
             <div>{q.question}</div>
             <div className="text-neutral-500">
               prio {q.priority.toFixed(2)} · {q.status} · tópico: {q.followUpTopic}
+              {q.topicLabel !== undefined ? ` · balão: ${q.topicLabel}` : ""}
               {q.highlight !== undefined ? ` · linhas ${q.highlight.startLine}-${q.highlight.endLine}` : ""}
+              {q.kickoff === true ? " · abertura" : ""}
             </div>
           </li>
         ))}
       </Block>
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-neutral-400">evidências ({view.evidence.length})</summary>
+        <ul className="mt-1 ml-2 flex flex-col gap-1">
+          {view.evidence.length === 0 && <li className="text-neutral-600">nenhuma</li>}
+          {view.evidence.map((e, i) => (
+            <li key={i} className="break-words text-neutral-400">
+              {formatMs(e.t)} · {e.criterionId} · {e.source} · {e.note}
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <Block title={`blips (${view.blips.length})`}>
         {view.blips.length === 0 && <li className="text-neutral-600">nenhum</li>}

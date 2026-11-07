@@ -5,6 +5,8 @@ export const AnalystQuestion = z.object({
   question: z.string(),
   /** Tema pra aprofundar se a resposta vier rasa — sempre o mesmo assunto da pergunta. */
   followUpTopic: z.string(),
+  /** 2–5 palavras pro balão ("o loop interno", "sua escolha de abordagem"). */
+  topicLabel: z.string(),
   priority: z.number().min(0).max(1),
   startLine: z.number().int().min(1),
   endLine: z.number().int().min(1),

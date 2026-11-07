@@ -31,6 +31,7 @@ export function getOrCreateSession(sessionId: string, config: InterviewConfig = 
     blips: [],
     hintsUsed: 0,
     ended: false,
+    evidence: [],
   };
   sessions.set(sessionId, session);
   return session;
@@ -63,6 +64,7 @@ export function appendEvent(session: SessionState, event: SessionEvent): void {
     }
     case "blip_closed":
       if (session.pendingBlipId === event.blipId) session.pendingBlipId = undefined;
+      session.lastConversationEndedAt = event.t;
       break;
     default:
       break;
@@ -92,6 +94,7 @@ export function toView(session: SessionState): SessionStateView {
     pendingBlipId: session.pendingBlipId,
     hintsUsed: session.hintsUsed,
     ended: session.ended,
+    evidence: session.evidence,
     llm: getLlmStats(),
   };
 }

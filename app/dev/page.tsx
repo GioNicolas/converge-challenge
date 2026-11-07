@@ -147,6 +147,7 @@ export default function DevPage() {
             blipId={chat.blipId}
             messages={chat.messages}
             busy={chat.busy}
+            ended={chat.ended}
             error={chat.error}
             disabled={session.ended}
             onSend={chat.send}

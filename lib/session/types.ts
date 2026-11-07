@@ -10,10 +10,22 @@ export interface QueuedQuestion {
   id: string;
   question: string;
   followUpTopic: string;
+  /** 2–5 palavras pro balão ("o loop interno"). Nunca revela o erro. */
+  topicLabel?: string;
   priority: number; // 0–1
   highlight?: LineRange;
   createdAt: number; // t da sessão
   status: "queued" | "blipped" | "asked" | "stale";
+  /** Pergunta fixa de abertura ("me conta como pretende resolver"), não vem do Analyst. */
+  kickoff?: boolean;
+}
+
+/** Observação pra rubrica, acumulada ao longo da sessão (o Evaluator lê tudo). */
+export interface EvidenceNote {
+  t: number;
+  criterionId: string;
+  note: string;
+  source: "analyst" | "interviewer";
 }
 
 export interface AnalystStatus {
@@ -51,6 +63,9 @@ export interface SessionState {
   pendingBlipId?: string;
   hintsUsed: number;
   ended: boolean;
+  evidence: EvidenceNote[];
+  /** Quando a última conversa (blip ou chamada do candidato) terminou, em t da sessão. */
+  lastConversationEndedAt?: number;
 }
 
 /** Resposta de GET /api/state?sessionId=... */
@@ -69,6 +84,7 @@ export interface SessionStateView {
   pendingBlipId?: string;
   hintsUsed: number;
   ended: boolean;
+  evidence: EvidenceNote[];
   /** Estatísticas dos LLMs (Featherless x OpenRouter) desde o start do servidor. */
   llm?: LlmStatsSnapshot;
 }

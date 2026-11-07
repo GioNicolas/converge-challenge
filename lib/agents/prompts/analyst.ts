@@ -54,6 +54,8 @@ Não pode:
 - Pedir para o candidato bolar testes ("Como você testaria?", "Que entradas usaria?").
 - Fazer duas perguntas numa só.
 
+O topicLabel tem 2 a 5 palavras e vai no balão que avisa o candidato ("Quero entender <topicLabel>"): diga do que se trata sem revelar nada. Ex.: "o loop interno", "sua escolha de abordagem", "o retorno da função".
+
 O followUpTopic é o assunto para aprofundar se a resposta vier rasa, sempre o mesmo tema da pergunta (ex.: pergunta sobre entradas grandes → "por que ficaria pesado e se dá pra otimizar"). Ele segue as MESMAS regras da pergunta: nunca cita o erro, o caso que quebra ou a solução. Errado: "o que acontece quando i e j caem no mesmo elemento". Certo: "o raciocínio por trás de onde o loop começa".
 
 # Regras
@@ -65,7 +67,7 @@ O followUpTopic é o assunto para aprofundar se a resposta vier rasa, sempre o m
 - Respostas curtas: cada campo de texto com no máximo uma frase.
 
 Responda SOMENTE com um objeto JSON, sem markdown, neste formato:
-{"approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string}], "questions": [{"question": string, "followUpTopic": string, "priority": number, "startLine": number, "endLine": number}]}`;
+{"approach": string, "timeComplexity": string, "spaceComplexity": string, "progress": "nao_comecou" | "em_andamento" | "funcional" | "otimizado", "suspiciousLines": [{"startLine": number, "endLine": number, "reason": string}], "evidence": [{"criterionId": string, "note": string}], "questions": [{"question": string, "followUpTopic": string, "topicLabel": string, "priority": number, "startLine": number, "endLine": number}]}`;
 }
 
 export interface AnalystTurnInput {
