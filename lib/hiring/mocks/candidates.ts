@@ -136,133 +136,133 @@ export const CANDIDATES: Candidate[] = [
     stage: "triagem",
   },
 
-  // --- pm-senior ---
+  // --- staff-engineer ---
   {
     id: "c11",
     name: "Carolina Veloso",
     email: "carolina.veloso@example.com",
-    jobPostingId: "pm-senior",
-    yearsExperience: 7,
-    currentRole: "Senior PM em marketplace de delivery",
-    skills: ["Discovery", "A/B testing", "Roadmap", "Amplitude"],
+    jobPostingId: "staff-engineer",
+    yearsExperience: 11,
+    currentRole: "Principal Engineer em marketplace de delivery",
+    skills: ["Java", "Kafka", "Arquitetura de eventos", "RFCs"],
     resumeSummary:
-      "Sete anos. Subiu a conversão da busca ao pedido em 9% com mudanças de ranking e filtros. Foco forte em dados; menos em monetização.",
+      "Onze anos. Liderou a extração do checkout de um monólito para serviços, com migração gradual e rollback por feature flag. Escreve RFCs que destravam decisões entre squads. Menos prática com consistência entre regiões.",
     stage: "entrevista_agendada",
   },
   {
     id: "c12",
     name: "Mateus Brandão",
     email: "mateus.brandao@example.com",
-    jobPostingId: "pm-senior",
-    yearsExperience: 6,
-    currentRole: "Product Owner em banco",
-    skills: ["Backlog", "Scrum", "Jira", "Stakeholders"],
+    jobPostingId: "staff-engineer",
+    yearsExperience: 9,
+    currentRole: "Tech Lead em banco",
+    skills: ["Java", "Spring", "PostgreSQL", "Microsserviços"],
     resumeSummary:
-      "Seis anos como PO em ambiente corporativo, forte em execução e refinamento. Pouca prática de discovery e de definir métricas de sucesso.",
+      "Nove anos, liderou um time de oito pessoas em serviços de crédito. Domina um domínio a fundo, mas nunca definiu padrões que valessem para várias squads nem conduziu uma migração com downtime zero.",
     stage: "triagem",
   },
 
-  // --- coordenador-obras ---
+  // --- sdet-qa ---
   {
     id: "c13",
     name: "Marcelo Torres",
     email: "marcelo.torres@example.com",
-    jobPostingId: "coordenador-obras",
-    yearsExperience: 11,
-    currentRole: "Coordenador de Obras em incorporadora",
-    skills: ["MS Project", "Lean construction", "NR-18", "Gestão de empreiteiros"],
+    jobPostingId: "sdet-qa",
+    yearsExperience: 5,
+    currentRole: "SDET em empresa de logística",
+    skills: ["Python", "Pytest", "Playwright", "GitHub Actions"],
     resumeSummary:
-      "Onze anos, entregou três torres residenciais de 24 pavimentos no prazo. Replanejou o caminho crítico após atraso de fundação. Pouco contato com BIM.",
+      "Cinco anos montando suítes de API e ponta a ponta. Reduziu o tempo do pipeline de 40 para 12 minutos paralelizando e eliminando testes instáveis. Sem experiência com testes de contrato.",
     stage: "entrevista_agendada",
   },
   {
     id: "c14",
     name: "Luciana Barreto",
     email: "luciana.barreto@example.com",
-    jobPostingId: "coordenador-obras",
-    yearsExperience: 7,
-    currentRole: "Engenheira de Obras Pleno",
-    skills: ["AutoCAD", "Medições", "Segurança do trabalho", "Excel"],
+    jobPostingId: "sdet-qa",
+    yearsExperience: 3,
+    currentRole: "Analista de QA",
+    skills: ["Testes manuais", "Postman", "Selenium IDE", "SQL"],
     resumeSummary:
-      "Sete anos em obra, forte em medição e controle de custos. Nunca coordenou mais de uma obra ao mesmo tempo.",
+      "Três anos em testes manuais e exploratórios, com bom olho para casos de borda. Automação em código ainda é básica e nunca escreveu utilitários de teste usados por outras pessoas.",
     stage: "triagem",
   },
 
-  // --- planejador-orcamentista ---
+  // --- appsec-engineer ---
   {
     id: "c15",
     name: "Roberto Câmara",
     email: "roberto.camara@example.com",
-    jobPostingId: "planejador-orcamentista",
+    jobPostingId: "appsec-engineer",
     yearsExperience: 5,
-    currentRole: "Orçamentista em construtora",
-    skills: ["SINAPI", "Excel avançado", "MS Project", "Sienge"],
+    currentRole: "Engenheiro de Segurança em fintech",
+    skills: ["Python", "OWASP", "Semgrep", "Threat modeling", "OAuth2"],
     resumeSummary:
-      "Cinco anos, monta orçamentos e curva S de edifícios residenciais. Quando o realizado desvia mais de 5%, revisa a EAP. Sem BIM.",
+      "Cinco anos revisando código e modelando ameaças em fluxos de pagamento. Escreveu regras de Semgrep que pegaram uma falha de autorização entre contas. Pouca experiência com segurança de apps móveis.",
     stage: "entrevista_agendada",
   },
   {
     id: "c16",
     name: "Patrícia Nogueira",
     email: "patricia.nogueira@example.com",
-    jobPostingId: "planejador-orcamentista",
+    jobPostingId: "appsec-engineer",
     yearsExperience: 3,
-    currentRole: "Assistente de Planejamento",
-    skills: ["MS Project", "Excel", "Quantitativos"],
+    currentRole: "Analista de Segurança (SOC)",
+    skills: ["SIEM", "Resposta a incidentes", "Burp Suite", "Python básico"],
     resumeSummary:
-      "Três anos levantando quantitativos de projetos. Composição de custos própria ainda é ponto a investigar.",
+      "Três anos em monitoramento e resposta a incidentes, com bom conhecimento de ataques. Revisar e corrigir código de aplicação ainda é ponto a investigar.",
     stage: "triagem",
   },
 
-  // --- engenheiro-seguranca ---
+  // --- android-senior ---
   {
     id: "c17",
     name: "Vinícius Ferraz",
     email: "vinicius.ferraz@example.com",
-    jobPostingId: "engenheiro-seguranca",
-    yearsExperience: 6,
-    currentRole: "Engenheiro de Segurança em construtora",
-    skills: ["NR-18", "NR-35", "PGR", "Investigação de acidentes"],
+    jobPostingId: "android-senior",
+    yearsExperience: 7,
+    currentRole: "Engenheiro Android Sênior em app de mobilidade",
+    skills: ["Kotlin", "Jetpack Compose", "Room", "WorkManager", "Coroutines"],
     resumeSummary:
-      "Seis anos em obras verticais. Reorganizou o layout de um canteiro apertado separando a circulação de pessoas e de máquinas e zerou acidentes com afastamento por um ano. Pouca experiência com espaço confinado.",
+      "Sete anos com Android nativo. Implementou sincronização offline com fila de operações e resolução de conflitos por versão, e reduziu os ANRs em 60%. Pouca experiência com testes de UI automatizados.",
     stage: "entrevista_agendada",
   },
   {
     id: "c18",
     name: "Helena Rocha",
     email: "helena.rocha@example.com",
-    jobPostingId: "engenheiro-seguranca",
-    yearsExperience: 3,
-    currentRole: "Técnica de Segurança do Trabalho",
-    skills: ["Checklists", "Treinamentos", "NR-35"],
+    jobPostingId: "android-senior",
+    yearsExperience: 4,
+    currentRole: "Desenvolvedora Android Pleno",
+    skills: ["Kotlin", "XML Views", "Retrofit", "MVVM"],
     resumeSummary:
-      "Três anos aplicando treinamentos e inspeções. Mapeamento de risco por etapa e desenho de controles ainda é ponto a investigar.",
+      "Quatro anos em apps que dependem de internet constante, com views em XML. Não trabalhou com Compose nem com arquitetura offline-first; bateria e sincronização são ponto a investigar.",
     stage: "triagem",
   },
 
-  // --- arquiteto-comercial ---
+  // --- embedded-iot ---
   {
     id: "c19",
     name: "Ricardo Amaral",
     email: "ricardo.amaral@example.com",
-    jobPostingId: "arquiteto-comercial",
+    jobPostingId: "embedded-iot",
     yearsExperience: 6,
-    currentRole: "Arquiteto em escritório de projetos de varejo",
-    skills: ["Revit", "Layout de lojas", "Fluxo de clientes", "Franquias"],
+    currentRole: "Engenheiro de Firmware em empresa de telemetria",
+    skills: ["C++", "FreeRTOS", "MQTT", "OTA", "CAN bus"],
     resumeSummary:
-      "Seis anos projetando lojas de rede. Reposicionou o caixa e a área de espera de uma loja âncora e a conversão subiu. Defende bem as decisões para o cliente; BIM só no básico.",
+      "Seis anos com firmware de rastreadores. Implementou buffer local com reenvio e atualização OTA com rollback automático, e diminuiu o consumo de dados em 35%. Sem experiência com Rust.",
     stage: "entrevista_agendada",
   },
   {
     id: "c20",
     name: "Fernanda Lopes",
     email: "fernanda.lopes@example.com",
-    jobPostingId: "arquiteto-comercial",
+    jobPostingId: "embedded-iot",
     yearsExperience: 3,
-    currentRole: "Arquiteta de interiores",
-    skills: ["SketchUp", "AutoCAD", "Interiores", "Renders"],
+    currentRole: "Desenvolvedora de Software Embarcado júnior-pleno",
+    skills: ["C", "Arduino", "UART", "I2C"],
     resumeSummary:
-      "Três anos em interiores comerciais, forte na parte visual. Pouca prática em setorização, fluxo de abastecimento e programa de necessidades.",
+      "Três anos com microcontroladores simples, forte em C e protocolos seriais. Nunca lidou com RTOS, rede celular instável nem com a parte de nuvem do fluxo de dados.",
     stage: "triagem",
   },
 ];

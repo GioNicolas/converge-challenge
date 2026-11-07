@@ -18,62 +18,39 @@ ANOTAÇÕES SOLTAS
     mudancas: "+ adicionou [r3] Gateway do banco parceiro e [s3]\n+ adicionou [t1] anotação sobre tentar de novo",
     fala: "Cada pagamento chama o gateway direto e, se falhar, a API tenta de novo.",
   },
-  "coordenador-obras": {
+  "staff-engineer": {
     grafo: `COMPONENTES
-- [r1] Fundação (retângulo)
-- [r2] Estrutura (retângulo)
-- [r3] Alvenaria (retângulo)
-- [r4] Instalações (retângulo)
-- [r5] Acabamento (retângulo)
-- [r6] Entrega (retângulo)
-- [e1] Grua única (elipse)
+- [r1] Checkout (retângulo)
+- [r2] Catálogo (retângulo)
+- [r3] Pedidos (retângulo)
+- [r4] Pagamentos (retângulo)
+- [e1] Banco único compartilhado (elipse)
 CONEXÕES
-- [s1] Fundação → Estrutura
-- [s2] Estrutura → Alvenaria
-- [s3] Alvenaria → Instalações
-- [s4] Instalações → Acabamento
-- [s5] Acabamento → Entrega
-- [s6] Grua única — Estrutura
+- [s1] Checkout → Pedidos
+- [s2] Pedidos → Pagamentos
+- [s3] Checkout → Banco único compartilhado
+- [s4] Catálogo → Banco único compartilhado
+- [s5] Pedidos → Banco único compartilhado
+- [s6] Pagamentos → Banco único compartilhado
 ANOTAÇÕES SOLTAS
-- [t1] "empreiteiros entram todos juntos na alvenaria"`,
-    mudancas: "+ adicionou [e1] Grua única e [s6]\n+ adicionou [t1] sobre empreiteiros",
-    fala: "Fiz a sequência normal da obra, uma etapa depois da outra, e a grua atende a estrutura.",
+- [t1] "migrar tudo no fim de semana, sem plano de volta"`,
+    mudancas: "+ adicionou [e1] Banco único compartilhado e [s3] a [s6]\n+ adicionou [t1] sobre migrar no fim de semana",
+    fala: "Separei em quatro serviços, mas todos continuam no mesmo banco, e migro tudo de uma vez no fim de semana.",
   },
-  "pm-senior": {
+  "android-senior": {
     grafo: `COMPONENTES
-- [r1] Busca (retângulo)
-- [r2] Página do prestador (retângulo)
-- [r3] Pedir orçamento (retângulo)
-- [r4] Pagamento (retângulo)
-- [r5] Avaliação (retângulo)
-- [t1] "meta: aumentar conversão"
+- [r1] Tela de entregas (retângulo)
+- [r2] Repositório (retângulo)
+- [r3] API remota (retângulo)
+- [e1] Cache local (elipse)
 CONEXÕES
-- [s1] Busca → Página do prestador
-- [s2] Página do prestador → Pedir orçamento
-- [s3] Pedir orçamento → Pagamento
-- [s4] Pagamento → Avaliação
+- [s1] Tela de entregas → Repositório
+- [s2] Repositório → API remota
+- [s3] Repositório → Cache local
 ANOTAÇÕES SOLTAS
-- [t2] "lançar tudo de uma vez em todas as cidades"`,
-    mudancas: "+ adicionou [r5] Avaliação e [s4]\n+ adicionou [t2] sobre lançar tudo de uma vez",
-    fala: "Eu melhoraria o funil inteiro de uma vez e lançaria em todas as cidades para ganhar tempo.",
-  },
-  "arquiteto-comercial": {
-    grafo: `COMPONENTES
-- [m1] Pavimento térreo (moldura)
-- [r1] Entrada principal (retângulo) — dentro de [m1]
-- [r2] Lojas (retângulo) — dentro de [m1]
-- [r3] Praça de alimentação (retângulo) — dentro de [m1]
-- [r4] Doca de carga e descarga (retângulo) — dentro de [m1]
-- [r5] Circulação de clientes (retângulo) — dentro de [m1]
-CONEXÕES
-- [s1] Entrada principal → Circulação de clientes
-- [s2] Circulação de clientes → Lojas
-- [s3] Circulação de clientes → Praça de alimentação
-- [s4] Doca de carga e descarga → Circulação de clientes
-ANOTAÇÕES SOLTAS
-- [t1] "caminhão entra pela mesma porta do cliente"`,
-    mudancas: "+ adicionou [r4] Doca e [s4]\n+ adicionou [t1] sobre o caminhão",
-    fala: "Coloquei a doca ligada à circulação para o abastecimento chegar rápido às lojas.",
+- [t1] "se a rede cair, mostra erro e tenta de novo"`,
+    mudancas: "+ adicionou [e1] Cache local e [s3]\n+ adicionou [t1] sobre erro de rede",
+    fala: "O cache só guarda o que veio da API; sem rede o app mostra erro e o entregador tenta de novo.",
   },
 };
 

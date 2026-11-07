@@ -20,7 +20,7 @@ describe("RepositorioAvaliacoes", () => {
   it("criar nasce não aprovada; aprovar; substituir remove a aprovação; devolve cópias", async () => {
     const repo = criarRepositorioAvaliacoesEmMemoria();
     const kit = kitObra();
-    const r = await repo.criar({ avaliacaoId: "av_1", kit, problema: kit.problemas[0], vagaId: "coordenador-obras" });
+    const r = await repo.criar({ avaliacaoId: "av_1", kit, problema: kit.problemas[0], vagaId: "staff-engineer" });
     assert.equal(r.aprovado, false);
     assert.ok(r.criadoEm > 0);
     assert.equal((await repo.aprovar("av_1"))?.aprovado, true);

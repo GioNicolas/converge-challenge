@@ -143,13 +143,13 @@ describe("conversarPlano", () => {
 
 describe("vaga de exemplo", () => {
   it("compõe texto legível com todas as seções", () => {
-    const v = JOB_POSTINGS.find((j) => j.id === "coordenador-obras")!;
+    const v = JOB_POSTINGS.find((j) => j.id === "staff-engineer")!;
     const t = textoDaVaga(v);
-    assert.match(t, /^Coordenador\(a\) de Obras Sênior \(Sênior\)/);
+    assert.match(t, /^Engenheiro\(a\) Staff de Sistemas Distribuídos \(Staff\)/);
     assert.ok(t.includes(v.description));
     assert.ok(t.includes("Responsabilidades:") && t.includes("Requisitos:") && t.includes("Diferenciais:"));
-    assert.ok(t.includes("- Garantir o cumprimento das normas de segurança (NR-18)"));
-    assert.ok(t.includes("Stack / ferramentas: MS Project, AutoCAD, BIM, Sienge"));
+    assert.ok(t.includes("- Escrever RFCs e destravar decisões de arquitetura entre times"));
+    assert.ok(t.includes("Stack / ferramentas: Java, Kafka, PostgreSQL, gRPC, AWS"));
   });
 
   it("dá a volta nas 10 vagas, inclusive com índice negativo", () => {

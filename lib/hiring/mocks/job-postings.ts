@@ -1,5 +1,6 @@
 /**
- * 10 vagas fictícias: 6 de tecnologia/produto e 4 de construção civil.
+ * 10 vagas fictícias, todas de tecnologia. Toda entrevista termina em Live Coding
+ * (code_editor) ou System Design (whiteboard), ou nos dois.
  * Cada uma pede um mix diferente de ferramentas, de propósito, para testar se o
  * agente interpreta a descrição em vez de aplicar um template.
  *
@@ -9,16 +10,15 @@
  *   ml-engineer .......... code_editor + whiteboard
  *   data-engineer ........ code_editor + whiteboard
  *   sre-devops ........... whiteboard (+ code_editor)
- *   pm-senior ............ whiteboard
- *   coordenador-obras .... whiteboard
- *   planejador-orcamentista whiteboard
- *   engenheiro-seguranca . whiteboard (layout de canteiro, rotas de fuga, riscos)
- *   arquiteto-comercial .. whiteboard (setorização e fluxo, sem medidas)
+ *   staff-engineer ....... whiteboard (system design puro: decomposição e contratos)
+ *   sdet-qa .............. code_editor (+ whiteboard)
+ *   appsec-engineer ...... code_editor (code review de vulnerabilidade) + whiteboard (threat model)
+ *   android-senior ....... code_editor + whiteboard (app offline-first)
+ *   embedded-iot ......... code_editor + whiteboard (telemetria de frota)
  */
 import { JobPosting } from "../job-posting";
 
 export const JOB_POSTINGS: JobPosting[] = [
-  // ---------------------------------------------------------------- Tecnologia
   {
     id: "backend-pleno",
     title: "Desenvolvedor(a) Backend Pleno",
@@ -117,104 +117,103 @@ export const JOB_POSTINGS: JobPosting[] = [
     stack: ["Kubernetes", "Terraform", "AWS", "Prometheus", "Go"],
   },
   {
-    id: "pm-senior",
-    title: "Product Manager Sênior",
+    id: "staff-engineer",
+    title: "Engenheiro(a) Staff de Sistemas Distribuídos",
+    seniority: "staff",
+    description:
+      "Marketplace com dezenas de squads e um monólito que já não acompanha o crescimento. Você define a arquitetura de referência, desenha as fronteiras entre serviços e conduz migrações grandes sem parar a operação, influenciando várias equipes sem ser dono de todas.",
+    responsibilities: [
+      "Decompor o monólito em serviços com contratos e donos claros",
+      "Definir padrões de consistência, eventos e versionamento de APIs entre squads",
+      "Conduzir migrações sem downtime, com plano de rollback e métricas de sucesso",
+      "Escrever RFCs e destravar decisões de arquitetura entre times",
+    ],
+    requirements: [
+      "8+ anos com sistemas distribuídos em produção",
+      "Experiência de projetar e migrar sistemas de alto tráfego",
+      "Capacidade de explicar trade-offs (consistência, custo, complexidade operacional) a pessoas de nível diferente",
+    ],
+    niceToHave: ["Event sourcing / CQRS", "Experiência em marketplaces ou e-commerce"],
+    stack: ["Java", "Kafka", "PostgreSQL", "gRPC", "AWS"],
+  },
+  {
+    id: "sdet-qa",
+    title: "Engenheiro(a) de Qualidade (SDET) Pleno",
+    seniority: "pleno",
+    description:
+      "Empresa de software para gestão de frotas com releases semanais. Você constrói a automação que dá segurança para entregar rápido: testes em vários níveis, ambientes previsíveis e pipelines que falham pelos motivos certos.",
+    responsibilities: [
+      "Escrever e manter testes automatizados de API, integração e ponta a ponta",
+      "Reduzir testes instáveis (flaky) e o tempo de execução do pipeline",
+      "Criar utilitários e fixtures de teste usados pelas squads",
+      "Revisar código de outras pessoas com foco em testabilidade e casos de borda",
+    ],
+    requirements: [
+      "3+ anos com automação de testes em código (não apenas ferramentas de gravação)",
+      "Python ou TypeScript com boa prática de programação",
+      "Experiência com CI (GitHub Actions ou similar) e testes de API",
+    ],
+    niceToHave: ["Testes de contrato", "Testes de carga", "Property-based testing"],
+    stack: ["Python", "Pytest", "Playwright", "GitHub Actions", "Docker"],
+  },
+  {
+    id: "appsec-engineer",
+    title: "Engenheiro(a) de Segurança de Aplicações (AppSec) Pleno",
+    seniority: "pleno",
+    description:
+      "Fintech que expõe APIs a parceiros e aplicativos móveis. Você encontra vulnerabilidades antes que cheguem à produção, ajuda as squads a corrigir e desenha controles para que os mesmos problemas não se repitam.",
+    responsibilities: [
+      "Revisar código e pull requests em busca de vulnerabilidades (injection, authz quebrada, SSRF, segredos expostos)",
+      "Fazer threat modeling de novos fluxos de login, pagamento e integração com parceiros",
+      "Automatizar verificações de segurança no pipeline (SAST, dependências, segredos)",
+      "Apoiar a resposta a incidentes de segurança e a correção das causas",
+    ],
+    requirements: [
+      "3+ anos em segurança de aplicações ou desenvolvimento com foco em segurança",
+      "Domínio do OWASP Top 10 e de autenticação/autorização (OAuth2, JWT, sessões)",
+      "Capacidade de ler e escrever código em pelo menos uma linguagem de backend",
+    ],
+    niceToHave: ["Experiência com PCI DSS", "Bug bounty", "Segurança de APIs móveis"],
+    stack: ["Python", "OWASP", "Semgrep", "Burp Suite", "AWS"],
+  },
+  {
+    id: "android-senior",
+    title: "Desenvolvedor(a) Android Sênior",
     seniority: "senior",
     description:
-      "Marketplace de serviços com dois lados (clientes e prestadores). Você é dono do funil de contratação: da busca até o pagamento. Precisa transformar dados e conversas com usuários em apostas priorizadas.",
+      "App de entregas usado por entregadores em campo, muitas vezes com internet instável. Você cuida da arquitetura do app Android nativo, da sincronização offline e da bateria, para que o trabalho não pare quando a rede cai.",
     responsibilities: [
-      "Definir a estratégia e o roadmap do funil de contratação",
-      "Priorizar entre iniciativas concorrentes com dados e trade-offs explícitos",
-      "Definir métricas de sucesso e desenhar experimentos A/B",
-      "Alinhar design e engenharia em torno de problemas, não de soluções",
+      "Definir a arquitetura do app (camadas, injeção de dependência, navegação)",
+      "Implementar sincronização offline-first com resolução de conflitos",
+      "Otimizar consumo de bateria, memória e tempo de inicialização",
+      "Mentorar pessoas do time e revisar código",
     ],
     requirements: [
-      "5+ anos como PM em produto digital com tração",
-      "Capacidade de decompor métricas (conversão, retenção, LTV)",
-      "Experiência conduzindo discovery com usuários",
+      "5+ anos com Android nativo em Kotlin",
+      "Experiência com Jetpack Compose, coroutines/Flow e Room",
+      "Vivência com publicação e monitoramento de apps em produção (crashes, ANRs)",
     ],
-    niceToHave: ["Marketplaces", "Monetização e pricing"],
-    stack: ["Amplitude", "Figma", "Jira", "SQL básico"],
-  },
-
-  // ---------------------------------------------------------- Construção civil
-  {
-    id: "coordenador-obras",
-    title: "Coordenador(a) de Obras Sênior",
-    seniority: "senior",
-    description:
-      "Construtora de edifícios residenciais com três obras simultâneas. Você coordena equipes próprias e empreiteiros, protege o cronograma e o orçamento e garante a segurança no canteiro.",
-    responsibilities: [
-      "Sequenciar as etapas da obra e administrar o caminho crítico",
-      "Organizar o layout do canteiro, a logística de materiais e o uso de grua e elevadores",
-      "Gerir empreiteiros, medições e interferências entre disciplinas",
-      "Garantir o cumprimento das normas de segurança (NR-18)",
-    ],
-    requirements: [
-      "7+ anos em obra, formação em Engenharia Civil",
-      "Planejamento com MS Project, Primavera ou similar",
-      "Experiência com edifícios de múltiplos pavimentos",
-    ],
-    niceToHave: ["BIM", "Lean construction", "Pós-graduação em gerenciamento de obras"],
-    stack: ["MS Project", "AutoCAD", "BIM", "Sienge"],
+    niceToHave: ["WorkManager e geolocalização em segundo plano", "Testes de UI automatizados"],
+    stack: ["Kotlin", "Jetpack Compose", "Room", "Coroutines", "Firebase"],
   },
   {
-    id: "planejador-orcamentista",
-    title: "Planejador(a) e Orçamentista de Obras Pleno",
+    id: "embedded-iot",
+    title: "Engenheiro(a) de Software Embarcado / IoT Pleno",
     seniority: "pleno",
     description:
-      "Construtora que precisa de previsibilidade de prazo e custo. Você transforma projetos em quantitativos, orçamento e cronograma físico-financeiro, e acompanha o desvio entre o previsto e o realizado.",
+      "Empresa de rastreamento veicular com milhares de dispositivos em caminhões enviando telemetria por rede celular instável. Você escreve o firmware dos dispositivos e ajuda a desenhar o caminho dos dados até a nuvem, com pouca memória, pouca banda e muita necessidade de confiabilidade.",
     responsibilities: [
-      "Levantar quantitativos a partir dos projetos e compor custos",
-      "Montar a EAP, o cronograma e a curva S da obra",
-      "Acompanhar o realizado e propor ações quando houver desvio",
+      "Implementar firmware em C/C++ ou Rust para dispositivos com recursos limitados",
+      "Projetar protocolos de envio de telemetria com reenvio, buffer local e economia de dados",
+      "Cuidar de atualização remota (OTA) segura e com rollback",
+      "Depurar problemas de campo a partir de logs e métricas dos dispositivos",
     ],
     requirements: [
-      "3+ anos em planejamento ou orçamento de obras",
-      "Domínio de composições de custo (SINAPI ou base própria)",
-      "Excel avançado e MS Project",
+      "3+ anos com software embarcado em C, C++ ou Rust",
+      "Entendimento de concorrência, interrupções e gerenciamento de memória",
+      "Experiência com protocolos de comunicação (MQTT, UART, I2C ou similares)",
     ],
-    niceToHave: ["Orçamento paramétrico", "BIM 5D"],
-    stack: ["Excel", "SINAPI", "MS Project", "Sienge"],
-  },
-  {
-    id: "engenheiro-seguranca",
-    title: "Engenheiro(a) de Segurança do Trabalho (Obras) Pleno",
-    seniority: "pleno",
-    description:
-      "Construtora com várias frentes de obra ao mesmo tempo. Você antecipa riscos, organiza o canteiro para que as pessoas circulem e trabalhem com segurança e conduz o que fazer quando algo dá errado.",
-    responsibilities: [
-      "Planejar o layout seguro do canteiro: acessos, áreas de vivência, circulação de máquinas e rotas de fuga",
-      "Mapear riscos por etapa da obra e definir controles (PGR/PCMAT)",
-      "Desenhar o fluxo de permissão de trabalho para atividades críticas (altura, espaço confinado, içamento)",
-      "Conduzir investigação de acidentes e plano de ação",
-    ],
-    requirements: [
-      "3+ anos em segurança do trabalho em obras",
-      "Domínio das NRs aplicáveis (NR-18, NR-35, NR-12)",
-      "Capacidade de explicar risco e controle para equipes e empreiteiros",
-    ],
-    niceToHave: ["ISO 45001", "Experiência com obras verticais"],
-    stack: ["AutoCAD", "PGR", "Checklists digitais"],
-  },
-  {
-    id: "arquiteto-comercial",
-    title: "Arquiteto(a) de Projetos Comerciais e Varejo Pleno",
-    seniority: "pleno",
-    description:
-      "Escritório de arquitetura especializado em lojas, restaurantes e centros comerciais. Você transforma o objetivo do negócio em um espaço que funciona: onde o cliente entra, circula e compra, e como a operação se abastece sem atrapalhar.",
-    responsibilities: [
-      "Levantar o programa de necessidades com o cliente e traduzi-lo em setorização",
-      "Desenhar o fluxo de clientes, funcionários e abastecimento",
-      "Definir a implantação e a hierarquia de espaços (vitrine, circulação, caixa, estoque)",
-      "Compatibilizar o conceito com restrições de norma, custo e cronograma",
-    ],
-    requirements: [
-      "3+ anos em projeto comercial ou de varejo",
-      "Conhecimento de acessibilidade e de rotas de saída em linhas gerais",
-      "Capacidade de defender decisões de projeto para o cliente",
-    ],
-    niceToHave: ["Experiência com franquias", "BIM"],
-    stack: ["Revit", "AutoCAD", "SketchUp"],
+    niceToHave: ["RTOS (FreeRTOS/Zephyr)", "Experiência com dados de GPS e CAN bus"],
+    stack: ["C++", "Rust", "MQTT", "FreeRTOS", "AWS IoT"],
   },
 ];

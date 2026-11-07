@@ -15,7 +15,7 @@ import { POST as aprovar } from "../avaliacoes/[id]/aprovar/route";
 import { POST as criarSessao } from "../sessoes/route";
 
 const SEGREDO = "segredo-de-teste-123";
-const vaga = JOB_POSTINGS.find((v) => v.id === "coordenador-obras")!;
+const vaga = JOB_POSTINGS.find((v) => v.id === "staff-engineer")!;
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
 function req(url: string, metodo: string, corpo?: unknown, headers: Record<string, string> = { "x-api-key": SEGREDO }): Request {
@@ -87,7 +87,7 @@ describe("POST /api/avaliacoes", () => {
     const g = await (await obter(req("/api/avaliacoes/x", "GET"), params(c.avaliacao_id))).json();
     assert.equal(g.aprovado, false);
     assert.equal(g.vaga_id, vaga.id);
-    assert.equal(g.kit.id, "coordenador_obras");
+    assert.equal(g.kit.id, "staff_engineer");
   });
 
   it("400 para JSON quebrado, vaga inválida e plano de outra vaga", async () => {
@@ -144,13 +144,13 @@ describe("GET/PUT/aprovar", () => {
     assert.ok(Array.isArray((await r400.json()).detalhes));
 
     const editado = structuredClone(atual);
-    editado.persona = "engenheira civil sênior, editada pelo gestor";
+    editado.persona = "engenheira staff de sistemas distribuídos, editada pelo gestor";
     editado.id = "tentativa_de_trocar";
     editado.problemas[0].id = "outro_id";
     const ok = await substituir(req("/x", "PUT", { kit: editado }), params(id));
     assert.equal(ok.status, 200);
     const c = await ok.json();
-    assert.equal(c.kit.persona, "engenheira civil sênior, editada pelo gestor");
+    assert.equal(c.kit.persona, "engenheira staff de sistemas distribuídos, editada pelo gestor");
     assert.equal(c.kit.id, atual.id);
     assert.equal(c.kit.problemas[0].id, atual.problemas[0].id);
     assert.equal(c.aprovado, false);
@@ -179,7 +179,7 @@ describe("POST /api/sessoes com avaliação gerada", () => {
     assert.equal(ok.status, 200);
     const c = await ok.json();
     assert.deepEqual(Object.keys(c.problema).sort(), ["enunciado", "titulo"]);
-    assert.match(c.area, /Obras/);
+    assert.match(c.area, /Staff/);
     // nada da ficha vaza
     assert.doesNotMatch(JSON.stringify(c), /Resposta oficial/);
   });

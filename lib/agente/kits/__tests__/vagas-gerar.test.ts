@@ -5,7 +5,7 @@ import { ErroLlm, criarClienteFalso } from "../../llm/cliente";
 import { kitFalso } from "../falso";
 import { ErroGeracaoKit, MODELO_FINAL_PADRAO, gerarKit, gerarKitDetalhado } from "../gerar";
 
-const vaga = JOB_POSTINGS.find((v) => v.id === "coordenador-obras")!;
+const vaga = JOB_POSTINGS.find((v) => v.id === "staff-engineer")!;
 
 /** Kit "do modelo": ids maliciosos de propósito, para provar que o servidor os troca. */
 const kitDoModelo = () => ({ ...kitFalso(vaga.title), id: "../../admin", problemas: [{ ...kitFalso().problemas[0], id: "__proto__" }] });
@@ -25,8 +25,8 @@ describe("gerarKit", () => {
     assert.ok((c.maxTokens ?? 0) >= 12000);
     assert.ok((c.timeoutMs ?? 0) >= 60_000);
     assert.equal(c.modelo, MODELO_FINAL_PADRAO);
-    assert.equal(kit.id, "coordenador_obras");
-    assert.equal(kit.problemas[0].id, "coordenador_obras_p1");
+    assert.equal(kit.id, "staff_engineer");
+    assert.equal(kit.problemas[0].id, "staff_engineer_p1");
     assert.equal(kit.criterios.length, 6);
   });
 
@@ -34,16 +34,16 @@ describe("gerarKit", () => {
     const llm = criarClienteFalso([kitDoModelo()]);
     const plano = {
       jobPostingId: vaga.id,
-      stages: [{ tool: "whiteboard" as const, minutes: 30, challenge: { title: "Canteiro", brief: "Layout do canteiro" }, rationale: "r" }],
-      focusPoints: [{ topic: "logística de canteiro", evidenceFromPosting: "layout", weight: 1 }],
-      outOfScope: ["orçamento detalhado"],
+      stages: [{ tool: "whiteboard" as const, minutes: 30, challenge: { title: "Monólito", brief: "Fronteiras entre serviços" }, rationale: "r" }],
+      focusPoints: [{ topic: "fronteiras entre serviços", evidenceFromPosting: "contratos", weight: 1 }],
+      outOfScope: ["custo detalhado de infraestrutura"],
       summary: "s",
     };
     await gerarKit({ llm, vaga, plano });
     const msg = llm.chamadas[0].mensagens[0].content;
-    assert.match(msg, /Coordenador\(a\) de Obras/);
-    assert.match(msg, /logística de canteiro/);
-    assert.match(msg, /orçamento detalhado/);
+    assert.match(msg, /Engenheiro\(a\) Staff de Sistemas Distribuídos/);
+    assert.match(msg, /fronteiras entre serviços/);
+    assert.match(msg, /custo detalhado de infraestrutura/);
   });
 
   it("respeita AGENTE_MODELO_FINAL e o parâmetro modelo", async () => {
