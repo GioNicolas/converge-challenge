@@ -85,7 +85,12 @@ export default function JanelaChamada({
       if (!el) return;
       const r = el.getBoundingClientRect();
       const esquerda = alvo.endsWith("esquerdo") ? MARGEM : innerWidth - MARGEM - r.width;
-      const topo = alvo.startsWith("superior") ? TOPO_LIVRE : innerHeight - BASE_LIVRE - r.height;
+      // No canto superior direito ficam o quadro de requisitos e a conversa: a janela encaixa logo abaixo deles.
+      const painel = alvo === "superior-direito" ? document.querySelector("[data-painel-direito]") : null;
+      const topoDireito = painel ? painel.getBoundingClientRect().bottom + 12 : TOPO_LIVRE;
+      const topo = alvo.startsWith("superior")
+        ? Math.min(Math.max(TOPO_LIVRE, topoDireito), innerHeight - BASE_LIVRE - r.height)
+        : innerHeight - BASE_LIVRE - r.height;
       const nx = x.get() + (esquerda - r.left);
       const ny = y.get() + (topo - r.top);
       canto.current = alvo;
@@ -117,6 +122,9 @@ export default function JanelaChamada({
     if (!el) return;
     const observador = new ResizeObserver(() => encaixar(canto.current));
     observador.observe(el);
+    // O quadro de requisitos cresce com itens novos: se a janela estiver embaixo dele, desce junto.
+    const painel = document.querySelector("[data-painel-direito]");
+    if (painel) observador.observe(painel);
     const aoRedimensionar = () => encaixar(canto.current, false);
     addEventListener("resize", aoRedimensionar);
     return () => {

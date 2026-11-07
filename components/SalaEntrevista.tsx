@@ -172,7 +172,7 @@ export default function SalaEntrevista() {
       )}
 
       {estado.fase !== "AGUARDANDO" && (
-        <div className="absolute top-[72px] right-4 z-10 flex items-start gap-2">
+        <div data-painel-direito className="absolute top-[72px] right-4 z-10 flex items-start gap-2">
           <button
             onClick={() => setConversaAberta(true)}
             aria-label="Abrir conversa"
