@@ -120,6 +120,12 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   return { ...base, elementos: base.status !== "ok" && alvo ? [alvo] : [] };
 }
 
+// --- Linha do tempo (POST /api/sessoes/:id/eventos), de mentira por enquanto ---
+
+export async function enviarEventos(sessaoId: string, lote: { horario: string; tipo: string; dados: unknown }[]) {
+  console.debug(`[linha do tempo] ${sessaoId}: ${lote.length} evento(s)`, lote);
+}
+
 // --- Voz provisória: a síntese do próprio navegador (depois vira o /falar da ElevenLabs) ---
 
 export function falar(texto: string): Promise<void> {

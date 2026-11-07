@@ -3,15 +3,19 @@
 // Liga a máquina de estados, o gatilho, o quadro e o servidor (por enquanto, de mentira).
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Quadro } from "@/components/Canvas";
+import type { ControleCursor } from "@/components/CursorAgente";
 import {
   analisar,
   calar,
   criarSessao,
+  enviarEventos,
   falar,
   type FalaRecente,
   type PedidoAnalise,
   type Sessao,
 } from "@/lib/sessao/cliente";
+import { criarLinhaDoTempo } from "@/lib/sessao/eventos";
+import { apontarEAnotar } from "@/lib/presenca/coreografia";
 import {
   estadoInicial,
   podeAnalisar,
@@ -22,7 +26,6 @@ import {
 import { criarGatilho, type Gatilho } from "@/lib/sessao/gatilho";
 import { criarConversor, type Instantaneo } from "@/lib/excalidraw/conversor";
 import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff";
-import type { ExcalidrawElement } from "@/lib/excalidraw/tipos";
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
@@ -30,18 +33,7 @@ function redutor(estado: EstadoEntrevista, acao: Acao) {
   return transicionar(estado, acao.evento, acao.agora);
 }
 
-/** Onde o agente escreve a nota: à direita do elemento citado ou, sem alvo, à direita do desenho. */
-function posicaoDaNota(cena: readonly ExcalidrawElement[], idAlvo: string | undefined) {
-  const alvo = idAlvo ? cena.find((e) => e.id === idAlvo && !e.isDeleted) : undefined;
-  if (alvo) return { x: alvo.x + alvo.width + 48, y: alvo.y - 24 };
-  const doCandidato = cena.filter((e) => !e.isDeleted && e.customData?.autor !== "agente");
-  if (doCandidato.length === 0) return { x: 40, y: 260 };
-  const direita = Math.max(...doCandidato.map((e) => e.x + e.width));
-  const topo = Math.min(...doCandidato.map((e) => e.y));
-  return { x: direita + 48, y: topo };
-}
-
-export function useEntrevista(quadro: Quadro | null) {
+export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<ControleCursor | null>) {
   const [sessao, setSessao] = useState<Sessao | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
   const enviar = useCallback(
@@ -63,6 +55,7 @@ export function useEntrevista(quadro: Quadro | null) {
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     setFalaAtual({ quem: "agente", texto });
     setAgenteFalando(true);
+    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
     await falar(texto);
     setAgenteFalando(false);
     // A legenda fica um pouco depois da voz, para dar tempo de terminar de ler.
@@ -78,10 +71,32 @@ export function useEntrevista(quadro: Quadro | null) {
   const ultimoInstantaneo = useRef<Instantaneo | null>(null);
   const conversa = useRef<FalaRecente[]>([]);
   const gatilho = useRef<Gatilho | null>(null);
+  const linhaDoTempo = useRef<ReturnType<typeof criarLinhaDoTempo> | null>(null);
+  const registrar = useCallback(
+    (...args: Parameters<ReturnType<typeof criarLinhaDoTempo>["registrar"]>) =>
+      linhaDoTempo.current?.registrar(...args),
+    [],
+  );
 
   useEffect(() => {
     criarSessao().then(setSessao);
   }, []);
+
+  // Linha do tempo da entrevista: vai ao servidor em lotes.
+  useEffect(() => {
+    if (!sessao) return;
+    const linha = criarLinhaDoTempo({ enviar: (lote) => enviarEventos(sessao.sessao_id, lote) });
+    linhaDoTempo.current = linha;
+    return () => {
+      linha.parar();
+      void linha.descarregar().catch(() => {});
+    };
+  }, [sessao]);
+
+  useEffect(() => {
+    if (estado.fase !== "AGUARDANDO") registrar("fase", { fase: estado.fase });
+    if (estado.fase === "ENCERRADA") void linhaDoTempo.current?.descarregar().catch(() => {});
+  }, [estado.fase, registrar]);
 
   // Gatilho da análise.
   useEffect(() => {
@@ -103,18 +118,20 @@ export function useEntrevista(quadro: Quadro | null) {
           imagem_url: null,
         };
         console.log("[análise] pedido", pedido);
+        if (mudancas) registrar("desenho", { grafo: r.texto, mudancas });
         return pedido;
       },
       analisar,
       aoResultado: (resposta) => {
         console.log("[análise] resposta", resposta);
+        registrar("analise", resposta);
         enviar({ tipo: "ANALISE_RECEBIDA", resposta });
       },
       aoErro: (erro) => console.warn("[análise] ignorada:", erro),
     });
     gatilho.current = g;
     return () => g.parar();
-  }, [quadro, sessao, enviar]);
+  }, [quadro, sessao, enviar, registrar]);
 
   // Tempo de cada fase.
   useEffect(() => {
@@ -155,33 +172,39 @@ export function useEntrevista(quadro: Quadro | null) {
     };
   }, [estado.fase, quadro, sessao, enviar, dizer]);
 
-  // Pergunta ativa: o agente fala e escreve a nota; quando a resposta termina, apaga a nota.
+  // Pergunta ativa: ao mesmo tempo, a voz fala e a mão do agente circula o elemento e escreve a nota.
+  // Quando a resposta termina, o agente para (se ainda estiver desenhando) e apaga o que desenhou.
   const numeroPergunta = estado.perguntaAtiva?.numero ?? null;
   useEffect(() => {
     const p = estadoAtual.current.perguntaAtiva;
     if (numeroPergunta === null || !p || !quadro) return;
     const grupo = `pergunta:${numeroPergunta}`;
-    const idAlvo = p.elementos[0] ? conversor.current.idReal(p.elementos[0]) : undefined;
-    const { x, y } = posicaoDaNota(quadro.api.getSceneElementsIncludingDeleted(), idAlvo);
+    const alvos = p.elementos
+      .map((curto) => conversor.current.idReal(curto))
+      .filter((id): id is string => !!id);
 
+    registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos });
     if (p.pergunta) {
       conversa.current.push({ quem: "agente", texto: p.pergunta });
       void dizer(p.pergunta);
     }
-    void quadro.agente.escrever({
-      id: `agente-${grupo}-nota`,
+    const controle = new AbortController();
+    const coreografia = apontarEAnotar({
+      quadro,
+      cursor: cursor.current,
       grupo,
-      texto: p.nota ?? p.pergunta ?? "?",
-      x,
-      y,
-      largura: 28,
-    });
+      alvos,
+      nota: p.nota ?? p.pergunta ?? "?",
+      semente: numeroPergunta * 7919,
+      sinal: controle.signal,
+    }).catch((erro) => console.warn("[mão do agente]", erro));
 
     return () => {
       silenciar();
-      void quadro.agente.apagarGrupo(grupo);
+      controle.abort();
+      void coreografia.then(() => quadro.agente.apagarGrupo(grupo));
     };
-  }, [numeroPergunta, quadro, dizer, silenciar]);
+  }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar]);
 
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
@@ -196,10 +219,11 @@ export function useEntrevista(quadro: Quadro | null) {
   }, [enviar]);
   const clicarPlin = useCallback(() => enviar({ tipo: "PLIN_CLICADO" }), [enviar]);
   const terminarResposta = useCallback(() => {
+    registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero });
     enviar({ tipo: "RESPOSTA_TERMINOU" });
     // A resposta pode mudar a avaliação: analisa de novo logo depois.
     setTimeout(() => gatilho.current?.dispararAgora(), 0);
-  }, [enviar]);
+  }, [enviar, registrar]);
   const encerrar = useCallback(() => {
     silenciar();
     enviar({ tipo: "ENCERRAR" });

@@ -33,11 +33,30 @@ export type OpcoesEscrita = {
   largura?: number;
   /** Caracteres por segundo. */
   velocidade?: number;
+  /** Para de escrever no meio (ex.: o candidato já respondeu). */
+  sinal?: AbortSignal;
+};
+
+export type OpcoesTraco = {
+  id: string;
+  grupo: string;
+  /** Origem absoluta na cena e pontos relativos a ela (formato do Excalidraw). */
+  origem: { x: number; y: number };
+  pontos: [number, number][];
+  /** "seta" desenha a ponta no fim. */
+  tipo?: "linha" | "seta";
+  espessura?: number;
+  /** Fixa o "jeito" do traço entre um quadro e outro da animação. */
+  semente: number;
 };
 
 export type CamadaAgente = {
   /** Escreve um texto letra a letra, com ritmo humano. Resolve quando termina. */
   escrever(opcoes: OpcoesEscrita): Promise<void>;
+  /** Coloca (ou atualiza) um traço do agente: chamar a cada quadro para desenhar aos poucos. */
+  tracar(opcoes: OpcoesTraco): void;
+  /** Move a vista do quadro (fora do histórico). */
+  rolar(scrollX: number, scrollY: number): void;
   /** Apaga (com esmaecer) todos os elementos de um grupo. */
   apagarGrupo(grupo: string): Promise<void>;
   /** Chamar a cada onChange: restaura o que o candidato tiver mexido. */
@@ -129,6 +148,7 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
       const cps = o.velocidade ?? 38;
       let versao = (oficiais.get(o.id)?.version ?? 0) + 1;
       for (let i = 1; i <= completo.length; i++) {
+        if (o.sinal?.aborted) return;
         aplicar([criarTexto(o, completo.slice(0, i), versao++)]);
         const letra = completo[i - 1];
         // Ritmo humano: variação pequena e pausas em pontuação e quebra de linha.
@@ -137,6 +157,40 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
         if (letra === "\n") pausa += 90;
         await esperar(pausa);
       }
+    },
+
+    tracar(o) {
+      // O Excalidraw precisa de pelo menos dois pontos num traço.
+      const pontos = o.pontos.length >= 2 ? o.pontos : [[0, 0] as [number, number], [0.1, 0] as [number, number]];
+      const xs = pontos.map((p) => p[0]);
+      const ys = pontos.map((p) => p[1]);
+      const comum = {
+        id: o.id,
+        x: o.origem.x,
+        y: o.origem.y,
+        // Largura e altura pelos pontos (o conversor do Excalidraw não calcula sozinho).
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
+        points: pontos,
+        strokeColor: corDoAgente(),
+        strokeWidth: o.espessura ?? 2,
+        roughness: 0,
+        roundness: null,
+        seed: o.semente,
+        locked: true,
+        version: (oficiais.get(o.id)?.version ?? 0) + 1,
+        customData: { autor: AUTOR_AGENTE, grupo: o.grupo },
+      };
+      const esqueleto =
+        o.tipo === "seta"
+          ? { ...comum, type: "arrow" as const, startArrowhead: null, endArrowhead: "arrow" as const }
+          : { ...comum, type: "line" as const };
+      const [el] = convertToExcalidrawElements([esqueleto], { regenerateIds: false });
+      aplicar([el]);
+    },
+
+    rolar(scrollX, scrollY) {
+      api.updateScene({ appState: { scrollX, scrollY }, captureUpdate: CaptureUpdateAction.NEVER });
     },
 
     async apagarGrupo(grupo) {

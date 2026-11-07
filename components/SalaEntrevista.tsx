@@ -2,11 +2,12 @@
 
 // Sala da entrevista no quadro: o quadro em tela cheia, a janela de chamada no canto e a legenda embaixo.
 // O enunciado não fica num painel: o agente escreve no próprio quadro.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import JanelaChamada from "@/components/JanelaChamada";
 import Legenda from "@/components/Legenda";
+import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import type { Quadro } from "@/components/Canvas";
 import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
@@ -19,7 +20,8 @@ const Canvas = dynamic(() => import("@/components/Canvas"), {
 
 export default function SalaEntrevista() {
   const [quadro, setQuadro] = useState<Quadro | null>(null);
-  const entrevista = useEntrevista(quadro);
+  const cursor = useRef<ControleCursor | null>(null);
+  const entrevista = useEntrevista(quadro, cursor);
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
 
@@ -63,6 +65,12 @@ export default function SalaEntrevista() {
       )}
 
       <Legenda fala={entrevista.falaAtual} />
+
+      <CursorAgente
+        onPronto={(c) => {
+          cursor.current = c;
+        }}
+      />
 
       <AnimatePresence>
         {mostrarCartao && (
