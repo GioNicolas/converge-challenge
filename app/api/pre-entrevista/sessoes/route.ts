@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
+import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { criarSessao, estadoDaSessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa } from "@/lib/pre-entrevista/turno";
 
@@ -38,7 +39,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ erro: "não consegui classificar a vaga", detalhe: mensagem }, { status: 502 });
   }
 
-  const sessao = criarSessao(vaga, classificacao, criadaEm);
+  // Competências da vaga: uma chamada rápida. Se falhar, a sessão segue sem elas (o log registra o motivo).
+  const competencias = await extrairCompetencias(vaga);
+  const sessao = criarSessao(vaga, classificacao, criadaEm, competencias);
   abrirConversa(sessao);
   return NextResponse.json(estadoDaSessao(sessao), { status: 201 });
 }

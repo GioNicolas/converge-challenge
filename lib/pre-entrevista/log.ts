@@ -11,6 +11,7 @@
 export type TipoEvento =
   | "sessao_criada"
   | "classificacao"
+  | "competencias"
   | "fala_recrutadora"
   | "fala_agente"
   | "extracao"

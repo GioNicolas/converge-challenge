@@ -15,12 +15,13 @@ import { join } from "path";
 import { InterviewConfig, type FocusArea } from "@/lib/contracts";
 import type { Classificacao, Vaga } from "./classificador";
 import { aplicarCobertura, areasEmJogo, avaliarCobertura, mesclarCobertura, topicosDo, ultimaFalaDoAgente } from "./cobertura";
+import { type Competencia, type ResultadoCompetencias } from "./competencias";
 import { ErroExtracao, extrair } from "./extrator";
 import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
 import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
 import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
-import { criarRascunho, type Rascunho, type Turno } from "./rascunho";
+import { aplicarDecisoesTradeoff, criarRascunho, type Rascunho, type Turno } from "./rascunho";
 
 export interface Sessao {
   id: string;
@@ -36,6 +37,10 @@ export interface Sessao {
   preferencias: Preferencias;
   /** Como estava o resumo da última vez que a Totti o falou. Serve para confirmar só o que mudou na revisão. */
   resumo?: { preferencias: Preferencias; duracaoMin: number };
+  /** Competências-chave da vaga e se o formato verifica cada uma (ver `competencias.ts`). Não viram pergunta. */
+  competencias: Competencia[];
+  /** O que esta entrevista não avalia: áreas deixadas para a próxima etapa e competências que o formato não verifica. */
+  naoAvaliado: string[];
   logs: EventoLog[];
   status: { extraindo: boolean; versaoExtraida: number };
   configFinal?: InterviewConfig;
@@ -60,7 +65,11 @@ export interface EstadoSessao {
     sinais: Record<string, number>;
     perguntasPorTopico: Record<string, number>;
     resumos: number;
+    /** Decisão sobre a troca de formato por área (ver `planejador.ts`). */
+    decisoesTradeoff: PlanoEstado["decisoesTradeoff"];
   };
+  competencias: Competencia[];
+  naoAvaliado: string[];
   status: Sessao["status"];
   logs: EventoLog[];
   configFinal?: InterviewConfig;
@@ -104,8 +113,11 @@ export function liberar(id: string): void {
   store.ocupadas.delete(id);
 }
 
-/** Cria a sessão com o rascunho inicial (tudo pendente) e grava os dois primeiros eventos. */
-export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number): Sessao {
+/**
+ * Cria a sessão com o rascunho inicial (tudo pendente) e grava os eventos iniciais: sessão, classificação
+ * e competências (com o motivo, se a extração das competências falhou).
+ */
+export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number, competencias: ResultadoCompetencias): Sessao {
   // Com cobertura vazia, todos os tópicos obrigatórios das áreas do foco entram em `pendencias`.
   const rascunho = aplicarCobertura(criarRascunho(vaga, classificacao), {});
   const sessao: Sessao = {
@@ -117,6 +129,8 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     transcricao: [],
     plano: planoInicial(),
     preferencias: { ...PREFERENCIAS_PADRAO },
+    competencias: competencias.competencias,
+    naoAvaliado: [],
     logs: [],
     status: { extraindo: false, versaoExtraida: 0 },
   };
@@ -141,6 +155,25 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
       focus: classificacao.focus,
       confirmar: classificacao.confirmar,
       rascunhoInicial: rascunho,
+    },
+  });
+  const nomes = competencias.competencias.map((c) => c.nome).join(", ");
+  registrarEvento(sessao, {
+    tipo: "competencias",
+    nivel: competencias.erro ? "aviso" : "info",
+    resumo: competencias.erro
+      ? `sem competências (${competencias.erro})`
+      : `${competencias.competencias.length} competência(s): ${nomes || "nenhuma"}`,
+    ms: competencias.ms,
+    provedor: competencias.provedor,
+    model: competencias.model,
+    fallback: competencias.erro ? undefined : houveFallback(competencias.tentativas),
+    dados: {
+      mensagens: competencias.mensagens,
+      respostaCrua: competencias.respostaCrua,
+      competencias: competencias.competencias,
+      erro: competencias.erro,
+      tentativas: competencias.tentativas,
     },
   });
   return sessao;
@@ -204,7 +237,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
   const antes = sessao.rascunho;
   let etapa = "extracao";
   try {
-    const ext = await extrair(antes, transcricao, sessao.preferencias);
+    const ext = await extrair(antes, transcricao, sessao.preferencias, sessao.plano.decisoesTradeoff, sessao.plano.modoEscolhido);
     const camposDoPatch = Object.keys(ext.patch).filter((k) => ext.patch[k as keyof typeof ext.patch] !== undefined);
     registrarEvento(sessao, {
       tipo: "extracao",
@@ -250,7 +283,13 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     // A cobertura síncrona (do turno) pode ter subido enquanto esta rodada rodava: mescla, sem perder nada.
     // Os sinais não entram aqui: quem decide o passo é a leitura do turno, que tem a transcrição mais recente.
     const cobertura = mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura);
-    const novo = aplicarCobertura(ext.rascunho, cobertura, areasEmJogo(ext.rascunho.focus, sessao.plano.sinais));
+    // As decisões de troca de formato podem ter mudado enquanto a rodada rodava: valem as de agora.
+    const decisoes = sessao.plano.decisoesTradeoff;
+    const novo = aplicarCobertura(
+      aplicarDecisoesTradeoff(ext.rascunho, decisoes, sessao.plano.modoEscolhido),
+      cobertura,
+      areasEmJogo(ext.rascunho.focus, sessao.plano.sinais, decisoes),
+    );
     const mudancas = diff(antes, novo);
     sessao.rascunho = novo;
     registrarEvento(sessao, {
@@ -319,7 +358,7 @@ export async function aguardarExtracao(sessao: Sessao, limiteMs = 60_000): Promi
 
 export function estadoDaSessao(sessao: Sessao): EstadoSessao {
   const { classificacao, plano } = sessao;
-  const emJogo = areasEmJogo(sessao.rascunho.focus, plano.sinais);
+  const emJogo = areasEmJogo(sessao.rascunho.focus, plano.sinais, plano.decisoesTradeoff);
   return {
     id: sessao.id,
     criadaEm: sessao.criadaEm,
@@ -350,7 +389,10 @@ export function estadoDaSessao(sessao: Sessao): EstadoSessao {
       sinais: plano.sinais,
       perguntasPorTopico: plano.perguntasPorTopico,
       resumos: plano.resumos,
+      decisoesTradeoff: plano.decisoesTradeoff,
     },
+    competencias: sessao.competencias,
+    naoAvaliado: sessao.naoAvaliado,
     status: sessao.status,
     logs: sessao.logs,
     configFinal: sessao.configFinal,

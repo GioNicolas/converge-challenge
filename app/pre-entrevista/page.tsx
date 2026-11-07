@@ -11,6 +11,7 @@ const API = "/api/pre-entrevista/sessoes";
 const TIPOS: TipoEvento[] = [
   "sessao_criada",
   "classificacao",
+  "competencias",
   "fala_recrutadora",
   "fala_agente",
   "extracao",
@@ -25,6 +26,7 @@ const TIPOS: TipoEvento[] = [
 const COR_TIPO: Record<TipoEvento, string> = {
   sessao_criada: "bg-slate-200 text-slate-800",
   classificacao: "bg-blue-100 text-blue-800",
+  competencias: "bg-sky-100 text-sky-900",
   fala_recrutadora: "bg-emerald-100 text-emerald-800",
   fala_agente: "bg-indigo-100 text-indigo-800",
   extracao: "bg-amber-100 text-amber-900",
@@ -40,7 +42,7 @@ const NOME_AREA: Record<string, string> = {
   tecnico: "domínio técnico",
   pressao: "pressão e adaptação",
   escala_produto: "escala e produto",
-  uso_ia: "uso de IA",
+  uso_ia: "IA aplicada",
 };
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -432,6 +434,33 @@ export default function PaginaPreEntrevista() {
             <dt className="text-neutral-500">Notas</dt>
             <dd className="whitespace-pre-wrap">{r.recruiterNotes || "(vazio)"}</dd>
           </dl>
+
+          <h3 className="mb-1 text-xs font-semibold text-neutral-500">Não avaliado nesta entrevista</h3>
+          <p className="mb-3 text-sm">{estado.naoAvaliado.length ? estado.naoAvaliado.join(", ") : "(nada)"}</p>
+
+          <h3 className="mb-1 text-xs font-semibold text-neutral-500">Competências da vaga</h3>
+          {estado.competencias.length === 0 ? (
+            <p className="mb-3 text-sm text-neutral-500">(nenhuma extraída)</p>
+          ) : (
+            <table className="mb-3 w-full text-left text-sm">
+              <thead className="text-xs text-neutral-500">
+                <tr>
+                  <th className="py-1 font-medium">Competência</th>
+                  <th className="py-1 font-medium">Live coding</th>
+                  <th className="py-1 font-medium">System design</th>
+                </tr>
+              </thead>
+              <tbody>
+                {estado.competencias.map((c) => (
+                  <tr key={c.nome} className="border-t border-neutral-200">
+                    <td className="py-1">{c.nome}</td>
+                    <td className="py-1">{c.verificavel.live_coding ? "✅" : "❌"}</td>
+                    <td className="py-1">{c.verificavel.system_design ? "✅" : "❌"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
 
           <h3 className="mb-1 text-xs font-semibold text-neutral-500">Tópicos</h3>
           <table className="mb-3 w-full text-left text-sm">

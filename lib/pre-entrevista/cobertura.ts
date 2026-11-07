@@ -9,8 +9,9 @@
  */
 import { noul } from "@typesafe-ai/sdk";
 import { FocusArea } from "@/lib/contracts";
+import { mede } from "./catalogo";
 import { jev } from "./jev";
-import type { Rascunho, Turno } from "./rascunho";
+import { areasFora, type DecisoesTradeoff, type Rascunho, type Turno } from "./rascunho";
 
 /** Probabilidade a partir da qual um tópico está coberto e um sinal conta como verdadeiro. */
 export const LIMIAR = 0.6;
@@ -22,7 +23,7 @@ export const NOME_AREA_FALA: Record<FocusArea, string> = {
   tecnico: "algoritmos e código",
   pressao: "lidar com pressão e imprevistos",
   escala_produto: "escalabilidade",
-  uso_ia: "uso de IA",
+  uso_ia: "IA aplicada",
 };
 
 export interface Pergunta {
@@ -77,21 +78,21 @@ const EXEMPLOS_CRITERIO: Record<FocusArea, string> = {
   pressao: "'bom é continuar explicando o raciocínio quando o requisito muda'; 'ruim é travar ou desistir quando algo muda no meio'",
   escala_produto:
     "'bom é resolver com solução simples e complexidade baixa'; 'ruim é complexidade muito alta que fica ruim com muitos dados'",
-  uso_ia: "'bom é revisar o código gerado e achar um problema antes de rodar'; 'ruim é colar a resposta sem entender'",
+  uso_ia: "'bom é mostrar onde o LLM entra no desenho e como o agente trata erro'; 'ruim é tratar a IA como caixa-preta'",
 };
 
 const EXEMPLOS_QUER: Record<FocusArea, string> = {
   tecnico: "'implementar bem os algoritmos', 'código limpo e testado', 'saber estrutura de dados'",
   pressao: "'quero ver como ele lida com prazo curto', 'ambiente acelerado, com prioridade mudando toda semana'",
   escala_produto: "'escalabilidade', 'algoritmo que aguente volume', 'soluções simples com complexidade baixa'",
-  uso_ia: "'IA', 'Copilot', 'Cursor', 'revisar o que a IA gera'",
+  uso_ia: "'IA aplicada', 'construir agentes', 'RAG e tool calling', 'integrar LLM no produto'",
 };
 
 const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
   tecnico: "'isso não é tão importante pra gente', 'pode diminuir a parte de algoritmo'",
   pressao: "'coloca menos pressão', 'pressão eu tiraria', 'não precisa ser muito rigoroso com prazo'",
   escala_produto: "'escala não é prioridade agora', 'pode tirar a parte de escalabilidade'",
-  uso_ia: "'pode tirar IA', 'uso de IA não pesa tanto'",
+  uso_ia: "'pode tirar IA', 'IA aplicada não pesa tanto'",
 };
 
 function criterioDaArea(area: FocusArea): Topico {
@@ -131,10 +132,13 @@ function dispensaDaArea(area: FocusArea): Pergunta {
   };
 }
 
-/** Tópicos de cobertura, na ordem: confirmação inicial → critério por área (área do foco primeiro) → opcionais. */
+/**
+ * Tópicos de cobertura, na ordem: confirmação inicial → critério por área (área do foco primeiro) → opcionais.
+ * Áreas que o formato não mede não têm critério, então não viram tópico.
+ */
 export function topicosDo(r: Rascunho): Topico[] {
   const doFoco = [...r.focus].sort((a, b) => b.weight - a.weight).map((f) => f.area);
-  const areas = [...new Set([...doFoco, ...AREAS])];
+  const areas = [...new Set([...doFoco, ...AREAS])].filter((a) => mede(r.mode, a));
   return [
     {
       id: "confirmou_inicio",
@@ -169,11 +173,37 @@ export function topicosDo(r: Rascunho): Topico[] {
   ];
 }
 
-/** Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança e aprovação do resumo. */
+/**
+ * Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo e a escolha
+ * sobre a troca de formato (só faz sentido logo depois da oferta, mas o Jev responde sempre; o planejador decide se usa).
+ */
 function sinaisDo(): Pergunta[] {
   return [
     ...AREAS.map(quererDaArea),
     ...AREAS.map(dispensaDaArea),
+    {
+      id: "escolheu_trocar_formato",
+      pergunta:
+        "Na última fala, a recrutadora escolheu trocar para o outro formato de entrevista, o que a Totti ofereceu como alternativa?",
+      sinal_sim:
+        "Sim se ela escolheu o outro formato: 'vamos de system design', 'pode ser system design', 'troca pra system design', 'prefiro desenhar'.",
+      sinal_nao: "Não se ela escolheu manter o formato atual, deixou a área para depois, ou respondeu outra coisa, inclusive uma dúvida.",
+    },
+    {
+      id: "escolheu_proxima_etapa",
+      pergunta: "Na última fala, a recrutadora escolheu deixar a área que o formato não mede para a próxima etapa do processo?",
+      sinal_sim:
+        "Sim se ela disse que a área fica para depois, na próxima etapa ou fase do processo: 'deixa pra próxima etapa', 'IA fica pra depois', 'isso vai pra próxima fase'.",
+      sinal_nao: "Não se ela escolheu outro formato, disse que a área não precisa ser avaliada de jeito nenhum, ou respondeu outra coisa.",
+    },
+    {
+      id: "escolheu_seguir_sem",
+      pergunta: "Na última fala, a recrutadora escolheu seguir a entrevista sem essa área, sem avaliá-la nem deixá-la para depois?",
+      sinal_sim:
+        "Sim se ela disse para seguir sem a área, sem avaliar: 'segue sem isso', 'pode seguir sem IA', 'não precisa avaliar isso'.",
+      sinal_nao:
+        "Não se ela escolheu outro formato ou deixar para a próxima etapa, ou respondeu outra coisa. Deixar para a próxima etapa é outra escolha.",
+    },
     {
       id: "resposta_vaga",
       pergunta: "A última fala da recrutadora foi genérica, sem nenhum comportamento observável, como resposta à última fala do agente?",
@@ -181,7 +211,7 @@ function sinaisDo(): Pergunta[] {
         "Sim se ela respondeu de forma vaga: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', " +
         "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
       sinal_nao:
-        "Não se ela deu um comportamento concreto ('ruim é colar o código sem entender'), escolheu entre opções concretas, ou respondeu outra coisa.",
+        "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, ou respondeu outra coisa.",
     },
     {
       id: "quer_tom_desafiador",
@@ -248,15 +278,21 @@ export function mesclarCobertura(anterior: Record<string, number>, nova: Record<
 }
 
 /**
- * Áreas "em jogo" agora: as do foco do rascunho, mais as que ela quer avaliar, menos as que ela dispensou.
- * Usa os sinais mais recentes, então vale antes de o extrator (lento) atualizar o rascunho. Função pura.
+ * Áreas "em jogo" agora: as do foco do rascunho, mais as que ela quer avaliar, menos as que ela dispensou
+ * e menos as que ela deixou de fora pela troca de formato (`decisoes`). Usa os sinais mais recentes, então vale
+ * antes de o extrator (lento) atualizar o rascunho. Função pura.
  */
-export function areasEmJogo(focus: Array<{ area: FocusArea }>, sinais: Record<string, number>): FocusArea[] {
+export function areasEmJogo(
+  focus: Array<{ area: FocusArea }>,
+  sinais: Record<string, number>,
+  decisoes: DecisoesTradeoff = {},
+): FocusArea[] {
   const sinal = (id: string) => sinais[id] ?? 0;
   const noFoco = focus.map((f) => f.area);
   const pedidas = AREAS.filter((a) => sinal(`quer_${a}`) >= LIMIAR);
   const dispensadas = new Set(AREAS.filter((a) => sinal(`dispensa_${a}`) >= LIMIAR));
-  return [...new Set<FocusArea>([...noFoco, ...pedidas])].filter((a) => !dispensadas.has(a));
+  const deixadas = new Set(areasFora(decisoes));
+  return [...new Set<FocusArea>([...noFoco, ...pedidas])].filter((a) => !dispensadas.has(a) && !deixadas.has(a));
 }
 
 function faltandoDo(topicos: Topico[], cobertura: Record<string, number>, emJogo: FocusArea[]): Topico[] {

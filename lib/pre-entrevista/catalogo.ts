@@ -1,8 +1,11 @@
 /**
- * Catálogo de critérios-modelo por modo de entrevista.
+ * Catálogo de critérios-modelo por modo de entrevista, e o que cada formato consegue medir.
  *
  * É o ponto de partida do rascunho: a recrutadora não escreve critérios do zero,
  * o extrator só personaliza estes (texto, peso, o que entra e o que sai do foco).
+ *
+ * A tabela `MEDE` diz o que cada formato mede de cada área. É a única fonte de verdade sobre isso:
+ * a frase que a Totti usa para explicar a avaliação (`COMO_AVALIAMOS`) é derivada dela.
  */
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
 
@@ -15,6 +18,10 @@ export interface CriterioModelo {
   description: string;
 }
 
+/**
+ * Áreas com `nao_mede` não têm critério nesse formato. Uso de IA, por exemplo, só tem critério em system design,
+ * onde o candidato desenha a parte de IA da solução.
+ */
 export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
   live_coding: [
     {
@@ -55,14 +62,6 @@ export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
       weight: 1.25,
       description:
         "Bom: explica o raciocínio enquanto codifica e usa bem as dicas que pede. Ruim: fica em silêncio ou ignora as dicas recebidas.",
-    },
-    {
-      id: "uso_ia_criterio",
-      name: "Uso de IA",
-      focus: "uso_ia",
-      weight: 1,
-      description:
-        "Bom: revisa o código gerado, explica o que ele faz antes de aceitar e aponta problemas. Ruim: cola a resposta sem entender e não sabe dizer por que funciona.",
     },
     {
       id: "pressao_adaptacao",
@@ -116,10 +115,11 @@ export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
     },
     {
       id: "uso_ia_criterio",
-      name: "Uso de IA",
+      name: "Solução com IA",
       focus: "uso_ia",
       weight: 1,
-      description: "Bom: revisa o que a IA sugere e explica por que aceitou ou descartou cada ponto. Ruim: aceita a sugestão sem checar.",
+      description:
+        "Bom: mostra onde o LLM entra, como o agente chama ferramentas e como trata erro e alucinação. Ruim: trata a IA como caixa-preta ('aí a IA resolve').",
     },
     {
       id: "pressao_adaptacao",
@@ -132,32 +132,84 @@ export const CATALOGO: Record<InterviewMode, CriterioModelo[]> = {
   ],
 };
 
+/** O que um formato consegue observar numa área. `nao_mede`: a área não entra nesse formato. */
+export type NivelMedicao = "direto" | "indireto" | "nao_mede";
+
 /**
- * Como cada área é observada em cada formato, só com os sinais que a plataforma tem: código, execuções de teste,
- * colagens e dicas pedidas (live coding), desenho no quadro, falas e perguntas do entrevistador.
- * A Totti usa estas frases para responder a dúvida "como isso é avaliado?" sem prometer nada a mais.
+ * O que cada formato mede de cada área, e como. `como` é uma oração que completa "Em <formato>, ..." (sem ponto final).
+ * Quando a plataforma não tem sinal para uma área, o formato não mede: a Totti diz isso em vez de prometer.
  */
-export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = {
+export const MEDE: Record<InterviewMode, Record<FocusArea, { nivel: NivelMedicao; como: string }>> = {
   live_coding: {
-    tecnico:
-      "Em live coding, a gente olha o código escrito e as execuções de teste: se passa nos testes, se trata os casos de borda e se a estrutura é clara.",
-    pressao:
-      "Em live coding, a gente vê como ele segue quando o requisito muda ou quando trava, pela explicação falada e pelas perguntas do entrevistador. Também conta quantas dicas ele pede.",
-    escala_produto:
-      "Em live coding, a gente olha se ele diz a complexidade da solução e o que acontece com entradas grandes, pela explicação falada e pelas perguntas do entrevistador.",
-    uso_ia:
-      "Em live coding, a IDE registra quando ele cola código, e o entrevistador pede que ele explique o que colou: dá pra ver se revisou ou só aceitou.",
+    tecnico: {
+      nivel: "direto",
+      como: "a gente olha o código escrito e as execuções de teste: se passa nos testes, se trata os casos de borda e se a estrutura é clara",
+    },
+    escala_produto: {
+      nivel: "direto",
+      como: "a gente olha se ele diz a complexidade da solução e o que acontece com entradas grandes, pela explicação falada e pelas perguntas do entrevistador",
+    },
+    pressao: {
+      nivel: "indireto",
+      como: "a gente vê como ele segue quando o requisito muda ou quando trava, pela explicação falada e pelas perguntas do entrevistador. Também conta quantas dicas ele pede",
+    },
+    uso_ia: {
+      nivel: "nao_mede",
+      como: "um problema de algoritmo na IDE não mostra se a pessoa sabe construir com IA",
+    },
   },
   system_design: {
-    tecnico:
-      "Em system design, a gente olha o desenho no quadro: se os componentes e o modelo de dados batem com os requisitos que ele levantou.",
-    pressao:
-      "Em system design, a gente vê como ele defende as decisões quando o entrevistador questiona ou quando o requisito muda, pelas justificativas faladas.",
-    escala_produto:
-      "Em system design, a gente olha a estimativa de escala, as alternativas que ele compara e os gargalos que aponta no desenho, pelo quadro e pela fala.",
-    uso_ia:
-      "Em system design, a gente vê, pelas justificativas faladas e pelas perguntas do entrevistador, se ele revisa o que a IA sugere e por que aceitou ou descartou cada ponto.",
+    tecnico: {
+      nivel: "indireto",
+      como: "a gente olha o desenho no quadro e a fala: se os componentes e o modelo de dados batem com os requisitos que ele levantou",
+    },
+    escala_produto: {
+      nivel: "direto",
+      como: "a gente olha a estimativa de escala, as alternativas que ele compara e os gargalos que aponta no desenho, pelo quadro e pela fala",
+    },
+    pressao: {
+      nivel: "indireto",
+      como: "a gente vê como ele defende as decisões quando o entrevistador questiona ou quando o requisito muda, pelas justificativas faladas",
+    },
+    uso_ia: {
+      nivel: "direto",
+      como: "quando o problema envolve IA, a gente vê onde o LLM entra no desenho, como o agente chama ferramentas e como ele trata erro, alucinação e custo, e o entrevistador aprofunda",
+    },
   },
+};
+
+const SUJEITO: Record<InterviewMode, string> = { live_coding: "live coding", system_design: "system design" };
+
+/** Frase que a Totti usa para explicar como cada área é observada em cada formato. Derivada de `MEDE`. */
+function comoAvaliamos(): Record<InterviewMode, Record<FocusArea, string>> {
+  const resultado = {} as Record<InterviewMode, Record<FocusArea, string>>;
+  for (const modo of Object.keys(MEDE) as InterviewMode[]) {
+    resultado[modo] = {} as Record<FocusArea, string>;
+    for (const area of Object.keys(MEDE[modo]) as FocusArea[]) {
+      resultado[modo][area] = `Em ${SUJEITO[modo]}, ${MEDE[modo][area].como}.`;
+    }
+  }
+  return resultado;
+}
+
+export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = comoAvaliamos();
+
+/** A área é observada neste formato (direto ou indireto)? */
+export function mede(modo: InterviewMode, area: FocusArea): boolean {
+  return MEDE[modo][area].nivel !== "nao_mede";
+}
+
+/** Outro formato que mede a área, se houver. Usado para oferecer a troca. */
+export function modoAlternativoQueMede(atual: InterviewMode, area: FocusArea): InterviewMode | undefined {
+  return (Object.keys(MEDE) as InterviewMode[]).find((m) => m !== atual && mede(m, area));
+}
+
+/** Nome da área quando ela fica de fora da avaliação: "X ficam pra próxima etapa". */
+export const ROTULO_NAO_AVALIADO: Record<FocusArea, string> = {
+  tecnico: "algoritmos e código",
+  pressao: "lidar com pressão e imprevistos",
+  escala_produto: "escalabilidade",
+  uso_ia: "conhecimento de IA aplicada",
 };
 
 /** Problema do agente de código quando a recrutadora não escolheu outro. */
@@ -165,6 +217,15 @@ export const PROBLEMA_PADRAO: Record<InterviewMode, string> = {
   live_coding: "two-sum",
   system_design: "encurtador-de-url",
 };
+
+/**
+ * Problema padrão do modo e das áreas do foco. System design com IA no foco usa o chatbot de atendimento.
+ * ATENÇÃO: `chatbot-atendimento-ia` precisa existir no catálogo de problemas do time do entrevistador.
+ */
+export function problemaPadrao(mode: InterviewMode, areas: FocusArea[]): string {
+  if (mode === "system_design" && areas.includes("uso_ia")) return "chatbot-atendimento-ia";
+  return PROBLEMA_PADRAO[mode];
+}
 
 /**
  * Critérios do catálogo cujo foco está nas áreas pedidas. Se nenhum casar,

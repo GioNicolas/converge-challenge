@@ -186,13 +186,14 @@ const FOCOS = {
     ],
   ),
   uso_ia: reguaFoco(
-    "uso de IA",
-    "Usa IA como ferramenta de trabalho com critério: sabe pedir, revisar e corrigir código gerado, e/ou constrói produtos com LLMs.",
+    "IA aplicada",
+    "Saber CONSTRUIR soluções com IA: agentes, LLMs, RAG, tool calling e integrações com modelos. " +
+      "Não é usar ferramentas de codificação com IA (Copilot, Cursor): isso pesa pouco aqui.",
     [
-      "menciona LLMs, IA generativa, agentes, RAG, prompts, copilots",
-      "a empresa ou o produto é de IA",
-      "espera produtividade com ferramentas como Copilot, Cursor, Claude",
-      "vai integrar modelos de IA ao produto",
+      "menciona agentes, LLMs, RAG, tool calling ou avaliação de respostas de IA",
+      "a empresa ou o produto é de IA, ou integra modelos de IA às funcionalidades",
+      "vai construir ou integrar agentes, chatbots ou features com LLM",
+      "pede experiência prática com APIs de modelos (OpenAI, Anthropic, open-source)",
     ],
   ),
 } satisfies Record<FocusArea, ReturnType<typeof reguaFoco>>;

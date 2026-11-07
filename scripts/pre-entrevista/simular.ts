@@ -9,11 +9,12 @@
  */
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
+import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { chat, type Mensagem } from "@/lib/pre-entrevista/llm";
 import { descreverPasso } from "@/lib/pre-entrevista/planejador";
 import { paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
-import { abrirConversa, conduzirTurno } from "@/lib/pre-entrevista/turno";
+import { abrirConversa, atualizarNaoAvaliado, conduzirTurno } from "@/lib/pre-entrevista/turno";
 
 /** Teto de falas da recrutadora por conversa (segurança). */
 const MAX_FALAS_RECRUTADORA = 14;
@@ -53,6 +54,25 @@ const PERSONAS: Persona[] = [
       "'mas como isso vai ser avaliado num live code?'; depois responda com um comportamento concreto. " +
       "(2) Não fale de dicas até a Totti fazer o resumo. Só depois do resumo, pede: 'tira a dica'. " +
       "(3) Quando a Totti confirmar a mudança e perguntar se pode finalizar, aprova com 'pode finalizar'. Não pede mais nada depois disso.",
+  },
+  {
+    id: "ia_tradeoff",
+    vagaId: "ia-pleno",
+    descricao:
+      "Você é uma recrutadora que quer contratar alguém que saiba construir agentes com LLM (tool calling, RAG, integrações). " +
+      "Responde direto, em uma ou duas frases. Quando a Totti oferecer a troca de formato entre live coding e system design, " +
+      "escolha system design: diga 'vamos de system design', porque quer ver se a pessoa sabe desenhar a parte de IA da solução. " +
+      "Depois, se perguntarem, quer avaliar algoritmos e código limpo também. Dispensa pressão: não precisa ser rigorosa com prazo. " +
+      "Quando perguntarem sobre IA, responde com concreto: onde o LLM entra, como o agente chama ferramentas, como trata erro e alucinação.",
+  },
+  {
+    id: "ia_fica_live",
+    vagaId: "ia-pleno",
+    descricao:
+      "Você é uma recrutadora que quer avaliar algoritmos e código limpo no live coding. " +
+      "Quando a Totti oferecer a troca de formato entre live coding e system design, escolha manter o live coding e deixar a parte de IA " +
+      "para a próxima etapa do processo: diga 'fica no live coding, IA deixa pra próxima etapa'. Não quer system design nesta etapa. " +
+      "Dispensa pressão. Responde curto e concreto quando perguntarem sobre algoritmos e código.",
   },
   {
     id: "vaga",
@@ -271,7 +291,8 @@ async function simularPersona(persona: Persona): Promise<void> {
   console.log(`================================================================`);
 
   const classificacao = await classificarVaga({ roleTitle: vaga.roleTitle, jobDescription: vaga.jobDescription });
-  const sessao = criarSessao({ roleTitle: vaga.roleTitle, jobDescription: vaga.jobDescription }, classificacao, Date.now());
+  const competencias = await extrairCompetencias({ roleTitle: vaga.roleTitle, jobDescription: vaga.jobDescription });
+  const sessao = criarSessao({ roleTitle: vaga.roleTitle, jobDescription: vaga.jobDescription }, classificacao, Date.now(), competencias);
   abrirConversa(sessao);
 
   const registros: Registro[] = [];
@@ -351,8 +372,18 @@ function imprimirTranscricao(persona: Persona, sessao: Sessao, registros: Regist
 }
 
 function imprimirConfig(sessao: Sessao): void {
+  console.log("\n--- trade-off e competências ---");
+  console.log(`  oferta na abertura: ${sessao.plano.tradeoffNaAbertura ? "sim" : "não"}`);
+  console.log(`  decisões de troca: ${JSON.stringify(sessao.plano.decisoesTradeoff)}`);
+  console.log(`  formato escolhido na troca: ${sessao.plano.modoEscolhido ?? "(nenhum)"}`);
+  console.log(
+    `  competências: ${sessao.competencias.map((c) => `${c.nome} [lc=${c.verificavel.live_coding} sd=${c.verificavel.system_design}]`).join("; ") || "(nenhuma)"}`,
+  );
+  atualizarNaoAvaliado(sessao);
+  console.log(`  não avaliado: ${sessao.naoAvaliado.join(", ") || "(nada)"}`);
+
   console.log("\n--- config final (paraInterviewConfig) ---");
-  const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias);
+  const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias, sessao.naoAvaliado);
   if (!resultado.ok) {
     console.log(`  recusada:\n${resultado.erros.map((e) => `    - ${e}`).join("\n")}`);
     return;

@@ -8,10 +8,28 @@
 import { z } from "zod";
 import { Criterion, FocusArea, InterviewConfig, InterviewMode } from "@/lib/contracts";
 import type { Classificacao, Vaga } from "./classificador";
-import { criteriosIniciais, PROBLEMA_PADRAO } from "./catalogo";
+import { criteriosIniciais, problemaPadrao } from "./catalogo";
 
 /** Uma fala da conversa de pré-entrevista. */
 export type Turno = { role: "recrutadora" | "agente"; text: string };
+
+/**
+ * O que a recrutadora decidiu quando o formato não mede uma área: troca de formato, deixa para a próxima etapa
+ * ou segue sem a área. Ver `planejador.ts` (oferta) e `turno.ts` (aplicação).
+ */
+export type DecisaoTradeoff = "trocou" | "proxima_etapa" | "seguir_sem";
+export type DecisoesTradeoff = Partial<Record<FocusArea, DecisaoTradeoff>>;
+
+/** Áreas que ficaram de fora da avaliação por decisão da recrutadora (próxima etapa ou seguir sem). */
+export function areasFora(decisoes: DecisoesTradeoff): FocusArea[] {
+  return (Object.keys(decisoes) as FocusArea[]).filter((a) => decisoes[a] === "proxima_etapa" || decisoes[a] === "seguir_sem");
+}
+
+/** "a", "a e b", "a, b e c". */
+export function listar(itens: string[]): string {
+  if (itens.length <= 1) return itens.join("");
+  return `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}`;
+}
 
 /** Duração padrão quando a recrutadora não disse nada. */
 export const DURACAO_PADRAO: Record<InterviewMode, number> = {
@@ -85,6 +103,77 @@ export function somaPorArea(criteria: Criterion[], focus: Foco[]): Array<{ area:
   });
 }
 
+/** Reescala os pesos do foco para somar 1, corrigindo o arredondamento na primeira área. */
+function normalizarPesosDoFoco(focus: Foco[]): Foco[] {
+  const soma = focus.reduce((acc, f) => acc + f.weight, 0);
+  if (focus.length === 0 || soma <= 0) return focus;
+  const pesos = focus.map((f) => ({ area: f.area, weight: round2(f.weight / soma) }));
+  const diff = round2(1 - pesos.reduce((acc, p) => acc + p.weight, 0));
+  pesos[0].weight = round2(pesos[0].weight + diff);
+  return pesos;
+}
+
+/** Tira áreas do foco e dos critérios e reescala. Nunca deixa o foco vazio: nesse caso devolve o rascunho como está. Função pura. */
+export function retirarAreas(r: Rascunho, areas: FocusArea[]): Rascunho {
+  if (areas.length === 0) return r;
+  const restante = r.focus.filter((f) => !areas.includes(f.area));
+  if (restante.length === 0) return r;
+  const focus = normalizarPesosDoFoco(restante);
+  const criteria = alinharPesos(
+    r.criteria.filter((c) => !areas.includes(c.focus)),
+    focus,
+  );
+  return { ...r, focus, criteria };
+}
+
+/** Põe uma área no foco, com o mesmo peso das outras (1/(n+1)), e reescala. Se já estava, não muda. Função pura. */
+export function incluirArea(r: Rascunho, area: FocusArea): Rascunho {
+  if (r.focus.some((f) => f.area === area)) return r;
+  const focus = normalizarPesosDoFoco([...r.focus, { area, weight: 1 / (r.focus.length + 1) }]);
+  return { ...r, focus };
+}
+
+/**
+ * Muda o formato: critérios do catálogo do novo modo, só para as áreas do foco. Problema escolhido para o modo
+ * antigo não serve para o novo, então volta ao padrão. Função pura.
+ */
+export function mudarModo(r: Rascunho, modo: InterviewMode): Rascunho {
+  if (r.mode === modo) return r;
+  const areas = r.focus.map((f) => f.area);
+  const criteria = alinharPesos(
+    criteriosIniciais(modo, areas).filter((c) => areas.includes(c.focus)),
+    r.focus,
+  );
+  return { ...r, mode: modo, criteria, problemId: undefined };
+}
+
+/**
+ * Aplica ao rascunho as decisões de troca de formato já tomadas. Áreas "trocou" entram no foco; áreas
+ * "proxima_etapa" e "seguir_sem" saem do foco e dos critérios; o formato escolhido prevalece. Usado depois de
+ * cada extração, para que o extrator nunca recoloque uma área que a recrutadora deixou de fora. Função pura.
+ */
+export function aplicarDecisoesTradeoff(r: Rascunho, decisoes: DecisoesTradeoff, modoEscolhido?: InterviewMode): Rascunho {
+  let novo = r;
+  for (const area of Object.keys(decisoes) as FocusArea[]) {
+    if (decisoes[area] === "trocou") novo = incluirArea(novo, area);
+  }
+  novo = retirarAreas(novo, areasFora(decisoes));
+  if (modoEscolhido) novo = mudarModo(novo, modoEscolhido);
+  return novo;
+}
+
+/** Texto da nota que lista as áreas e competências fora desta entrevista. Sempre a mesma frase, para não duplicar. */
+const PREFIXO_NAO_AVALIADO = "Não avaliado nesta entrevista:";
+
+/**
+ * Acrescenta a frase "Não avaliado nesta entrevista: X, Y." às notas, trocando a que já estiver lá. Função pura.
+ */
+export function acrescentarNaoAvaliado(notas: string, naoAvaliado: string[]): string {
+  const semFrase = notas.replace(new RegExp(`${PREFIXO_NAO_AVALIADO}[^.]*\\.\\s*`, "g"), "").trim();
+  if (naoAvaliado.length === 0) return semFrase;
+  return [semFrase, `${PREFIXO_NAO_AVALIADO} ${listar(naoAvaliado)}.`].filter(Boolean).join(" ");
+}
+
 /** Pré-preenche o rascunho a partir da classificação da vaga. Nada confirmado ainda. */
 export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
   const mode = c.mode.value;
@@ -113,10 +202,14 @@ function gerarId(): string {
   return `cfg-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** Valida o rascunho e gera o `InterviewConfig`, ou devolve as mensagens de erro. */
+/**
+ * Valida o rascunho e gera o `InterviewConfig`, ou devolve as mensagens de erro.
+ * `naoAvaliado` entra nas notas finais como "Não avaliado nesta entrevista: ...".
+ */
 export function paraInterviewConfig(
   r: Rascunho,
   preferencias?: { duracaoMin?: number },
+  naoAvaliado: string[] = [],
 ): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
   const erros: string[] = [];
 
@@ -133,9 +226,14 @@ export function paraInterviewConfig(
     jobDescription: r.jobDescription,
     seniority: r.seniority,
     focus: r.focus,
-    recruiterNotes: r.recruiterNotes,
+    recruiterNotes: acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado),
     criteria: r.criteria,
-    problemId: r.problemId ?? PROBLEMA_PADRAO[r.mode],
+    problemId:
+      r.problemId ??
+      problemaPadrao(
+        r.mode,
+        r.focus.map((f) => f.area),
+      ),
     languages: LINGUAGENS,
     durationMin: duracaoDoRascunho(r, preferencias),
   };

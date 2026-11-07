@@ -13,7 +13,7 @@ import { CATALOGO, criteriosIniciais, type CriterioModelo } from "./catalogo";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { PREFERENCIAS_PADRAO, fraseTomEDicas, type Preferencias } from "./preferencias";
-import { alinharPesos, Rascunho, type Turno } from "./rascunho";
+import { aplicarDecisoesTradeoff, alinharPesos, Rascunho, type DecisoesTradeoff, type Turno } from "./rascunho";
 
 const TEMPERATURA = 0.2;
 const MAX_TOKENS_EXTRATOR = 12000;
@@ -344,10 +344,17 @@ export function limparNotas(notas: string, falasDaTotti: string[], preferencias:
   return [...mantidas, fraseTomEDicas(preferencias)].join(" ");
 }
 
+/**
+ * Extrai o patch da conversa e aplica no rascunho. `decisoes` e `modoEscolhido` são as trocas de formato já feitas:
+ * áreas que ficaram de fora saem do foco e dos critérios, e o formato escolhido prevalece. Assim o modelo
+ * nunca recoloca uma área que a recrutadora deixou de fora.
+ */
 export async function extrair(
   r: Rascunho,
   transcricao: Turno[],
   preferencias: Preferencias = PREFERENCIAS_PADRAO,
+  decisoes: DecisoesTradeoff = {},
+  modoEscolhido?: InterviewMode,
 ): Promise<ResultadoExtracao> {
   const avisos: Avisos = [];
   const tentativas: Tentativa[] = [];
@@ -403,7 +410,7 @@ export async function extrair(
 
     tentativasJson.push({ resposta: resposta.content });
     const aceito = checarDuracao(patch, transcricao, avisos);
-    const aplicado = aplicarPatch(r, aceito, avisos);
+    const aplicado = aplicarDecisoesTradeoff(aplicarPatch(r, aceito, avisos), decisoes, modoEscolhido);
     const falasDaTotti = transcricao.filter((t) => t.role === "agente").map((t) => t.text);
     return {
       rascunho: { ...aplicado, recruiterNotes: limparNotas(aplicado.recruiterNotes, falasDaTotti, preferencias) },
