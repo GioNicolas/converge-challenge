@@ -18,6 +18,7 @@ import {
   type EtapaVaga,
   type VagaEmpresa,
 } from "@/lib/vagas/workspace";
+import { comReais, useEntrevistasReais } from "@/lib/vagas/entrevistas";
 import { curvaSuave } from "@/lib/design/motion";
 
 type Props = { vagas: VagaEmpresa[]; vagaAtual?: string; etapaAtual?: EtapaVaga; onNavegar?: () => void };
@@ -25,7 +26,13 @@ type Props = { vagas: VagaEmpresa[]; vagaAtual?: string; etapaAtual?: EtapaVaga;
 export default function MenuVagas({ vagas, vagaAtual, etapaAtual, onNavegar }: Props) {
   const recentes = useRecentes();
   const ids = [...new Set([...(vagaAtual ? [vagaAtual] : []), ...recentes])];
-  const lista = ids.map((id) => vagas.find((v) => v.id === id)).filter((v): v is VagaEmpresa => !!v).slice(0, 6);
+  const reais = useEntrevistasReais();
+  const lista = ids
+    .map((id) => vagas.find((v) => v.id === id))
+    .filter((v): v is VagaEmpresa => !!v)
+    .slice(0, 6)
+    // As entrevistas feitas pelo link contam nos números do menu, como na tela inicial.
+    .map((v) => (v.resumo ? { ...v, funil: comReais(v.funil, reais?.[v.resumo.configId]) } : v));
   const [abertos, setAbertos] = useState<Set<string>>(() => new Set(vagaAtual ? [vagaAtual] : []));
 
   const alternar = (id: string) =>

@@ -6,6 +6,7 @@
 //                embaixo, busca por nome ou e-mail, filtros, ordenação, páginas e convite em lote.
 //   Escores    → só quem concluiu, com o lugar do escore reservado (o escore ainda vai ser construído).
 //   Plano      → o que foi combinado com o Totti e o link de convite.
+// Em Candidatos e Escores, as entrevistas feitas de verdade pelo link vêm antes, com o relatório.
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
@@ -34,6 +35,14 @@ import {
   type CandidatoVaga,
   type Situacao,
 } from "@/lib/vagas/candidatos";
+import {
+  NOME_ANDAMENTO,
+  NOME_RECOMENDACAO,
+  andamentoDa,
+  comReais,
+  useEntrevistasReais,
+  type EntrevistaReal,
+} from "@/lib/vagas/entrevistas";
 import { curvaSuave } from "@/lib/design/motion";
 import Casca from "./Casca";
 import { Abas, Busca, Paginacao, Seletor, Voltar } from "./controles";
@@ -65,6 +74,8 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
     .filter((x) => x && x !== "—")
     .join(" · ");
   const href = (e: EtapaVaga) => `/vagas/vaga?id=${encodeURIComponent(vaga.id)}&etapa=${e}`;
+  const todasReais = useEntrevistasReais();
+  const reais = vaga.resumo ? (todasReais?.[vaga.resumo.configId] ?? []) : [];
 
   return (
     <motion.div
@@ -80,7 +91,8 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
             <span className="rotulo text-texto-suave">{meta}</span>
             <h1 className="titulo-display text-[34px] text-texto md:text-[40px]">{vaga.cargo}</h1>
             <p className="text-[14px] text-texto-suave">
-              Aberta {quandoFoi(vaga.abertaHaDias)} · {situacaoDa(vaga)} · Responsável: {vaga.responsavel}
+              Aberta {quandoFoi(vaga.abertaHaDias)} · {situacaoDa({ ...vaga, funil: comReais(vaga.funil, reais) })} · Responsável:{" "}
+              {vaga.responsavel}
             </p>
           </div>
           {vaga.etapa !== "encerrada" && <CopiarLink vaga={vaga} />}
@@ -102,8 +114,9 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
       </header>
 
       {etapa === "plano" && <Plano vaga={vaga} />}
-      {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} />}
-      {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} />}
+      {etapa !== "plano" && reais.length > 0 && <EntrevistasReais reais={reais} />}
+      {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} temReais={reais.length > 0} />}
+      {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} temReais={reais.length > 0} />}
     </motion.div>
   );
 }
@@ -123,7 +136,17 @@ const NA_ETAPA: Record<Etapa, (c: CandidatoVaga) => boolean> = {
   concluiu: (c) => c.situacao === "concluiu",
 };
 
-function Candidatos({ vaga, modo, href }: { vaga: VagaEmpresa; modo: "candidatos" | "escores"; href: (e: EtapaVaga) => string }) {
+function Candidatos({
+  vaga,
+  modo,
+  href,
+  temReais,
+}: {
+  vaga: VagaEmpresa;
+  modo: "candidatos" | "escores";
+  href: (e: EtapaVaga) => string;
+  temReais: boolean;
+}) {
   const lista = useCandidatos(vaga.id, vaga.funil);
   const escores = modo === "escores";
 
@@ -204,6 +227,8 @@ function Candidatos({ vaga, modo, href }: { vaga: VagaEmpresa; modo: "candidatos
   }
 
   if (lista.length === 0) {
+    // Vaga nova: as entrevistas feitas pelo link já aparecem acima; aqui fica só o link para mandar mais.
+    if (temReais) return <LinkCandidatos vaga={vaga} />;
     return (
       <section className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
@@ -437,6 +462,74 @@ function Candidatos({ vaga, modo, href }: { vaga: VagaEmpresa; modo: "candidatos
         <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={filtrados.length} onMudar={setPagina} />
       </section>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Entrevistas feitas pelo link: as sessões reais desta vaga, com o relatório quando fica pronto.
+// ---------------------------------------------------------------------------
+
+function EntrevistasReais({ reais }: { reais: EntrevistaReal[] }) {
+  const prontas = reais.filter((e) => andamentoDa(e) === "pronto").length;
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Entrevistas feitas pelo link</h2>
+        <span className="numero text-[13px] text-texto-suave">
+          {numero(reais.length)} {reais.length === 1 ? "entrevista" : "entrevistas"} · {numero(prontas)}{" "}
+          {prontas === 1 ? "relatório pronto" : "relatórios prontos"}
+        </span>
+      </div>
+      <ul className="cartao overflow-hidden py-1.5">
+        {reais.map((e) => {
+          const a = andamentoDa(e);
+          return (
+            <li
+              key={e.sessionId}
+              className="linha-lista mx-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-5 gap-y-1 rounded-xl px-3 py-3 md:grid-cols-[minmax(0,1fr)_170px_150px_110px]"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate text-[14.5px] text-texto">
+                  Candidato {e.sessionId.slice(0, 6)}
+                  {a === "pronto" && <span className="rotulo rotulo-destaque ml-2">Novo</span>}
+                </span>
+                <span className="numero truncate text-[12.5px] text-texto-suave">
+                  {new Date(e.startedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                </span>
+              </div>
+              <span className={`justify-self-end text-[13px] md:justify-self-start ${a === "pronto" ? "text-texto" : "text-texto-suave"}`}>
+                {(a === "fazendo" || a === "gerando") && (
+                  <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-sucesso align-middle" />
+                )}
+                {NOME_ANDAMENTO[a]}
+              </span>
+              <span className="hidden text-[13px] text-texto md:block">
+                {e.recommendation ? (
+                  <>
+                    {NOME_RECOMENDACAO[e.recommendation]}
+                    {e.overallScore !== undefined && (
+                      <span className="numero text-texto-suave"> · {e.overallScore.toFixed(1)}/4</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-texto-suave/40">—</span>
+                )}
+              </span>
+              <span className="hidden text-right md:block">
+                {e.ended && (
+                  <Link
+                    href={`/report?sessionId=${encodeURIComponent(e.sessionId)}`}
+                    className="inline-flex items-center gap-1 text-[13px] text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto"
+                  >
+                    Relatório <ArrowRight size={13} />
+                  </Link>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

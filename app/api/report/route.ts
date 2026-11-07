@@ -1,7 +1,9 @@
 // Relatório final para a recrutadora. A avaliação começa no session_ended (lib/agents/evaluator.ts);
 // aqui só se consulta o resultado.
 import { NextRequest, NextResponse } from "next/server";
+import type { Report } from "@/lib/contracts";
 import { startEvaluation } from "@/lib/agents/evaluator";
+import { findReport, listReports } from "@/lib/session/reports";
 import { getSession, listSessions } from "@/lib/session/store";
 
 export const dynamic = "force-dynamic";
@@ -9,11 +11,14 @@ export const dynamic = "force-dynamic";
 /** Item da lista de sessões (GET /api/report sem sessionId). */
 export interface ReportListItem {
   sessionId: string;
+  /** Config da vaga: é por ela que o painel da vaga acha as entrevistas feitas pelo link. */
+  configId: string;
   roleTitle: string;
   startedAt: number;
   ended: boolean;
   state?: "running" | "done" | "error";
   overallScore?: number;
+  recommendation?: Report["recommendation"];
 }
 
 /**
@@ -29,17 +34,36 @@ export async function GET(request: NextRequest) {
   if (!sessionId) {
     const items: ReportListItem[] = listSessions().map((s) => ({
       sessionId: s.sessionId,
+      configId: s.config.id,
       roleTitle: s.config.roleTitle,
       startedAt: s.startedAt,
       ended: s.ended,
       state: s.report?.state,
       overallScore: s.report?.report?.overallScore,
+      recommendation: s.report?.report?.recommendation,
     }));
-    return NextResponse.json(items);
+    // Relatórios de sessões que já saíram da memória (o servidor reiniciou).
+    const emMemoria = new Set(items.map((i) => i.sessionId));
+    for (const { startedAt, report } of await listReports()) {
+      if (emMemoria.has(report.sessionId)) continue;
+      items.push({
+        sessionId: report.sessionId,
+        configId: report.configId,
+        roleTitle: report.roleTitle,
+        startedAt,
+        ended: true,
+        state: "done",
+        overallScore: report.overallScore,
+        recommendation: report.recommendation,
+      });
+    }
+    return NextResponse.json(items.sort((a, b) => b.startedAt - a.startedAt));
   }
 
   const session = getSession(sessionId);
   if (!session) {
+    const salvo = await findReport(sessionId);
+    if (salvo) return NextResponse.json(salvo.report);
     return NextResponse.json({ error: "sessão não encontrada" }, { status: 404 });
   }
   if (!session.ended) {

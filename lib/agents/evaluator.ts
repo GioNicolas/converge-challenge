@@ -11,6 +11,7 @@ import { buildEvaluatorSystem, buildEvaluatorUser } from "@/lib/agents/prompts/e
 import type { Report, SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
+import { saveReport } from "@/lib/session/reports";
 import { latestCode, numberCode } from "@/lib/session/store";
 import type { CodeVersion, ProbeKind, ReportStatus, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -40,6 +41,8 @@ export function startEvaluation(session: SessionState, opts: { retry?: boolean }
     .then((report) => {
       status.report = report;
       status.state = "done";
+      // Em disco para o painel da vaga sobreviver a restart; falhar aqui não derruba o relatório.
+      saveReport(session.startedAt, report).catch((err: unknown) => console.error("[evaluator] não salvou o relatório:", err));
     })
     .catch((err: unknown) => {
       status.error = err instanceof Error ? err.message : String(err);
