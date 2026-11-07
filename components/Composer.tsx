@@ -26,7 +26,7 @@ export default function Composer({
   return (
     <form
       onSubmit={submit}
-      className="vidro absolute bottom-4 left-1/2 z-20 flex w-[min(560px,60%)] -translate-x-1/2 items-center gap-2 rounded-full py-1.5 pl-5 pr-1.5 shadow-flutuante"
+      className="vidro mx-auto mt-2 flex w-[min(560px,100%)] shrink-0 items-center gap-2 rounded-full py-1.5 pl-5 pr-1.5 shadow-flutuante"
     >
       <input
         value={draft}
