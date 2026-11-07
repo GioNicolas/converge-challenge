@@ -6,10 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "node scripts/copy-vendor.mjs",
+    "predev": "node scripts/copy-vendor.mjs",
+    "prebuild": "node scripts/copy-vendor.mjs"
   },
   "dependencies": {
+    "@elevenlabs/client": "^1.35.0",
+    "@monaco-editor/react": "^4.7.0",
+    "lucide-react": "^1.70.0",
+    "monaco-editor": "^0.57.0",
+    "motion": "^14.10.1",
     "next": "15.5.4",
+    "pyodide": "^0.26.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "zod": "^3.25.76"

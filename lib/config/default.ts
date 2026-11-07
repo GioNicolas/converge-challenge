@@ -25,7 +25,8 @@ export const DEFAULT_CONFIG: InterviewConfig = InterviewConfig.parse({
     { id: "comunicacao", name: "Comunicação e resposta a dicas", focus: "tecnico", weight: 1.25,
       description: "Explicou o raciocínio com profundidade e usou bem as dicas que pediu." },
   ],
-  problemId: "two-sum",
-  languages: ["python", "cpp"],
+  difficulty: "medio", // pleno → nível médio
+  problemId: "maximum-subarray",
+  languages: ["python", "cpp", "c"],
   durationMin: 30,
 });

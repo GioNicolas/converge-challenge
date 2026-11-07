@@ -36,6 +36,9 @@ export const InterviewConfig = z.object({
   /** Notas livres da recrutadora ("time pequeno, precisa de autonomia"). */
   recruiterNotes: z.string().default(""),
   criteria: z.array(Criterion).min(1),
+  /** Nível das questões, definido pelo agente conforme a vaga (ver `lib/problems.ts`). */
+  difficulty: z.enum(["facil", "medio"]).optional(),
+  /** Questão escolhida do banco pelo agente; deve ser do nível `difficulty`. */
   problemId: z.string(),
   languages: z.array(z.string()).min(1),
   durationMin: z.number().int().positive().default(30),
