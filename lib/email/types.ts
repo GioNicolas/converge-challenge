@@ -3,36 +3,45 @@
  * mudar aqui não afeta o resto do time.
  */
 import { z } from "zod";
-import { Report } from "@/lib/contracts";
 
-const candidate = { candidateName: z.string(), to: z.string().email() };
+const candidate = {
+  candidateName: z.string().trim().min(1).max(120),
+  to: z.string().email().max(254),
+};
+const roleTitle = z.string().trim().min(1).max(160);
+/** ISO 8601 com offset (ex.: 2026-05-10T14:00:00-03:00 ou ...Z). */
+const isoDateTime = z.string().datetime({ offset: true });
 
 export const InterviewInvitePayload = z.object({
   ...candidate,
-  roleTitle: z.string(),
-  /** ISO 8601, horário já no fuso que deve aparecer no email. */
-  scheduledAt: z.string(),
-  durationMin: z.number().int().positive().default(30),
+  roleTitle,
+  scheduledAt: isoDateTime,
+  durationMin: z.number().int().positive().max(480).default(30),
   /** Link da sessão (sala da entrevista). */
-  joinUrl: z.string().url(),
+  joinUrl: z.string().url().max(2048),
 });
 export type InterviewInvitePayload = z.infer<typeof InterviewInvitePayload>;
 
 export const InterviewReschedulePayload = z.object({
   ...candidate,
-  roleTitle: z.string(),
-  previousScheduledAt: z.string().optional(),
-  scheduledAt: z.string(),
-  durationMin: z.number().int().positive().default(30),
-  joinUrl: z.string().url(),
-  reason: z.string().optional(),
+  roleTitle,
+  previousScheduledAt: isoDateTime.optional(),
+  scheduledAt: isoDateTime,
+  durationMin: z.number().int().positive().max(480).default(30),
+  joinUrl: z.string().url().max(2048),
+  reason: z.string().trim().max(500).optional(),
 });
 export type InterviewReschedulePayload = z.infer<typeof InterviewReschedulePayload>;
 
+/**
+ * O email de feedback vai pro CANDIDATO: só carrega a recomendação, que define
+ * a mensagem. Conteúdo interno do relatório (concerns, nextSteps, resumo da IA)
+ * nunca é enviado nem renderizado.
+ */
 export const InterviewFeedbackPayload = z.object({
   ...candidate,
-  roleTitle: z.string(),
-  report: Report,
+  roleTitle,
+  recommendation: z.enum(["avancar", "talvez", "nao_avancar"]),
 });
 export type InterviewFeedbackPayload = z.infer<typeof InterviewFeedbackPayload>;
 

@@ -1,6 +1,6 @@
 import { Button, Heading, Section, Text } from "@react-email/components";
 import { EmailLayout, emailTypography } from "@/lib/email/templates/layout";
-import { formatDateTime } from "@/lib/email/format";
+import { formatDateTime, greeting } from "@/lib/email/format";
 import type { InterviewInvitePayload } from "@/lib/email/types";
 
 export function InterviewInviteEmail(props: InterviewInvitePayload) {
@@ -11,7 +11,7 @@ export function InterviewInviteEmail(props: InterviewInvitePayload) {
       previewText={`Sua entrevista para ${props.roleTitle} está marcada para ${when}`}
     >
       <Heading as="h2" style={emailTypography.heading}>
-        Tudo certo, {props.candidateName.split(" ")[0]}
+        {greeting("Tudo certo", props.candidateName)}
       </Heading>
       <Text style={emailTypography.body}>
         Sua entrevista técnica para a vaga de <strong>{props.roleTitle}</strong> está marcada para{" "}
@@ -23,7 +23,11 @@ export function InterviewInviteEmail(props: InterviewInvitePayload) {
           Entrar na entrevista
         </Button>
       </Section>
-      <Text style={emailTypography.muted}>Se precisar remarcar, é só responder este email.</Text>
+      <Text style={emailTypography.muted}>
+        {process.env.EMAIL_REPLY_TO
+          ? "Se precisar remarcar, é só responder este email."
+          : "Se precisar remarcar, entre em contato com o time responsável pelo processo seletivo."}
+      </Text>
     </EmailLayout>
   );
 }

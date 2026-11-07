@@ -15,6 +15,7 @@ export async function sendInterviewInvite(input: unknown): Promise<EmailSendResu
     to: payload.to,
     subject: `Entrevista marcada: ${payload.roleTitle}`,
     template: InterviewInviteEmail(payload),
+    templateName: "invite",
   });
 }
 
@@ -24,6 +25,7 @@ export async function sendInterviewReschedule(input: unknown): Promise<EmailSend
     to: payload.to,
     subject: `Entrevista remarcada: ${payload.roleTitle}`,
     template: InterviewRescheduleEmail(payload),
+    templateName: "reschedule",
   });
 }
 
@@ -33,6 +35,7 @@ export async function sendInterviewFeedback(input: unknown): Promise<EmailSendRe
     to: payload.to,
     subject: `Feedback da sua entrevista — ${payload.roleTitle}`,
     template: InterviewFeedbackEmail(payload),
+    templateName: "feedback",
   });
 }
 

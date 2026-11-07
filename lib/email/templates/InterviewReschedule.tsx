@@ -1,6 +1,6 @@
 import { Button, Heading, Section, Text } from "@react-email/components";
 import { EmailLayout, emailTypography, palette } from "@/lib/email/templates/layout";
-import { formatDateTime } from "@/lib/email/format";
+import { formatDateTime, greeting } from "@/lib/email/format";
 import type { InterviewReschedulePayload } from "@/lib/email/types";
 
 export function InterviewRescheduleEmail(props: InterviewReschedulePayload) {
@@ -11,7 +11,7 @@ export function InterviewRescheduleEmail(props: InterviewReschedulePayload) {
       previewText={`Novo horário da sua entrevista para ${props.roleTitle}: ${when}`}
     >
       <Heading as="h2" style={emailTypography.heading}>
-        Novo horário, {props.candidateName.split(" ")[0]}
+        {greeting("Novo horário", props.candidateName)}
       </Heading>
       {props.previousScheduledAt && (
         <Text style={emailTypography.muted}>
@@ -30,7 +30,11 @@ export function InterviewRescheduleEmail(props: InterviewReschedulePayload) {
           Entrar na entrevista
         </Button>
       </Section>
-      <Text style={emailTypography.muted}>Se esse novo horário também não funcionar, é só responder este email.</Text>
+      <Text style={emailTypography.muted}>
+        {process.env.EMAIL_REPLY_TO
+          ? "Se esse novo horário também não funcionar, é só responder este email."
+          : "Se esse novo horário também não funcionar, entre em contato com o time responsável pelo processo seletivo."}
+      </Text>
     </EmailLayout>
   );
 }
