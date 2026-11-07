@@ -9,9 +9,13 @@
     "lint": "eslint",
     "postinstall": "node scripts/copy-vendor.mjs",
     "predev": "node scripts/copy-vendor.mjs",
-    "prebuild": "node scripts/copy-vendor.mjs"
+    "prebuild": "node scripts/copy-vendor.mjs",
+    "pre:classificar": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/classificar.ts",
+    "pre:extrair": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/extrair.ts",
+    "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts"
   },
   "dependencies": {
+    "@typesafe-ai/sdk": "^0.7.0",
     "@elevenlabs/client": "^1.35.0",
     "@monaco-editor/react": "^4.7.0",
     "lucide-react": "^1.70.0",

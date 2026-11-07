@@ -28,9 +28,16 @@ export const Criterion = z.object({
 });
 export type Criterion = z.infer<typeof Criterion>;
 
+/** Formato da entrevista: código na IDE (estilo NeetCode) ou system design no Excalidraw. */
+export const InterviewMode = z.enum(["live_coding", "system_design"]);
+export type InterviewMode = z.infer<typeof InterviewMode>;
+
 export const InterviewConfig = z.object({
   id: z.string(),
+  mode: InterviewMode.default("live_coding"),
   roleTitle: z.string(),
+  /** Descrição da vaga colada pela recrutadora na pré-entrevista. */
+  jobDescription: z.string().optional(),
   seniority: z.enum(["junior", "pleno", "senior"]),
   focus: z.array(z.object({ area: FocusArea, weight: z.number().min(0).max(1) })),
   /** Notas livres da recrutadora ("time pequeno, precisa de autonomia"). */

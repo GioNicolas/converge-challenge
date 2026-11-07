@@ -46,3 +46,5 @@ next-env.d.ts
 /public/pyodide/
 /public/monaco/
 sim-runs/
+# dados locais da pré-entrevista (configs salvas)
+/data/
