@@ -7,12 +7,14 @@
  *   npm run pre:simular -- muda_foco                     # só uma
  *   npm run pre:simular -- questionadora muda_foco       # várias
  */
+import type { FocusArea, InterviewConfig } from "@/lib/contracts";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { chat, type Mensagem } from "@/lib/pre-entrevista/llm";
 import { descreverPasso } from "@/lib/pre-entrevista/planejador";
-import { paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
+import { normalizarTexto } from "@/lib/pre-entrevista/pesos";
+import { DURACAO_PADRAO, paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa, atualizarNaoAvaliado, conduzirTurno } from "@/lib/pre-entrevista/turno";
 
@@ -21,10 +23,28 @@ const MAX_FALAS_RECRUTADORA = 14;
 /** Outro modelo que o do produto (gemini-flash-lite), para não disputar o limite de taxa do fallback. */
 const MODELO_RECRUTADORA = "meta-llama/llama-3.3-70b-instruct";
 
+/**
+ * O que a recrutadora de cada persona quer, escrito a partir do roteiro dela (não do que o sistema produziu).
+ * Serve de gabarito para o placar de fidelidade. Não se ajusta para passar.
+ */
+interface Verdade {
+  /** Áreas que ela quer, da mais para a menos importante. Só as que o formato da entrevista mede. */
+  ordemFoco: FocusArea[];
+  /** Áreas que ela dispensa ou deixa de fora. Não podem estar no foco. */
+  dispensa: FocusArea[];
+  /** Palavra-chave do eliminatório, que tem de aparecer nas notas. */
+  eliminatorio?: string;
+  tom: "amigavel" | "desafiador";
+  dicas: "leves" | "nenhuma";
+  /** Duração que ela disse. Sem ela, vale o padrão do formato. */
+  duracaoMin?: number;
+}
+
 interface Persona {
   id: string;
   vagaId: string;
   descricao: string;
+  verdade: Verdade;
 }
 
 const PERSONAS: Persona[] = [
@@ -35,6 +55,15 @@ const PERSONAS: Persona[] = [
       "Você sabe o que quer e responde direto, em uma ou duas frases. Quer foco em idempotência, consistência e falhas no meio do fluxo. " +
       "Eliminatório para você: o candidato não considerar falhas de rede. Duração: sessenta minutos, porque o desenho é grande. " +
       "Tom: mais desafiador, quer ver como ele defende uma decisão. Sem dicas: ele que se vire.",
+    verdade: {
+      // Falhas (gargalos e falhas, escala e produto) vêm antes; idempotência e consistência (técnico) depois.
+      ordemFoco: ["escala_produto", "tecnico"],
+      dispensa: [],
+      eliminatorio: "rede",
+      tom: "desafiador",
+      dicas: "nenhuma",
+      duracaoMin: 60,
+    },
   },
   {
     id: "muda_foco",
@@ -43,6 +72,13 @@ const PERSONAS: Persona[] = [
       "Você quer que a pessoa saiba implementar algoritmos complexos com soluções simples, pensando em escalabilidade. " +
       "Aceita live coding. Dispensa pressão: diz que não precisa muito. Dá respostas curtas e às vezes genéricas, como 'um pouco de cada' " +
       "ou 'implementar bem os algoritmos'. Quando perguntarem se uso de IA continua no foco, diz que ainda conta, mas bem menos.",
+    verdade: {
+      // Algoritmos primeiro, escalabilidade depois. IA não entra na ordem: em live coding o formato não mede.
+      ordemFoco: ["tecnico", "escala_produto"],
+      dispensa: ["pressao"],
+      tom: "amigavel",
+      dicas: "leves",
+    },
   },
   {
     id: "questionadora",
@@ -54,6 +90,12 @@ const PERSONAS: Persona[] = [
       "'mas como isso vai ser avaliado num live code?'; depois responda com um comportamento concreto. " +
       "(2) Não fale de dicas até a Totti fazer o resumo. Só depois do resumo, pede: 'tira a dica'. " +
       "(3) Quando a Totti confirmar a mudança e perguntar se pode finalizar, aprova com 'pode finalizar'. Não pede mais nada depois disso.",
+    verdade: {
+      ordemFoco: ["tecnico"],
+      dispensa: ["pressao"],
+      tom: "amigavel",
+      dicas: "nenhuma",
+    },
   },
   {
     id: "ia_tradeoff",
@@ -62,8 +104,16 @@ const PERSONAS: Persona[] = [
       "Você é uma recrutadora que quer contratar alguém que saiba construir agentes com LLM (tool calling, RAG, integrações). " +
       "Responde direto, em uma ou duas frases. Quando a Totti oferecer a troca de formato entre live coding e system design, " +
       "escolha system design: diga 'vamos de system design', porque quer ver se a pessoa sabe desenhar a parte de IA da solução. " +
-      "Depois, se perguntarem, quer avaliar algoritmos e código limpo também. Dispensa pressão: não precisa ser rigorosa com prazo. " +
+      "Depois, se perguntarem, quer avaliar algoritmos e código limpo também. Logo na primeira fala depois da troca, diga com essas palavras: " +
+      "'pressão eu tiraria, não precisa ser rigorosa com prazo'. " +
       "Quando perguntarem sobre IA, responde com concreto: onde o LLM entra, como o agente chama ferramentas, como trata erro e alucinação.",
+    verdade: {
+      // Depois da troca para system design, IA é o principal; algoritmos e código vêm em seguida.
+      ordemFoco: ["uso_ia", "tecnico"],
+      dispensa: ["pressao"],
+      tom: "amigavel",
+      dicas: "leves",
+    },
   },
   {
     id: "ia_fica_live",
@@ -73,6 +123,13 @@ const PERSONAS: Persona[] = [
       "Quando a Totti oferecer a troca de formato entre live coding e system design, escolha manter o live coding e deixar a parte de IA " +
       "para a próxima etapa do processo: diga 'fica no live coding, IA deixa pra próxima etapa'. Não quer system design nesta etapa. " +
       "Dispensa pressão. Responde curto e concreto quando perguntarem sobre algoritmos e código.",
+    verdade: {
+      // IA fica para a próxima etapa: sai do foco por decisão de troca, não por dispensa de peso.
+      ordemFoco: ["tecnico"],
+      dispensa: ["uso_ia", "pressao"],
+      tom: "amigavel",
+      dicas: "leves",
+    },
   },
   {
     id: "vaga",
@@ -81,6 +138,13 @@ const PERSONAS: Persona[] = [
       "No começo responde de forma genérica ('quero alguém bom', 'alguém que saiba bem'). Só depois de uma pergunta com opções concretas " +
       "você dá um exemplo do que observa. No meio da conversa, primeiro diz trinta minutos de duração e depois muda para quarenta e cinco. " +
       "Aceita dicas leves se o candidato travar. Quer um ambiente de startup, com prazo curto e prioridades que mudam.",
+    verdade: {
+      ordemFoco: ["pressao"],
+      dispensa: [],
+      tom: "amigavel",
+      dicas: "leves",
+      duracaoMin: 45,
+    },
   },
 ];
 
@@ -282,6 +346,9 @@ function checarEstilo(sessao: Sessao): string[] {
 // Execução
 // ---------------------------------------------------------------------------
 
+/** Soma do placar de fidelidade de todas as personas simuladas nesta rodada. */
+const totais = { passou: 0, total: 0 };
+
 async function simularPersona(persona: Persona): Promise<void> {
   const vaga = VAGAS.find((v) => v.id === persona.vagaId);
   if (!vaga) throw new Error(`vaga "${persona.vagaId}" não encontrada em fixtures/pre-entrevista/vagas.ts`);
@@ -324,8 +391,15 @@ async function simularPersona(persona: Persona): Promise<void> {
   }
 
   imprimirTranscricao(persona, sessao, registros, erroFatal);
-  imprimirConfig(sessao);
+  const config = imprimirConfig(sessao);
   imprimirChecagens(sessao);
+  if (config) {
+    const placar = imprimirFidelidade(persona, verificarFidelidade(persona, sessao, config));
+    totais.passou += placar.passou;
+    totais.total += placar.total;
+  } else {
+    console.log("\n--- fidelidade: sem config final, nada a comparar ---");
+  }
 }
 
 function registrar(n: number, recrutadora: string, passo: string, sessao: Sessao, logs: Sessao["logs"], msExtracao: number): Registro {
@@ -371,7 +445,7 @@ function imprimirTranscricao(persona: Persona, sessao: Sessao, registros: Regist
   console.log(`  resumos: ${sessao.plano.resumos}`);
 }
 
-function imprimirConfig(sessao: Sessao): void {
+function imprimirConfig(sessao: Sessao): InterviewConfig | undefined {
   console.log("\n--- trade-off e competências ---");
   console.log(`  oferta na abertura: ${sessao.plano.tradeoffNaAbertura ? "sim" : "não"}`);
   console.log(`  decisões de troca: ${JSON.stringify(sessao.plano.decisoesTradeoff)}`);
@@ -382,13 +456,141 @@ function imprimirConfig(sessao: Sessao): void {
   atualizarNaoAvaliado(sessao);
   console.log(`  não avaliado: ${sessao.naoAvaliado.join(", ") || "(nada)"}`);
 
+  console.log("\n--- ênfase e foco ---");
+  for (const d of sessao.pesosDetalhe) {
+    const peso = d.noFoco ? d.peso.toFixed(2) : "fora";
+    console.log(`  ${d.area}: ênfase ${d.enfase.toFixed(2)} (${d.origem}) | nota ${d.nota.toFixed(2)} | peso ${peso} | ${d.motivo}`);
+    if (d.fixou) console.log(`      fixou: "${d.fixou}"`);
+  }
+  console.log("  estado acumulado por área:");
+  for (const [area, e] of Object.entries(sessao.enfaseEstado)) {
+    const declarado = e.declarado ?? "(sem declaração explícita)";
+    console.log(`    ${area}: falou=${e.falou} | máximo=${e.maximo} | ${declarado}${e.frase ? ` | frase: "${e.frase}"` : ""}`);
+  }
+
+  console.log("\n--- critérios e origem ---");
+  for (const c of sessao.rascunho.criteria) {
+    const o = sessao.rascunho.origens[c.id];
+    const origem = o === undefined || o === "catalogo" ? "catálogo" : `fala ${o.turno}: "${o.fala}"`;
+    console.log(`  ${c.id} [${c.focus}] peso ${c.weight} | origem: ${origem}`);
+  }
+
   console.log("\n--- config final (paraInterviewConfig) ---");
   const resultado = paraInterviewConfig(sessao.rascunho, sessao.preferencias, sessao.naoAvaliado);
   if (!resultado.ok) {
     console.log(`  recusada:\n${resultado.erros.map((e) => `    - ${e}`).join("\n")}`);
-    return;
+    return undefined;
   }
   console.log(JSON.stringify(resultado.config, null, 2));
+  return resultado.config;
+}
+
+// ---------------------------------------------------------------------------
+// Fidelidade: o config final contra o que a recrutadora disse
+// ---------------------------------------------------------------------------
+
+/** Um item do placar. `ok` undefined = não se aplica (não entra no placar). */
+interface ItemFidelidade {
+  nome: string;
+  ok?: boolean;
+  detalhe: string;
+}
+
+const DICAS_NAS_NOTAS = { leves: "dica leve", nenhuma: "sem dicas" } as const;
+
+function verificarFidelidade(persona: Persona, sessao: Sessao, config: InterviewConfig): ItemFidelidade[] {
+  const v = persona.verdade;
+  const peso = (area: FocusArea) => config.focus.find((f) => f.area === area)?.weight ?? 0;
+  const ordenado = [...config.focus].sort((a, b) => b.weight - a.weight);
+  const topo = ordenado[0];
+  const notas = normalizarTexto(config.recruiterNotes);
+  const itens: ItemFidelidade[] = [];
+
+  itens.push({
+    nome: "área de maior peso = ordemFoco[0]",
+    ok: topo !== undefined && peso(v.ordemFoco[0]) >= topo.weight - 0.001,
+    detalhe: `topo=${topo?.area ?? "(nenhum)"} ${topo?.weight.toFixed(2) ?? ""} | esperado=${v.ordemFoco[0]} ${peso(v.ordemFoco[0]).toFixed(2)}`,
+  });
+
+  const dispensadasNoFoco = v.dispensa.filter((a) => config.focus.some((f) => f.area === a));
+  itens.push({
+    nome: "nenhuma área de dispensa no foco",
+    ok: dispensadasNoFoco.length === 0,
+    detalhe: dispensadasNoFoco.length
+      ? `no foco: ${dispensadasNoFoco.join(", ")}`
+      : `dispensadas fora: ${v.dispensa.join(", ") || "(nenhuma)"}`,
+  });
+
+  const presentes = v.ordemFoco.filter((a) => config.focus.some((f) => f.area === a));
+  const ausentes = v.ordemFoco.filter((a) => !presentes.includes(a));
+  const ordemOk = ausentes.length === 0 && presentes.every((a, i) => i === 0 || peso(presentes[i - 1]) >= peso(a) - 0.001);
+  itens.push({
+    nome: "ordem dos pesos respeita ordemFoco (empate vale)",
+    ok: ordemOk,
+    detalhe: `${v.ordemFoco.map((a) => `${a}=${peso(a).toFixed(2)}`).join(" > ")}${ausentes.length ? ` | fora do foco: ${ausentes.join(", ")}` : ""}`,
+  });
+
+  if (v.eliminatorio) {
+    itens.push({
+      nome: "eliminatório aparece nas notas",
+      ok: notas.includes(normalizarTexto(v.eliminatorio)),
+      detalhe: `palavra-chave: "${v.eliminatorio}"`,
+    });
+  }
+
+  // Medidor do tom: o estado da conversa (preferencias.tom) e a palavra no guia ("desafiador" ou "amigável").
+  // O guia escreve o tom junto das dicas ("Tom e dicas: desafiador, ..."), então não se procura "tom ..." literal.
+  const palavraTom = v.tom === "desafiador" ? "desafiador" : "amigavel";
+  itens.push({
+    nome: "tom bate",
+    ok: sessao.preferencias.tom === v.tom && notas.includes(palavraTom),
+    detalhe: `estado=${sessao.preferencias.tom} | guia contém "${palavraTom}": ${notas.includes(palavraTom)} | esperado ${v.tom}`,
+  });
+
+  itens.push({
+    nome: "dicas batem",
+    ok: notas.includes(DICAS_NAS_NOTAS[v.dicas]),
+    detalhe: `esperado ${v.dicas}`,
+  });
+
+  const duracaoEsperada = v.duracaoMin ?? DURACAO_PADRAO[config.mode];
+  itens.push({
+    nome: "duração bate",
+    ok: config.durationMin === duracaoEsperada,
+    detalhe: `config=${config.durationMin} esperado=${duracaoEsperada}${v.duracaoMin === undefined ? " (padrão do formato)" : ""}`,
+  });
+
+  // Todo critério com origem de fala tem o trecho na fala que a origem aponta (e a fala é da recrutadora).
+  const origens = sessao.rascunho.origens;
+  const comFala = config.criteria.filter((c) => {
+    const o = origens[c.id];
+    return o !== undefined && o !== "catalogo";
+  });
+  const semTrecho = comFala.filter((c) => {
+    const o = origens[c.id];
+    if (o === undefined || o === "catalogo") return true;
+    const turno = sessao.transcricao[o.turno - 1];
+    return !(turno?.role === "recrutadora" && normalizarTexto(turno.text).includes(normalizarTexto(o.fala)));
+  });
+  itens.push({
+    nome: "critério com origem de fala tem trecho na transcrição",
+    ok: semTrecho.length === 0,
+    detalhe: `${comFala.length - semTrecho.length}/${comFala.length} critério(s) com trecho confirmado${semTrecho.length ? `; sem trecho: ${semTrecho.map((c) => c.id).join(", ")}` : ""}`,
+  });
+
+  return itens;
+}
+
+function imprimirFidelidade(persona: Persona, itens: ItemFidelidade[]): { passou: number; total: number } {
+  console.log("\n--- fidelidade (verdade da recrutadora x config final) ---");
+  for (const item of itens) {
+    const marca = item.ok === undefined ? "N/A " : item.ok ? "PASS" : "FAIL";
+    console.log(`  ${marca} ${item.nome} | ${item.detalhe}`);
+  }
+  const avaliados = itens.filter((i) => i.ok !== undefined);
+  const passou = avaliados.filter((i) => i.ok).length;
+  console.log(`  placar ${persona.id}: ${passou}/${avaliados.length}`);
+  return { passou, total: avaliados.length };
 }
 
 function imprimirChecagens(sessao: Sessao): void {
@@ -415,6 +617,8 @@ async function main(): Promise<void> {
   for (const persona of personas) {
     await simularPersona(persona);
   }
+  console.log(`\n================================================================`);
+  console.log(`placar total de fidelidade: ${totais.passou}/${totais.total}`);
 }
 
 main().catch((err) => {

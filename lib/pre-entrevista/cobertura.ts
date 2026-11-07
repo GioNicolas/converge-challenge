@@ -7,9 +7,10 @@
  *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
  * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo da Totti.
  */
-import { noul } from "@typesafe-ai/sdk";
+import { choice, noul } from "@typesafe-ai/sdk";
 import { FocusArea } from "@/lib/contracts";
 import { mede } from "./catalogo";
+import { NIVEIS_ENFASE, type NivelEnfase } from "./enfase";
 import { jev } from "./jev";
 import { areasFora, type DecisoesTradeoff, type Rascunho, type Turno } from "./rascunho";
 
@@ -54,7 +55,7 @@ export interface ChamadaJev {
 export interface Cobertura extends ChamadaJev {
   /** Probabilidade acumulada de cada tópico estar coberto, por id. */
   cobertura: Record<string, number>;
-  /** Sinais deste turno (quer/dispensa por área, resposta vaga, aprovação do resumo), por id. */
+  /** Sinais deste turno (quer/dispensa/falou por área, resposta vaga, aprovação do resumo), por id. */
   sinais: Record<string, number>;
   /** Tópicos obrigatórios das áreas em jogo que ainda não estão cobertos. */
   faltando: Topico[];
@@ -173,6 +174,15 @@ export function topicosDo(r: Rascunho): Topico[] {
   ];
 }
 
+/** Ela disse, nesta última fala, que algo reprova o candidato sozinho? Por turno, para o guia (ver `pesos.ts`). */
+const DISSE_ELIMINATORIO: Pergunta = {
+  id: "disse_eliminatorio",
+  pergunta: "Na última fala da recrutadora, ela disse que algo reprova o candidato sozinho, sem depender do resto (eliminatório)?",
+  sinal_sim:
+    "Sim se, nessa última fala, ela citou um ponto eliminatório: 'eliminatório', 'reprovo', 'desclassifica', ou um comportamento que reprova direto.",
+  sinal_nao: "Não se a última fala não citou nenhum ponto que reprove sozinho. Um critério de nota não é eliminatório.",
+};
+
 /**
  * Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo e a escolha
  * sobre a troca de formato (só faz sentido logo depois da oferta, mas o Jev responde sempre; o planejador decide se usa).
@@ -181,6 +191,7 @@ function sinaisDo(): Pergunta[] {
   return [
     ...AREAS.map(quererDaArea),
     ...AREAS.map(dispensaDaArea),
+    DISSE_ELIMINATORIO,
     {
       id: "escolheu_trocar_formato",
       pergunta:
@@ -315,12 +326,16 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contex
       ultima_fala_do_agente: contexto.ultimaFalaAgente ?? "(nenhuma)",
       transcricao,
     },
-    questions: Object.fromEntries([...topicos, ...sinais].map((p) => [p.id, noul(p.pergunta, { true: p.sinal_sim, false: p.sinal_nao })])),
+    questions: {
+      ...Object.fromEntries([...topicos, ...sinais].map((p) => [p.id, noul(p.pergunta, { true: p.sinal_sim, false: p.sinal_nao })])),
+    },
   };
   const { answers, model, usage } = await jev().systemOne(request);
+  // As perguntas são `noul` (sim/não) ou `score` (nível de 0 a 3); o tipo do SDK não distingue, então lê-se aqui.
+  const respostas = answers as Record<string, { noul?: number; score?: number }>;
 
-  const cobertura = mesclarCobertura(r.cobertura, Object.fromEntries(topicos.map((t) => [t.id, answers[t.id].noul])));
-  const sinaisDoTurno: Record<string, number> = Object.fromEntries(sinais.map((s) => [s.id, answers[s.id].noul]));
+  const cobertura = mesclarCobertura(r.cobertura, Object.fromEntries(topicos.map((t) => [t.id, respostas[t.id].noul ?? 0])));
+  const sinaisDoTurno: Record<string, number> = Object.fromEntries(sinais.map((s) => [s.id, respostas[s.id].noul ?? 0]));
   const emJogo = areasEmJogo(r.focus, sinaisDoTurno);
 
   return {
@@ -342,4 +357,66 @@ export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contex
 export function aplicarCobertura(r: Rascunho, cobertura: Record<string, number>, emJogo = areasEmJogo(r.focus, {})): Rascunho {
   const pendencias = faltandoDo(topicosDo(r), cobertura, emJogo).map((t) => t.id);
   return { ...r, cobertura, pendencias };
+}
+
+/** Nível de ênfase de uma área na última fala da recrutadora. Os exemplos são os que o Jev usa para escolher. */
+function nivelDaFala(area: FocusArea) {
+  const nome = NOME_AREA_FALA[area];
+  return choice(`Na ÚLTIMA fala da recrutadora, o que ela disse sobre ${nome}?`, {
+    nao_falou: { quando: "a fala não tocou nessa área, nem de passagem." },
+    dispensou: {
+      quando: "disse que a área não precisa, que pode tirar, que é sem muita ênfase ou que não é tanto sobre ela.",
+      exemplos: "'não precisa', 'sem muita pressão', 'pode tirar', 'não é tanto sobre algoritmos'",
+    },
+    secundaria: {
+      quando: "disse que a área pesa menos, ou que também conta.",
+      exemplos: "'pesa menos', 'um pouco', 'também conta'",
+    },
+    respondeu: {
+      quando: "descreveu o que espera nessa área, inclusive ao responder uma pergunta da Totti sobre ela.",
+      exemplos: "'quero ver se implementam algoritmos de forma simples', 'vejo quando ele calcula o custo'",
+    },
+    central: {
+      quando: "disse que é o principal ou o mais importante, que é eliminatório, ou trouxe a área por conta própria como foco.",
+      exemplos: "'o principal é', 'o mais importante', 'é eliminatório', 'quero focar em idempotência e falhas'",
+    },
+  });
+}
+
+/** O que a última fala da recrutadora diz sobre cada área, e o que foi perguntado (ver `enfase.ts`). */
+export interface EnfaseFala {
+  niveis: Partial<Record<FocusArea, NivelEnfase>>;
+  ms: number;
+  model: string;
+  request: { state: unknown; questions: unknown };
+  answers: unknown;
+}
+
+/**
+ * Classifica só a última fala da recrutadora, com a última pergunta da Totti, em um nível por área.
+ * A conversa inteira não entra aqui: quem acumula é `acumularEnfase`.
+ */
+export async function avaliarEnfaseDaFala(transcricao: Turno[]): Promise<EnfaseFala> {
+  const dela = transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
+  const perguntaDaTotti = transcricao.filter((t) => t.role === "agente").at(-1)?.text ?? "(nenhuma)";
+  const request = {
+    state: {
+      tarefa:
+        "Você lê UMA fala da recrutadora numa pré-entrevista e diz o que ela disse sobre cada área, em relação à pergunta da Totti logo antes.",
+      ultima_pergunta_da_totti: perguntaDaTotti,
+      ultima_fala_da_recrutadora: dela ?? "(nenhuma)",
+    },
+    questions: Object.fromEntries(AREAS.map((area) => [`enfase_fala_${area}`, nivelDaFala(area)])),
+  };
+  if (!dela) return { niveis: {}, ms: 0, model: "", request, answers: {} };
+
+  const inicio = Date.now();
+  const { answers, model } = await jev().systemOne(request);
+  const respostas = answers as Record<string, { choice?: string }>;
+  const niveis: Partial<Record<FocusArea, NivelEnfase>> = {};
+  for (const area of AREAS) {
+    const escolhido = respostas[`enfase_fala_${area}`]?.choice;
+    niveis[area] = NIVEIS_ENFASE.includes(escolhido as NivelEnfase) ? (escolhido as NivelEnfase) : "nao_falou";
+  }
+  return { niveis, ms: Date.now() - inicio, model, request, answers };
 }

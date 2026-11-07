@@ -10,7 +10,8 @@
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
 import { ROTULO_NAO_AVALIADO } from "./catalogo";
-import { aplicarCobertura, AREAS, areasEmJogo, avaliarCobertura, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
+import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
+import { acumularEnfase } from "./enfase";
 import { aberturaDoAgente, responder, tradeoffDaAbertura } from "./conversa";
 import { ErroChat } from "./llm";
 import { registrarEvento } from "./log";
@@ -26,17 +27,24 @@ import {
 } from "./planejador";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { atualizarPreferencias } from "./preferencias";
-import { aplicarDecisoesTradeoff, duracaoDoRascunho } from "./rascunho";
-import { desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
+import { aplicarDecisoesTradeoff, duracaoDoRascunho, type Turno } from "./rascunho";
+import { fraseComPalavra, limitarPalavras, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
+import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
 /** Estado que o planejador enxerga: o plano da sessão mais o foco, a cobertura e o formato do rascunho. */
 function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
   return { ...sessao.plano, focus: sessao.rascunho.focus, cobertura: sessao.rascunho.cobertura, mode: sessao.rascunho.mode };
 }
 
+/** Última fala dela na transcrição, se houver. */
+function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
+  return transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
+}
+
 /**
- * Mede a cobertura e os sinais da transcrição atual e aplica no rascunho. Se o Jev falhar, registra
+ * Mede a cobertura, a ênfase e os sinais da transcrição atual e aplica no rascunho. Se o Jev falhar, registra
  * o erro e segue com o estado anterior: o planejador ainda tem o que decidir, e a conversa não trava.
+ * O foco e as notas são refeitos depois, em `conduzirTurno` (ver `aplicarPesosNaSessao`).
  */
 async function atualizarCobertura(sessao: Sessao): Promise<void> {
   try {
@@ -44,16 +52,33 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
     });
     sessao.plano = { ...sessao.plano, sinais: cob.sinais };
-    // Guarda o máximo de cada dispensa: é o que autoriza a extração a tirar a área do foco depois.
-    for (const area of AREAS) {
-      sessao.dispensaMaxima[area] = Math.max(sessao.dispensaMaxima[area] ?? 0, cob.sinais[`dispensa_${area}`] ?? 0);
+    // A ênfase é por fala: classifica só a última fala dela, e o acumulado é feito no código (ver `enfase.ts`).
+    const ultimaDela = ultimaFalaDaRecrutadora(sessao.transcricao);
+    const porFala = await avaliarEnfaseDaFala(sessao.transcricao);
+    if (ultimaDela) sessao.enfaseEstado = acumularEnfase(sessao.enfaseEstado, porFala.niveis, ultimaDela);
+
+    // Falas dela que mostram tom, dicas e eliminatório: entram no guia como trecho, sem passar pelo extrator.
+    if (ultimaDela) {
+      const pediuTom = (cob.sinais.quer_tom_desafiador ?? 0) >= LIMIAR || (cob.sinais.quer_tom_amigavel ?? 0) >= LIMIAR;
+      const pediuDicas = (cob.sinais.quer_sem_dicas ?? 0) >= LIMIAR || (cob.sinais.quer_dicas ?? 0) >= LIMIAR;
+      // Só a frase que contém a palavra-chave: tom, dicas e eliminatório não citam a fala inteira.
+      const fraseTom = pediuTom ? fraseComPalavra(ultimaDela, RE_TOM) : undefined;
+      const fraseDicas = pediuDicas ? fraseComPalavra(ultimaDela, RE_DICAS) : undefined;
+      if (fraseTom) sessao.origemPreferencias = { ...sessao.origemPreferencias, tom: fraseTom };
+      if (fraseDicas) sessao.origemPreferencias = { ...sessao.origemPreferencias, dicas: fraseDicas };
+      if ((cob.sinais.disse_eliminatorio ?? 0) >= LIMIAR) {
+        const frase = fraseComPalavra(ultimaDela, RE_ELIMINATORIO) ?? limitarPalavras(ultimaDela);
+        sessao.eliminatorioFalas = [...new Set([...sessao.eliminatorioFalas, frase])];
+      }
     }
     sessao.preferencias = atualizarPreferencias(sessao.preferencias, cob.sinais);
-    const emJogo = areasEmJogo(sessao.rascunho.focus, cob.sinais, sessao.plano.decisoesTradeoff);
-    sessao.rascunho = aplicarCobertura(sessao.rascunho, cob.cobertura, emJogo);
+    sessao.rascunho = { ...sessao.rascunho, cobertura: cob.cobertura };
+
     registrarEvento(sessao, {
       tipo: "cobertura",
-      resumo: `sincrona (antes da fala) | em jogo: ${emJogo.join(", ") || "nenhuma"} | faltando: ${sessao.rascunho.pendencias.join(", ") || "nada"}`,
+      resumo: `sincrona (antes da fala) | ênfase da fala: ${Object.entries(porFala.niveis)
+        .map(([a, n]) => `${a}=${n}`)
+        .join(" ")}`,
       ms: cob.ms,
       provedor: "typesafe",
       model: cob.model,
@@ -64,8 +89,8 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
         usage: cob.usage,
         cobertura: cob.cobertura,
         sinais: cob.sinais,
-        emJogo,
-        faltando: cob.faltando.map((t) => t.id),
+        niveisDaFala: porFala.niveis,
+        enfaseEstado: sessao.enfaseEstado,
       },
     });
   } catch (err) {
@@ -98,8 +123,8 @@ function resolverTradeoff(sessao: Sessao): void {
   }
   sessao.plano = plano;
 
-  const novo = aplicarDecisoesTradeoff(sessao.rascunho, decisoes, plano.modoEscolhido);
-  sessao.rascunho = aplicarCobertura(novo, novo.cobertura, areasEmJogo(novo.focus, plano.sinais, decisoes));
+  // O foco e as notas são refeitos depois, em `conduzirTurno`, com as decisões de agora.
+  sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, decisoes, plano.modoEscolhido);
   registrarEvento(sessao, {
     tipo: "plano",
     resumo: `troca de formato sobre ${oferta.area}: ${decisao}${decisao === "trocou" ? ` para ${oferta.modoAlternativo}` : ""}`,
@@ -154,6 +179,8 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
   await atualizarCobertura(sessao);
   resolverTradeoff(sessao);
   atualizarNaoAvaliado(sessao);
+  // O foco e as notas saem da ênfase, das falas e das decisões de agora, antes de o planejador escolher o passo.
+  aplicarPesosNaSessao(sessao, "turno");
 
   const estado = estadoDoPlanejamento(sessao);
   const passo = proximoPasso(estado);

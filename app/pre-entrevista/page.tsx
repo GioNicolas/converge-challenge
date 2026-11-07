@@ -5,6 +5,7 @@ import type { InterviewConfig } from "@/lib/contracts";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import type { EventoLog, TipoEvento } from "@/lib/pre-entrevista/log";
 import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
+import type { Origem } from "@/lib/pre-entrevista/rascunho";
 
 const API = "/api/pre-entrevista/sessoes";
 
@@ -46,6 +47,12 @@ const NOME_AREA: Record<string, string> = {
 };
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+/** De onde veio um critério: a fala dela (com o número da fala) ou o catálogo. */
+function descreverOrigem(origem: Origem | undefined): string {
+  if (origem && origem !== "catalogo") return `de onde veio: '${origem.fala}' (fala ${origem.turno})`;
+  return "sugestão do catálogo";
+}
 
 function Selo({ children, className }: { children: ReactNode; className?: string }) {
   return <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${className ?? "bg-neutral-200"}`}>{children}</span>;
@@ -414,6 +421,30 @@ export default function PaginaPreEntrevista() {
             ))}
           </ul>
 
+          <h3 className="mb-1 text-xs font-semibold text-neutral-500">Ênfase por área (0 a 3)</h3>
+          <table className="mb-3 w-full text-left text-sm">
+            <thead className="text-xs text-neutral-500">
+              <tr>
+                <th className="py-1 font-medium">Área</th>
+                <th className="py-1 font-medium">Ênfase</th>
+                <th className="py-1 font-medium">Origem</th>
+                <th className="py-1 font-medium">Peso</th>
+              </tr>
+            </thead>
+            <tbody>
+              {estado.pesos.map((p) => (
+                <tr key={p.area} className="border-t border-neutral-200">
+                  <td className="py-1">{NOME_AREA[p.area] ?? p.area}</td>
+                  <td className="py-1 font-mono text-xs">{p.enfase.toFixed(1)}</td>
+                  <td className="py-1 text-xs text-neutral-500">
+                    {p.origem}: {p.motivo}
+                  </td>
+                  <td className="py-1 font-mono text-xs">{p.noFoco ? p.peso.toFixed(2) : "fora"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
           <h3 className="mb-1 text-xs font-semibold text-neutral-500">Critérios ({r.criteria.length})</h3>
           <ul className="mb-3 max-h-48 space-y-2 overflow-y-auto text-sm">
             {r.criteria.map((c) => (
@@ -424,6 +455,7 @@ export default function PaginaPreEntrevista() {
                   <span className="font-mono text-xs">peso {c.weight}</span>
                 </div>
                 <p className="mt-1 text-xs text-neutral-600">{c.description}</p>
+                <p className="mt-1 text-xs text-neutral-400">{descreverOrigem(r.origens?.[c.id])}</p>
               </li>
             ))}
           </ul>
@@ -532,6 +564,13 @@ export default function PaginaPreEntrevista() {
           {revisando && (
             <div className="mt-4 space-y-2 rounded border border-neutral-300 p-3">
               <p className="text-xs text-neutral-500">Edite o rascunho (JSON) e confirme para gerar a config.</p>
+              <ul className="space-y-1 text-xs text-neutral-400">
+                {estado.rascunho.criteria.map((c) => (
+                  <li key={c.id}>
+                    {c.name}: {descreverOrigem(estado.rascunho.origens?.[c.id])}
+                  </li>
+                ))}
+              </ul>
               <textarea
                 value={jsonRevisao}
                 onChange={(e) => setJsonRevisao(e.target.value)}
