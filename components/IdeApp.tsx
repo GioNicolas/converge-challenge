@@ -205,10 +205,10 @@ export default function IdeApp({ problemId }: { problemId?: string }) {
       <section ref={sectionRef} className="relative h-full overflow-hidden rounded-padrao bg-superficie shadow-cartao">
         {/* O editor começa depois do painel do problema, para não ficar escondido */}
         {/* Coluna do editor: editor, testes e campo de conversa. Recolhido, o painel do problema vira uma
-            pílula no topo, e a coluna desce para abrir espaço para ela e para os botões. */}
+            pílula na coluna da esquerda; o editor fica fixo, não se move ao recolher/expandir. */}
         <div
-          className="flex h-full flex-col pr-3 pb-3 transition-[margin,padding] duration-normal ease-suave"
-          style={problemaAberto ? { marginLeft: 392 } : { paddingTop: 124 }}
+          className="flex h-full flex-col pr-3 pb-3"
+          style={{ marginLeft: 392 }}
         >
           <div className="min-h-0 flex-1">
             <CodeEditor

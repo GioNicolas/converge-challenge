@@ -14,6 +14,7 @@ export default function RunResults({ state, total }: { state: RunState; total: n
   const [aberto, setAberto] = useState(true);
   const feito = state.status === "done" ? state.result : null;
   const ok = !!feito && feito.total > 0 && feito.passed === feito.total;
+  const temCorpo = !feito || !!feito.stderr || !!feito.stdout || feito.passed < feito.cases.length || feito.cases.length < feito.total;
   const rodando = state.status === "running" ? state : null;
   // contador ao vivo: "2/3" enquanto roda, "3/3" no fim
   const feitos = rodando ? rodando.feitos : (feito?.cases.length ?? 0);
@@ -35,20 +36,11 @@ export default function RunResults({ state, total }: { state: RunState; total: n
             }`}
           >
             {rodando && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
-            {passaram}/{feito ? feito.total : total}
-          </span>
-        )}
-        {(rodando || feito) && (
-          <span className="flex items-center gap-1" aria-hidden>
-            {Array.from({ length: feito ? feito.total : total }, (_, i) => {
-              const c = feito?.cases[i];
-              const cor = c ? (c.passed ? "bg-sucesso" : "bg-perigo") : i < feitos ? "bg-texto-suave" : "bg-borda";
-              return <span key={i} className={`h-1.5 w-4 rounded-full transition-colors duration-rapida ease-suave ${cor}`} />;
-            })}
+            {passaram}/{feito ? feito.total : total}{feito ? " testes passaram" : ""}
           </span>
         )}
         {feito && <span className="label-pequena numero">{feito.durationMs} ms</span>}
-        <button
+        {temCorpo && <button
           type="button"
           onClick={() => setAberto((a) => !a)}
           aria-label={aberto ? "Recolher resultados" : "Expandir resultados"}
@@ -56,10 +48,10 @@ export default function RunResults({ state, total }: { state: RunState; total: n
           className="ml-auto rounded-full p-1.5 text-texto-suave transition-colors duration-rapida ease-suave hover:bg-superficie-2"
         >
           {aberto ? <ChevronDown size={16} strokeWidth={1.75} /> : <ChevronUp size={16} strokeWidth={1.75} />}
-        </button>
+        </button>}
       </header>
 
-      {aberto && (
+      {aberto && temCorpo && (
         <div className="max-h-[180px] overflow-y-auto border-t border-borda px-4 py-3 text-corpo">
           {state.status === "idle" && (
             <p className="label-pequena">Rode o código para ver os testes aqui.</p>
@@ -86,7 +78,7 @@ function Done({ result }: { result: RunResult }) {
       )}
 
       <ul className="grid gap-x-6 gap-y-1.5 md:grid-cols-2">
-        {result.cases.map((c) => (
+        {result.cases.filter((c) => !c.passed).map((c) => (
           <li key={c.name} className="flex gap-2">
             {c.passed ? (
               <Check size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-sucesso" />
