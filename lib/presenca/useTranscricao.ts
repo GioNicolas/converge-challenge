@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
+import { ErroHttp, tokenTranscricao } from "../sessao/servidor";
 import {
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, reamostrar, urlDoScribe,
@@ -184,8 +184,9 @@ export function criarEscutaTranscricao(opcoes: {
       try {
         token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
       } catch (erro) {
-        // Sem chave, sessão inexistente ou encerrada: repetir não resolve, vai direto ao navegador.
-        if (!encerrado && atual === geracao) falharScribe(erro instanceof ErroTokenTranscricao && erro.permanente);
+        // Recusa do servidor (sem chave, sessão inválida/encerrada, limite): repetir não adianta.
+        const recusa = erro instanceof ErroHttp && (erro.status === 503 || (erro.status >= 400 && erro.status < 500));
+        if (!encerrado && atual === geracao) falharScribe(recusa);
         return;
       }
       if (encerrado || atual !== geracao) return;
@@ -356,8 +357,7 @@ export function useTranscricao(opcoes: {
   const [estado, setEstado] = useState<EstadoEscuta>({ motor: "nenhum", escutando: false, erro: null });
   const callbacks = useRef({ aoParcial, aoFinal });
   const escuta = useRef<ReturnType<typeof criarEscutaTranscricao> | null>(null);
-  // Scribe por padrão; "0" (demonstração) usa só a transcrição do navegador.
-  const servidor = process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0";
+  const servidor = process.env.NEXT_PUBLIC_USAR_SERVIDOR === "1";
   useEffect(() => { callbacks.current = { aoParcial, aoFinal }; }, [aoParcial, aoFinal]);
   useEffect(() => {
     if (!stream) {

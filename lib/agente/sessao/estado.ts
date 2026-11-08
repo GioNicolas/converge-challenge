@@ -7,6 +7,7 @@
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu dúvida) → PERGUNTA_ATIVA (candidato clicou) → LIVRE
 //
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
+import type { PlanoDaSessao } from "../plano";
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
 import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
 
@@ -55,6 +56,8 @@ export type EstadoSessao = {
   fase: Fase;
   faseIniciadaEm: number | null;
   tempos: Tempos;
+  /** Plano de entrevista da vaga (pré-entrevista). Ausente/null: entrevista padrão. */
+  plano?: PlanoDaSessao | null;
 
   plin: CicloPlin;
   perguntaPendente: PlinPendente | null;
@@ -113,11 +116,12 @@ export type Efeito =
 
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
 
-export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[] } = {}): EstadoSessao {
+export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; plano?: PlanoDaSessao | null } = {}): EstadoSessao {
   return {
     fase: "AGUARDANDO",
     faseIniciadaEm: null,
     tempos: opcoes.tempos ?? TEMPOS_PADRAO,
+    plano: opcoes.plano ?? null,
     plin: "LIVRE",
     perguntaPendente: null,
     perguntaAtiva: null,

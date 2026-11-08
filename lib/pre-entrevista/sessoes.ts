@@ -24,6 +24,7 @@ import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
 import { criarRascunho, rascunhoNoFormatoAtivo, type Rascunho, type Turno } from "./rascunho";
 import { estadoInicialEnfase, type EstadoEnfase } from "./enfase";
 import { recalcularRascunho, type DetalhePeso } from "./pesos";
+import { pastaDados } from "@/lib/dados";
 
 export interface Sessao {
   id: string;
@@ -466,7 +467,7 @@ export function estadoDaSessao(sessao: Sessao): EstadoSessao {
 export async function salvarConfig(sessao: Sessao, config: InterviewConfig): Promise<void> {
   sessao.configFinal = config;
   store.configs.set(config.id, config);
-  const pasta = join(process.cwd(), "data", "configs");
+  const pasta = pastaDados("configs");
   await mkdir(pasta, { recursive: true });
   await writeFile(join(pasta, `${config.id}.json`), JSON.stringify(config, null, 2), "utf8");
 }
@@ -477,7 +478,7 @@ export async function buscarConfig(id: string): Promise<InterviewConfig | undefi
   const emMemoria = store.configs.get(id);
   if (emMemoria) return emMemoria;
   try {
-    const texto = await readFile(join(process.cwd(), "data", "configs", `${id}.json`), "utf8");
+    const texto = await readFile(pastaDados("configs", `${id}.json`), "utf8");
     const lido = InterviewConfig.safeParse(JSON.parse(texto));
     return lido.success ? lido.data : undefined;
   } catch {

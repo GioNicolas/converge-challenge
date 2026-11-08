@@ -1,98 +1,112 @@
-# Propostas de Diferenciais de Produto — Entrevista Técnica (Tecnologia)
+# Propostas de Diferenciais de Produto — Por Que Escolher o Totti
 
-Mapeamento de **novas funcionalidades de produto** e **combinações estratégicas** para diferenciar nossa plataforma das soluções internacionais existentes (**Mercor, micro1, Apriora/Alex, Ribbon, CodeSignal, HackerRank, Codility, CoderPad, Karat, Byteboard, Woven, FloCareer, Equip, Canditech, DevSkiller e Intervue**).
+Ideias de funcionalidades e formatos para somar ao fluxo que o **Totti já tem hoje** (pré-entrevista de alinhamento da vaga + revisão do plano com o Tech Lead no Slack + entrevista ao vivo em código/quadro + relatório), focadas em:
+1. **Deixar a entrevista genuinamente interessante de viver** (fim da prova escolar fria de *LeetCode* e do interrogatório robótico unilateral);
+2. **Fazer uma empresa escolher o Totti em vez de CodeSignal, HackerRank, Karat, Mercor, micro1 ou Apriora**.
 
 ---
 
-## O Que Já É Commodity Lá Fora (Descartado como Diferencial Isolado)
+## O Problema Real das Ferramentas Gringas Hoje
 
-Antes das propostas, filtramos mecânicas que **já existem** nas plataformas gringas ou geram rejeição no público sênior:
-
-| Mecânica descartada | Quem já faz lá fora | Por que não diferencia sozinha |
+| Categoria lá fora | Exemplos | Por que empresas e candidatos rejeitam |
 | :--- | :--- | :--- |
-| **Copilot passivo na IDE gravando prompts** | *CodeSignal (Cosmo), HackerRank (CodePair AI), CoderPad, Codility, Karat* | Ter chat/autocomplete de IA na IDE e salvar o log virou padrão de mercado entre 2025 e 2026. |
-| **Perguntas socráticas orais dinâmicas** | *Mercor, micro1 (Zara), Apriora (Alex), HackerRank (Chakra), FloCareer (NIVO), Equip* | Todas vendem follow-ups por voz baseados no currículo/resposta; isoladamente é vulnerável a colas de segunda tela (*Cluely, Interview Coder, StealthCoder*). |
-| **Certificados / Badges / "Tech Passport" no LinkedIn** | *micro1 (Certification), CodeSignal (Certified), HackerRank* | Rejeitado por desenvolvedores seniores e nocivo em SaaS B2B (estimula concorrentes a caçarem candidatos aprovados). |
-| **Calibração interna apenas por nota/percentil** | *CodeSignal, HackerRank, Karat* | Comparar números frios (*"time interno fez 840 vs. candidato 790"*) não explica divergências reais de arquitetura ou código. |
+| **Provas de algoritmo e vigilância** | *CodeSignal, HackerRank, Codility* | **60%+ de desistência de seniores** (fecham a aba ao ver puzzle tipo *Two Sum* e webcam policialesca), falsos positivos com colas de 2ª tela e zero relação com o dia a dia do time. |
+| **Bots interrogadores de 1ª geração** | *Mercor, micro1 (Zara), Apriora (Alex), FloCareer* | **Interrogatório frio de mão única:** cortam o candidato, não sabem nada sobre a empresa real, não respondem dúvidas técnicas sobre a vaga e geram rejeição da marca empregadora. |
+| **Fábricas terceirizadas humanas** | *Karat, Intervue* | Caríssimas (US$ 200–400 por entrevista), seguem roteiros engessados de telemarketing técnico e não conhecem a cultura nem a arquitetura da squad contratante. |
 
 ---
 
-## Os 6 Diferenciais de Produto Propostos
+## Diferenciais Propostos para o Produto
 
-### 1. Gerador de Desafios via Incidentes Reais (`Incident-to-Challenge`)
-Transforma problemas reais enfrentados pela engenharia da empresa em desafios práticos de Live Coding e System Design em menos de 60 segundos — eliminando algoritmos genéricos de *LeetCode* sem exigir 20 horas de um Staff Engineer criando provas.
+### 1. Decisão em 60s no Slack com 3 Clipes de Ouro + Guia dos Primeiros 30 Dias
+Elimina tanto a nota fria em que ninguém confia (`78/100`) quanto o relatório longo de 15 páginas que nenhum líder ocupado lê.
 
-- **Como funciona no produto (3 modos de entrada com zero risco de compliance):**
-  1. **Dump de Thread / Post-Mortem com Sanitização Automática:** O Tech Lead cola a thread bruta do canal `#incidents` (Slack/Discord) ou um post-mortem; um filtro limpa automaticamente IPs, chaves, dados sensíveis e nomes internos antes de gerar um micro-cenário isolado e executável.
-  2. **Áudio de 60s ou 3 Tópicos (*Zero-Code* para Bancos e Fintechs):** Para empresas sob regras rígidas (SOC2, PCI-DSS, LGPD) que não podem subir código nem logs, o líder grava 1 minuto de áudio descrevendo a dinâmica da falha (*ex.: deadlock em débito concorrente após reprocessamento de fila*) e a plataforma sintetiza um caso limpo equivalente.
-  3. **Reversão de PR de Bugfix ou Arquétipo de Stack:** Converte um PR passado de `hotfix` em ambiente quebrado para debug, ou permite escolher em 3 cliques `Stack + Senioridade + Arquétipo Real de Falha` para startups novas sem histórico de incidentes.
-- **Diferença frente às gringas:** *CodeSignal, HackerRank e Equip* dependem de bancos genéricos ou prompts rasos sobre a descrição da vaga; *Byteboard, Woven e DevSkiller* usam cenários fixos de catálogo que não refletem a arquitetura real do cliente.
-
----
-
-### 2. Quadro de System Design com Telemetria & FinOps ao Vivo (`Chaos Canvas`)
-Tira o System Design do "papel que aceita tudo de graça" (*jogar Kafka, Multi-Region e 4 clusters de cache sem consequência*) e conecta o diagrama do candidato a um simulador analítico em tempo real de **Latência P99, Saturação de I/O e Custo Mensal Estimado de Cloud (AWS/GCP)**, somado à injeção ao vivo de quedas e picos de tráfego pelo agente.
-
-- **Como funciona no produto (UX Zero-Formulário):**
-  1. **Presets Topológicos Implícitos:** O candidato **não** perde tempo preenchendo formulários de instância (`t3.large`, IOPS, VPC). Os nós adicionados ao quadro assumem dimensionamento padrão automático proporcional à volumetria do enunciado (*ex.: 50 mil req/s*).
-  2. **Reação Topológica Instantânea:** O que altera P99, gargalo e fatura mensal são as conexões desenhadas (e eventuais *pills* rápidas de 1 clique `[Econômico | Padrão | Alta-Vazão]` ou comandos por voz como *"adiciona réplica de leitura"*). Ligar `Cliente → Banco` direto sob alta carga dispara alerta visual de exaustão de conexões; intercalar fila/cache recalcula latência e custo na hora.
-  3. **Injeção Espacial de Incidente:** Na metade da sessão, o agente derruba um nó/zona ou multiplica o tráfego diretamente sobre a topologia desenhada pelo candidato para avaliar contenção, degradação graciosa e consciência de custo.
-- **Diferença frente às gringas:** *CoderPad, HackerRank, CodeSignal e Intervue* oferecem quadros brancos estáticos e mudos; *Mercor, micro1 e Apriora* discutem arquitetura apenas no gogó, sem impacto mensurável de latência ou FinOps.
+- **Como funciona no produto (evoluindo o card de decisão que já vai pro Slack):**
+  - Assim que a entrevista acaba, o Tech Lead recebe no Slack o veredito acompanhado de **3 cortes clicáveis de 20 segundos** (voz do candidato + trecho exato do código ou da lousa sincronizados):
+    - 🟢 **Onde brilhou (20s):** o momento exato em que destravou o gargalo principal;
+    - 🟡 **Onde hesitou (20s):** o ponto específico para o líder explorar na conversa final humana (sem perder tempo repetindo o resto da entrevista);
+    - 🔵 **Visão de time/produto (20s):** a melhor troca de trade-off ou pergunta feita pelo candidato sobre a vaga.
+  - **Guia dos Primeiros 30 Dias:** 2 linhas práticas de onboarding caso seja contratado (*ex.: "Muito forte e pragmático em incidentes; nos primeiros 30 dias vale parear com alguém sênior da casa em modelagem relacional"*).
+  - **Cada clique ensina o Totti:** o `Aprovar`/`Reprovar` desse card é a principal fonte de aprendizado da **Memória Viva da Squad (#5)**.
+- **Por que faz a empresa escolher o Totti:** vicia o gestor técnico na primeira semana. Em **1 minuto pelo celular no Slack**, entre duas reuniões, o Tech Lead ouve a própria voz do candidato nos 3 lances decisivos e aprova com 100% de segurança — economizando 20+ horas de engenharia por mês.
 
 ---
 
-### 3. Copilot Adversário & Mudança de Requisito em Voo (`Adversarial Copilot & Live Pivot`)
-Em vez de proibir IA com spyware invasivo no computador do candidato ou dar um Copilot passivo que só ajuda, o produto avalia as duas competências mais críticas da engenharia moderna: **auditar código sutilmente falho gerado por IA** e **refatorar sob mudança real de regra de negócio**.
+### 2. Escolha de Arena pelo Candidato (`Choose Your Arena`)
+Em vez de empurrar todo mundo para o mesmo teste engessado onde bons engenheiros travam ou desistem, o candidato escolhe **em qual arena quer provar sua senioridade**.
+
+- **Como funciona na entrevista:**
+  - **Checkpoint comum rápido (10 min):** todos passam por uma leitura/ajuste curto de código real para garantir base técnica comparável (ninguém foge de código).
+  - **Arena principal escolhida pelo candidato (20 min):**
+    1. **Parear na IDE:** evoluir e refatorar uma funcionalidade real lado a lado com o Totti;
+    2. **Plantão de Incidente (`War Room`):** investigar um gargalo/queda de produção em dupla com o Totti; ou
+    3. **Dissecar sua Própria Obra:** abrir um repositório público seu na IDE **ou** (para os 70% que trabalham sob NDA em bancos/empresas fechadas) desenhar na lousa, de forma anonimizada, o sistema mais crítico que já operou na carreira e ser sabatinado sobre os gargalos reais dele.
+  - O Totti avalia **exatamente a mesma régua de critérios da vaga** (já alinhada na pré-entrevista) nas três arenas.
+- **Por que faz a empresa escolher o Totti:** derruba o abandono de candidatos seniores (quem fecha a aba do *HackerRank* aceita na hora falar sobre sistemas reais ou escolher seu melhor formato) e inviabiliza cola pronta de ChatGPT.
+
+---
+
+### 3. O Totti como Colega de Squad, Não Fiscal de Prova (`Pair & War Room Cooperativo`)
+Muda completamente o clima da sessão: o Totti deixa de ser um juiz mudo esperando o candidato errar e passa a agir como um **colega pleno do time trabalhando junto com você numa segunda-feira de manhã**.
+
+- **Como funciona na entrevista:**
+  - **Na IDE (Pareamento Vivo):** o Totti escreve um primeiro rascunho ou hipótese no código e puxa conversa de igual para igual (*"Escrevi esse retry na linha 42, mas se a fila engasgar acho que vamos estourar o pool de conexões — como você mudaria isso comigo?"*).
+  - **Na Lousa / Incidente (`War Room`):** o Totti atua como o engenheiro de plantão ao seu lado — você pede para ele puxar logs, checar latência do banco ou testar hipóteses enquanto você lidera o diagnóstico (ele executa o apoio mecânico, mas nunca entrega a decisão pronta).
+- **Por que faz a empresa escolher o Totti:** nenhuma empresa contrata dev para inverter árvore binária em silêncio; contrata para **trabalhar em equipe, revisar código alheio, orientar colegas e pensar sob imprevisto**. Nenhuma plataforma autônoma gringa avalia colaboração real de bancada — e nenhum *teleprompter* de cola sobrevive a um diálogo vivo a quatro mãos.
+
+---
+
+### 4. O Totti Abre o Capô da Vaga & Vende o Time (`Closer de Talentos`)
+Transforma a entrevista de um filtro frio que espanta gente boa em um **ímã que faz os melhores engenheiros quererem trabalhar na empresa**.
+
+- **Como funciona na entrevista:**
+  - **Desafio-Espelho Anonimizado:** aproveitando o alinhamento prévio que o Totti já faz com a recrutadora e o Tech Lead, o problema é ambientado na mesma dor técnica real da vaga (*ex.: conciliação assíncrona de alto volume*), sem expor código, nomes internos ou dados confidenciais.
+  - **Mesa Invertida nos Minutos Finais:** o Totti vira a chave — conta com transparência qual é o desafio real que espera a pessoa nos primeiros meses, como funcionam deploy e autonomia na squad, responde dúvidas técnicas do candidato e **avalia a maturidade das perguntas que ele faz**.
+- **Por que faz a empresa escolher o Totti:** empresas disputam devs seniores a tapas. Nos bots gringos (*Mercor, micro1, Apriora*), o candidato sai desanimado sem saber nada da vaga; no Totti, ele sai empolgado com o problema real do time, aumentando diretamente a **taxa de aceite de propostas (`Offer Acceptance Rate`)**.
+
+---
+
+### 5. Memória Viva da Squad: o Totti Aprende com Cada Decisão do Tech Lead (`Squad Memory`) — ✅ Decidido: vamos fazer
+Lá fora, a régua é **configurada uma vez por um humano e fica parada**: a *Karat* calibra com o cliente no início do contrato, e *CodeSignal*/*HackerRank* deixam montar testes próprios, mas nenhum muda sozinho depois. No Totti, **a régua muda a cada decisão do Tech Lead, sem formulário**, e o time vê exatamente o que mudou.
 
 - **Como funciona no produto:**
-  1. **Armadilha Controlada de Produção (UX Tri-Modal):** A plataforma apresenta sugestões plausíveis que compilam e passam no caminho feliz, mas escondem bugs reais de produção (*race condition*, *query N+1*, vazamento de conexão, falta de idempotência). Para garantir que até o candidato que programa 100% na mão seja avaliado sem forçá-lo a abrir um chat, a auditoria ocorre via:
-     - Módulo auxiliar pré-existente no projeto inicial marcado como gerado por IA; ou
-     - Sugestão inline proativa no editor com 1 clique (`[Aceitar | Rejeitar | Editar]`); ou
-     - Checagem natural por voz do agente pedindo parecer técnico sobre um snippet sugerido.
-  2. **Mudança de Requisito em Voo (`Live Requirement Pivot`):** No meio da implementação, o produto altera uma premissa de negócio (*ex.: de single-tenant para rate-limit por cliente ou cobrança idempotente*) e atualiza os testes automatizados ao vivo na IDE — medindo modularidade do código e neutralizando assistentes invisíveis de segunda tela.
-- **Diferença frente às gringas:** *CodeSignal (Cosmo), HackerRank, CoderPad e Karat* tratam o assistente na IDE apenas como co-autor benigno e gravam o histórico; nenhuma testa discernimento crítico contra alucinações sutis nem muta contratos de teste em tempo real.
+  - **O Totti aprende com o que o Tech Lead já faz no Slack** (sem pedir nada a mais):
+    - o motivo do `Reprovar` (*ex.: "reprovei porque propôs Kafka sem necessidade para esse volume"*);
+    - uma linha opcional no `Aprovar` (*"o que te convenceu?"*);
+    - os pedidos de `Ajustar` no plano da entrevista (*ex.: "menos algoritmo, mais modelagem de dados"*).
+  - **Cada motivo vira uma regra técnica curta**, com origem rastreável (qual candidato ou qual plano gerou a regra):
+    - 🔴 *"Penaliza over-engineering: reprovou quem propôs Kafka para volume baixo"*;
+    - 🟢 *"Valoriza quem pergunta sobre observabilidade antes de codar"*.
+  - **Tela "O que o Totti aprendeu sobre a squad":** lista de regras ativas, com origem, que o Tech Lead pode **editar, desligar ou apagar**. O aprendizado nunca fica escondido.
+  - **Na entrevista seguinte**, as regras entram no plano e na avaliação. O scorecard marca quando um critério veio da squad (*"critério aprendido com o time"*).
+  - **Concordância Totti × Tech Lead:** compara a recomendação do Totti (`avancar` / `nao_avancar`) com a decisão real do Tech Lead, vaga a vaga (*ex.: 60% na 1ª vaga → 85% na 3ª*). É o número que prova o aprendizado.
+  - **Guarda-corpo contra viés:** o Totti só guarda critérios técnicos. Motivos como idade, faculdade, gênero, sotaque ou aparência **não viram regra**, e o card avisa o Tech Lead que aquilo foi ignorado.
+- **Por que faz a empresa escolher o Totti:** cria um **fosso competitivo que cresce com o uso** dentro de cada cliente. Na 3ª vaga, o Totti já entrevista com a cabeça do Tech Lead da casa, e a concordância mostra isso em número. Trocar por uma ferramenta gringa significa voltar a uma régua que não conhece o time e recomeçar do zero.
+- **Defesas de Q&A:**
+  - *"Isso não é só guardar histórico no prompt?"* → É, de propósito. A memória é explícita, auditável e editável pelo humano, ao contrário de um modelo que aprende de forma opaca. A empresa sabe por que o Totti mudou de critério.
+  - *"E se o Tech Lead tiver viés?"* → Só entram critérios técnicos, cada regra mostra de onde veio e pode ser desligada. A decisão final continua humana.
+  - *"Precisa de meses de dados?"* → Não. Aprender com o **motivo** do Tech Lead funciona desde a 1ª decisão. A calibração com o resultado real da contratação (quem foi contratado e deu certo) é a etapa seguinte, no roadmap.
+
+#### Plano de implementação no hackathon
+O que já existe e será aproveitado (`lib/slack/`): o modal de `Reprovar` já coleta `reason`, o `Ajustar` já guarda `comments` no plano, e o `Report` já traz `recommendation`.
+
+1. **Motivo opcional no `Aprovar`:** trocar o clique direto por um modal curto ("o que te convenceu?"), com o campo vazio permitido para não atrasar o Tech Lead.
+2. **Extrator de regras:** nos hooks `onCandidateDecision` e `revisePlan`, uma chamada curta ao modelo transforma motivo + scorecard em 0 a 2 regras `{ texto, efeito: "valoriza" | "penaliza", criterio, origem }`. Motivos não técnicos são descartados e sinalizados.
+3. **`SquadMemory`:** store por squad (no hackathon, por empresa/canal do Slack), em memória como o `SlackStore`, com regras ativas/desligadas e o histórico de decisões para a concordância.
+4. **Uso nas próximas entrevistas:** injetar as regras ativas no gerador do plano e no prompt do avaliador, em um bloco "Critérios aprendidos com o Tech Lead desta squad". O scorecard cita a regra quando ela pesar.
+5. **Tela "O que o Totti aprendeu":** lista de regras com origem, editar/desligar/apagar e o gráfico de concordância. Segue a identidade das telas da recrutadora (`/vagas`).
+6. **Slack:** depois de cada decisão, o card responde na thread *"Aprendi: penaliza over-engineering para volume baixo. [Ver o que aprendi]"*.
+7. **Dados da demo:** histórico sintético de 2 vagas anteriores já decididas, para a concordância aparecer subindo.
+
+**Roteiro da demo (~20s):** o Tech Lead reprova no Slack com o motivo *"propôs Kafka sem necessidade"* → o Totti responde na thread *"Aprendi: …"* → na próxima entrevista, o Totti pergunta sobre o volume antes de aceitar a fila, e o scorecard mostra *"critério aprendido com o time"* → corta para a tela com a concordância em 85%.
 
 ---
 
-### 4. Code Review por Voz com Roleplay Inverso (`Voice PR Review Roleplay`)
-Modo de avaliação onde o candidato não escreve código do zero: ele abre um Pull Request realista de 70–80 linhas cheio de armadilhas arquiteturais, falhas de segurança e gambiarras, enquanto **o agente de voz interpreta o desenvolvedor júnior/pleno autor da PR** pedindo revisão e defendendo suas escolhas.
+## Combinações com o Fluxo Atual do Totti
 
-- **Como funciona no produto:**
-  1. **Defesa Ingênua Realista:** Quando o candidato aponta um problema no diff, o agente responde como um colega júnior (*"Coloquei esse `sleep(1000)` porque o webhook dava erro 429 quando mandava tudo junto, por que tirar?"*).
-  2. **Curva de Concessão Progressiva (Zero Frustração):** O agente nunca age como um "robô teimoso irritante": ele defende o atalho apenas uma vez e, assim que o candidato explica o trade-off correto (*ex.: fila com backoff exponencial*), concede na hora e pede orientação de implementação.
-  3. **Métricas Extraídas:** Precisão diagnóstica (bugs críticos vs. nitpicks cosméticos), visão de segurança/escala e **capacidade real de mentoria e liderança técnica** (firmeza técnica com clareza didática, sem rispidez).
-- **Diferença frente às gringas:** *Byteboard* e *Woven* têm revisões de PR, mas 100% assíncronas por texto estático; *Mercor, micro1, Apriora e FloCareer* usam voz apenas com a IA no papel de entrevistador-interrogador, nunca invertendo o papel para medir liderança técnica ao vivo.
-
----
-
-### 5. Matriz Comparativa de Finalistas & Shadow Diff da Casa (`Shadow Architecture Diff`)
-Substitui relatórios PDF isolados de 20 páginas e notas abstratas por uma visão executiva de decisão rápida, ancorada na referência arquitetural da própria empresa.
-
-- **Como funciona no produto:**
-  1. **Gabarito Expresso de 5 Minutos (`Golden Blueprint`):** Sem precisar gravar uma entrevista inteira, o Staff Engineer ou Tech Lead da empresa arrasta em 3 a 5 minutos sua topologia de referência no quadro e fixa como padrão da vaga.
-  2. **Shadow Architecture & FinOps Diff:** O relatório sobrepõe visualmente as decisões de cada candidato contra o desenho da casa (*"Referência interna usou fila SQS + DLQ a ~US$ 1,2 mil/mês; candidato usou lock pessimista direto no banco a ~US$ 3,8 mil/mês"*).
-  3. **Matriz Lado a Lado + Clipes Sincronizados de 30s:** Tela única comparando os finalistas da vaga com miniatura da arquitetura, custo mensal estimado, resiliência P99 e um player sincronizado de 30 segundos mostrando exatamente como cada finalista reagiu ao mesmo incidente.
-- **Diferença frente às gringas:** *CodeSignal e HackerRank* comparam percentis numéricos; ATSs (*Greenhouse, Ashby, Lever*) mostram estrelas de 1 a 5 e textos soltos. Ninguém cruza diff topológico + custo de nuvem contra o arquiteto da casa com clipes sincronizados de crise.
-
----
-
-### 6. Dossiê de Handoff Anti-Redundância & Debrief Factual Privado
-Fecha as duas pontas quebradas entre a triagem por IA, o líder técnico humano e o candidato.
-
-- **Como funciona no produto:**
-  1. **Para o Tech Lead (`Handoff Anti-Redundância`):** Gera um guia enxuto de 1 página para a entrevista final humana dividido em: *(a) Competências 100% comprovadas na prática — NÃO perca tempo perguntando novamente*, *(b) Pontos exatos de hesitação no código/quadro* e *(c) 3 perguntas cirúrgicas de aprofundamento com o que esperar na resposta*.
-  2. **Para o Candidato (`Debrief Técnico Factual` + Garantia Zero-Treino):** Encerra o "buraco negro" dos bots de recrutamento entregando ao candidato um diagnóstico privado, construtivo e **estritamente circunscrito a fatos técnicos observados no artefato** (*ex.: modelagem transacional sólida; sob pico de 50 mil req/s faltou proteção contra cache stampede*), sem qualquer juízo subjetivo ou comportamental (zero risco jurídico trabalhista) e com selo explícito de que voz e código não treinam modelos externos.
-- **Diferença frente às gringas:** Ataca diretamente a maior rejeição de engenheiros no Reddit e Hacker News contra *Mercor, micro1 e Apriora* (sensação de coleta obscura de dados, falta total de retorno técnico e entrevistas humanas que repetem tudo do zero).
-
----
-
-## Combinações de Produto (Suítes e Fluxos Combinados)
-
-As 6 funcionalidades foram desenhadas como blocos modulares que se multiplicam quando combinados por perfil de vaga:
-
-| Combinação / Suíte | Módulos Combinados | Público / Vagas-Alvo | Como a experiência completa funciona na prática |
-| :--- | :--- | :--- | :--- |
-| **1. Suíte de Arquitetura Viva & Resiliência FinOps** | **#1** (`Incident-to-Challenge`) + **#2** (`Chaos Canvas`) + **#5** (`Shadow Diff & Matriz`) | *Senior / Staff Engineers, Arquitetos de Software, SREs e Cloud* | O Tech Lead cria o caso em 60s a partir de um incidente real da empresa (**#1**). Na sala, o candidato projeta a solução no quadro com P99 e fatura AWS/GCP reagindo ao vivo e enfrenta queda de nós (**#2**). No fechamento da vaga, o comitê compara as topologias, custos e clipes de 30s dos finalistas lado a lado contra o desenho do Staff da casa (**#5**). |
-| **2. Loop de Engenharia AI-Native (Pós-Copilot)** | **#1** (`Incident-to-Challenge`) + **#3** (`Adversarial Copilot & Live Pivot`) + **#6** (`Handoff & Debrief`) | *Engenheiros Backend, Frontend e Fullstack (Pleno e Sênior)* | O desafio nasce de um bug/incidente real da stack do time (**#1**). Na IDE, o candidato tem seu senso crítico testado contra sugestões de IA com armadilhas sutis de concorrência e precisa refatorar quando a regra de negócio muda em voo (**#3**). Aprovados chegam ao Tech Lead com pauta cirúrgica sem perguntas repetidas, e reprovados recebem diagnóstico técnico factual (**#6**). |
-| **3. Loop de Liderança Técnica & Mentoria** | **#4** (`Voice PR Review Roleplay`) + **#5** (`Matriz de Clipes 30s`) + **#6** (`Handoff Anti-Redundância`) | *Tech Leads, Staff Engineers e Engineering Managers Hands-on* | Em vez de codar algoritmos do zero, o candidato revisa uma PR crítica conversando por voz com a IA no papel do autor júnior (**#4**). A liderança compara em 2 minutos os clipes de como cada finalista mentorou e rebateu falhas de segurança (**#5**) e recebe o briefing pronto para a conversa executiva final (**#6**). |
-| **4. Motor Enterprise Ponta a Ponta** | **Todos os módulos (`#1` a `#6`)** configuráveis por trilha | *Bancos, Fintechs, E-commerces e Scale-ups em contratação contínua* | Padroniza todo o funil técnico da empresa: criação instantânea de vagas sem expor código proprietário (**#1**), avaliação prática adaptada à vaga via código pós-Copilot (**#3**), revisão por voz (**#4**) ou arquitetura com FinOps (**#2**), decisão em comitê em 10 minutos (**#5**) e experiência transparente para Tech Leads e candidatos (**#6**). |
+| Combinação | Como soma ao que o Totti já faz | Por que ganha da concorrência na venda |
+| :--- | :--- | :--- |
+| **1. Alinhamento Totti + Decisão em 60s (`#1`)** | Pré-entrevista & revisão no Slack (já existentes) + **3 Clipes de 20s no Slack + Guia de 30 Dias (#1)** | **Adoção imediata pelo Tech Lead:** fecha a ponta final da jornada no Slack com prova real de áudio + código/quadro em 1 minuto, sem obrigar o líder a ler relatório longo ou confiar cegamente em nota numérica. |
+| **2. Ímã de Seniores (`#2 + #3 + #4`)** | **Escolha de Arena (#2)** + **Totti Colega de Squad (#3)** + **Abre o Capô & Vende a Vaga (#4)** | **Conversão máxima de candidatos disputados:** zera a cara de prova escolar, transforma a entrevista em 30 minutos de trabalho real em dupla e faz o dev sair querendo aceitar a proposta da empresa. |
+| **3. Fosso da Squad (`#1 + #5`)** | Card de decisão no Slack (**#1**) + **Memória Viva da Squad (#5)** | **Retenção do cliente:** cada `Aprovar`/`Reprovar` que o Tech Lead já faria vira critério da próxima entrevista. Quanto mais a empresa usa, mais difícil é trocar. |
+| **4. Ciclo Completo Totti (`Fluxo Atual + #1 a #5`)** | Pré-entrevista do Totti ➔ **[#2 + #3 + #4]** na sala ➔ **#1** no Slack do Tech Lead ➔ **#5** aprende e melhora a próxima vaga | **Diferencial ponta a ponta contra qualquer gringa:** o Totti já nasce calibrado com a vaga, conduz uma sessão colaborativa que encanta seniores, entrega a decisão mastigada em 60s e **fica mais parecido com o Tech Lead a cada contratação**. |

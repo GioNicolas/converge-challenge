@@ -45,6 +45,19 @@ export function statusPermitido(fase: Fase, status: StatusAnalise): boolean {
   return PLINS_DA_FASE[fase]?.includes(status) ?? false;
 }
 
+/**
+ * O plano da vaga limita as dicas: "nenhuma" bloqueia o status `dica`; "leves" permite uma só.
+ * Sem plano, vale só a regra da fase.
+ */
+export function statusPermitidoNoEstado(estado: EstadoSessao, status: StatusAnalise): boolean {
+  if (!statusPermitido(estado.fase, status)) return false;
+  if (status !== "dica") return true;
+  const dicas = estado.plano?.dicas ?? "livres";
+  if (dicas === "nenhuma") return false;
+  if (dicas === "leves") return !estado.perguntas.some((p) => p.status === "dica");
+  return true;
+}
+
 /** Fases em que o /analisar roda (colhe observações). Plin é outra conta: ver PLINS_DA_FASE. */
 const FASES_QUE_ANALISAM: Fase[] = ["REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
 
@@ -113,7 +126,7 @@ export function podeLevantarPlin(
   regras: Regras = REGRAS_PADRAO,
 ): boolean {
   if (status === "ok") return false;
-  return statusPermitido(estado.fase, status) && motivoBloqueioPlin(estado, agora, regras) === null;
+  return statusPermitidoNoEstado(estado, status) && motivoBloqueioPlin(estado, agora, regras) === null;
 }
 
 /** Extrai os ids curtos do grafo (linhas "- [e1] Postgres (elipse)" ou "- [s1] A → B"). */

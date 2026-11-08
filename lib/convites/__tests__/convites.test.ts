@@ -9,7 +9,7 @@ import {
   horariosDeTeste,
   horariosDisponiveis,
 } from "@/lib/convites/horarios";
-import { candidatosTeste, ehCandidatoTeste } from "@/lib/convites/teste";
+import { candidatosTeste, ehCandidatoTeste, recebeEmail } from "@/lib/convites/teste";
 import { acharConvite } from "@/lib/convites/store";
 import { TriagemConviteEmail } from "@/lib/email/templates/TriagemConvite";
 import type { TriagemConvitePayload } from "@/lib/email/types";
@@ -123,11 +123,22 @@ describe("candidatosTeste", () => {
     ]);
   });
 
-  it("env vazio ou ausente vira lista vazia", () => {
+  it("env vazio ou ausente usa o time (Lucas, Sofia, Henrique e Giorgio)", () => {
     env.CANDIDATOS_TESTE = "   ";
-    assert.deepEqual(candidatosTeste(), []);
+    assert.equal(candidatosTeste().length, 4);
     delete env.CANDIDATOS_TESTE;
-    assert.deepEqual(candidatosTeste(), []);
+    assert.deepEqual(
+      candidatosTeste().map((c) => c.nome.split(" ")[0]),
+      ["Lucas", "Sofia", "Henrique", "Giorgio"],
+    );
+  });
+
+  it("só o Lucas recebe e-mail de verdade", () => {
+    delete env.CANDIDATOS_TESTE;
+    assert.equal(recebeEmail(" LTodaroSouza@gmail.com "), true);
+    assert.equal(recebeEmail("sofiaomarques26@gmail.com"), false);
+    assert.equal(recebeEmail("henrique.guimaa08@gmail.com"), false);
+    assert.equal(recebeEmail("alguem@exemplo.com"), false);
   });
 
   it("ehCandidatoTeste ignora caixa e espaços", () => {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { criarEscutaTranscricao, type EstadoEscuta } from "../useTranscricao";
-import { ErroTokenTranscricao } from "../tokenTranscricao";
 import type { TrechoTranscrito } from "../transcricao";
+import { ErroHttp } from "../../sessao/servidor";
 
 const andar = () => new Promise<void>((resolver) => setImmediate(resolver));
 
@@ -443,12 +443,13 @@ test("hipótese parcial retirada pelo navegador limpa a legenda sem criar final"
   assert.equal(m.trechos.filter((t) => t.final).length, 0);
 });
 
-test("erro permanente do token cai direto no navegador, sem retentativas", async (t) => {
+test("recusa definitiva do servidor ao pedir token cai direto no navegador", async (t) => {
   let chamadas = 0;
-  const m = montar(t, { obterToken: async () => { chamadas++; throw new ErroTokenTranscricao("sem chave", true); } });
+  const m = montar(t, { obterToken: async () => { chamadas++; throw new ErroHttp("sem chave", 503); } });
   m.controle.ativar(true);
   await andar();
   assert.equal(chamadas, 1);
+  assert.equal(m.sockets.length, 0);
   assert.equal(m.estado()?.motor, "navegador");
 });
 

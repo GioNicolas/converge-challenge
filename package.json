@@ -37,7 +37,7 @@
     "lucide-react": "^1.70.0",
     "monaco-editor": "^0.57.0",
     "motion": "^14.10.1",
-    "next": "15.5.4",
+    "next": "15.5.9",
     "pdfjs-dist": "6.4.299",
     "pyodide": "^0.26.4",
     "react": "19.1.0",

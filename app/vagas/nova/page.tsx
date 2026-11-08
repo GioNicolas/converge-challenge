@@ -1,7 +1,8 @@
 "use client";
 
 // Nova vaga: o estúdio com o Totti. Tudo acontece aqui, sem trocar de página:
-//   descrever a vaga → o Totti lê → conversa e plano ao vivo → revisão → vaga publicada.
+//   descrever a vaga → o Totti lê → conversa e plano ao vivo → revisão → vaga publicada → convites enviados.
+// Ao publicar, os convites saem sozinhos para todos os inscritos (EnvioConvites), sem o recrutador escolher ninguém.
 // Enquanto o plano não é confirmado, a vaga é um rascunho (não aparece no menu).
 // /vagas/nova?rascunho=<id> retoma um rascunho de onde parou.
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -9,7 +10,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
 import PreEntrevistaTotti from "@/components/pre-entrevista/PreEntrevistaTotti";
-import { atualizarRascunho, criarRascunho, lerRascunho, publicarVaga, type RascunhoVaga } from "@/lib/vagas/workspace";
+import EnvioConvites from "@/components/vagas/EnvioConvites";
+import { atualizarRascunho, criarRascunho, lerRascunho, publicarVaga, type RascunhoVaga, type VagaEmpresa } from "@/lib/vagas/workspace";
 
 function Estudio() {
   const router = useRouter();
@@ -22,7 +24,7 @@ function Estudio() {
   useEffect(() => {
     idRascunho.current = rascunho?.id ?? null;
   }, [rascunho]);
-  const [vagaId, setVagaId] = useState<string | null>(null);
+  const [vaga, setVaga] = useState<VagaEmpresa | null>(null);
 
   const onComecar = useCallback((v: Vaga) => {
     idRascunho.current = criarRascunho(v);
@@ -34,7 +36,7 @@ function Estudio() {
     if (idRascunho.current) atualizarRascunho(idRascunho.current, { combinados: { feitos, total } });
   }, []);
   const onPronta = useCallback((config: InterviewConfig) => {
-    setVagaId(publicarVaga(idRascunho.current, config));
+    setVaga(publicarVaga(idRascunho.current, config));
     idRascunho.current = null;
   }, []);
   const onSair = useCallback(() => router.push("/vagas"), [router]);
@@ -51,10 +53,14 @@ function Estudio() {
       onProgresso={onProgresso}
       onPronta={onPronta}
       onSair={onSair}
-      final={
-        vagaId
-          ? { rotulo: "Abrir a vaga", acao: () => router.push(`/vagas/vaga?id=${encodeURIComponent(vagaId)}&etapa=plano`) }
-          : undefined
+      posPublicacao={() =>
+        vaga && (
+          <EnvioConvites
+            key={vaga.id}
+            vaga={vaga}
+            onAbrir={() => router.push(`/vagas/vaga?id=${encodeURIComponent(vaga.id)}&etapa=entrevistas`)}
+          />
+        )
       }
     />
   );

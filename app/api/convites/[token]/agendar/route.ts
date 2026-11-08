@@ -3,7 +3,7 @@ import { z } from "zod";
 import { sendInterviewInvite } from "@/lib/email";
 import { acharConvite, linkDaEntrevista, novoEntrevistaId, salvarConvite } from "@/lib/convites/store";
 import { horarioAceito } from "@/lib/convites/horarios";
-import { ehCandidatoTeste } from "@/lib/convites/teste";
+import { recebeEmail } from "@/lib/convites/teste";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   const { nome, email } = convite.candidato;
   let emailStatus: "enviado" | "simulado" | "erro" = "simulado";
-  if (ehCandidatoTeste(email)) {
+  if (recebeEmail(email)) {
     try {
       const envio = await sendInterviewInvite({
         candidateName: nome,

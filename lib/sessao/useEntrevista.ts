@@ -77,7 +77,15 @@ export async function pedidoComImagem(
   }
 }
 
-export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<ControleCursor | null>) {
+/**
+ * `configId`: plano de entrevista da vaga (o servidor escolhe o kit e calibra o agente por ele).
+ * `convite`: id do link do e-mail; liga esta sessão ao candidato no painel da vaga.
+ */
+export function useEntrevista(
+  quadro: Quadro | null,
+  cursor: React.RefObject<ControleCursor | null>,
+  opcoes: { configId?: string; convite?: string } = {},
+) {
   const [sessao, setSessao] = useState<Sessao | null>(null);
   const criacaoDaSessao = useRef<Promise<Sessao> | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
@@ -158,9 +166,17 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
 
   useEffect(() => {
     let cancelado = false;
-    criacaoDaSessao.current ??= criarSessao();
+    criacaoDaSessao.current ??= criarSessao({ configId: opcoes.configId });
     criacaoDaSessao.current.then((nova) => {
       if (!cancelado) setSessao(nova);
+      // Liga a sessão ao convite (painel da vaga). Falhar não atrapalha a entrevista.
+      if (opcoes.convite && usarServidor()) {
+        void fetch("/api/convites/sessao", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ convite: opcoes.convite, sessionId: nova.sessao_id }),
+        }).catch(() => {});
+      }
     }).catch((erro) => console.warn("[sessão] não foi possível iniciar:", erro));
     return () => { cancelado = true; };
   }, []);
@@ -522,14 +538,41 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const registrarAtividade = useCallback(() => {
     ultimaAtividade.current = Date.now();
   }, []);
+  /** Transcrição do candidato: o parcial vai para a legenda (e conta como atividade); a frase final segue o mesmo caminho do texto digitado. */
+  const [parcialDoCandidato, setParcialDoCandidatoBruto] = useState("");
+  const setParcialDoCandidato = useCallback((texto: string) => {
+    if (texto.trim()) ultimaAtividade.current = Date.now();
+    setParcialDoCandidatoBruto(texto);
+  }, []);
+  /**
+   * Frase final transcrita da voz do candidato. Com uma pergunta (plin) ativa ela só entra na conversa:
+   * quem encerra a resposta é o silêncio (useFimPorSilencio), pois a fala chega em vários pedaços.
+   * Sem plin ativo, vai ao /perguntar como o texto digitado (responde, escreve requisito, conta como atividade).
+   * Devolve o requisito combinado, se houver, para quem escreve no quadro.
+   */
+  const falaDoCandidato = useCallback(
+    async (texto: string): Promise<{ requisito: string | null }> => {
+      const limpo = texto.trim();
+      if (!limpo) return { requisito: null };
+      ultimaAtividade.current = Date.now();
+      if (estadoAtual.current.plin === "PERGUNTA_ATIVA") {
+        conversa.current.push({ quem: "candidato", texto: limpo });
+        registrar("fala", { quem: "candidato", texto: limpo });
+        return { requisito: null };
+      }
+      return enviarTexto(limpo);
+    },
+    [enviarTexto, registrar],
+  );
   const encerrar = useCallback(() => {
     silenciar();
+    setParcialDoCandidato("");
     enviar({ tipo: "ENCERRAR" });
     // Entrevista encerrada: o desenho salvo localmente não é mais necessário (a prova fica no servidor).
     try {
       if (chaveDoDesenho) localStorage.removeItem(chaveDoDesenho);
     } catch {}
-  }, [enviar, silenciar, chaveDoDesenho]);
+  }, [enviar, silenciar, chaveDoDesenho, setParcialDoCandidato]);
 
   return {
     sessao,
@@ -546,5 +589,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     enviarTexto,
     registrarAtividade,
     encerrar,
+    parcialDoCandidato,
+    setParcialDoCandidato,
+    falaDoCandidato,
   };
 }
