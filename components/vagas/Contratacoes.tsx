@@ -5,8 +5,8 @@
 //   2. Uma ficha por contratado, lado a lado: o que a entrevista disse × o que aconteceu aos 90 dias.
 //      Quem fez 90 dias e não foi respondido ganha a pergunta "Como foi?": 3 toques (deu certo? em que a
 //      entrevista errou? o que surpreendeu?).
-//   3. "O que o Totti ajustou com isso": as regras que a resposta criou na memória da squad, valendo nas
-//      próximas entrevistas desta vaga (a memória é por vaga; encerrada, vale quando ela reabrir).
+//   3. "O que o Totti ajustou com isso": as regras que a resposta criou na memória da squad, já valendo
+//      para a próxima entrevista.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
@@ -552,9 +552,8 @@ function Revelar({ children }: { children: React.ReactNode }) {
 function Ajuste({ c, destaque, onDesfez }: { c: ContratacaoVista; destaque: boolean; onDesfez: () => Promise<void> }) {
   const { regras, ignorados } = c.ajuste!;
   const { vagas } = useVagas();
-  // A regra só vale nesta vaga (a memória da squad é por vaga): se ela está encerrada, o ajuste espera ela reabrir.
-  const encerrada = vagas?.find((v) => v.id === c.vagaId)?.etapa === "encerrada";
-  const quando = encerrada ? "Quando esta vaga reabrir" : "Nas próximas entrevistas desta vaga";
+  // A próxima vaga aberta no mesmo formato: é onde o ajuste aparece primeiro.
+  const proxima = vagas?.find((v) => v.etapa !== "encerrada" && v.id !== c.vagaId && v.resumo?.formato === "live_coding");
   const [desfazendo, setDesfazendo] = useState(false);
 
   async function desfazer() {
@@ -605,7 +604,7 @@ function Ajuste({ c, destaque, onDesfez }: { c: ContratacaoVista; destaque: bool
                   <span>{r.mudanca.manchete}</span>
                 </p>
                 <p className="text-[14.5px] text-texto-claro/75">
-                  {quando}, o Totti {r.mudanca.naEntrevista}.
+                  A partir da próxima entrevista, o Totti {r.mudanca.naEntrevista}.
                   {!r.ativa && <span className="ml-1 text-texto-claro/50">(desligado na memória)</span>}
                 </p>
               </li>
@@ -625,12 +624,20 @@ function Ajuste({ c, destaque, onDesfez }: { c: ContratacaoVista; destaque: bool
 
         {regras.length > 0 && (
           <div className="flex flex-wrap gap-x-5 gap-y-2 text-[13.5px]">
+            {proxima && (
+              <Link
+                href={`/vagas/vaga?id=${encodeURIComponent(proxima.id)}&etapa=plano`}
+                className="inline-flex items-center gap-1.5 font-medium text-texto-claro underline-offset-4 hover:underline"
+              >
+                Ver no plano de {proxima.cargo}
+                <ArrowRight size={14} />
+              </Link>
+            )}
             <Link
-              href={`/vagas/vaga?id=${encodeURIComponent(c.vagaId)}&etapa=aprendizado`}
-              className="inline-flex items-center gap-1.5 font-medium text-texto-claro underline-offset-4 hover:underline"
+              href="/vagas/aprendizado"
+              className="inline-flex items-center gap-1.5 text-texto-claro/70 underline-offset-4 hover:text-texto-claro hover:underline"
             >
-              O que o Totti aprendeu nesta vaga
-              <ArrowRight size={14} />
+              O que o Totti aprendeu
             </Link>
           </div>
         )}

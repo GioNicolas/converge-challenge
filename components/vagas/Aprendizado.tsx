@@ -1,17 +1,17 @@
 "use client";
 
-// Aba "O que o Totti aprendeu" de uma vaga: a Memória Viva da Squad desta vaga à vista do time.
-// Cada regra só vale na vaga de onde veio, então a aba mostra só o que veio desta vaga.
-//   1. Concordância Totti × Tech Lead: o número desta vaga e a série das vagas, com esta em destaque.
-//   2. As regras que o Totti aprendeu aqui, cada uma com a decisão de onde veio. Dá para editar, desligar e apagar.
-//   3. O que o guarda-corpo ignorou aqui: motivo não técnico nunca vira regra, mas fica visível.
-//   4. (só em desenvolvimento) Simular o Tech Lead decidindo nesta vaga, pelo mesmo caminho do clique de verdade.
+// "O que o Totti aprendeu": a Memória Viva da Squad à vista do time.
+//   1. Concordância Totti × Tech Lead por vaga: o número da vaga atual e a série subindo.
+//   2. As regras que o Totti aprendeu, cada uma com a decisão de onde veio. Dá para editar, desligar e apagar.
+//   3. O que o guarda-corpo ignorou: motivo não técnico nunca vira regra, mas fica visível.
+//   4. (só em desenvolvimento) Simular o Tech Lead decidindo, pelo mesmo caminho do clique de verdade.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-react";
 import type { ConcordanciaVaga, EfeitoRegra, MotivoIgnorado, OrigemRegra, RegraSquad } from "@/lib/squad-memory/tipos";
 import type { VisaoMemoria } from "@/lib/squad-memory/visao";
 import { curvaSuave } from "@/lib/design/motion";
+import Casca from "./Casca";
 
 const MODO_DEV = process.env.NODE_ENV !== "production";
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -21,27 +21,22 @@ function dataCurta(iso: string): string {
   return `${d.getDate()} ${MESES[d.getMonth()]}`;
 }
 
-/** De onde veio. A vaga não entra: a aba inteira já é de uma vaga. */
-function textoDaOrigem(o: OrigemRegra): string {
+function textoDaOrigem(o: OrigemRegra, vagas: Record<string, string>): string {
+  const vaga = vagas[o.vagaId];
+  const onde = vaga ? ` · ${vaga}` : "";
   switch (o.tipo) {
     case "reprovacao":
-      return `Da reprovação de ${o.candidato}`;
+      return `Da reprovação de ${o.candidato}${onde}`;
     case "aprovacao":
-      return `Da aprovação de ${o.candidato}`;
+      return `Da aprovação de ${o.candidato}${onde}`;
     case "ajuste_plano":
-      return "De um ajuste no plano";
+      return `De um ajuste no plano${onde}`;
     case "resultado_90_dias":
-      return `De ${o.candidato} aos 90 dias (${o.deuCerto ? "deu certo" : "não deu certo"})`;
+      return `De ${o.candidato} aos 90 dias (${o.deuCerto ? "deu certo" : "não deu certo"})${onde}`;
   }
 }
 
-type OpcaoVaga = { id: string; titulo: string };
-
-/**
- * `vagaIds`: os ids com que esta vaga aparece na memória (o da vaga e o da config dela, ver `vagaDaConfig`).
- * O primeiro é o id da vaga: é nele que o simulador ensina.
- */
-export default function Aprendizado({ vagaIds, vagaTitulo }: { vagaIds: string[]; vagaTitulo: string }) {
+export default function Aprendizado() {
   const [memoria, setMemoria] = useState<VisaoMemoria | null>(null);
   const [erro, setErro] = useState(false);
   /** Regras que acabaram de chegar pela simulação: ganham destaque na lista. */
@@ -66,80 +61,97 @@ export default function Aprendizado({ vagaIds, vagaTitulo }: { vagaIds: string[]
     setMemoria((m) => (m ? { ...m, regras: m.regras.map((r) => (r.id === regra.id ? regra : r)) } : m));
   const tirarRegra = (id: string) => setMemoria((m) => (m ? { ...m, regras: m.regras.filter((r) => r.id !== id) } : m));
 
-  const daVaga = (id: string) => vagaIds.includes(id);
-  const regras = memoria?.regras.filter((r) => daVaga(r.origem.vagaId)) ?? [];
-  const ignorados = memoria?.ignorados.filter((i) => daVaga(i.origem.vagaId)) ?? [];
-  const ativas = regras.filter((r) => r.ativa).length;
-
-  if (erro && !memoria)
-    return (
-      <div className="cartao flex items-center justify-between gap-4 p-5 text-[14px] text-texto">
-        Não consegui carregar a memória do time.
-        <button onClick={() => void carregar()} className="rounded-full bg-texto px-4 py-1.5 text-[13px] text-texto-claro">
-          Tentar de novo
-        </button>
-      </div>
-    );
-
-  if (!memoria) return <Esqueleto />;
+  const ativas = memoria?.regras.filter((r) => r.ativa).length ?? 0;
 
   return (
-    <div className="flex flex-col gap-10">
-      <Concordancia porVaga={memoria.concordancia.porVaga} daVaga={daVaga} />
-
-      {MODO_DEV && (
-        <Simulador
-          vaga={{ id: vagaIds[0], titulo: vagaTitulo }}
-          onAprendeu={(nova, ids) => {
-            setMemoria(nova);
-            setNovas(new Set(ids));
-          }}
-        />
-      )}
-
-      <Secao
-        titulo="Critérios aprendidos"
-        detalhe={regras.length ? `${ativas} de ${regras.length} ${regras.length === 1 ? "ligado" : "ligados"}` : undefined}
-        apoio="Os ligados entram no plano e na avaliação das próximas entrevistas desta vaga."
+    <Casca>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: curvaSuave }}
+        className="mx-auto flex max-w-[1120px] flex-col gap-10"
       >
-        {regras.length === 0 ? (
-          <div className="cartao p-6 text-[14px] text-texto-suave">
-            Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão, o Totti guarda aqui o critério técnico.
+        <header className="flex flex-col gap-2">
+          <span className="rotulo text-texto-suave">Memória da squad</span>
+          <h1 className="titulo-display text-[34px] text-texto sm:text-[40px]">O que o Totti aprendeu</h1>
+          <p className="max-w-[640px] text-[15px] leading-relaxed text-texto-suave">
+            Cada vez que o Tech Lead aprova ou reprova alguém, o Totti aprende um critério técnico deste time e usa na
+            próxima entrevista. Nada fica escondido: edite, desligue ou apague o que quiser.
+          </p>
+        </header>
+
+        {erro && !memoria && (
+          <div className="cartao flex items-center justify-between gap-4 p-5 text-[14px] text-texto">
+            Não consegui carregar a memória do time.
+            <button onClick={() => void carregar()} className="rounded-full bg-texto px-4 py-1.5 text-[13px] text-texto-claro">
+              Tentar de novo
+            </button>
           </div>
-        ) : (
-          <ul className="cartao overflow-hidden py-1">
-            <AnimatePresence initial={false}>
-              {regras.map((r) => (
-                <LinhaRegra
-                  key={r.id}
-                  regra={r}
-                  nova={novas.has(r.id)}
-                  criterios={memoria.criterios}
-                  onMudou={trocarRegra}
-                  onApagou={tirarRegra}
-                />
-              ))}
-            </AnimatePresence>
-          </ul>
         )}
-      </Secao>
 
-      <Secao
-        titulo="O que o Totti ignorou"
-        detalhe={ignorados.length ? String(ignorados.length) : undefined}
-        apoio="Motivo que não é técnico nunca vira regra."
-      >
-        {ignorados.length === 0 ? (
-          <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado.</div>
-        ) : (
-          <ul className="cartao overflow-hidden py-1">
-            {ignorados.map((m) => (
-              <LinhaIgnorado key={m.id} item={m} />
-            ))}
-          </ul>
+        {!memoria && !erro && <Esqueleto />}
+
+        {memoria && (
+          <>
+            <Concordancia porVaga={memoria.concordancia.porVaga} />
+
+            {MODO_DEV && (
+              <Simulador
+                onAprendeu={(nova, ids) => {
+                  setMemoria(nova);
+                  setNovas(new Set(ids));
+                }}
+              />
+            )}
+
+            <Secao
+              titulo="Critérios aprendidos"
+              detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
+              apoio="Os ligados entram no plano e na avaliação da próxima entrevista, marcados como critério aprendido com o time."
+            >
+              {memoria.regras.length === 0 ? (
+                <div className="cartao p-6 text-[14px] text-texto-suave">
+                  Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão, o Totti guarda aqui o critério
+                  técnico.
+                </div>
+              ) : (
+                <ul className="cartao overflow-hidden py-1">
+                  <AnimatePresence initial={false}>
+                    {memoria.regras.map((r) => (
+                      <LinhaRegra
+                        key={r.id}
+                        regra={r}
+                        nova={novas.has(r.id)}
+                        criterios={memoria.criterios}
+                        vagas={memoria.vagas}
+                        onMudou={trocarRegra}
+                        onApagou={tirarRegra}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </ul>
+              )}
+            </Secao>
+
+            <Secao
+              titulo="O que o Totti ignorou"
+              detalhe={memoria.ignorados.length ? String(memoria.ignorados.length) : undefined}
+              apoio="Motivo que não é técnico nunca vira regra. Fica registrado aqui para o time ver o que foi descartado e por quê."
+            >
+              {memoria.ignorados.length === 0 ? (
+                <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado até agora.</div>
+              ) : (
+                <ul className="cartao overflow-hidden py-1">
+                  {memoria.ignorados.map((m) => (
+                    <LinhaIgnorado key={m.id} item={m} vagas={memoria.vagas} />
+                  ))}
+                </ul>
+              )}
+            </Secao>
+          </>
         )}
-      </Secao>
-    </div>
+      </motion.div>
+    </Casca>
   );
 }
 
@@ -171,10 +183,9 @@ function Esqueleto() {
 // 1. Concordância
 // ---------------------------------------------------------------------------
 
-function Concordancia({ porVaga, daVaga }: { porVaga: ConcordanciaVaga[]; daVaga: (id: string) => boolean }) {
+function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
   const comNumero = porVaga.filter((v) => v.pct !== null);
-  // O número grande é o desta vaga; o gráfico continua com as outras, para mostrar a série no tempo.
-  const atual = comNumero.find((v) => daVaga(v.vagaId));
+  const atual = comNumero.at(-1);
   const primeira = comNumero[0];
   const delta = atual && primeira && atual !== primeira ? atual.pct! - primeira.pct! : null;
 
@@ -194,7 +205,7 @@ function Concordancia({ porVaga, daVaga }: { porVaga: ConcordanciaVaga[]; daVaga
               {atual.pct}%
             </motion.span>
             <p className="max-w-[420px] text-[14.5px] leading-relaxed text-texto">
-              O Tech Lead decidiu igual ao Totti em{" "}
+              Na vaga atual ({atual.vagaTitulo}), o Tech Lead decidiu igual ao Totti em{" "}
               <span className="numero font-medium">
                 {atual.concordou} de {atual.total}
               </span>{" "}
@@ -217,43 +228,18 @@ function Concordancia({ porVaga, daVaga }: { porVaga: ConcordanciaVaga[]; daVaga
             </p>
           </>
         ) : (
-          <p className="max-w-[420px] text-[14.5px] text-texto-suave">Aparece depois das primeiras decisões do Tech Lead.</p>
+          <p className="text-[14.5px] text-texto-suave">A concordância aparece depois das primeiras decisões.</p>
         )}
       </div>
-      {comNumero.length > 0 && (
-        <GraficoConcordancia
-          vagas={janela(comNumero, atual?.vagaId)}
-          escolhida={atual?.vagaId}
-          maisRecente={comNumero.at(-1)?.vagaId}
-        />
-      )}
+      {comNumero.length > 0 && <GraficoConcordancia vagas={comNumero} />}
     </section>
   );
 }
 
 const ALTURA_GRAFICO = 148;
-/** Quantas colunas o gráfico mostra: com dezenas de vagas, só as mais recentes (e sempre a escolhida). */
-const COLUNAS_GRAFICO = 6;
 
-/** As últimas vagas da série; se a escolhida for mais antiga, a janela começa nela. */
-function janela(vagas: ConcordanciaVaga[], escolhida: string | undefined): ConcordanciaVaga[] {
-  if (vagas.length <= COLUNAS_GRAFICO) return vagas;
-  const i = vagas.findIndex((v) => v.vagaId === escolhida);
-  const inicio = i >= 0 ? Math.min(i, vagas.length - COLUNAS_GRAFICO) : vagas.length - COLUNAS_GRAFICO;
-  return vagas.slice(inicio, inicio + COLUNAS_GRAFICO);
-}
-
-/** Colunas por vaga, da mais antiga para a atual. Esta vaga em tinta, as outras em cinza. */
-function GraficoConcordancia({
-  vagas,
-  escolhida,
-  maisRecente,
-}: {
-  vagas: ConcordanciaVaga[];
-  escolhida: string | undefined;
-  /** A vaga mais recente de toda a série (a janela pode não terminar nela). */
-  maisRecente: string | undefined;
-}) {
+/** Colunas por vaga, da mais antiga para a atual. A atual em tinta, as anteriores em cinza. */
+function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
   const [foco, setFoco] = useState<string | null>(null);
   return (
     <figure className="flex flex-col gap-2">
@@ -284,8 +270,7 @@ function GraficoConcordancia({
           </div>
           <ul className="relative flex">
             {vagas.map((v, i) => {
-              const atual = v.vagaId === maisRecente;
-              const marcada = v.vagaId === escolhida;
+              const atual = i === vagas.length - 1;
               const aberto = foco === v.vagaId;
               const altura = Math.max(2, (ALTURA_GRAFICO * (v.pct ?? 0)) / 100);
               return (
@@ -308,13 +293,13 @@ function GraficoConcordancia({
                         delay: 0.1 + i * 0.08,
                         ease: curvaSuave,
                       }}
-                      className={`relative w-6 rounded-t-[4px] transition-[opacity,background-color] ${
-                        marcada ? "bg-texto" : "bg-[#c4bdb1] group-hover:bg-[#a9a196]"
-                      } ${foco && !aberto ? "opacity-60" : ""}`}
+                      className={`relative w-6 rounded-t-[4px] transition-opacity ${atual ? "bg-texto" : "bg-[#c4bdb1]"} ${
+                        foco && !aberto ? "opacity-60" : ""
+                      }`}
                     >
                       <span
                         className={`numero absolute -top-6 left-1/2 -translate-x-1/2 text-[12.5px] whitespace-nowrap ${
-                          marcada ? "font-semibold text-texto" : "text-texto-suave"
+                          atual ? "font-semibold text-texto" : "text-texto-suave"
                         }`}
                       >
                         {v.pct}%
@@ -345,7 +330,7 @@ function GraficoConcordancia({
                   </div>
                   <span
                     className={`mt-2 line-clamp-2 px-1 text-center text-[12px] leading-tight ${
-                      marcada ? "font-medium text-texto" : "text-texto-suave"
+                      atual ? "font-medium text-texto" : "text-texto-suave"
                     }`}
                   >
                     {v.vagaTitulo}
@@ -403,12 +388,14 @@ function LinhaRegra({
   regra,
   nova,
   criterios,
+  vagas,
   onMudou,
   onApagou,
 }: {
   regra: RegraSquad;
   nova: boolean;
   criterios: VisaoMemoria["criterios"];
+  vagas: Record<string, string>;
   onMudou: (r: RegraSquad) => void;
   onApagou: (id: string) => void;
 }) {
@@ -486,7 +473,7 @@ function LinhaRegra({
               </div>
               <p className="text-[15px] leading-snug text-texto">{regra.texto}</p>
               <p className="text-[12.5px] text-texto-suave">
-                {textoDaOrigem(regra.origem)} · {dataCurta(regra.criadaEm)}
+                {textoDaOrigem(regra.origem, vagas)} · {dataCurta(regra.criadaEm)}
               </p>
               {falha && <p className="text-[12.5px] text-perigo">{falha}</p>}
             </div>
@@ -677,7 +664,7 @@ function EditorRegra({
 // 3. Ignorados
 // ---------------------------------------------------------------------------
 
-function LinhaIgnorado({ item }: { item: MotivoIgnorado }) {
+function LinhaIgnorado({ item, vagas }: { item: MotivoIgnorado; vagas: Record<string, string> }) {
   return (
     <li className="linha-lista flex gap-3 px-5 py-4">
       <ShieldOff size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-texto-suave" />
@@ -687,7 +674,7 @@ function LinhaIgnorado({ item }: { item: MotivoIgnorado }) {
         </p>
         <p className="text-[13px] text-texto">Ignorado: {item.porque}.</p>
         <p className="text-[12.5px] text-texto-suave">
-          {textoDaOrigem(item.origem)} · {dataCurta(item.criadoEm)}
+          {textoDaOrigem(item.origem, vagas)} · {dataCurta(item.criadoEm)}
         </p>
       </div>
     </li>
@@ -713,8 +700,7 @@ const SUGESTOES: { decisao: "aprovado" | "reprovado"; motivo: string }[] = [
   },
 ];
 
-/** Ensina na vaga escolhida na tela, como se a decisão fosse de uma entrevista dela. */
-function Simulador({ vaga, onAprendeu }: { vaga: OpcaoVaga; onAprendeu: (memoria: VisaoMemoria, novas: string[]) => void }) {
+function Simulador({ onAprendeu }: { onAprendeu: (memoria: VisaoMemoria, novas: string[]) => void }) {
   const [decisao, setDecisao] = useState<"aprovado" | "reprovado">("reprovado");
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -731,7 +717,7 @@ function Simulador({ vaga, onAprendeu }: { vaga: OpcaoVaga; onAprendeu: (memoria
       const r = await fetch("/api/squad-memory/simular", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decisao, motivo, vagaId: vaga.id, vagaTitulo: vaga.titulo }),
+        body: JSON.stringify({ decisao, motivo }),
       });
       if (!r.ok) throw new Error(String(r.status));
       const { aprendizado, memoria } = (await r.json()) as {
@@ -756,7 +742,7 @@ function Simulador({ vaga, onAprendeu }: { vaga: OpcaoVaga; onAprendeu: (memoria
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Simular o Tech Lead</h2>
         <span className="text-[12px] text-texto-suave">
-          Só em desenvolvimento · Rafael Moura, {vaga.titulo} · o Totti recomendou avançar
+          Só em desenvolvimento · Rafael Moura, Backend Pleno · o Totti recomendou avançar
         </span>
       </div>
       <form
@@ -821,7 +807,7 @@ function Simulador({ vaga, onAprendeu }: { vaga: OpcaoVaga; onAprendeu: (memoria
             exit={{ opacity: 0 }}
             className="flex flex-col gap-1 rounded-[12px] bg-superficie px-4 py-3 text-[13.5px]"
           >
-            <span className="rotulo text-texto-suave">O que o Totti respondeu</span>
+            <span className="rotulo text-texto-suave">Resposta do Totti na thread</span>
             {resposta.regras.map((r) => (
               <span key={r.id} className="text-texto">
                 <span className="font-medium">Aprendi:</span> {r.texto}

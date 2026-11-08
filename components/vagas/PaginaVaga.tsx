@@ -7,7 +7,6 @@
 //   Escores    → só quem concluiu, com o lugar do escore reservado (o escore ainda vai ser construído).
 //   Plano      → o que foi combinado com o Totti, o que ele aprendeu com o time e o link de convite.
 //   Contratações → (só em vaga que contratou) o ciclo dos 90 dias: como foi cada contratação.
-//   O que o Totti aprendeu → a memória da squad desta vaga: concordância, critérios aprendidos e o que foi ignorado.
 // Em Candidatos e Escores, as entrevistas feitas de verdade pelo link vêm antes, com o relatório.
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -48,7 +47,6 @@ import {
 } from "@/lib/vagas/entrevistas";
 import { curvaSuave } from "@/lib/design/motion";
 import AprendidoNoPlano from "./AprendidoNoPlano";
-import Aprendizado from "./Aprendizado";
 import Casca from "./Casca";
 import Contratacoes from "./Contratacoes";
 import { Abas, Busca, Paginacao, Seletor, Voltar } from "./controles";
@@ -142,9 +140,6 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
       {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} temReais={reais.length > 0} />}
       {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} temReais={reais.length > 0} />}
       {etapa === "contratacoes" && <Contratacoes vaga={vaga} />}
-      {etapa === "aprendizado" && (
-        <Aprendizado vagaIds={[vaga.id, ...(vaga.resumo ? [vaga.resumo.configId] : [])]} vagaTitulo={vaga.cargo} />
-      )}
     </motion.div>
   );
 }
@@ -743,7 +738,7 @@ function Plano({ vaga }: { vaga: VagaEmpresa }) {
         ))}
       </section>
 
-      {vaga.etapa !== "encerrada" && <AprendidoNoPlano formato={r.formato} vagaIds={[vaga.id, r.configId]} />}
+      {vaga.etapa !== "encerrada" && <AprendidoNoPlano formato={r.formato} />}
 
       {vaga.etapa !== "encerrada" && (
         <section className="cartao flex flex-col gap-3 p-5">
