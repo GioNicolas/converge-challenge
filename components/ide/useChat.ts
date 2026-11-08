@@ -9,6 +9,8 @@ interface ChatDeps {
   applyCommands: (commands: EditorCommand[]) => void;
   onAgentReply?: (texto: string) => Promise<unknown>;
   onCancelReply?: () => void;
+  /** O candidato pediu, falando, para encerrar a entrevista. */
+  onFinishRequest?: () => void;
   /** Código e linguagem de agora: vão junto de cada turno para o Totti nunca comentar versão velha. */
   getLiveCode?: () => { code: string; language: string };
 }
@@ -50,7 +52,7 @@ function errorText(err: unknown): string {
  * dois encerrar ("pode seguir" do agente ou "voltar a programar" do candidato). As conversas encerradas ficam
  * em `previous`. `epochRef` invalida respostas que chegam depois de fechar.
  */
-export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onCancelReply, getLiveCode }: ChatDeps) {
+export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onCancelReply, onFinishRequest, getLiveCode }: ChatDeps) {
   const [open, setOpen] = useState(false);
   const [blip, setBlip] = useState<Blip | null>(null);
   /** Há uma conversa em andamento, visível ou não (a fala solta esperando a decisão do entrevistador). */
@@ -72,8 +74,8 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
   const epochRef = useRef(0);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const turnoRef = useRef(0);
-  const vozRef = useRef({ onAgentReply, onCancelReply });
-  vozRef.current = { onAgentReply, onCancelReply };
+  const vozRef = useRef({ onAgentReply, onCancelReply, onFinishRequest });
+  vozRef.current = { onAgentReply, onCancelReply, onFinishRequest };
   const liveCodeRef = useRef(getLiveCode);
   liveCodeRef.current = getLiveCode;
 
@@ -162,6 +164,12 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
           messages: [...contexto, ...history].map(({ role, text }) => ({ role, text })),
         });
         if (!vigente()) return;
+        if (res.finish) {
+          if (!ativa.visivel) descartarOculta();
+          setBusy(false);
+          vozRef.current.onFinishRequest?.();
+          return;
+        }
         if (res.listening || !res.reply.trim()) {
           if (!ativa.visivel) descartarOculta();
           else setBusy(false);

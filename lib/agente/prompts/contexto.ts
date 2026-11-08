@@ -72,7 +72,10 @@ export function perguntasFeitasEmTexto(perguntas: PerguntaFeita[]): string {
     .map((p) => {
       const desfecho = p.desfecho ? ROTULO_DESFECHO[p.desfecho] : "sem resposta registrada";
       const resposta = p.resposta && p.desfecho === "respondeu" ? ` Ele disse: ${JSON.stringify(p.resposta)}` : "";
-      return `${p.numero}. [${p.status}${p.degrau ? `, degrau ${p.degrau}` : ""}] "${p.pergunta}" (assunto: ${p.nota ?? "-"}; elementos: ${p.elementos.join(", ") || "nenhum"}) → ${desfecho}.${resposta}`;
+      const continuacoes = p.seguimentos?.length
+        ? ` Continuações no mesmo fio (${p.seguimentos.length}): ${p.seguimentos.map((s) => JSON.stringify(s)).join("; ")}.`
+        : "";
+      return `${p.numero}. [${p.status}${p.degrau ? `, degrau ${p.degrau}` : ""}] "${p.pergunta}" (assunto: ${p.nota ?? "-"}; elementos: ${p.elementos.join(", ") || "nenhum"})${continuacoes} → ${desfecho}.${resposta}`;
     })
     .join("\n");
 }

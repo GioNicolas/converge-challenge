@@ -1,4 +1,15 @@
 /** Regras de turno da conversa ao vivo, comuns ao quadro e ao live coding. */
+
+/**
+ * Silêncio que fecha a fala da pessoa, contado depois do trecho final da transcrição. O Scribe só fecha um trecho
+ * depois de ~1 s calado; somando os dois, a fala vai ao agente depois de ~3 s sem voz. Menos que isso cortava
+ * quem só parou para pensar no meio da frase.
+ */
+export const PAUSA_FIM_DA_FALA_MS = 2000;
+
+/** Pausa da pessoa a partir da qual o agente pode tomar a vez por iniciativa própria (pergunta, convite). */
+export const PAUSA_PARA_TOMAR_A_VEZ_MS = 3000;
+
 /** Uma transcrição parcial mantém o turno aberto, mesmo durante pausas da pessoa. */
 export function podeTomarTurno(opcoes: {
   agora: number;
@@ -8,7 +19,7 @@ export function podeTomarTurno(opcoes: {
   aguardandoResposta: boolean;
 }): boolean {
   return !opcoes.falaParcial && !opcoes.agenteFalando && !opcoes.aguardandoResposta
-    && opcoes.agora - opcoes.ultimaFalaEm >= 900;
+    && opcoes.agora - opcoes.ultimaFalaEm >= PAUSA_PARA_TOMAR_A_VEZ_MS;
 }
 
 /**

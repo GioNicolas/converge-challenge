@@ -6,32 +6,49 @@ const andar = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 
 test("falas chegam ao agente em ordem, sem pedidos simultâneos", async () => {
   const recebidas: string[] = [];
-  let liberar: (() => void) | undefined;
-  const fila = new FilaFalas(async (texto) => {
-    recebidas.push(texto);
-    if (texto === "primeira") await new Promise<void>((resolve) => { liberar = resolve; });
-  }, () => assert.fail("sem erro esperado"));
+  const fila = new FilaFalas(async (texto) => { recebidas.push(texto); }, () => assert.fail("sem erro esperado"));
   fila.adicionar("primeira");
+  await andar();
   fila.adicionar("segunda");
-  assert.deepEqual(recebidas, ["primeira"]);
-  liberar?.();
   await andar();
   assert.deepEqual(recebidas, ["primeira", "segunda"]);
 });
 
-test("pedaços que chegam com um pedido em voo viram uma fala só", async () => {
+test("fala nova com um pedido em voo cancela o pedido e manda tudo junto", async () => {
   const recebidas: string[] = [];
-  let liberar: (() => void) | undefined;
-  const fila = new FilaFalas(async (texto) => {
+  const canceladas: string[] = [];
+  const fila = new FilaFalas((texto, sinal) => {
     recebidas.push(texto);
-    if (recebidas.length === 1) await new Promise<void>((resolve) => { liberar = resolve; });
-  }, () => assert.fail("sem erro esperado"));
+    if (recebidas.length > 1) return Promise.resolve();
+    return new Promise<void>((_, rejeitar) => sinal.addEventListener("abort", () => { canceladas.push(texto); rejeitar(new Error("abort")); }));
+  }, () => assert.fail("cancelar não é falha"));
   fila.adicionar("então eu acho que");
   fila.adicionar("o cache fica na frente");
   fila.adicionar("e quanto de leitura a gente tem?");
-  liberar?.();
   await andar();
-  assert.deepEqual(recebidas, ["então eu acho que", "o cache fica na frente e quanto de leitura a gente tem?"]);
+  assert.deepEqual(canceladas, ["então eu acho que"]);
+  assert.deepEqual(recebidas, ["então eu acho que", "então eu acho que o cache fica na frente e quanto de leitura a gente tem?"]);
+});
+
+test("resposta pronta e ainda não ouvida é descartada e a fala vai inteira", async () => {
+  const recebidas: string[] = [];
+  let naoOuvida = true;
+  let descartes = 0;
+  const fila = new FilaFalas(async (texto) => { recebidas.push(texto); }, () => assert.fail("sem erro"), {
+    respostaNaoOuvida: () => naoOuvida,
+    descartarResposta: () => { descartes++; },
+  });
+  fila.adicionar("eu guardaria no banco");
+  await andar();
+  fila.adicionar("só a URL curta");
+  await andar();
+  assert.equal(descartes, 1);
+  assert.deepEqual(recebidas, ["eu guardaria no banco", "eu guardaria no banco só a URL curta"]);
+  // A resposta já foi ouvida: a fala seguinte vai sozinha.
+  naoOuvida = false;
+  fila.adicionar("e a original também");
+  await andar();
+  assert.deepEqual(recebidas.at(-1), "e a original também");
 });
 
 test("falha tenta de novo uma vez sozinha", async () => {
@@ -40,7 +57,7 @@ test("falha tenta de novo uma vez sozinha", async () => {
   const fila = new FilaFalas(async (texto) => {
     tentativas.push(texto);
     if (falhas-- > 0) throw new Error("503");
-  }, () => assert.fail("o retry resolve"), 1);
+  }, () => assert.fail("o retry resolve"), { esperaDoRetryMs: 1 });
   fila.adicionar("sim");
   await andar();
   assert.deepEqual(tentativas, ["sim", "sim"]);
@@ -53,7 +70,7 @@ test("falha duas vezes: avisa e segue com as próximas falas (não trava a conve
   const fila = new FilaFalas(async (texto) => {
     tentativas.push(texto);
     if (falhar) throw new Error("rede");
-  }, (texto) => erros.push(texto), 1);
+  }, (texto) => erros.push(texto), { esperaDoRetryMs: 1 });
   fila.adicionar("sim");
   await andar();
   assert.deepEqual(erros, ["sim"]);

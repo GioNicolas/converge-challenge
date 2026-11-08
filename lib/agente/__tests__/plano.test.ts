@@ -37,10 +37,10 @@ describe("planoDaConfig", () => {
   });
 
   it("respeita tom e dicas da recrutadora e corta notas longas", () => {
-    const p = planoDaConfig(config({ tone: "desafiador", hints: "nenhuma", recruiterNotes: "x".repeat(900) }));
+    const p = planoDaConfig(config({ tone: "desafiador", hints: "nenhuma", recruiterNotes: "x".repeat(1500) }));
     assert.equal(p.tom, "desafiador");
     assert.equal(p.dicas, "nenhuma");
-    assert.equal(p.notas.length, 500);
+    assert.equal(p.notas.length, 1000);
   });
 });
 
@@ -125,5 +125,20 @@ describe("dicas conforme o plano (statusPermitidoNoEstado)", () => {
     assert.equal(statusPermitidoNoEstado(e, "dica"), true);
     const comUma = { ...e, perguntas: [{ numero: 1, status: "dica" as const, pergunta: "p", nota: null, elementos: [], degrau: 1, fase: "APROFUNDAMENTO" as const, feitaEm: 0 }] };
     assert.equal(statusPermitidoNoEstado(comUma, "dica"), false);
+  });
+});
+
+describe("plano com o contexto da vaga", () => {
+  it("leva a descrição da vaga e os critérios da pré-entrevista ao prompt", () => {
+    const p = planoDaConfig(config({
+      jobDescription: "Time de links curtos, cuida do redirecionamento e das métricas.",
+      criteria: [
+        { id: "req", name: "Requisitos", description: "Levanta escopo e volume antes de desenhar.", weight: 0.5, focus: "tecnico" },
+        { id: "dados", name: "Componentes e dados", description: "Modelo de dados coerente com o problema.", weight: 0.5, focus: "tecnico" },
+      ],
+    }));
+    const bloco = blocoDoPlano(p);
+    assert.match(bloco, /<vaga>Time de links curtos/);
+    assert.match(bloco, /- Componentes e dados: Modelo de dados coerente/);
   });
 });

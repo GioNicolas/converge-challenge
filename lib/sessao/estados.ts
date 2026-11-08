@@ -39,6 +39,8 @@ export type EventoEntrevista =
   | { tipo: "PLIN_DEMO"; resposta: RespostaAnalise }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "RESPOSTA_TERMINOU" }
+  /** O Totti emendou uma pergunta de continuação na resposta: o mesmo fio segue ativo, com a fala nova. */
+  | { tipo: "SEGUIMENTO"; pergunta: string }
   /** O candidato disse "pronto"/"terminei" no alto nível: segue para o aprofundamento sem esperar. */
   | { tipo: "CANDIDATO_CONCLUIU" }
   | { tipo: "ENCERRAR" };
@@ -49,7 +51,7 @@ export type Regras = {
 };
 
 export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: 60_000,
+  intervaloEntrePerguntasMs: 30_000,
   maxPerguntas: 5,
 };
 
@@ -204,6 +206,10 @@ export function transicionar(
         conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
       };
     }
+
+    case "SEGUIMENTO":
+      if (estado.plin !== "PERGUNTA_ATIVA" || !estado.perguntaAtiva) return estado;
+      return { ...estado, perguntaAtiva: { ...estado.perguntaAtiva, pergunta: evento.pergunta } };
 
     case "RESPOSTA_TERMINOU": {
       if (estado.plin !== "PERGUNTA_ATIVA") return estado;

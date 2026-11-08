@@ -275,6 +275,8 @@ export const ChatResponse = z.object({
   listening: z.boolean().optional(),
   /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
   concluded: z.boolean().optional(),
+  /** O candidato pediu para encerrar a entrevista: a IDE se despede e encerra a sessão. */
+  finish: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 

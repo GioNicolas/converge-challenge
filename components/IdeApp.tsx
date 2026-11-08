@@ -19,8 +19,8 @@ import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
-import { comoFuncionaLiveCoding } from "@/lib/conversa/instrucoes";
-import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
+import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
+import { deveAguardarParaFalar, PAUSA_FIM_DA_FALA_MS, podeTomarTurno } from "@/lib/conversa/turnos";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import ControleVoz from "./voz/ControleVoz";
 import Legenda from "./Legenda";
@@ -36,9 +36,9 @@ const MARGEM_RECOLHIDO = 12;
 /** Espaço em cima do editor com o painel recolhido: pílula e botões numa fileira só. */
 const TOPO_RECOLHIDO = 104;
 /** Silêncio real depois da última frase final antes de a fala ir para o Totti (evita cortar no meio da frase). */
-const FALA_SILENCIO_MS = 750;
+const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 /** Teto da espera acima: ruído constante no microfone não segura a fala para sempre. */
-const FALA_ESPERA_MAX_MS = 4000;
+const FALA_ESPERA_MAX_MS = 12_000;
 /** Barge-in: volume do microfone e tempo contínuo acima dele para o Totti calar e ouvir o candidato. */
 const VOLUME_BARGE_IN = 0.2;
 const TEMPO_BARGE_IN_MS = 380;
@@ -160,12 +160,14 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     cmds.forEach((c) => executorRef.current?.(c));
   }, []);
 
+  const encerrarPelaVozRef = useRef<() => void>(() => {});
   const chat = useChat({
     sessionId: session.sessionId,
     sendEvent: session.sendEvent,
     applyCommands,
     onAgentReply: falarNaVez,
     onCancelReply: voz.parar,
+    onFinishRequest: () => encerrarPelaVozRef.current(),
     getLiveCode: capture.getLiveCode,
   });
 
@@ -203,8 +205,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       ouvirSolta(pendente);
     }
   });
-  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de 750 ms de
-  // silêncio real. Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
+  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de ~3 s sem voz
+  // (PAUSA_FIM_DA_FALA_MS mais o 1 s do Scribe). Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
   const bufferFalaRef = useRef("");
   const bufferDesdeRef = useRef(0);
   const bufferTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -352,6 +354,21 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       console.error("POST /api/dev/empecilho falhou", err);
     }
   }
+
+  /** Pediu, falando, para encerrar: o Totti se despede e a sessão fecha, sem a última pergunta do botão. */
+  async function encerrarPelaVoz() {
+    if (session.sessionId === null || finalizando || session.ended) return;
+    setFinalizando(true);
+    session.setIncomingBlip(null);
+    lembrarFala({ role: "agent", text: DESPEDIDA_LIVE_CODING });
+    void registrarEvento({ type: "speech", role: "agent", text: DESPEDIDA_LIVE_CODING }).catch(() => {});
+    await Promise.all([
+      falarNaVez(DESPEDIDA_LIVE_CODING).catch(() => {}),
+      capture.flushSnapshot().catch(() => {}),
+    ]);
+    session.endSession("button");
+  }
+  encerrarPelaVozRef.current = () => void encerrarPelaVoz();
 
   /** Confirmou que quer finalizar: se o agente ainda tem o que perguntar, abre a última conversa antes. */
   async function finalizar() {

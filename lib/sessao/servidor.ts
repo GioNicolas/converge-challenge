@@ -18,7 +18,7 @@ const EsquemaSessao: z.ZodType<Sessao> = z.object({
   despedida: z.string().nullable().optional(),
 });
 
-const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false), visual: EsquemaVisualOpcional });
+const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false), seguimento: z.boolean().default(false), encerrar: z.boolean().default(false), visual: EsquemaVisualOpcional });
 const EsquemaAlinhamento: z.ZodType<Alinhamento> = z.object({
   characters: z.array(z.string()),
   character_start_times_seconds: z.array(z.number().finite().nonnegative()),
@@ -115,9 +115,9 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   }
 }
 
-export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[] } = {}): Promise<{ responder: boolean; texto: string; requisito: string | null; concluiu?: boolean; visual?: AcaoVisual[] }> {
+export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[]; substitui?: boolean } = {}, sinal?: AbortSignal): Promise<{ responder: boolean; texto: string; requisito: string | null; concluiu?: boolean; seguimento?: boolean; encerrar?: boolean; visual?: AcaoVisual[] }> {
   const rota = rotaDaSessao(sessaoId, "perguntar");
-  const dados = await lerJson(rota, jsonPost({ sessao_id: sessaoId, fase, texto, ...contexto }));
+  const dados = await lerJson(rota, jsonPost({ sessao_id: sessaoId, fase, texto, ...contexto }, sinal));
   return validar(rota, dados, EsquemaPergunta);
 }
 

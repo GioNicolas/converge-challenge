@@ -51,7 +51,8 @@ describe("perguntar", () => {
   it("limita a 3 frases (sem cortar decimais) e não repete requisito já no quadro", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Um. São 2.5 mil por segundo. Três. Quatro.", requisito: "Retenção: 5 anos" }]);
     const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?", requisitosAtuais: ["Retenção: 5 anos"] }, AGORA);
-    assert.equal(r.texto, "Um. São 2.5 mil por segundo. Três.");
+    // As 3 frases do modelo ficam inteiras; como nenhuma devolve a vez, entra um convite curto no fim.
+    assert.equal(r.texto, "Um. São 2.5 mil por segundo. Três. Continua daí.");
     assert.equal(r.requisito, null);
   });
 
@@ -157,5 +158,38 @@ describe("foto e mudanças do quadro no /perguntar", () => {
     assert.equal(llm.chamadas[0].imagem, "data:image/jpeg;base64,/9j/");
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /acabou de mudar no desenho.*adicionou \[r2\] Cache/);
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
+  });
+});
+
+describe("briefing da entrevista no /perguntar", () => {
+  const comEvidencia = {
+    ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }),
+    fase: "APROFUNDAMENTO" as const,
+    faseIniciadaEm: AGORA,
+    cobertura: { ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }).cobertura, escalabilidade: { positivo: 1, negativo: 0, neutro: 0 } },
+    observacoes: [{ criterio: "escalabilidade", sinal: "positivo" as const, espontaneo: true, evidencia: "cache de leitura para o pico", em: AGORA, fase: "APROFUNDAMENTO" as const }],
+  };
+
+  it("o briefing vai no bloco dinâmico, com as evidências e o que falta", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), comEvidencia, { fase: "APROFUNDAMENTO", texto: "então, o cache fica na frente" }, AGORA);
+    const dinamico = llm.chamadas[0].sistema.dinamico ?? "";
+    assert.match(dinamico, /BRIEFING DA ENTREVISTA/);
+    assert.match(dinamico, /cache de leitura para o pico/);
+    assert.match(dinamico, /O que ainda falta/);
+  });
+
+  it("o bloco estático não muda com a evidência (continua igual para o mesmo kit)", async () => {
+    const a = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    const b = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(a), comEvidencia, { fase: "APROFUNDAMENTO", texto: "ok" }, AGORA);
+    await perguntar(deps(b), { ...comEvidencia, observacoes: [], cobertura: estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }).cobertura }, { fase: "APROFUNDAMENTO", texto: "ok" }, AGORA);
+    assert.equal(a.chamadas[0].sistema.estatico, b.chamadas[0].sistema.estatico);
+  });
+
+  it("o prompt estático manda usar o briefing sem cobrar o que já tem evidência", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "ok" }, AGORA);
+    assert.match(llm.chamadas[0].sistema.estatico, /BRIEFING DA ENTREVISTA mostra o que você já tem/);
   });
 });
