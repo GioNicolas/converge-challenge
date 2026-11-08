@@ -194,14 +194,34 @@ function comoAvaliamos(): Record<InterviewMode, Record<FocusArea, string>> {
 
 export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = comoAvaliamos();
 
+/**
+ * System design ainda não está pronto nesta versão: o agente entrevistador só conduz live coding. Enquanto for `false`,
+ * a classificação vira live coding (ver `classificacaoDoFormatoAtivo`), não há oferta de troca de formato, e um pedido
+ * de system design recebe um aviso. Ligar só quando o agente souber conduzir o desenho no quadro.
+ */
+export const SYSTEM_DESIGN_ATIVO = false;
+
+/** O formato está disponível nesta versão? */
+export function modoAtivo(modo: InterviewMode): boolean {
+  return modo === "live_coding" || SYSTEM_DESIGN_ATIVO;
+}
+
 /** A área é observada neste formato (direto ou indireto)? */
 export function mede(modo: InterviewMode, area: FocusArea): boolean {
   return MEDE[modo][area].nivel !== "nao_mede";
 }
 
-/** Outro formato que mede a área, se houver. Usado para oferecer a troca. */
+/** Outro formato disponível que mede a área, se houver. Usado para oferecer a troca. */
 export function modoAlternativoQueMede(atual: InterviewMode, area: FocusArea): InterviewMode | undefined {
-  return (Object.keys(MEDE) as InterviewMode[]).find((m) => m !== atual && mede(m, area));
+  return (Object.keys(MEDE) as InterviewMode[]).find((m) => m !== atual && modoAtivo(m) && mede(m, area));
+}
+
+/**
+ * Área que o formato atual não mede e que nenhum outro formato disponível mede: não há troca possível, então ela
+ * fica pra próxima etapa. A abertura e o resumo dizem isso.
+ */
+export function semMedicaoNoFormato(modo: InterviewMode, area: FocusArea): boolean {
+  return !mede(modo, area) && modoAlternativoQueMede(modo, area) === undefined;
 }
 
 /** Nome da área quando ela fica de fora da avaliação: "X ficam pra próxima etapa". */

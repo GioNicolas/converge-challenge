@@ -15,6 +15,7 @@
     "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts",
     "test:email": "tsx --test lib/email/__tests__/*.test.ts",
     "test:convites": "tsx --test lib/convites/__tests__/*.test.ts",
+    "test:pre-entrevista": "tsx --test lib/pre-entrevista/__tests__/*.test.ts",
     "test:e2e": "playwright test",
     "test:agente": "tsx --test lib/agente/__tests__/*.test.ts lib/agente/**/__tests__/*.test.ts",
     "test:rotas": "tsx --test app/api/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",

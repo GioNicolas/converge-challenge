@@ -1,5 +1,6 @@
 // Único ponto de acesso da tela da pré-entrevista ao servidor.
-// Com NEXT_PUBLIC_USAR_SERVIDOR=1 usa as rotas reais (/api/pre-entrevista/...); sem, a demonstração roteirizada.
+// Usa as rotas reais (/api/pre-entrevista/...) por padrão. A demonstração roteirizada só entra com
+// NEXT_PUBLIC_USAR_SERVIDOR=0: antes, sem a variável, a tela caía nela em silêncio e parecia estar no servidor.
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "../classificador";
 import type { Rascunho } from "../rascunho";
@@ -8,7 +9,7 @@ import { estadoInicialDemo, responderDemo } from "./demo";
 
 const API = "/api/pre-entrevista/sessoes";
 
-export const usarServidor = () => process.env.NEXT_PUBLIC_USAR_SERVIDOR === "1";
+export const usarServidor = () => process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0";
 
 type CorpoErro = { erro?: string; detalhe?: string; erros?: string[] };
 
