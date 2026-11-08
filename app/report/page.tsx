@@ -11,6 +11,7 @@ import MomentoDaSessao, { type MomentoProva } from "@/components/report/MomentoD
 import HistoriaDaEntrevista, { duracaoCurta, type Acontecimento } from "@/components/report/HistoriaDaEntrevista";
 import NotasDosCriterios, { type NotaCriterio } from "@/components/report/NotasDosCriterios";
 import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
+import DecisaoFinal from "@/components/report/DecisaoFinal";
 
 const REC = { avancar: "Avançar", talvez: "Talvez", nao_avancar: "Não avançar" } as const;
 /** A avaliação leva de 15 s a 1 min: enquanto o servidor responde 202, consulta de novo. */
@@ -248,6 +249,8 @@ function SessionReport({ id }: { id: string }) {
           {report.learning && <Aprendizado l={report.learning} desenharProva={desenharProva} />}
         </div>
       </details>
+
+      <DecisaoFinal sessionId={id} />
 
       {gravacao && (
         <MomentoDaSessao gravacao={gravacao} momentos={momentos} aberto={aberto} onFechar={fechar} onAbrir={setAberto} />

@@ -28,6 +28,16 @@ export async function lerDecisoes(): Promise<Map<string, DecisaoRegistrada>> {
   return mapa;
 }
 
+/** A decisão de uma entrevista, se já houver. */
+export async function lerDecisao(sessionId: string): Promise<DecisaoRegistrada | undefined> {
+  try {
+    return (await kvPadrao().get<DecisaoRegistrada>(NS, sessionId)) ?? undefined;
+  } catch (err) {
+    console.error("[decisao] não leu a decisão:", err instanceof Error ? err.message : "erro");
+    return undefined;
+  }
+}
+
 /** Registra a decisão (a primeira vale) e avisa o candidato por e-mail. Nunca lança por causa do e-mail. */
 export async function decidir(sessionId: string, decisao: Decisao): Promise<{ registro: DecisaoRegistrada; jaDecidida: boolean }> {
   const kv = kvPadrao();
