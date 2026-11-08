@@ -27,6 +27,35 @@ export const TWO_SUM: Problem = {
     ],
   },
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "primeiro-par",
+        kind: "requisito",
+        concept: "criterio_de_desempate",
+        title: "Pode ter mais de um par",
+        statement: "Agora pode existir **mais de um par** que soma `target`. Retorne o par que fecha primeiro lendo da esquerda para a direita: o de **menor segundo índice**. Se dois pares terminam no mesmo índice, fica o de **menor primeiro índice**. Ainda sempre existe pelo menos um par.",
+        announcement:
+          "Chegou uma mudança do time de produto: com dados reais, agora pode existir mais de um par que soma o target. Eles querem o par que fecha primeiro, lendo a lista da esquerda pra direita, ou seja, o de menor segundo índice. Se empatar no segundo índice, fica o de menor primeiro índice. Os testes antigos continuam valendo.",
+        tests: [
+          { name: "Dois pares: vale o que fecha antes", input: { nums: [6, 1, 9, 4], target: 10 }, expected: [1, 2] },
+          { name: "Empate no fim: menor primeiro índice", input: { nums: [2, 2, 3], target: 5 }, expected: [0, 2] },
+          { name: "Par logo no começo", input: { nums: [5, 5, 5], target: 10 }, expected: [0, 1] },
+        ],
+        hiddenTests: [
+          { name: "Dois pares, o segundo fecha antes", input: { nums: [8, 5, 5, 2], target: 10 }, expected: [1, 2] },
+          { name: "Repetido antes do par", input: { nums: [1, 4, 4, 6], target: 10 }, expected: [1, 3] },
+        ],
+        clarifications: [
+          { question: "O que é o segundo índice?", answer: "O maior dos dois índices do par: o ponto da lista em que o par se completa." },
+          { question: "A ordem do retorno importa?", answer: "Não, como antes: os dois índices em qualquer ordem." },
+          { question: "Pode não existir nenhum par?", answer: "Não: sempre existe pelo menos um." },
+          { question: "Os testes antigos mudam?", answer: "Não, todos continuam valendo (neles só existe um par)." },
+        ],
+        rubricNote:
+          "Boa adaptação: entende a regra (pode perguntar o que é o segundo índice ou testar um exemplo à mão), percebe o que a solução dele devolve hoje quando há vários pares e muda só isso (na força bruta, a ordem dos loops; no hash map, não sobrescrever o índice de um valor que já apareceu), sem perder o O(n) se já tinha. Fraca: só faz passar os testes novos por tentativa e erro, sem explicar, ou quebra os testes antigos.",
+      },
+    ],
     hiddenTests: [
       { name: "Negativos e zero", input: { nums: [-3, 4, 3, 90], target: 0 }, expected: [0, 2] },
       { name: "Zeros repetidos", input: { nums: [0, 4, 3, 0], target: 0 }, expected: [0, 3] },

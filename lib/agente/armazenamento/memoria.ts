@@ -153,8 +153,8 @@ export function criarRepositorioEmMemoria(limites: Partial<LimitesMemoria> = {})
 
 const CHAVE_GLOBAL = Symbol.for("convergechallenge.repositorioSessoes");
 
-/** Singleton do processo. Fica em globalThis para sobreviver ao HMR do `next dev`. */
-export function repositorioPadrao(): RepositorioSessoes {
+/** Singleton em memória do processo. Fica em globalThis para sobreviver ao HMR do `next dev`. */
+export function repositorioEmMemoriaPadrao(): RepositorioSessoes {
   const g = globalThis as unknown as Record<symbol, RepositorioSessoes | undefined>;
   return (g[CHAVE_GLOBAL] ??= criarRepositorioEmMemoria());
 }

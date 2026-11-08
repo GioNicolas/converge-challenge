@@ -1,8 +1,9 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronUp, FileText } from "lucide-react";
-import { entrada } from "@/lib/design/motion";
+import { ChevronUp, FileText, Shuffle } from "lucide-react";
+import { duracaoLenta, curvaSaida, entrada } from "@/lib/design/motion";
+import type { EmpecilhoPublico } from "@/lib/contracts";
 import type { PublicProblem } from "@/lib/problems";
 import { formatMs } from "@/lib/format";
 
@@ -37,14 +38,58 @@ type Props = {
   durationMs: number;
   aberto: boolean;
   onToggle: (aberto: boolean) => void;
+  /** Mudança que o Totti trouxe no meio da entrevista (empecilho), se já veio. */
+  mudanca?: EmpecilhoPublico | null;
 };
+
+const TIPO_MUDANCA = { requisito: "O requisito mudou", caso_novo: "Entrou um caso novo" } as const;
+/** Quantos testes da mudança aparecem como exemplo no bloco. */
+const EXEMPLOS_MUDANCA = 2;
+
+/** Bloco da mudança no topo do problema: o que mudou, a regra nova e exemplos dos testes que entraram. */
+function BlocoMudanca({ mudanca }: { mudanca: EmpecilhoPublico }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: duracaoLenta, ease: curvaSaida }}
+      role="status"
+      className="space-y-2 rounded-controle border border-alerta/40 bg-alerta/10 px-3 py-2.5"
+    >
+      <div className="flex items-center gap-1.5 text-mini font-medium text-alerta">
+        <Shuffle size={14} strokeWidth={2} />
+        {TIPO_MUDANCA[mudanca.kind]}
+      </div>
+      <p className="font-medium">{mudanca.title}</p>
+      <p>
+        <Texto>{mudanca.statement}</Texto>
+      </p>
+      {mudanca.tests.slice(0, EXEMPLOS_MUDANCA).map((t) => (
+        <div key={t.name} className="rounded-controle bg-superficie-2 px-3 py-2 font-mono text-codigo">
+          <div>
+            <span className="text-texto-suave">Entrada: </span>
+            {t.args.map((a) => JSON.stringify(a)).join(", ")}
+          </div>
+          <div>
+            <span className="text-texto-suave">Saída: </span>
+            {JSON.stringify(t.expected)}
+          </div>
+        </div>
+      ))}
+      <p className="label-pequena">
+        {mudanca.tests.length === 1 ? "1 teste novo roda" : `${mudanca.tests.length} testes novos rodam`} junto com os
+        outros quando você clicar em Rodar.
+      </p>
+    </motion.div>
+  );
+}
 
 /**
  * Painel do problema (design §8.1): card de vidro no canto superior esquerdo
  * que recolhe para uma pílula. Só a parte pública do problema.
  * Animação só com opacity/transform (entrada de lib/design/motion).
  */
-export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, onToggle }: Props) {
+export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, onToggle, mudanca }: Props) {
   const tempo = `${formatMs(elapsedMs)} / ${formatMs(durationMs)}`;
   const chip = fase(elapsedMs, durationMs);
 
@@ -83,6 +128,7 @@ export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, o
             </header>
 
             <div className="space-y-4 overflow-y-auto px-4 pb-4 pt-3 text-corpo">
+              {mudanca && <BlocoMudanca mudanca={mudanca} />}
               <p>
                 <Texto>{problem.statement}</Texto>
               </p>
@@ -128,6 +174,9 @@ export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, o
           >
             <FileText size={16} strokeWidth={1.75} className="text-marca" />
             <span className="titulo text-corpo">{problem.title}</span>
+            {mudanca && (
+              <span className="rounded-full bg-alerta/15 px-2 py-0.5 text-mini font-medium text-alerta">Mudou</span>
+            )}
             <span className="label-pequena numero">{tempo}</span>
           </motion.button>
         )}

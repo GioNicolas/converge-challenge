@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Flag, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
-import type { EditorCommand, InterviewConfig } from "@/lib/contracts";
+import type { EditorCommand, EmpecilhoPublico, InterviewConfig } from "@/lib/contracts";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
@@ -18,7 +18,10 @@ import PainelConversa, { LARGURA_PAINEL } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
-import { postEncerramento } from "./ide/api";
+import { calar, falar } from "@/lib/sessao/cliente";
+import { liberarAudio } from "@/lib/presenca/vozSincronizada";
+import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { postEncerramento, postForcarEmpecilho } from "./ide/api";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
@@ -32,6 +35,9 @@ const MARGEM_PROBLEMA = 392;
  */
 /** `vaga`: o que a IDE usa da config da vaga (padrão: DEFAULT_CONFIG). */
 export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty">;
+
+/** Fora da conversa, frases finais com menos palavras que isso são descartadas. */
+const MIN_PALAVRAS_FALA = 2;
 
 /** `convite`: id do link do e-mail; liga esta sessão ao candidato no painel da vaga. */
 export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { problemId?: string; vaga?: VagaIDE; convite?: string }) {
@@ -69,7 +75,10 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   /** Pediu para finalizar e o agente abriu a última conversa: a sessão encerra quando ela fechar. */
   const [finalizando, setFinalizando] = useState(false);
   const encerramentoAbertoRef = useRef(false);
-  // Microfone só estético por enquanto: mexe a onda da pílula, nada é transcrito nem analisado.
+  /** Mudança no problema que o Totti trouxe (empecilho): entra no painel e os testes dela rodam junto. */
+  const [mudanca, setMudanca] = useState<EmpecilhoPublico | null>(null);
+  const problemaRodado = mudanca ? { ...problem, visibleTests: [...problem.visibleTests, ...mudanca.tests.map(({ name, args, expected }) => ({ name, args, expected }))] } : problem;
+  // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
 
   const executorRef = useRef<CommandExecutor | null>(null);
@@ -89,7 +98,83 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     applyCommands,
   });
 
+  // Fala do candidato (Scribe, ou o navegador como reserva): com a conversa aberta vira a resposta dele;
+  // fora dela, entra só na linha do tempo da sessão.
+  const falaRef = useRef<(texto: string) => void>(() => {});
+  /** Fala dita enquanto o agente ainda respondia: vai como resposta assim que o chat liberar. */
+  const falaPendenteRef = useRef<string | null>(null);
+  const registrarFala = (texto: string) => {
+    session.sendEvent({ type: "speech", role: "candidate", text: texto }).catch((err) => {
+      console.error("Falha ao registrar a fala do candidato", err);
+    });
+  };
+  falaRef.current = (texto) => {
+    const limpo = texto.trim();
+    if (!limpo) return;
+    if (chat.open && !chat.ended) {
+      // Dentro da conversa qualquer resposta vale, até "sim" ou "não".
+      if (chat.busy) falaPendenteRef.current = [falaPendenteRef.current, limpo].filter(Boolean).join(" ");
+      else chat.send(limpo);
+      return;
+    }
+    // Murmúrio solto ("hum", "é") não vira evento na linha do tempo.
+    if (limpo.split(/\s+/).filter(Boolean).length < MIN_PALAVRAS_FALA) return;
+    registrarFala(limpo);
+  };
+  useEffect(() => {
+    const pendente = falaPendenteRef.current;
+    if (!pendente) return;
+    if (chat.open && !chat.ended) {
+      if (chat.busy) return;
+      falaPendenteRef.current = null;
+      chat.send(pendente);
+    } else {
+      falaPendenteRef.current = null;
+      registrarFala(pendente);
+    }
+  });
+  const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
+  // Voz do agente: cada mensagem nova dele na conversa é falada (ElevenLabs, ou a voz do navegador como reserva).
+  // Enquanto ele fala, a escuta fica pausada para o microfone não transcrever o próprio agente.
+  const [agenteFalando, setAgenteFalando] = useState(false);
+  const ultimaFalaDita = useRef<number | null>(null);
+  const versaoDaVoz = useRef(0);
+  const ultimaDoAgente = chat.messages.at(-1)?.role === "agent" ? chat.messages.at(-1) : undefined;
+  useEffect(() => {
+    if (!ultimaDoAgente || ultimaFalaDita.current === ultimaDoAgente.at) return;
+    ultimaFalaDita.current = ultimaDoAgente.at;
+    const versao = ++versaoDaVoz.current;
+    setAgenteFalando(true);
+    // Só a fala mais recente libera a escuta; uma fala cortada por outra não destrava antes da hora.
+    void falar(ultimaDoAgente.text).finally(() => {
+      if (versao === versaoDaVoz.current) setAgenteFalando(false);
+    });
+  }, [ultimaDoAgente]);
+  // Conversa fechada ou sessão encerrada: corta a voz e volta a escutar.
+  useEffect(() => {
+    if (chat.open && !session.ended) return;
+    versaoDaVoz.current++;
+    calar();
+    setAgenteFalando(false);
+  }, [chat.open, session.ended]);
+  useEffect(() => () => calar(), []);
+
+  useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && !session.ended && !finalizando && !agenteFalando,
+    sessaoId: session.sessionId,
+    aoFinal: aoFalar,
+  });
+
   useEffect(() => warmUp(), []);
+  // A voz do agente chega depois de uma chamada assíncrona: libera o áudio no primeiro gesto do candidato.
+  useEffect(() => {
+    const eventos = ["pointerdown", "keydown", "touchstart"] as const;
+    // liberarAudio ignora as chamadas depois de liberar; se o primeiro gesto falhar, o próximo tenta de novo.
+    const liberar = () => liberarAudio();
+    eventos.forEach((e) => window.addEventListener(e, liberar));
+    return () => eventos.forEach((e) => window.removeEventListener(e, liberar));
+  }, []);
   const pedirMidia = midia.pedir;
   useEffect(() => {
     void pedirMidia();
@@ -113,6 +198,32 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     if (finalizando && encerramentoAbertoRef.current) encerrar("button");
     else editorRef.current?.focus();
   }, [conversaAberta, finalizando, encerrar]);
+
+  // Empecilho: não é pergunta que dá para adiar. A conversa abre sozinha, o Totti anuncia a mudança e o painel
+  // do problema abre com ela em destaque.
+  const balao = session.incomingBlip;
+  const abrirBalao = chat.openBlip;
+  const tirarBalao = session.setIncomingBlip;
+  useEffect(() => {
+    const empecilho = balao?.empecilho;
+    if (!balao || !empecilho || conversaAberta || finalizando || session.ended) return;
+    tirarBalao(null);
+    setMudanca(empecilho);
+    setProblemaAberto(true);
+    void abrirBalao(balao);
+  }, [balao, conversaAberta, finalizando, session.ended, tirarBalao, abrirBalao]);
+
+  /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
+  async function forcarEmpecilho() {
+    if (session.sessionId === null) return;
+    try {
+      const res = await postForcarEmpecilho(session.sessionId);
+      console.info("[dev] empecilho:", res.reason);
+      session.applyResponse(res);
+    } catch (err) {
+      console.error("POST /api/dev/empecilho falhou", err);
+    }
+  }
 
   /** Confirmou que quer finalizar: se o agente ainda tem o que perguntar, abre a última conversa antes. */
   async function finalizar() {
@@ -173,7 +284,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   async function rodar() {
     if (session.ended) return;
     setRun({ status: "running", loadingPyodide: firstRun, feitos: 0, passaram: 0 });
-    const result = await runCode(capture.code, problem, capture.language, (feitos, passaram) =>
+    const result = await runCode(capture.code, problemaRodado, capture.language, (feitos, passaram) =>
       setRun((r) => (r.status === "running" ? { ...r, feitos, passaram } : r)),
     );
     setFirstRun(false);
@@ -220,7 +331,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               }}
             />
           </div>
-          <RunResults state={run} total={problem.visibleTests.length} />
+          <RunResults state={run} total={problemaRodado.visibleTests.length} />
         </div>
 
         {/* Coluna da questão: o painel do problema e, logo abaixo dele, os botões */}
@@ -231,6 +342,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             durationMs={DURATION_MS}
             aberto={problemaAberto}
             onToggle={setProblemaAberto}
+            mudanca={mudanca}
           />
           <div className="flex flex-wrap items-center gap-2">
             {remaining <= 5 * 60_000 && !session.ended && (
@@ -325,6 +437,16 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             className="label-pequena absolute bottom-3 left-28 rounded-controle bg-superficie-2 px-2 py-1"
           >
             Limpar grifos
+          </button>
+        )}
+        {process.env.NODE_ENV !== "production" && (
+          <button
+            type="button"
+            onClick={() => void forcarEmpecilho()}
+            disabled={mudanca !== null || chat.open}
+            className="label-pequena absolute bottom-3 left-[13.5rem] rounded-controle bg-superficie-2 px-2 py-1 disabled:opacity-50"
+          >
+            Forçar empecilho
           </button>
         )}
       </section>

@@ -3,6 +3,7 @@
  * O conteúdo das perguntas vem do Analyst (lib/agents/analyst.ts), menos a pergunta de abertura.
  */
 import { isCovered, uncoveredCriteria } from "@/lib/agents/coverage";
+import { empecilhoDaQuestao, empecilhoPublico, esperaDoEmpecilho, primeiraAdaptacao } from "@/lib/agents/empecilho";
 import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
 import type { QueuedQuestion, SessionState } from "@/lib/session/types";
@@ -161,6 +162,8 @@ function expireBlip(session: SessionState, t: number): string | undefined {
   const found = findBlipQuestion(session, pendingId);
   if (!found || found.question.status !== "blipped") return undefined;
   if (t - found.blip.createdAt < BLIP_EXPIRY_MS) return undefined;
+  // O empecilho não expira: a IDE abre a conversa dele sozinha.
+  if (found.question.kind === "empecilho") return undefined;
 
   found.question.status = "ignored";
   session.pendingBlipId = undefined;
@@ -206,6 +209,11 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   if (remaining <= CLOSING_BEFORE_END_MS && !session.queue.some((q) => q.kind === "encerramento")) {
     const closing = startClosing(session, t);
     if (closing) return { blip: closing, reason: `blip ${closing.id} (encerramento, faltam ${Math.ceil(remaining / 60_000)} min)` };
+  }
+  // Empecilho: uma mudança no problema, uma vez por sessão, quando chegar a hora (lib/agents/empecilho.ts).
+  if (esperaDoEmpecilho(session, t) === undefined) {
+    const empecilho = raiseEmpecilho(session, t);
+    if (empecilho) return { blip: empecilho, reason: `blip ${empecilho.id} (empecilho)` };
   }
   // O polling não decide no meio de uma análise: ela pode trazer a pergunta do momento (ex.: o run que acabou de passar).
   if (session.analyst.state === "running") return { reason: "esperando: análise em andamento" };
@@ -315,6 +323,45 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
   return raise(session, closing, t);
 }
 
+/** Põe o empecilho da questão no balão. A primeira fala da conversa é o anúncio (lib/agents/interviewer.ts). */
+function raiseEmpecilho(session: SessionState, t: number): Blip | undefined {
+  const empecilho = empecilhoDaQuestao(session);
+  if (!empecilho || session.empecilho) return undefined;
+  const q: QueuedQuestion = {
+    id: `q-${session.queue.length + 1}`,
+    question: empecilho.announcement,
+    followUpTopic: "as dúvidas dele sobre a mudança",
+    topicLabel: "uma mudança no problema",
+    priority: 1,
+    createdAt: t,
+    status: "queued",
+    kind: "empecilho",
+  };
+  session.queue.push(q);
+  session.empecilho = { id: empecilho.id, blipId: q.id, raisedAt: t };
+  return raise(session, q, t);
+}
+
+/**
+ * Teste e demo: solta o empecilho agora, sem esperar a janela de tempo. Um balão ainda não aberto volta para a
+ * fila (e sai da tela pelo `dismissBlipId`); com uma conversa aberta, não dá.
+ */
+export function forceEmpecilho(session: SessionState, t: number): { blip?: Blip; dismissBlipId?: string; reason: string } {
+  if (session.ended) return { reason: "sessão encerrada" };
+  if (session.empecilho) return { reason: "empecilho já saiu nesta sessão" };
+  if (!empecilhoDaQuestao(session)) return { reason: "questão sem empecilho" };
+  let dismissBlipId: string | undefined;
+  if (session.pendingBlipId) {
+    const found = findBlipQuestion(session, session.pendingBlipId);
+    if (found?.question.status !== "blipped") return { reason: "conversa aberta: feche antes" };
+    found.question.status = "queued";
+    dismissBlipId = session.pendingBlipId;
+    session.pendingBlipId = undefined;
+  }
+  const blip = raiseEmpecilho(session, t);
+  return { blip, dismissBlipId, reason: blip ? `blip ${blip.id} (empecilho forçado)` : "não deu para soltar" };
+}
+
 /**
  * Desafio topado vira pergunta de retorno quando chega a hora, o que vier primeiro:
  * rodou depois de mexer no código; mexeu e ficou 30 s parado; passaram 4 min; ou faltam 5 min.
@@ -324,24 +371,32 @@ function enqueueDueCheckIns(session: SessionState, t: number): void {
     if (checkIn.status !== "aguardando") continue;
     const changed = session.codeHistory.filter((v) => v.t > checkIn.createdAt && v.version > checkIn.versionAtStart);
     const lastChange = changed.at(-1);
+    // Na mudança do empecilho, um run qualquer não basta: ele volta quando os testes da mudança passarem.
     const ranAfterChange =
-      lastChange !== undefined && session.events.some((e) => e.type === "run" && e.t >= lastChange.t);
+      checkIn.empecilhoId !== undefined
+        ? primeiraAdaptacao(session) !== undefined
+        : lastChange !== undefined && session.events.some((e) => e.type === "run" && e.t >= lastChange.t);
     const idleAfterChange = lastChange !== undefined && t - lastChange.t >= CHECK_IN_IDLE_MS && isCandidateIdle(session, t);
     const waitedLong = t - checkIn.createdAt >= CHECK_IN_MAX_WAIT_MS;
     const endingSoon = session.config.durationMin * 60_000 - t <= CHECK_IN_BEFORE_END_MS;
     if (!ranAfterChange && !idleAfterChange && !waitedLong && !endingSoon) continue;
 
     checkIn.status = "na_fila";
+    const mudanca = checkIn.empecilhoId !== undefined;
     session.queue.push({
       id: `q-${session.queue.length + 1}`,
-      question: `E aí, como foi com o desafio de ${checkIn.challenge}? O que você pensou?`,
-      followUpTopic: `o que ele tentou ou pensou para ${checkIn.challenge}`,
-      topicLabel: "como foi o desafio",
+      question: mudanca
+        ? "E aí, como ficou com a mudança? O que você teve que mexer?"
+        : `E aí, como foi com o desafio de ${checkIn.challenge}? O que você pensou?`,
+      followUpTopic: mudanca
+        ? "o que ele mudou no código por causa da mudança e por quê"
+        : `o que ele tentou ou pensou para ${checkIn.challenge}`,
+      topicLabel: mudanca ? "como ficou a mudança" : "como foi o desafio",
       priority: 0.95,
       createdAt: t,
       status: "queued",
       // Como momento-chave: passa na frente e pula o intervalo entre blips.
-      keyMoment: "retorno de um desafio que o candidato topou",
+      keyMoment: mudanca ? "retorno da mudança que o entrevistador trouxe" : "retorno de um desafio que o candidato topou",
       kind: "retorno",
       criterionId: checkIn.criterionId,
       checkInId: checkIn.id,
@@ -431,6 +486,8 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
     createdAt: t,
     highlight: q.highlight,
   };
+  const empecilho = q.kind === "empecilho" ? empecilhoDaQuestao(session) : undefined;
+  if (empecilho) blip.empecilho = empecilhoPublico(session, empecilho);
   session.blips.push(blip);
   session.pendingBlipId = blip.id;
   return blip;
@@ -439,7 +496,8 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
 /** Texto curto do balão. Nunca a pergunta inteira. */
 function previewFor(q: QueuedQuestion): string {
   if (q.kickoff) return "Quando quiser, uma pergunta rápida";
-  if (q.kind === "retorno") return "E aí, como foi o desafio?";
+  if (q.kind === "empecilho") return "Mudou uma coisa no problema";
+  if (q.kind === "retorno") return q.topicLabel === "como ficou a mudança" ? "E aí, como ficou a mudança?" : "E aí, como foi o desafio?";
   if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
 }

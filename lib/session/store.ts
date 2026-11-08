@@ -129,6 +129,7 @@ export function toView(session: SessionState): SessionStateView {
     evidence: session.evidence,
     coverage: session.coverage,
     checkIns: session.checkIns,
+    empecilho: session.empecilho,
     report: reportView(session),
     llm: getLlmStats(),
   };

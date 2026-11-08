@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { sendInterviewInvite } from "@/lib/email";
 import { acharConvite, linkDaEntrevista, novoEntrevistaId, salvarConvite } from "@/lib/convites/store";
 import { horarioAceito } from "@/lib/convites/horarios";
-import { ehCandidatoTeste } from "@/lib/convites/teste";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const Body = z.object({ horario: z.string().max(40) });
 
-/** Marca o horário do candidato e manda a confirmação com o link da entrevista (só candidatos de teste). */
+/**
+ * Marca o horário do candidato. Não manda um segundo e-mail: a página do convite vira "Entrevista marcada",
+ * com o botão do Google Agenda (o evento leva o link) e o botão de entrar, que só abre no horário.
+ */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const convite = await acharConvite(token);
@@ -36,27 +37,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const agendado = { ...convite, status: "agendado" as const, agendadoPara: horario, entrevistaId: novoEntrevistaId() };
   const joinUrl = linkDaEntrevista(base, agendado);
 
-  // Salva antes de enviar: se o email falhar, o horário escolhido continua valendo.
   await salvarConvite(agendado);
 
-  const { nome, email } = convite.candidato;
-  let emailStatus: "enviado" | "simulado" | "erro" = "simulado";
-  if (ehCandidatoTeste(email)) {
-    try {
-      const envio = await sendInterviewInvite({
-        candidateName: nome,
-        to: email,
-        roleTitle: convite.cargo,
-        scheduledAt: horario,
-        durationMin: convite.durationMin,
-        joinUrl,
-      });
-      emailStatus = envio.status === "sent" ? "enviado" : "simulado";
-    } catch {
-      emailStatus = "erro";
-    }
-  }
-
-  console.log(`[convites] agendado vaga=${convite.vagaId} email=${emailStatus}`);
-  return NextResponse.json({ ok: true, agendadoPara: horario, joinUrl, emailStatus });
+  console.log(`[convites] agendado vaga=${convite.vagaId}`);
+  return NextResponse.json({ ok: true, agendadoPara: horario, joinUrl });
 }

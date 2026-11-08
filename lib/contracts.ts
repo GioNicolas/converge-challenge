@@ -96,6 +96,64 @@ export const RunResult = z.object({
 export type RunResult = z.infer<typeof RunResult>;
 
 // ---------------------------------------------------------------------------
+// Empecilho: o problema muda no meio da entrevista (agente → IDE)
+// ---------------------------------------------------------------------------
+
+/** requisito: o comportamento pedido muda. caso_novo: entra um tipo de entrada que antes não existia. */
+export const EmpecilhoKind = z.enum(["requisito", "caso_novo"]);
+export type EmpecilhoKind = z.infer<typeof EmpecilhoKind>;
+
+/**
+ * O conceito que o empecilho exige para o candidato se adaptar. Vocabulário fixo de propósito: o relatório
+ * de aprendizado (`Report.learning.change`) guarda por ele ("quanto tempo levou para destravar em valores repetidos").
+ * Conceito novo? Acrescente aqui e em CONCEITOS_EMPECILHO.
+ */
+export const ConceitoEmpecilho = z.enum([
+  "entrada_vazia", // a entrada pode vir vazia
+  "ausencia_de_resposta", // pode não existir solução: devolver um valor combinado
+  "dado_invalido", // leituras inválidas no meio dos dados, que precisam ser ignoradas
+  "valores_repetidos", // a premissa de valores distintos caiu
+  "parametro_fora_do_limite", // um parâmetro pode passar do limite que o código assumia
+  "normalizacao_de_entrada", // limpar ou filtrar a entrada antes de processar
+  "caso_base", // a recorrência ganha um caso base ou limite novo
+  "criterio_de_desempate", // passa a ter várias respostas válidas e uma regra para escolher uma
+]);
+export type ConceitoEmpecilho = z.infer<typeof ConceitoEmpecilho>;
+
+/** Nome legível de cada conceito (relatório e prompts). */
+export const CONCEITOS_EMPECILHO: Record<ConceitoEmpecilho, string> = {
+  entrada_vazia: "tratar entrada vazia",
+  ausencia_de_resposta: "tratar quando não existe resposta",
+  dado_invalido: "ignorar dados inválidos no meio da entrada",
+  valores_repetidos: "lidar com valores repetidos",
+  parametro_fora_do_limite: "lidar com parâmetro fora do limite esperado",
+  normalizacao_de_entrada: "normalizar a entrada antes de processar",
+  caso_base: "redefinir o caso base",
+  criterio_de_desempate: "escolher entre várias respostas válidas com uma regra de desempate",
+};
+
+/** Teste no formato da IDE: argumentos na ordem da assinatura. */
+/** Nome dos testes da mudança na IDE e no RunResult ("Mudança: Sem par"). */
+export const PREFIXO_TESTE_MUDANCA = "Mudança: ";
+
+export const TesteIde = z.object({ name: z.string(), args: z.array(z.unknown()), expected: z.unknown() });
+export type TesteIde = z.infer<typeof TesteIde>;
+
+/** O que a IDE recebe do empecilho quando o agente o anuncia. Os testes só chegam ao navegador nessa hora. */
+export const EmpecilhoPublico = z.object({
+  id: z.string(),
+  kind: EmpecilhoKind,
+  concept: ConceitoEmpecilho,
+  /** Título curto para o bloco "Mudança" do enunciado ("Pode não existir par"). */
+  title: z.string(),
+  /** A regra nova, como vai no enunciado. Pode ter `código` entre crases. */
+  statement: z.string(),
+  /** Testes novos, somados aos visíveis a partir de agora. */
+  tests: z.array(TesteIde),
+});
+export type EmpecilhoPublico = z.infer<typeof EmpecilhoPublico>;
+
+// ---------------------------------------------------------------------------
 // Eventos da sessão (IDE → agente, via POST /api/events)
 // ---------------------------------------------------------------------------
 
@@ -116,6 +174,21 @@ export const SessionEvent = z.discriminatedUnion("type", [
   /** Candidato clicou "agora não" no balão: a pergunta volta mais tarde. */
   z.object({ ...base, type: z.literal("blip_snoozed"), blipId: z.string() }),
   z.object({ ...base, type: z.literal("language_changed"), language: z.string() }),
+  /**
+   * O agente anunciou um empecilho (o servidor grava, na hora da fala do Totti). `concept` diz o que ele exige:
+   * a F2 mede a adaptação a partir daqui (primeiro run com os testes da mudança passando).
+   */
+  z.object({
+    ...base,
+    type: z.literal("empecilho"),
+    empecilhoId: z.string(),
+    kind: EmpecilhoKind,
+    concept: ConceitoEmpecilho,
+    title: z.string(),
+    blipId: z.string(),
+    /** Nomes dos testes da mudança, como aparecem em RunResult.cases. */
+    testNames: z.array(z.string()),
+  }),
   z.object({ ...base, type: z.literal("session_ended"), reason: z.enum(["timeout", "button"]) }),
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
@@ -135,6 +208,8 @@ export const Blip = z.object({
   priority: z.number().min(0).max(1),
   createdAt: z.number(),
   highlight: LineRange.optional(),
+  /** Balão de empecilho: a IDE abre a conversa sozinha, sem "agora não", e aplica a mudança na tela. */
+  empecilho: EmpecilhoPublico.optional(),
 });
 export type Blip = z.infer<typeof Blip>;
 
@@ -209,6 +284,26 @@ export const CriterionScore = z.object({
   squadRules: z.array(SquadRule).optional(),
 });
 
+/**
+ * Um momento em que ele travou, medido pelos eventos (não pelo LLM). Mede só os testes do problema original;
+ * a mudança (empecilho) tem a medida dela em `Report.learning.change`.
+ */
+export const StuckEpisode = z.object({
+  startedAt: z.number(),
+  /** Primeira execução depois disso com mais testes passando que o melhor até ali (ou todos). null = não destravou até o fim. */
+  unstuckAt: z.number().nullable(),
+  /**
+   * falhas_seguidas: duas ou mais execuções seguidas falhando sem passar em mais testes.
+   * parado: 2 min ou mais sem mexer no código e sem conversa, com o código ainda falhando.
+   */
+  cause: z.enum(["falhas_seguidas", "parado"]),
+  /** Execuções falhando entre o começo e o destrave (ou o fim). */
+  failedRuns: z.number().int(),
+  /** Níveis das dicas que ele recebeu enquanto estava travado. Vazio = destravou (ou não) sem dica. */
+  hintLevels: z.array(z.number().int()),
+});
+export type StuckEpisode = z.infer<typeof StuckEpisode>;
+
 export const Report = z.object({
   sessionId: z.string(),
   configId: z.string(),
@@ -222,6 +317,66 @@ export const Report = z.object({
   concerns: z.array(z.string()),
   /** Pontos pra explorar na próxima etapa do processo. */
   nextSteps: z.array(z.string()),
+  /** Como ele se adaptou ao empecilho. Só existe se o Totti chegou a anunciar um. Fora da nota geral. */
+  adaptation: z
+    .object({
+      empecilhoId: z.string(),
+      kind: EmpecilhoKind,
+      concept: ConceitoEmpecilho,
+      title: z.string(),
+      announcedAt: z.number(),
+      /** Primeiro run, depois do anúncio, com todos os testes da mudança passando. null = não chegou lá. */
+      adaptedAt: z.number().nullable(),
+      /** Testes da mudança rodados no servidor ao fim (visíveis + escondidos dela). */
+      testsPassed: z.number().int(),
+      testsTotal: z.number().int(),
+      /** null = não deu para observar (ex.: anunciado no último minuto). */
+      score: z.number().int().min(1).max(4).nullable(),
+      evidence: z.array(Evidence),
+    })
+    .optional(),
+  /**
+   * Como ele pensa e aprende: que dica precisou, quanto levou para destravar e como reagiu à mudança.
+   * Só no live coding. Fatos medidos pelos eventos; o LLM só dá a nota e as evidências. Fora da nota geral.
+   */
+  learning: z
+    .object({
+      hints: z.array(
+        z.object({
+          t: z.number(),
+          level: z.number().int(),
+          text: z.string(),
+          /** O código já passava nos testes visíveis quando a dica veio (ex.: desafio de otimização): o avanço não se mede pelos testes. */
+          codePassing: z.boolean(),
+          /** Primeira execução depois da dica com mais testes passando que antes dela (ou todos). null = não avançou (ou codePassing). */
+          unstuckAt: z.number().nullable(),
+          /** Execuções entre a dica e o avanço (ou o fim). */
+          runsAfter: z.number().int(),
+        }),
+      ),
+      /** Quantas dicas a política da vaga deixava dar nesta questão. */
+      hintsAvailable: z.number().int(),
+      stuck: z.array(StuckEpisode),
+      /** Reação à mudança no problema, quando o Totti anunciou uma. */
+      change: z
+        .object({
+          concept: ConceitoEmpecilho,
+          announcedAt: z.number(),
+          /** Primeiro run com todos os testes da mudança passando (o mesmo de `adaptation.adaptedAt`). */
+          adaptedAt: z.number().nullable(),
+          /** Execuções depois do anúncio que não passaram nos testes da mudança, até adaptar (ou até o fim). */
+          failedAttempts: z.number().int(),
+          /** Dicas recebidas entre o anúncio e a adaptação (ou o fim). */
+          hintsUsed: z.number().int(),
+          /** Quantas vezes ele falou na conversa da mudança (tirar dúvida conta a favor). */
+          conversationTurns: z.number().int(),
+        })
+        .optional(),
+      /** null = não houve momento de aprendizado para observar (não travou, sem dica e sem mudança). */
+      score: z.number().int().min(1).max(4).nullable(),
+      evidence: z.array(Evidence),
+    })
+    .optional(),
   signals: z.object({
     testsPassed: z.number().int(),
     testsTotal: z.number().int(),
@@ -231,6 +386,34 @@ export const Report = z.object({
   }),
 });
 export type Report = z.infer<typeof Report>;
+
+// ---------------------------------------------------------------------------
+// Gravação da sessão: o que o relatório usa para mostrar cada prova no minuto em que aconteceu
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/report/gravacao?sessionId=... — versões do código, falas, execuções e marcos (dica, colagem,
+ * mudança no problema), todos no mesmo relógio das evidências (`t`, ms desde o início). Fica salva em disco
+ * junto com o relatório.
+ */
+export const Gravacao = z.object({
+  sessionId: z.string(),
+  durationMs: z.number(),
+  /** Uma entrada por versão diferente do código, em ordem de tempo. */
+  codigo: z.array(z.object({ t: z.number(), language: z.string(), code: z.string() })),
+  falas: z.array(z.object({ t: z.number(), role: z.enum(["candidate", "agent"]), text: z.string() })),
+  execucoes: z.array(z.object({ t: z.number(), passed: z.number().int(), total: z.number().int() })),
+  /** Acontecimentos curtos para dar contexto ("recebeu uma dica", "colou 12 linhas"). */
+  marcos: z.array(
+    z.object({
+      t: z.number(),
+      text: z.string(),
+      /** Para o gráfico escolher o ícone. Opcional: relatórios salvos antes não têm. */
+      tipo: z.enum(["dica", "colagem", "mudanca", "linguagem", "adiou"]).optional(),
+    }),
+  ),
+});
+export type Gravacao = z.infer<typeof Gravacao>;
 
 // ---------------------------------------------------------------------------
 // Silêncio do candidato (quadro e cérebro precisam concordar: o quadro dispara a análise,

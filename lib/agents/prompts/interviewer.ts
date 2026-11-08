@@ -68,6 +68,14 @@ Você está voltando a um desafio que ele topou antes (o resumo está na mensage
 2. Se ele conseguiu ou tem uma ideia, peça para explicar por que funciona e qual o custo novo. Feche com probeOutcome respondeu_bem (ou parcial, se a ideia está certa mas incompleta).
 3. Se ele travou, ofereça UMA dica: "Quer uma dica?". Se ele aceitar, dê a dica leve disponível quase com as mesmas palavras (gaveHint = true) e deixe ele pensar em voz alta. Se chegar lá, probeOutcome com_dica; se não, nao_conseguiu. Se recusar a dica, nao_conseguiu.
 4. Feche neutro, sem dizer se estava certo.
+Retorno de uma MUDANÇA que você trouxe (a mensagem traz "Mudança no problema"): pergunte o que ele teve que mexer e por quê. Não ofereça dica. Se ele ainda não adaptou, pergunte o que falta ou o que está pegando, sem dizer como resolver. Registre em evidence, com criterionId "adaptacao", um fato curto de como ele lidou com a mudança; probeOutcome = null.
+
+## Tipo: empecilho
+Você acabou de trazer uma MUDANÇA no problema (sua primeira fala, já feita, foi o anúncio). Isso mede como ele reage quando algo muda no meio, não é pegadinha.
+- Responda dúvidas sobre a mudança de forma direta, usando as respostas oficiais quando servirem. A regra nova você pode repetir com outras palavras à vontade.
+- Nunca diga COMO adaptar o código, onde mexer, nem o que no código dele vai quebrar.
+- Se ele comentar como vai adaptar, ouça e registre em evidence, com criterionId "adaptacao", um fato curto (ex.: "perguntou se deveria retornar lista vazia ou None antes de mexer"). Pode pedir UMA vez para ele contar o plano, se ele não disse nada.
+- Quando ele disser que entendeu ou que vai mexer, libere: "Beleza, fica à vontade. Daqui a pouco eu volto pra ver como ficou." com end = true. challenge = null e probeOutcome = null (o retorno vem depois sozinho).
 
 ## Tipo: encerramento
 O candidato clicou para finalizar a entrevista. É a última conversa: você tem uma lista de PONTOS PENDENTES (perguntas preparadas e critérios da vaga que ainda não apareceram) e precisa passar por eles antes de ele sair.
@@ -135,6 +143,10 @@ export interface InterviewerTurnInput {
   probeGuide?: string;
   /** No retorno: o que o candidato topou tentar. */
   challengeSummary?: string;
+  /** Mudança no problema já anunciada (vale para a conversa toda, em qualquer tipo). */
+  mudanca?: string;
+  /** Respostas oficiais para dúvidas sobre a mudança. */
+  mudancaClarifications?: string[];
   question?: string;
   followUpTopic?: string;
   questionHighlight?: { startLine: number; endLine: number };
@@ -178,9 +190,13 @@ ${
       }
 Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.join(" | ") : "(todos já explorados)"}`
       : "O candidato te chamou.";
+  const respostas = input.mudancaClarifications?.length
+    ? `\nRespostas oficiais sobre a mudança:\n${input.mudancaClarifications.map((c) => `- ${c}`).join("\n")}`
+    : "";
+  const mudanca = input.mudanca ? `\nMudança no problema: ${input.mudanca}${respostas}` : "";
 
   return `Modo: ${input.mode}. Fase: ${input.fase}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
-${blip}
+${blip}${mudanca}
 Dica leve disponível: ${input.availableHint ?? dicaSemValor(input.hintsPolicy)}
 Notas internas do analista: ${input.analystNotes ?? "(nenhuma)"}
 Conversas anteriores:

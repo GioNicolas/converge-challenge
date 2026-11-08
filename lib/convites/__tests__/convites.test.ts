@@ -9,7 +9,7 @@ import {
   horariosDeTeste,
   horariosDisponiveis,
 } from "@/lib/convites/horarios";
-import { candidatosTeste, ehCandidatoTeste } from "@/lib/convites/teste";
+import { candidatosTeste, ehCandidatoTeste, recebeEmail } from "@/lib/convites/teste";
 import { acharConvite } from "@/lib/convites/store";
 import { TriagemConviteEmail } from "@/lib/email/templates/TriagemConvite";
 import type { TriagemConvitePayload } from "@/lib/email/types";
@@ -19,9 +19,9 @@ Object.assign(globalThis, { React });
 
 const env = process.env as Record<string, string | undefined>;
 const saved = { CANDIDATOS_TESTE: env.CANDIDATOS_TESTE, HORARIOS_DE_TESTE: env.HORARIOS_DE_TESTE };
-// A flag do shell não pode vazar pros testes de horários regulares.
+// A flag do shell não pode vazar pros testes de horários regulares: começam com os de teste desligados.
 beforeEach(() => {
-  delete env.HORARIOS_DE_TESTE;
+  env.HORARIOS_DE_TESTE = "0";
 });
 afterEach(() => {
   for (const [k, v] of Object.entries(saved)) {
@@ -58,14 +58,19 @@ describe("horariosDisponiveis", () => {
   });
 });
 
-describe("horários de teste (HORARIOS_DE_TESTE=1)", () => {
+describe("horários de teste (ligados salvo HORARIOS_DE_TESTE=0)", () => {
   // 10:00:20 em Brasília: arredonda pra cima até 10:01, então +3 e +5 dão 10:04 e 10:06.
   const agora = new Date("2026-11-06T10:00:20-03:00");
 
-  it("sem a flag, a lista não tem horários de teste", () => {
-    delete env.HORARIOS_DE_TESTE;
+  it("com HORARIOS_DE_TESTE=0, a lista não tem horários de teste", () => {
+    env.HORARIOS_DE_TESTE = "0";
     assert.equal(horariosDisponiveis(agora)[0], "2026-11-09T09:00:00-03:00");
     assert.equal(horariosDisponiveis(agora).length, 20);
+  });
+
+  it("sem a variável, os horários de teste vêm ligados", () => {
+    delete env.HORARIOS_DE_TESTE;
+    assert.equal(horariosDisponiveis(agora).length, 22);
   });
 
   it("com a flag, os dois horários de teste vêm primeiro, no minuto cheio e com -03:00", () => {
@@ -101,7 +106,7 @@ describe("horários de teste (HORARIOS_DE_TESTE=1)", () => {
     assert.equal(ehHorarioDeTesteValido("2026-11-06T09:50:00-03:00", agora), false); // 10 min atrás
     assert.equal(ehHorarioDeTesteValido("2026-11-06T10:04:30-03:00", agora), false); // segundos
     assert.equal(ehHorarioDeTesteValido("2026-11-06T13:04:00Z", agora), false); // outro offset
-    delete env.HORARIOS_DE_TESTE;
+    env.HORARIOS_DE_TESTE = "0";
     assert.equal(horarioAceito("2026-11-06T10:04:00-03:00", agora), false);
   });
 
@@ -123,11 +128,22 @@ describe("candidatosTeste", () => {
     ]);
   });
 
-  it("env vazio ou ausente vira lista vazia", () => {
+  it("env vazio ou ausente usa o time (Lucas, Sofia, Henrique e Giorgio)", () => {
     env.CANDIDATOS_TESTE = "   ";
-    assert.deepEqual(candidatosTeste(), []);
+    assert.equal(candidatosTeste().length, 4);
     delete env.CANDIDATOS_TESTE;
-    assert.deepEqual(candidatosTeste(), []);
+    assert.deepEqual(
+      candidatosTeste().map((c) => c.nome.split(" ")[0]),
+      ["Lucas", "Sofia", "Henrique", "Giorgio"],
+    );
+  });
+
+  it("só o Lucas recebe e-mail de verdade", () => {
+    delete env.CANDIDATOS_TESTE;
+    assert.equal(recebeEmail(" LTodaroSouza@gmail.com "), true);
+    assert.equal(recebeEmail("sofiaomarques26@gmail.com"), false);
+    assert.equal(recebeEmail("henrique.guimaa08@gmail.com"), false);
+    assert.equal(recebeEmail("alguem@exemplo.com"), false);
   });
 
   it("ehCandidatoTeste ignora caixa e espaços", () => {
