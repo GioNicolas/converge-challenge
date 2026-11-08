@@ -103,7 +103,7 @@ export function decisionBlocks(r: DecisionRecord): Block[] {
 export function decidedBlocks(r: DecisionRecord): Block[] {
   const line =
     r.status === "aprovado"
-      ? `:white_check_mark: Aprovado por <@${r.decidedBy}>. Feedback enviado ao candidato.`
+      ? `:white_check_mark: Aprovado por <@${r.decidedBy}>${r.reason ? ` — ${r.reason}` : ""}. Feedback enviado ao candidato.`
       : `:x: Reprovado por <@${r.decidedBy}>${r.reason ? ` — ${r.reason}` : ""}. Feedback enviado ao candidato.`;
   return [header(`${r.candidateName} — ${r.roleTitle}`), ...reportBody(r.report), context(line)];
 }
@@ -137,6 +137,21 @@ export function adjustModal(planId: string, channel: string, ts: string) {
   };
 }
 
+export function approveModal(decisionId: string, channel: string, ts: string) {
+  return {
+    type: "modal",
+    callback_id: MODAL.candApprove,
+    private_metadata: JSON.stringify({ decisionId, channel, ts }),
+    title: { type: "plain_text", text: "Aprovar candidato" },
+    submit: { type: "plain_text", text: "Aprovar" },
+    close: { type: "plain_text", text: "Cancelar" },
+    blocks: [
+      textInput("reason", "O que te convenceu? (opcional)", true),
+      context("Uma linha basta. O Totti usa para entrevistar o próximo candidato do jeito do time."),
+    ],
+  };
+}
+
 export function rejectModal(decisionId: string, channel: string, ts: string) {
   return {
     type: "modal",
@@ -145,6 +160,27 @@ export function rejectModal(decisionId: string, channel: string, ts: string) {
     title: { type: "plain_text", text: "Reprovar candidato" },
     submit: { type: "plain_text", text: "Reprovar" },
     close: { type: "plain_text", text: "Cancelar" },
-    blocks: [textInput("reason", "Motivo (opcional, uso interno)", true)],
+    blocks: [
+      textInput("reason", "Motivo (opcional, uso interno)", true),
+      context("O Totti aprende só o que for técnico. Idade, formação, origem ou aparência são ignorados."),
+    ],
   };
+}
+
+/** Resposta na thread depois de uma decisão: o que o Totti aprendeu e o que ignorou. */
+export function aprendizadoBlocks(
+  regras: { texto: string }[],
+  ignorados: { trecho: string; porque: string }[],
+  url: string,
+): Block[] {
+  const blocks: Block[] = [];
+  for (const r of regras) blocks.push(md(`:brain: *Aprendi:* ${r.texto}`));
+  for (const i of ignorados) {
+    blocks.push(context(`:no_entry_sign: Ignorei "${i.trecho}": ${i.porque}. O Totti só aprende critério técnico.`));
+  }
+  blocks.push({
+    type: "actions",
+    elements: [{ type: "button", text: { type: "plain_text", text: "Ver o que aprendi", emoji: true }, url, action_id: "squad_ver" }],
+  });
+  return blocks;
 }

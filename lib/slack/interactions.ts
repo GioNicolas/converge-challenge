@@ -4,6 +4,7 @@
  */
 import {
   adjustModal,
+  approveModal,
   decidedBlocks,
   planApprovedBlocks,
   planReviewBlocks,
@@ -14,7 +15,7 @@ import { slackApi } from "./client";
 import { getSlackHooks } from "./hooks";
 import { createTestSession } from "./session-link";
 import { store } from "./store";
-import { ACTION, MODAL } from "./types";
+import { ACTION, MODAL, type DecisionRecord } from "./types";
 
 interface SlackUser {
   id: string;
@@ -100,11 +101,12 @@ async function handleAction(p: Payload, defer: Defer): Promise<void> {
     case ACTION.candApprove: {
       const r = store.getDecision(id);
       if (!r || r.status !== "aguardando") return;
-      r.status = "aprovado";
-      r.decidedBy = p.user.id;
-      store.saveDecision(r);
-      await slackApi("chat.update", { channel: r.channel, ts: r.ts, text: "Candidato aprovado", blocks: decidedBlocks(r) });
-      defer(() => safe("onCandidateDecision", () => getSlackHooks().onCandidateDecision(r)));
+      // Modal curto "o que te convenceu?" (pode ficar vazio). Sem trigger_id não dá para abrir: aprova direto.
+      if (p.trigger_id) {
+        await slackApi("views.open", { trigger_id: p.trigger_id, view: approveModal(id, channel, ts) });
+        return;
+      }
+      await decidir(r, "aprovado", p.user.id, undefined, defer);
       return;
     }
     case ACTION.candReject: {
@@ -141,14 +143,27 @@ async function handleSubmission(p: Payload, defer: Defer): Promise<void> {
     return;
   }
 
-  if (view.callback_id === MODAL.candReject) {
+  if (view.callback_id === MODAL.candReject || view.callback_id === MODAL.candApprove) {
     const r = store.getDecision(meta.decisionId);
     if (!r || r.status !== "aguardando") return;
-    r.status = "reprovado";
-    r.decidedBy = p.user.id;
-    r.reason = fieldValue(p, "reason") || undefined;
-    store.saveDecision(r);
-    await slackApi("chat.update", { channel: r.channel, ts: r.ts, text: "Candidato reprovado", blocks: decidedBlocks(r) });
-    defer(() => safe("onCandidateDecision", () => getSlackHooks().onCandidateDecision(r)));
+    const status = view.callback_id === MODAL.candApprove ? "aprovado" : "reprovado";
+    await decidir(r, status, p.user.id, fieldValue(p, "reason") || undefined, defer);
   }
+}
+
+/** Grava a decisão, atualiza o card e roda o hook (email de feedback e o aprendizado do Totti). */
+async function decidir(
+  r: DecisionRecord,
+  status: "aprovado" | "reprovado",
+  userId: string,
+  reason: string | undefined,
+  defer: Defer,
+): Promise<void> {
+  r.status = status;
+  r.decidedBy = userId;
+  r.reason = reason;
+  store.saveDecision(r);
+  const text = status === "aprovado" ? "Candidato aprovado" : "Candidato reprovado";
+  await slackApi("chat.update", { channel: r.channel, ts: r.ts, text, blocks: decidedBlocks(r) });
+  defer(() => safe("onCandidateDecision", () => getSlackHooks().onCandidateDecision(r)));
 }

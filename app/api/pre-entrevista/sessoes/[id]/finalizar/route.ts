@@ -4,6 +4,7 @@ import { paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { registrarEvento } from "@/lib/pre-entrevista/log";
 import { aplicarPesosNaSessao, extrairSeAtrasada, salvarConfig, sincronizarSessao, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
 import { atualizarNaoAvaliado } from "@/lib/pre-entrevista/turno";
+import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +60,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: false, erros: resultado.erros }, { status: 422 });
   }
 
+  // As regras da squad ativas agora vão junto (a entrevista recarrega as ativas quando começa).
+  resultado.config = comRegrasDaSquad(resultado.config);
   await salvarConfig(sessao, resultado.config);
   registrarEvento(sessao, {
     tipo: "finalizacao",

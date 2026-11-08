@@ -4,6 +4,7 @@ import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { criarSessao, estadoDaSessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa } from "@/lib/pre-entrevista/turno";
+import { regrasDaEmpresa } from "@/lib/squad-memory/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,8 @@ export async function POST(req: Request) {
 
   // Competências da vaga: uma chamada rápida. Se falhar, a sessão segue sem elas (o log registra o motivo).
   const competencias = await extrairCompetencias(vaga);
-  const sessao = criarSessao(vaga, classificacao, criadaEm, competencias);
+  // O que o Totti já aprendeu com o Tech Lead desta empresa entra na conversa ("da última vez vocês pediram X").
+  const sessao = criarSessao(vaga, classificacao, criadaEm, competencias, regrasDaEmpresa());
   abrirConversa(sessao);
   return NextResponse.json(estadoDaSessao(sessao), { status: 201 });
 }

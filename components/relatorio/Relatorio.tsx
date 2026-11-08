@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Icone from "@/components/quadro/Icone";
+import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 import type { CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
 import type { Recomendacao } from "@/lib/agente/scorecard";
 
@@ -137,6 +138,7 @@ function Criterio({ c, ordem, aoAbrirImagem }: { c: CriterioVisto; ordem: number
           </div>
         </header>
         <p className="leading-relaxed text-texto">{c.justificativa}</p>
+        <AprendidoComOTime regras={c.aprendidoComOTime} />
         {c.provas.length > 0 && (
           <ul className="flex flex-col gap-3.5 border-t border-borda pt-4">
             {c.provas.map((p, i) => (

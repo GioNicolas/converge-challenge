@@ -1,133 +1,123 @@
 "use client";
 
+// "Antes de começar": a última tela antes da entrevista, no mesmo papel e tinta do resto do site
+// (tema-recrutador). Pouca coisa: a vaga, três passos curtos do formato (live coding ou system design),
+// o essencial em pílulas e um botão. O passo das dicas segue o que a recrutadora combinou (`config.hints`).
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
-import { Clock, Code2, Lightbulb, Mic, MessageSquare, Play } from "lucide-react";
+import { ArrowRight, Clock, Mic } from "lucide-react";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import type { InterviewConfig } from "@/lib/contracts";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
 import { DIFFICULTIES, difficultyForSeniority } from "@/lib/problems";
-import { curvaSuave, duracao } from "@/lib/design/motion";
-import Orb from "./Orb";
+import { curvaSuave } from "@/lib/design/motion";
 
-const PASSOS = [
-  {
-    icon: MessageSquare,
-    titulo: "Conversa inicial",
-    texto: "O entrevistador se apresenta e lê o problema com você. Pergunte à vontade: esclarecer é parte da avaliação.",
-  },
-  {
-    icon: Code2,
-    titulo: "Explique o plano, depois codifique",
-    texto: "Conte sua abordagem em voz alta antes de escrever. Você resolve no editor, na linguagem que preferir, e roda os testes quando quiser.",
-  },
-  // O passo das dicas depende da política da vaga (ver DICAS).
-  {
-    icon: Mic,
-    titulo: "Voz ou texto",
-    texto: "Converse por voz (o navegador vai pedir acesso ao microfone) ou pelo chat. O agente também pode apontar trechos do seu código.",
-  },
-];
+type Passo = { titulo: string; texto: string };
 
-/** O passo das dicas segue o que a recrutadora combinou (`config.hints`): sem prometer o que o agente não vai dar. */
-const DICAS: Record<NonNullable<InterviewConfig["hints"]>, { titulo: string; texto: string }> = {
-  livres: {
-    titulo: "Dicas, se precisar",
-    texto: "Pode pedir ajuda a qualquer momento. As dicas são graduais e ficam registradas no relatório.",
-  },
-  leves: {
-    titulo: "Uma dica, se travar",
-    texto: "Se travar, dá para pedir uma dica leve, uma vez só. Ela fica registrada no relatório.",
-  },
-  nenhuma: {
-    titulo: "Sem dicas",
-    texto: "Esta entrevista não tem dicas. Se travar, conte onde travou e o que já tentou: isso também conta.",
-  },
+/** Os dois primeiros passos de cada formato; o terceiro é o das dicas. */
+const PASSOS: Record<InterviewConfig["mode"], Passo[]> = {
+  live_coding: [
+    { titulo: "Converse primeiro", texto: "O entrevistador apresenta o problema. Pergunte à vontade: esclarecer conta." },
+    { titulo: "Explique e programe", texto: "Conte o plano em voz alta, escreva no editor e rode os testes quando quiser." },
+  ],
+  system_design: [
+    { titulo: "Entenda o problema", texto: "O entrevistador apresenta o sistema. Pergunte sobre escala e requisitos." },
+    { titulo: "Desenhe no quadro", texto: "Monte a arquitetura no quadro e explique as escolhas e os trade-offs." },
+  ],
+};
+
+const DICAS: Record<NonNullable<InterviewConfig["hints"]>, Passo> = {
+  livres: { titulo: "Peça dicas se precisar", texto: "As dicas são graduais e ficam registradas no relatório." },
+  leves: { titulo: "Uma dica, se travar", texto: "Dá para pedir uma dica leve, uma vez só." },
+  nenhuma: { titulo: "Sem dicas", texto: "Se travar, conte onde travou e o que já tentou: isso também conta." },
 };
 
 /** `vaga`: config da vaga (saída da pré-entrevista da recrutadora); sem ela, a padrão. */
 export default function PreInterview({ vaga = DEFAULT_CONFIG, convite }: { vaga?: InterviewConfig; convite?: string }) {
   const router = useRouter();
-  const { roleTitle, durationMin, languages } = vaga;
-  const passos = [...PASSOS.slice(0, 2), { icon: Lightbulb, ...DICAS[vaga.hints ?? "livres"] }, ...PASSOS.slice(2)];
+  const { roleTitle, durationMin, languages, mode } = vaga;
+  const passos = [...PASSOS[mode], DICAS[vaga.hints ?? "livres"]];
   const nivel = DIFFICULTIES.find((d) => d.id === (vaga.difficulty ?? difficultyForSeniority(vaga.seniority)))?.label;
+  const pilulas = [
+    `${durationMin} minutos`,
+    mode === "system_design" ? "Quadro de arquitetura" : languages.map((l) => LANGUAGE_LABELS[l] ?? l).join(" ou "),
+    nivel ? `Nível ${nivel.toLowerCase()}` : null,
+  ].filter((p): p is string => !!p);
+
+  // System design abre o quadro; live coding abre o IDE. A mesma config e o mesmo convite seguem nos dois.
+  const iniciar = () =>
+    router.push(
+      `${mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}`,
+    );
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-6 py-12">
-      <motion.div
-        initial={{ opacity: 0, y: 12, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: duracao, ease: curvaSuave }}
-        className="w-full max-w-2xl rounded-padrao bg-superficie border border-borda shadow-flutuante p-8 sm:p-10"
-      >
-        <div className="flex items-center gap-4">
-          <Orb state="ocioso" size={56} />
-          <div>
-            <p className="label-pequena">{roleTitle}</p>
-            <h1 className="titulo text-3xl">Pronto(a) para começar?</h1>
+    <div className="tema-recrutador min-h-dvh">
+      <header className="mx-auto flex w-full max-w-[560px] items-center px-5 pt-6">
+        <span className="text-[17px] font-semibold tracking-[-0.025em] text-texto">Converge</span>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-[560px] flex-col gap-9 px-5 pt-14 pb-16 sm:pt-20">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: curvaSuave }}
+          className="flex flex-col gap-4"
+        >
+          <span className="rotulo text-texto-suave">{roleTitle}</span>
+          <h1 className="titulo-display text-[40px] leading-[1.05] text-texto sm:text-[48px]">Pronto para começar?</h1>
+          <p className="text-[16px] leading-relaxed text-texto-suave">
+            Uma entrevista técnica por voz, com um entrevistador de IA que acompanha seu raciocínio. Não há pegadinhas: o objetivo é ver
+            como você pensa.
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {pilulas.map((p, i) => (
+              <span key={p} className="numero flex h-8 items-center gap-1.5 rounded-full bg-superficie-2/70 px-3 text-[13px] text-texto">
+                {i === 0 && <Clock size={13} strokeWidth={1.75} className="text-texto-suave" />}
+                {p}
+              </span>
+            ))}
           </div>
-        </div>
+        </motion.div>
 
-        <p className="mt-5 text-corpo-grande text-texto-suave">
-          Você vai fazer uma entrevista técnica com um agente de voz, que acompanha seu raciocínio e seu código em tempo real. Veja como ela funciona.
-        </p>
-
-        <div className="mt-6 flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-superficie-2 px-3 py-1 text-mini font-medium numero">
-            <Clock size={14} strokeWidth={1.75} /> {durationMin} minutos
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-superficie-2 px-3 py-1 text-mini font-medium">
-            <Code2 size={14} strokeWidth={1.75} /> {languages.map((l) => LANGUAGE_LABELS[l] ?? l).join(", ")}
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-superficie-2 px-3 py-1 text-mini font-medium">
-            Nível {nivel}
-          </span>
-        </div>
-
-        <ol className="mt-8 space-y-5">
-          {passos.map(({ icon: Icon, titulo, texto }, i) => (
+        <ol className="cartao flex flex-col">
+          {passos.map(({ titulo, texto }, i) => (
             <motion.li
               key={titulo}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: duracao, ease: curvaSuave, delay: 0.08 * (i + 1) }}
-              className="flex gap-4"
+              transition={{ duration: 0.36, ease: curvaSuave, delay: 0.12 + 0.06 * i }}
+              className="linha-lista flex gap-4 px-5 py-4"
             >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-controle bg-marca-suave text-marca">
-                <Icon size={20} strokeWidth={1.75} />
+              <span className="numero flex size-6 shrink-0 items-center justify-center rounded-full bg-texto text-[12px] text-texto-claro">
+                {i + 1}
               </span>
-              <div>
-                <h2 className="titulo text-corpo-grande">{titulo}</h2>
-                <p className="text-corpo text-texto-suave">{texto}</p>
-              </div>
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-medium text-texto">{titulo}</span>
+                <span className="text-[14px] leading-relaxed text-texto-suave">{texto}</span>
+              </span>
             </motion.li>
           ))}
         </ol>
 
-        <p className="mt-8 text-corpo text-texto-suave">
-          Ao encerrar, ou quando o tempo acabar, você recebe um relatório com o que foi avaliado. Não há pegadinhas: o objetivo é ver como você pensa.
-        </p>
-
-        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.35 }}
+          className="flex flex-col gap-4"
+        >
           <button
             type="button"
-            onClick={() => router.back()}
-            className="rounded-controle px-5 py-3 text-corpo font-medium text-texto-suave transition-colors duration-rapida hover:text-texto"
+            onClick={iniciar}
+            className="group flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-texto text-[15px] font-medium text-texto-claro transition-[opacity,transform] duration-150 hover:opacity-90 active:scale-[0.99]"
           >
-            Ainda não
+            Começar a entrevista
+            <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              // System design abre o quadro; live coding abre o IDE. A mesma config e o mesmo convite seguem nos dois.
-              router.push(`${vaga.mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}`)
-            }
-            className="inline-flex items-center justify-center gap-2 rounded-controle bg-marca px-6 py-3 text-corpo font-semibold text-texto-claro transition-all duration-rapida ease-suave hover:brightness-110 active:scale-[0.98]"
-          >
-            <Play size={16} strokeWidth={1.75} /> Estou pronto(a), iniciar
-          </button>
-        </div>
-      </motion.div>
-    </main>
+          <p className="flex items-center justify-center gap-1.5 text-center text-[13px] text-texto-suave">
+            <Mic size={13} strokeWidth={1.75} /> O navegador vai pedir o microfone. Se preferir, dá para usar o chat.
+          </p>
+        </motion.div>
+      </main>
+    </div>
   );
 }

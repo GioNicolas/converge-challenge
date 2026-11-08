@@ -48,6 +48,8 @@ export type EntradaPromptScorecard = {
   observacoes: string;
   grafoFinal: string;
   imagens: string;
+  /** Critérios aprendidos com o Tech Lead desta squad (ver `lib/squad-memory/prompt.ts`). */
+  regrasDaSquad?: string;
 };
 
 export function montarSistemaDinamicoScorecard(e: EntradaPromptScorecard): string {

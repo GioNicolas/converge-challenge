@@ -5,6 +5,7 @@
 // ficha, sinais, armadilhas, rubrica ou diagnóstico sai daqui; o log leva só ids e metadados.
 import { z } from "zod";
 import { findConfig } from "@/lib/config/store";
+import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, respostaSilencio } from "../analisar";
@@ -58,7 +59,9 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   if (!corpo.ok) return corpo.resposta;
 
   // O plano da vaga (se vier) escolhe o kit e calibra a entrevista; config desconhecida cai na entrevista padrão.
-  const config = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
+  const encontrada = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
+  // Regras ativas da squad no começo da sessão: o entrevistador e o scorecard usam (ver `lib/squad-memory/`).
+  const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
   const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;
 
