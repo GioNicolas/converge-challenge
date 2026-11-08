@@ -97,8 +97,8 @@ const CONFIGS_DE_VITRINE: Record<string, InterviewConfig> = Object.fromEntries(
       focus: [{ area: "uso_ia", weight: 0.5 }, { area: "tecnico", weight: 0.35 }, { area: "escala_produto", weight: 0.15 }],
     }),
     configDeVitrine({
-      id: "config-marketing-performance", vagaId: "marketing-performance", mode: "system_design",
-      roleTitle: "Analista de Marketing de Performance Pleno", seniority: "pleno", problemId: "encurtador-de-url", durationMin: 40,
+      id: "config-backend-links", vagaId: "backend-links", mode: "system_design",
+      roleTitle: "Desenvolvedor(a) Backend Pleno · Links", seniority: "pleno", problemId: "encurtador-de-url", durationMin: 40,
       focus: [{ area: "escala_produto", weight: 0.5 }, { area: "pressao", weight: 0.3 }, { area: "uso_ia", weight: 0.2 }],
     }),
     configDeVitrine({
