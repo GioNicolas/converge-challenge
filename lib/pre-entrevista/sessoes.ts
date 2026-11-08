@@ -13,7 +13,7 @@ import { randomUUID } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { InterviewConfig, type FocusArea } from "@/lib/contracts";
-import type { Classificacao, Vaga } from "./classificador";
+import { classificacaoDoFormatoAtivo, type Classificacao, type Vaga } from "./classificador";
 import { aplicarCobertura, areasEmJogo, avaliarCobertura, mesclarCobertura, topicosDo, ultimaFalaDoAgente } from "./cobertura";
 import { type Competencia, type ResultadoCompetencias } from "./competencias";
 import { ErroExtracao, extrair } from "./extrator";
@@ -21,7 +21,7 @@ import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
 import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
 import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
-import { criarRascunho, type Rascunho, type Turno } from "./rascunho";
+import { criarRascunho, rascunhoNoFormatoAtivo, type Rascunho, type Turno } from "./rascunho";
 import { estadoInicialEnfase, type EstadoEnfase } from "./enfase";
 import { recalcularRascunho, type DetalhePeso } from "./pesos";
 
@@ -135,12 +135,14 @@ export function liberar(id: string): void {
  */
 export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number, competencias: ResultadoCompetencias): Sessao {
   // Com cobertura vazia, todos os tópicos obrigatórios das áreas do foco entram em `pendencias`.
-  const rascunho = aplicarCobertura(criarRascunho(vaga, classificacao), {});
+  // O formato que não está disponível vira live coding; a classificação original segue no log (ver `classificacaoDoFormatoAtivo`).
+  const classificacaoUsada = classificacaoDoFormatoAtivo(classificacao);
+  const rascunho = aplicarCobertura(criarRascunho(vaga, classificacaoUsada), {});
   const sessao: Sessao = {
     id: randomUUID(),
     criadaEm,
     vaga,
-    classificacao,
+    classificacao: classificacaoUsada,
     rascunho,
     transcricao: [],
     plano: planoInicial(),
@@ -165,7 +167,8 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
       `modo=${classificacao.mode.value} (${confianca(classificacao.mode.confidence)}) ` +
       `senioridade=${classificacao.seniority.value} (${confianca(classificacao.seniority.confidence)}) ` +
       `foco=${classificacao.focus.map((f) => `${f.area}:${f.weight}`).join(" ")} ` +
-      `confirmar=[${classificacao.confirmar.join(", ")}]`,
+      `confirmar=[${classificacao.confirmar.join(", ")}]` +
+      (classificacaoUsada.mode.value !== classificacao.mode.value ? ` | usado: modo=${classificacaoUsada.mode.value}` : ""),
     ms: classificacao.usage.ms,
     provedor: "typesafe",
     model: classificacao.model,
@@ -175,6 +178,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
       focusScores: classificacao.focusScores,
       focus: classificacao.focus,
       confirmar: classificacao.confirmar,
+      modoUsado: classificacaoUsada.mode.value,
       rascunhoInicial: rascunho,
     },
   });
@@ -318,7 +322,9 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     }
 
     etapa = "cobertura";
-    const cob = await avaliarCobertura(ext.rascunho, transcricao, { ultimaFalaAgente: ultimaFalaDoAgente(transcricao) });
+    // O formato que não está disponível nesta versão nunca entra no rascunho, nem pelo extrator.
+    const extraido = rascunhoNoFormatoAtivo(ext.rascunho);
+    const cob = await avaliarCobertura(extraido, transcricao, { ultimaFalaAgente: ultimaFalaDoAgente(transcricao) });
     const faltando = cob.faltando.map((t) => t.id);
     registrarEvento(sessao, {
       tipo: "cobertura",
@@ -344,7 +350,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     const nivelDeVolta = sessao.rascunho.confirmado.seniority
       ? { seniority: sessao.rascunho.seniority, confirmado: { ...ext.rascunho.confirmado, seniority: true } }
       : {};
-    sessao.rascunho = { ...ext.rascunho, ...nivelDeVolta, cobertura: mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura) };
+    sessao.rascunho = { ...extraido, ...nivelDeVolta, cobertura: mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura) };
     aplicarPesosNaSessao(sessao, "segundo plano");
     const mudancas = diff(antes, sessao.rascunho);
     registrarEvento(sessao, {

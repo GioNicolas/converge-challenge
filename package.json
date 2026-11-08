@@ -14,7 +14,8 @@
     "pre:extrair": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/extrair.ts",
     "pre:simular": "tsx --env-file-if-exists=.env.local scripts/pre-entrevista/simular.ts",
     "test:email": "tsx --test lib/email/__tests__/*.test.ts",
-    "test:convites": "tsx --test lib/convites/__tests__/*.test.ts"
+    "test:convites": "tsx --test lib/convites/__tests__/*.test.ts",
+    "test:pre-entrevista": "tsx --test lib/pre-entrevista/__tests__/*.test.ts"
   },
   "dependencies": {
     "@elevenlabs/client": "^1.35.0",

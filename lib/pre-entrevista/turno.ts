@@ -9,7 +9,7 @@
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
-import { ROTULO_NAO_AVALIADO } from "./catalogo";
+import { modoAtivo, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
 import { acumularEnfase, declararCentral } from "./enfase";
 import { aberturaDoAgente, responder, tradeoffDaAbertura } from "./conversa";
@@ -40,12 +40,17 @@ import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } 
 function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
   const aberto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, sessao.rascunho.confirmado.seniority);
   const cobertura = aberto ? { ...sessao.rascunho.cobertura, confirmou_inicio: 0 } : sessao.rascunho.cobertura;
+  // Área que ela já tratou na fala (respondeu ou declarou central): o básico dela já foi dito, não se pergunta de novo.
+  const enfase = sessao.enfaseEstado;
+  const areasFaladas = AREAS.filter((a) => (enfase[a].falou && enfase[a].maximo >= 2) || enfase[a].declarado === "central");
   return {
     ...sessao.plano,
     focus: sessao.rascunho.focus,
     cobertura,
     mode: sessao.rascunho.mode,
     nivelEmAberto: aberto,
+    areasFaladas,
+    formatoIndisponivelPedido: !modoAtivo("system_design"),
   };
 }
 
@@ -173,18 +178,23 @@ function resolverTradeoff(sessao: Sessao): void {
 }
 
 /**
- * O que fica de fora desta entrevista: áreas que a recrutadora deixou para a próxima etapa, e as competências
- * que o formato final não verifica (só as duas primeiras da lista, que são as importantes). Derivado do estado,
- * então é recalculado a cada turno e não fica desatualizado se o formato mudar.
+ * O que fica de fora desta entrevista: áreas que a recrutadora deixou para a próxima etapa, áreas do foco que o formato
+ * não mede e nenhum outro formato disponível mede, e as competências que o formato final não verifica (só as duas
+ * primeiras da lista, que são as importantes). Derivado do estado, então é recalculado a cada turno.
  */
 export function atualizarNaoAvaliado(sessao: Sessao): void {
   const decisoes = sessao.plano.decisoesTradeoff;
+  const r = sessao.rascunho;
   const porDecisao = AREAS.filter((a) => decisoes[a] === "proxima_etapa").map((a) => ROTULO_NAO_AVALIADO[a]);
+  const porFormato = r.focus
+    .map((f) => f.area)
+    .filter((a) => semMedicaoNoFormato(r.mode, a))
+    .map((a) => ROTULO_NAO_AVALIADO[a]);
   const porCompetencia = sessao.competencias
     .slice(0, 2)
-    .filter((c) => !c.verificavel[sessao.rascunho.mode])
+    .filter((c) => !c.verificavel[r.mode])
     .map((c) => c.nome);
-  sessao.naoAvaliado = [...new Set([...porDecisao, ...porCompetencia])];
+  sessao.naoAvaliado = [...new Set([...porDecisao, ...porFormato, ...porCompetencia])];
 }
 
 /** Primeira fala do Totti, sem LLM. Conta como a pergunta de confirmação do início. */
