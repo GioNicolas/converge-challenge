@@ -64,7 +64,8 @@ async function preparar(page: Page) {
       constructor(src = "") { this.src = src; }
       async play() {
         if (this.src.startsWith("data:")) return; // destrave do áudio no primeiro gesto
-        const texto = await (await fetch(this.src)).text();
+        // Tira o silêncio que a voz põe em volta da fala (lib/voz/folga.ts): quadros MP3 que terminam em "LAME3.100UUU…".
+        const texto = (await (await fetch(this.src)).text()).split(/LAME3\.100U+/).map((p) => p.replace(/\uFFFD[^]*$/, "").trim()).reduce((a, b) => (b.length > a.length ? b : a), "");
         tocar(this, texto);
         if (controle.autoTerminar) setTimeout(controle.terminar, 100);
       }
