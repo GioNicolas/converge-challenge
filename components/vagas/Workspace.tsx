@@ -1,18 +1,18 @@
 "use client";
 
-// A tela inicial do recrutador. A pergunta que ela responde é "o que eu tenho que fazer agora?":
-//   1. As abas de estágio: Definir escopo → Enviar convites → Aguardando entrevistas → Ver resultados.
-//      Cada aba mostra só quantas vagas estão nela e, clicada, vira o filtro da lista.
-//   2. A lista: sem estágio escolhido, agrupada pelo que pede ação primeiro (resultados, convites,
-//      escopos e, por último, o que só está esperando); com estágio, busca ou filtro, uma lista só.
-// Cada linha tem o cargo, uma frase curta (com um número, no máximo) e um único próximo passo.
-// Os detalhes (funil, barras, responsável) ficam dentro da vaga. Encerradas ficam num atalho à parte.
+// A tela inicial do recrutador: as vagas como uma pipeline, na ordem em que andam.
+//   Definir escopo → Aguardando entrevistas → Ver resultados
+// Sem filtro, um quadro com uma coluna por estágio (da esquerda para a direita, como a vaga anda), cada
+// coluna com as primeiras vagas e um "Ver todas". Clicar num estágio, buscar ou filtrar vira uma lista só.
+// Os convites saem sozinhos ao publicar, então não há estágio de "enviar convites" nem "divulgar link".
+// Cada vaga tem o cargo e uma frase curta (com um número, no máximo); os detalhes ficam dentro da vaga.
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Check, SlidersHorizontal, X } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import {
+  DICA_ESTAGIO,
   ESTAGIOS,
   NOME_AREA_VAGA,
   NOME_ESTAGIO,
@@ -40,9 +40,8 @@ type Ordem = "recentes" | "inscritos" | "az";
 type Linha = VagaEmpresa & { estagio: ReturnType<typeof estagioDa> };
 type Item = { tipo: "vaga"; v: Linha } | { tipo: "escopo"; r: RascunhoVaga };
 
-/** Na lista agrupada, o que pede ação vem antes do que só está esperando. */
-const ORDEM_GRUPOS: Estagio[] = ["resultados", "convidar", "escopo", "aguardando"];
-const POR_GRUPO = 4;
+/** Quantas vagas cada coluna do quadro mostra antes do "Ver todas". */
+const POR_COLUNA = 5;
 const POR_PAGINA = 12;
 
 export default function Workspace() {
@@ -107,7 +106,6 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
     };
     // Sem ordem escolhida, cada estágio põe na frente o que mais pede atenção.
     if (ordem === "recentes" && estagio === "resultados") return [...l].sort((a, b) => b.funil.novos - a.funil.novos);
-    if (ordem === "recentes" && estagio === "convidar") return [...l].sort((a, b) => b.funil.inscritos - a.funil.inscritos);
     return [...l].sort(cmp[ordem]);
   };
 
@@ -131,7 +129,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const itensPlanos = useMemo(() => {
     if (filtro) return doEstagio(filtro);
     if (!plana) return [];
-    return [...doEstagio("resultados"), ...doEstagio("convidar"), ...doEstagio("escopo"), ...doEstagio("aguardando")];
+    return ESTAGIOS.flatMap((e) => doEstagio(e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtro, plana, filtradas, escopos, ordem]);
 
@@ -154,7 +152,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
     [...new Set(linhas.map((v) => v[k]).filter((x) => x && x !== "—"))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 
   const tituloLista =
-    filtro === "encerradas" ? "Encerradas" : filtro ? NOME_ESTAGIO[filtro] : termo || temFiltro ? "Resultado da busca" : "O que fazer agora";
+    filtro === "encerradas" ? "Encerradas" : filtro ? NOME_ESTAGIO[filtro] : "Resultado da busca";
 
   return (
     <motion.div
@@ -168,20 +166,27 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         <Busca valor={busca} onMudar={(v) => (setBusca(v), setPagina(0))} placeholder="Buscar vaga, time ou responsável" />
       </header>
 
-      {/* Os estágios viram abas: a vaga anda da esquerda para a direita. Clicada, a aba filtra a lista. */}
+      {/* A pipeline: os estágios em ordem, ligados por setas. Clicado, o estágio vira o filtro da lista. */}
       <section ref={lista} className="flex scroll-mt-8 flex-col gap-5">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-          <nav aria-label="Estágios das vagas" className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:gap-x-4">
+          <nav
+            aria-label="Estágios das vagas"
+            className="-mx-5 flex min-w-0 items-center gap-1 overflow-x-auto px-5 [scrollbar-width:none] md:mx-0 md:flex-wrap md:overflow-visible md:px-0"
+          >
             <Aba ativa={filtro === null} onClick={() => escolher(null)}>
               Tudo
             </Aba>
-            {ESTAGIOS.map((e) => (
-              <Aba key={e} ativa={filtro === e} n={contagem(e)} pedeAcao={e !== "aguardando"} onClick={() => escolher(e)}>
-                {NOME_ESTAGIO[e]}
-              </Aba>
+            <span className="mx-1 h-4 w-px shrink-0 bg-borda" aria-hidden />
+            {ESTAGIOS.map((e, i) => (
+              <span key={e} className="flex shrink-0 items-center gap-1">
+                {i > 0 && <ChevronRight size={14} className="text-texto-suave/50" aria-hidden />}
+                <Aba ativa={filtro === e} passo={i + 1} n={contagem(e)} onClick={() => escolher(e)}>
+                  {NOME_ESTAGIO[e]}
+                </Aba>
+              </span>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center justify-end gap-2 md:ml-auto">
             {filtro !== "encerradas" && encerradas > 0 && (
               <button
                 onClick={() => escolher("encerradas")}
@@ -238,35 +243,18 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
                 <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itensPlanos.length} onMudar={setPagina} />
               </>
             ) : (
-              ORDEM_GRUPOS.map((e) => {
-                const itens = doEstagio(e);
-                if (itens.length === 0) return null;
-                return (
-                  <div key={e} className="flex flex-col gap-2.5">
-                    <div className="flex items-center justify-between gap-3 px-1">
-                      <span className="flex items-center gap-2 text-[14px] font-medium text-texto">
-                        <Ponto estagio={e} />
-                        {NOME_ESTAGIO[e]}
-                      </span>
-                      {itens.length > POR_GRUPO && (
-                        <button
-                          onClick={() => escolher(e)}
-                          className="group flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto"
-                        >
-                          Ver todas <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="cartao overflow-hidden">
-                      <ul className="py-1.5">
-                        {itens.slice(0, POR_GRUPO).map((it) => (
-                          <ItemLista key={chave(it)} it={it} />
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                );
-              })
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                {ESTAGIOS.map((e, i) => (
+                  <Coluna
+                    key={e}
+                    passo={i + 1}
+                    estagio={e}
+                    itens={doEstagio(e)}
+                    ultima={i === ESTAGIOS.length - 1}
+                    onVerTodas={() => escolher(e)}
+                  />
+                ))}
+              </div>
             )}
           </motion.div>
         </AnimatePresence>
@@ -277,17 +265,17 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
 
 const chave = (it: Item) => (it.tipo === "vaga" ? it.v.id : `escopo-${it.r.id}`);
 
-/** Uma aba de estágio: nome e, ao lado, quantas vagas. Um ponto avisa quando o estágio pede ação. */
+/** Um passo da pipeline (ou "Tudo"): número, nome e quantas vagas. A pílula preta desliza até o escolhido. */
 function Aba({
   ativa,
+  passo,
   n,
-  pedeAcao,
   onClick,
   children,
 }: {
   ativa: boolean;
+  passo?: number;
   n?: number;
-  pedeAcao?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -295,7 +283,7 @@ function Aba({
     <button
       onClick={onClick}
       aria-pressed={ativa}
-      className={`relative flex h-9 items-center gap-2 rounded-full px-4 text-[13.5px] transition-colors ${
+      className={`relative flex h-9 shrink-0 items-center gap-2 rounded-full px-3.5 text-[13.5px] whitespace-nowrap transition-colors ${
         ativa ? "text-texto-claro" : "text-texto/75 hover:bg-superficie-2/70 hover:text-texto"
       }`}
     >
@@ -306,18 +294,152 @@ function Aba({
           className="absolute inset-0 rounded-full bg-texto"
         />
       )}
+      {passo !== undefined && (
+        <span
+          className={`numero relative flex size-[18px] items-center justify-center rounded-full text-[10.5px] ${
+            ativa ? "bg-texto-claro/15 text-texto-claro" : "bg-superficie-2 text-texto-suave"
+          }`}
+        >
+          {passo}
+        </span>
+      )}
       <span className="relative">{children}</span>
       {n !== undefined && n > 0 && (
         <span className={`numero relative text-[12.5px] ${ativa ? "text-texto-claro/60" : "text-texto-suave"}`}>{n}</span>
       )}
-      {pedeAcao && !!n && !ativa && <span className="relative -ml-0.5 size-1.5 rounded-full bg-texto" aria-label="Pede ação" />}
     </button>
+  );
+}
+
+/**
+ * Uma coluna do quadro: o passo, o nome do estágio e as primeiras vagas dele, em cartões.
+ * A seta no canto liga uma coluna à próxima (a vaga anda da esquerda para a direita).
+ */
+function Coluna({
+  passo,
+  estagio,
+  itens,
+  ultima,
+  onVerTodas,
+}: {
+  passo: number;
+  estagio: Estagio;
+  itens: Item[];
+  ultima: boolean;
+  onVerTodas: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: (passo - 1) * 0.07, ease: curvaSuave }}
+      className="relative flex min-w-0 flex-col gap-3 rounded-[22px] bg-superficie-2/45 p-3"
+    >
+      <button onClick={onVerTodas} className="group flex items-center gap-2.5 rounded-xl px-2 pt-1.5 pb-1 text-left">
+        <span className="numero flex size-6 shrink-0 items-center justify-center rounded-full bg-texto text-[11.5px] text-texto-claro">
+          {passo}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex items-center gap-2 text-[14.5px] font-medium text-texto">
+            {NOME_ESTAGIO[estagio]}
+            <span className="numero font-normal text-texto-suave">{itens.length}</span>
+          </span>
+          <span className="truncate text-[12.5px] text-texto-suave">{DICA_ESTAGIO[estagio]}</span>
+        </span>
+        <ArrowRight size={14} className="shrink-0 text-texto-suave opacity-0 transition-[opacity,transform] group-hover:translate-x-0.5 group-hover:opacity-100" />
+      </button>
+
+      {itens.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-borda px-4 py-8 text-center text-[13px] text-texto-suave">Nenhuma vaga aqui.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {itens.slice(0, POR_COLUNA).map((it, k) => (
+            <motion.li
+              key={chave(it)}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: (passo - 1) * 0.07 + 0.08 + k * 0.035, ease: curvaSuave }}
+            >
+              {it.tipo === "vaga" ? <CartaoVaga v={it.v} /> : <CartaoEscopo r={it.r} />}
+            </motion.li>
+          ))}
+        </ul>
+      )}
+
+      {itens.length > POR_COLUNA && (
+        <button
+          onClick={onVerTodas}
+          className="group mt-auto flex items-center justify-center gap-1 rounded-xl py-2 text-[13px] text-texto-suave transition-colors hover:bg-superficie hover:text-texto"
+        >
+          Ver todas as {itens.length} <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+        </button>
+      )}
+
+      {!ultima && (
+        <span
+          aria-hidden
+          className="absolute top-[22px] -right-[13px] z-10 hidden size-[22px] items-center justify-center rounded-full bg-fundo text-texto-suave lg:flex"
+        >
+          <ChevronRight size={14} />
+        </span>
+      )}
+    </motion.div>
+  );
+}
+
+/** Cartão de uma vaga publicada no quadro: cargo, time e a frase do estágio. */
+function CartaoVaga({ v }: { v: Linha }) {
+  const { href, situacao } = estadoDa(v);
+  const meta = [v.time, NOME_SENIORIDADE_VAGA[v.senioridade]].filter((x) => x && x !== "—").join(" · ");
+  return (
+    <Link
+      href={href}
+      className="group flex flex-col gap-2.5 rounded-2xl bg-superficie p-3.5 shadow-[0_0_0_1px_rgb(17_17_17/0.04)] transition-[box-shadow,transform] duration-200 outline-none hover:-translate-y-px hover:shadow-[0_0_0_1px_rgb(17_17_17/0.1),0_6px_16px_-8px_rgb(17_17_17/0.18)] focus-visible:shadow-[0_0_0_2px_rgb(17_17_17/0.3)]"
+    >
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-[14.5px] text-texto">{v.cargo}</span>
+        {meta && <span className="truncate text-[12px] text-texto-suave">{meta}</span>}
+      </span>
+      <span className="flex items-center justify-between gap-2 text-[12.5px] text-texto-suave">
+        <span className="truncate">{situacao}</span>
+        <ArrowRight size={13} className="shrink-0 opacity-0 transition-[opacity,transform] group-hover:translate-x-0.5 group-hover:opacity-100" />
+      </span>
+    </Link>
+  );
+}
+
+/** Cartão de um escopo com o Totti. O X, no canto, descarta (fora do texto, que deixa espaço para ele). */
+function CartaoEscopo({ r }: { r: RascunhoVaga }) {
+  return (
+    <div className="group/cartao relative">
+      <Link
+        href={`/vagas/nova?rascunho=${encodeURIComponent(r.id)}`}
+        className="group flex flex-col gap-2.5 rounded-2xl bg-superficie p-3.5 pr-10 shadow-[0_0_0_1px_rgb(17_17_17/0.04)] transition-[box-shadow,transform] duration-200 outline-none hover:-translate-y-px hover:shadow-[0_0_0_1px_rgb(17_17_17/0.1),0_6px_16px_-8px_rgb(17_17_17/0.18)] focus-visible:shadow-[0_0_0_2px_rgb(17_17_17/0.3)]"
+      >
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-[14.5px] text-texto">{r.cargo}</span>
+          <span className="truncate text-[12px] text-texto-suave">Criada {quandoFoi(diasDoRascunho(r))}</span>
+        </span>
+        <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-texto">
+          {r.sessaoId ? "Continuar com o Totti" : "Começar com o Totti"}
+          <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </Link>
+      <button
+        onClick={() => descartarRascunho(r.id)}
+        aria-label={`Descartar o escopo ${r.cargo}`}
+        title="Descartar escopo"
+        className="absolute top-2.5 right-2.5 flex size-7 items-center justify-center rounded-full text-texto-suave opacity-0 transition-[opacity,color,background-color] group-hover/cartao:opacity-100 hover:bg-superficie-2 hover:text-perigo focus-visible:opacity-100"
+      >
+        <X size={13} />
+      </button>
+    </div>
   );
 }
 
 /** O ponto do estágio: cheio pede ação, vazado está esperando. */
 function Ponto({ estagio }: { estagio: Estagio | "encerrada" }) {
-  const cheio = estagio === "resultados" || estagio === "convidar" || estagio === "escopo";
+  const cheio = estagio === "resultados" || estagio === "escopo";
   return (
     <span
       aria-hidden
@@ -398,8 +520,31 @@ function Selo({ estagio }: { estagio: Linha["estagio"] | "escopo" }) {
 
 const plural = (n: number, um: string, varios: string) => `${numeroCurto(n)} ${n === 1 ? um : varios}`;
 
-function LinhaVaga({ v, mostrarEstagio }: { v: Linha; mostrarEstagio: boolean }) {
+/** Para onde a vaga leva, o próximo passo e a frase do estágio (um número, no máximo: o resto fica dentro da vaga). */
+function estadoDa(v: Linha): { href: string; acao: string; situacao: ReactNode } {
   const f = v.funil;
+  const base = `/vagas/vaga?id=${encodeURIComponent(v.id)}`;
+  const faltam = Math.max(0, f.convidados - f.concluiram);
+  if (v.estagio === "resultados")
+    return {
+      href: `${base}&etapa=escores`,
+      acao: "Ver resultados",
+      situacao:
+        f.novos > 0 ? (
+          <span className="font-medium text-texto">{plural(f.novos, "relatório novo", "relatórios novos")}</span>
+        ) : (
+          plural(f.concluiram, "relatório", "relatórios")
+        ),
+    };
+  if (v.estagio === "encerrada") return { href: `${base}&etapa=escores`, acao: "Ver resultados", situacao: "Encerrada" };
+  return {
+    href: `${base}&etapa=entrevistas`,
+    acao: "Acompanhar",
+    situacao: faltam > 0 ? plural(faltam, "entrevista por fazer", "entrevistas por fazer") : "Esperando os candidatos",
+  };
+}
+
+function LinhaVaga({ v, mostrarEstagio }: { v: Linha; mostrarEstagio: boolean }) {
   const meta = [v.time, NOME_SENIORIDADE_VAGA[v.senioridade]].filter((x) => x && x !== "—").join(" · ");
   const sub = mostrarEstagio ? (
     <span className="flex items-center gap-2">
@@ -409,37 +554,7 @@ function LinhaVaga({ v, mostrarEstagio }: { v: Linha; mostrarEstagio: boolean })
   ) : (
     meta || `Aberta ${quandoFoi(v.abertaHaDias)}`
   );
-  const base = `/vagas/vaga?id=${encodeURIComponent(v.id)}`;
-  const faltam = Math.max(0, f.convidados - f.concluiram);
-
-  // Um número por linha, no máximo: o resto fica dentro da vaga.
-  const porEstagio = {
-    resultados: {
-      href: `${base}&etapa=escores`,
-      acao: "Ver resultados",
-      situacao:
-        f.novos > 0 ? (
-          <span className="font-medium text-texto">{plural(f.novos, "relatório novo", "relatórios novos")}</span>
-        ) : (
-          plural(f.concluiram, "relatório", "relatórios")
-        ),
-    },
-    convidar: {
-      href: `${base}&etapa=entrevistas`,
-      acao: f.inscritos > 0 ? "Enviar convites" : "Divulgar link",
-      situacao: f.inscritos > 0 ? plural(f.inscritos, "inscrito esperando", "inscritos esperando") : "Ninguém inscrito ainda",
-    },
-    aguardando: {
-      href: `${base}&etapa=entrevistas`,
-      acao: "Acompanhar",
-      situacao: faltam > 0 ? plural(faltam, "entrevista por fazer", "entrevistas por fazer") : "Esperando os candidatos",
-    },
-    encerrada: {
-      href: `${base}&etapa=escores`,
-      acao: "Ver resultados",
-      situacao: "Encerrada",
-    },
-  }[v.estagio];
+  const porEstagio = estadoDa(v);
 
   return (
     <li className="linha-lista mx-2">
@@ -449,7 +564,7 @@ function LinhaVaga({ v, mostrarEstagio }: { v: Linha; mostrarEstagio: boolean })
         sub={sub}
         situacao={porEstagio.situacao}
         acao={porEstagio.acao}
-        forte={v.estagio === "resultados" || v.estagio === "convidar"}
+        forte={v.estagio === "resultados"}
       />
     </li>
   );

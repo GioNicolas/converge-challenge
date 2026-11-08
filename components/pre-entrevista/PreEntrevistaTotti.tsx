@@ -131,7 +131,15 @@ export default function PreEntrevistaTotti({
     const t = setInterval(async () => {
       try {
         const novo = await buscarSessao(id);
-        if (novo) setEstado((atual) => (atual && novo.transcricao.length >= atual.transcricao.length ? novo : atual));
+        // Nunca volta para trás: com instâncias diferentes no servidor, uma pode responder com a extração mais velha.
+        if (novo)
+          setEstado((atual) =>
+            atual &&
+            (novo.transcricao.length > atual.transcricao.length ||
+              (novo.transcricao.length === atual.transcricao.length && novo.status.versaoExtraida >= atual.status.versaoExtraida))
+              ? novo
+              : atual,
+          );
       } catch {
         // Falhas pontuais não interrompem a conversa.
       }

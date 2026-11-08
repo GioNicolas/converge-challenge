@@ -86,6 +86,7 @@ export function useEntrevista(
   cursor: React.RefObject<ControleCursor | null>,
   opcoes: { configId?: string; convite?: string } = {},
 ) {
+  const { configId, convite } = opcoes;
   const [sessao, setSessao] = useState<Sessao | null>(null);
   const criacaoDaSessao = useRef<Promise<Sessao> | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
@@ -166,20 +167,20 @@ export function useEntrevista(
 
   useEffect(() => {
     let cancelado = false;
-    criacaoDaSessao.current ??= criarSessao({ configId: opcoes.configId });
+    criacaoDaSessao.current ??= criarSessao({ configId });
     criacaoDaSessao.current.then((nova) => {
       if (!cancelado) setSessao(nova);
       // Liga a sessão ao convite (painel da vaga). Falhar não atrapalha a entrevista.
-      if (opcoes.convite && usarServidor()) {
+      if (convite && usarServidor()) {
         void fetch("/api/convites/sessao", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ convite: opcoes.convite, sessionId: nova.sessao_id }),
+          body: JSON.stringify({ convite, sessionId: nova.sessao_id }),
         }).catch(() => {});
       }
     }).catch((erro) => console.warn("[sessão] não foi possível iniciar:", erro));
     return () => { cancelado = true; };
-  }, []);
+  }, [configId, convite]);
 
   // Linha do tempo da entrevista: vai ao servidor em lotes.
   useEffect(() => {
