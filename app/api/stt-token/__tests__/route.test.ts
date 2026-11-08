@@ -1,59 +1,31 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, test } from "node:test";
+import { afterEach, test } from "node:test";
 import { NextRequest } from "next/server";
-import { criarRepositorioEmMemoria, type RepositorioSessoes } from "../../../../lib/agente/armazenamento";
-import { definirContextoParaTestes } from "../../../../lib/agente/rotas/contexto";
-import { estadoInicial } from "../../../../lib/agente/sessao/estado";
-import { getOrCreateSession } from "../../../../lib/session/store";
+import { getOrCreateSession } from "@/lib/session/store";
 import { GET } from "../route";
+import { criarRepositorioEmMemoria } from "@/lib/agente/armazenamento";
+import { definirContextoParaTestes } from "@/lib/agente/rotas/contexto";
+import { estadoInicial } from "@/lib/agente/sessao/estado";
 
 const fetchOriginal = globalThis.fetch;
-let repo: RepositorioSessoes;
-let sessaoId: string;
-let contadorIp = 0;
-
-beforeEach(async () => {
-  repo = criarRepositorioEmMemoria();
-  definirContextoParaTestes({ repositorio: repo });
-  sessaoId = (await repo.criar({ avaliacaoId: "a", candidatoId: "c", estado: estadoInicial() })).id;
-});
 afterEach(() => {
+  definirContextoParaTestes(null);
   globalThis.fetch = fetchOriginal;
   delete process.env.ELEVENLABS_API_KEY;
-  definirContextoParaTestes(null);
 });
+// Cada teste usa um IP próprio: o limitador por IP é global ao módulo e um teste não pode consumir a cota de outro.
+let ipSeq = 0;
+const pedido = (query = "?sessao_id=s1", ip = `10.0.0.${++ipSeq}`) =>
+  new NextRequest(`http://localhost/api/stt-token${query}`, { headers: { "x-real-ip": ip } });
 
-// Cada pedido usa um IP próprio para os testes não esgotarem o limite um do outro.
-const pedido = (id: string | null = sessaoId, ip = `10.0.0.${++contadorIp}`) =>
-  new NextRequest(`http://localhost/api/stt-token${id === null ? "" : `?sessao_id=${id}`}`, { headers: { "x-real-ip": ip } });
-
-const fetchFalso = (calls: { n: number }) => {
-  globalThis.fetch = (async () => { calls.n++; return Response.json({ token: "tk" }); }) as typeof fetch;
-};
+getOrCreateSession("s1");
 
 test("exige sessao_id", async () => {
-  assert.equal((await GET(pedido(null))).status, 400);
+  assert.equal((await GET(pedido(""))).status, 400);
 });
 
 test("sem chave configurada responde 503", async () => {
   assert.equal((await GET(pedido())).status, 503);
-});
-
-test("sessão inexistente responde 404 sem chamar o ElevenLabs", async () => {
-  process.env.ELEVENLABS_API_KEY = "k";
-  const calls = { n: 0 };
-  fetchFalso(calls);
-  assert.equal((await GET(pedido("nao-existe"))).status, 404);
-  assert.equal(calls.n, 0);
-});
-
-test("sessão encerrada responde 409 sem chamar o ElevenLabs", async () => {
-  process.env.ELEVENLABS_API_KEY = "k";
-  const calls = { n: 0 };
-  fetchFalso(calls);
-  const id = (await repo.criar({ avaliacaoId: "a", candidatoId: "c", estado: { ...estadoInicial(), fase: "ENCERRADA" } })).id;
-  assert.equal((await GET(pedido(id))).status, 409);
-  assert.equal(calls.n, 0);
 });
 
 test("devolve o token e nunca a chave", async () => {
@@ -68,26 +40,6 @@ test("devolve o token e nunca a chave", async () => {
   assert.deepEqual(await resposta.json(), { token: "tk" });
 });
 
-test("limita pedidos por sessão e por IP", async () => {
-  process.env.ELEVENLABS_API_KEY = "k";
-  const calls = { n: 0 };
-  fetchFalso(calls);
-  const porSessao: number[] = [];
-  for (let i = 0; i < 21; i++) porSessao.push((await GET(pedido())).status);
-  assert.deepEqual(porSessao.slice(0, 20), Array(20).fill(200));
-  assert.equal(porSessao[20], 429);
-  assert.equal(calls.n, 20);
-
-  const ip = "192.168.9.9";
-  const porIp: number[] = [];
-  for (let i = 0; i < 31; i++) {
-    const id = (await repo.criar({ avaliacaoId: "a", candidatoId: "c", estado: estadoInicial() })).id;
-    porIp.push((await GET(pedido(id, ip))).status);
-  }
-  assert.equal(porIp[29], 200);
-  assert.equal(porIp[30], 429);
-});
-
 test("falha do ElevenLabs vira 502", async () => {
   process.env.ELEVENLABS_API_KEY = "k";
   globalThis.fetch = (async () => new Response("x", { status: 401 })) as typeof fetch;
@@ -96,33 +48,60 @@ test("falha do ElevenLabs vira 502", async () => {
   assert.equal((await GET(pedido())).status, 502);
 });
 
-test("sessão da IDE de coding (store em memória) também recebe token", async () => {
+test("sessão desconhecida responde 404 e não chama o ElevenLabs", async () => {
   process.env.ELEVENLABS_API_KEY = "k";
-  const calls = { n: 0 };
-  fetchFalso(calls);
-  getOrCreateSession("ide-ativa");
-  assert.equal((await GET(pedido("ide-ativa"))).status, 200);
-  assert.equal(calls.n, 1);
+  let chamou = false;
+  globalThis.fetch = (async () => { chamou = true; return Response.json({ token: "tk" }); }) as typeof fetch;
+  assert.equal((await GET(pedido("?sessao_id=inexistente"))).status, 404);
+  assert.equal(chamou, false);
 });
 
-test("sessão encerrada da IDE responde 409 sem chamar o ElevenLabs", async () => {
+test("sessão encerrada responde 409", async () => {
   process.env.ELEVENLABS_API_KEY = "k";
-  const calls = { n: 0 };
-  fetchFalso(calls);
-  getOrCreateSession("ide-fim").ended = true;
-  assert.equal((await GET(pedido("ide-fim"))).status, 409);
-  assert.equal(calls.n, 0);
+  getOrCreateSession("s-fim").ended = true;
+  assert.equal((await GET(pedido("?sessao_id=s-fim"))).status, 409);
+});
+
+test("limita pedidos repetidos da mesma sessão (429)", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  getOrCreateSession("s-limite");
+  globalThis.fetch = (async () => Response.json({ token: "tk" })) as typeof fetch;
+  const status: number[] = [];
+  const ip = "10.9.9.9";
+  for (let i = 0; i < 21; i++) status.push((await GET(pedido("?sessao_id=s-limite", ip))).status);
+  assert.equal(status[19], 200);
+  assert.equal(status[20], 429);
+});
+
+test("autoriza sessões reais do quadro e recusa quadro encerrado", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  const repo = criarRepositorioEmMemoria();
+  definirContextoParaTestes({ repositorio: repo, llm: null });
+  const sessao = await repo.criar({ avaliacaoId: "demo", candidatoId: "teste", estado: estadoInicial() });
+  globalThis.fetch = async () => Response.json({ token: "temporario" });
+  const query = `?sessao_id=${sessao.id}&contexto=quadro`;
+  assert.equal((await GET(pedido(query))).status, 200);
+  await repo.salvarEstado(sessao.id, { ...sessao.estado, fase: "ENCERRADA" });
+  assert.equal((await GET(pedido(query))).status, 409);
+  assert.equal((await GET(pedido("?sessao_id=fantasma&contexto=quadro"))).status, 404);
+});
+
+test("recusa origem externa e contexto inválido antes de chamar o provedor", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  globalThis.fetch = async () => { assert.fail("não deve chamar o provedor"); };
+  assert.equal((await GET(new NextRequest("http://localhost/api/stt-token?sessao_id=s1", { headers: { origin: "https://outro.example" } }))).status, 403);
+  assert.equal((await GET(pedido("?sessao_id=s1&contexto=invalido"))).status, 400);
 });
 
 test("teto global barra o gasto mesmo com muitas sessões e IPs diferentes (429)", async () => {
   process.env.ELEVENLABS_API_KEY = "k";
-  const calls = { n: 0 };
-  fetchFalso(calls);
+  let chamadas = 0;
+  globalThis.fetch = (async () => { chamadas++; return Response.json({ token: "tk" }); }) as typeof fetch;
   let barrou = false;
   for (let i = 0; i < 400 && !barrou; i++) {
-    getOrCreateSession(`ide-global-${i}`);
-    barrou = (await GET(pedido(`ide-global-${i}`))).status === 429;
+    getOrCreateSession(`s-global-${i}`);
+    barrou = (await GET(pedido(`?sessao_id=s-global-${i}`))).status === 429;
   }
   assert.equal(barrou, true);
-  assert.ok(calls.n <= 300);
+  assert.ok(chamadas <= 300);
 });

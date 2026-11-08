@@ -1,4 +1,4 @@
-// Planejador falso e determinístico (AGENTE_FAKE=1): 1º turno pergunta, depois propõe, depois revisa.
+// Planejador falso e determinístico (AGENTE_FAKE=1): propõe o plano já no 1º turno e depois revisa.
 import { NOME_SCHEMA_PLANEJADOR } from "../prompts/planejador";
 
 export function respostaFalsaDePlanejador(nomeSchema: string, mensagens: { content: string }[]): unknown {
@@ -6,7 +6,6 @@ export function respostaFalsaDePlanejador(nomeSchema: string, mensagens: { conte
   const texto = mensagens[0]?.content ?? "";
   const colada = texto.match(/<descricao_colada>\n([\s\S]*?)\n<\/descricao_colada>/)?.[1] ?? "";
   const titulo = (colada.split("\n")[0] || "a vaga").replace(/\s*\([^)]*\)\s*$/, "").slice(0, 80) || "a vaga";
-  const respondeu = /\n\[usuario\] /.test(texto);
   const comPlano = texto.includes("<plano_atual>");
   const vaga = {
     title: titulo,
@@ -17,14 +16,6 @@ export function respostaFalsaDePlanejador(nomeSchema: string, mensagens: { conte
     niceToHave: [],
     stack: [],
   };
-  if (!respondeu && !comPlano) {
-    return {
-      mensagem: `Li a vaga de ${titulo}. Duas perguntas rápidas: (1) o que pesa mais nesta função? (2) algo que devo deixar de fora da entrevista?`,
-      vaga,
-      plano: null,
-      pronto: false,
-    };
-  }
   const evidencia = colada.slice(0, 80) || titulo;
   const plano = {
     stages: [
@@ -44,8 +35,10 @@ export function respostaFalsaDePlanejador(nomeSchema: string, mensagens: { conte
   };
   return {
     mensagem: comPlano
-      ? "Ajustei o plano conforme pedido. Pode aprovar ou pedir mais mudanças."
-      : "Proponho uma etapa de 30 min no quadro branco. Pode aprovar ou pedir ajustes.",
+      ? "Ajustei o plano conforme pedido. Quer ajustar mais algo ou posso aprovar?"
+      : "Proponho uma etapa de 30 min no quadro branco, com foco em estrutura do raciocínio e trade-offs.\n" +
+        "Premissas: ênfase no trabalho principal da função; uma etapa única; conhecimentos fora da vaga ficam de fora.\n" +
+        "Quer ajustar algo ou posso aprovar?",
     vaga,
     plano,
     pronto: true,

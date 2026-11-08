@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { ChatMessage } from "@/lib/contracts";
+import { useTranscricao } from "@/lib/transcricao/useTranscricao";
+import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
 
 interface ChatPanelProps {
   open: boolean;
@@ -33,6 +36,10 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const ditado = useTranscricao({
+    bloqueada: busy || disabled || ended || !open,
+    aoTexto: (texto) => setDraft((atual) => acrescentarFala(atual, texto)),
+  });
 
   useEffect(() => {
     const el = listRef.current;
@@ -53,7 +60,7 @@ export function ChatPanel({
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const text = draft.trim();
-    if (text === "" || busy || disabled || ended) return;
+    if (text === "" || busy || disabled || ended || ditado.ativa) return;
     setDraft("");
     onSend(text);
   };
@@ -94,15 +101,18 @@ export function ChatPanel({
       <form onSubmit={submit} className="flex gap-2">
         <input
           value={draft}
+          readOnly={ditado.ativa}
           onChange={(e) => setDraft(e.target.value)}
           disabled={busy || disabled || ended}
           placeholder="responda ao entrevistador"
           className="min-w-0 flex-1 border border-neutral-700 bg-neutral-900 px-2 py-1 outline-none"
         />
-        <button type="submit" disabled={busy || disabled || ended || draft.trim() === ""} className={BTN}>
+        <BotaoDitado transcricao={ditado} disabled={busy || disabled || ended} />
+        <button type="submit" disabled={busy || disabled || ended || draft.trim() === "" || ditado.ativa} className={BTN}>
           Enviar
         </button>
       </form>
+      <EstadoDitado transcricao={ditado} />
     </section>
   );
 }

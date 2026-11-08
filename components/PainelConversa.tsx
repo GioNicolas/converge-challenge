@@ -4,7 +4,7 @@
 // fica até um dos dois encerrar: o entrevistador ("pode seguir") ou o candidato ("Voltar a programar").
 // Não é modal: o código continua visível e o editor abre espaço para ela. As conversas anteriores ficam
 // no topo, apagadas, para reler.
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, SendHorizontal } from "lucide-react";
 import type { ConversaAnterior, Fala } from "./ide/useChat";
@@ -28,6 +28,7 @@ type Props = {
   onVoltar: () => void;
   /** Texto do botão de sair da conversa (padrão "Voltar a programar"; no encerramento, "Encerrar agora"). */
   rotuloVoltar?: string;
+  rodape?: ReactNode;
 };
 
 const CURVA = [0.32, 0.72, 0, 1] as const; // --curva-suave
@@ -49,6 +50,7 @@ export default function PainelConversa({
   onTentarDeNovo,
   onVoltar,
   rotuloVoltar = "Voltar a programar",
+  rodape,
 }: Props) {
   const reduzir = useReducedMotion() ?? false;
   const lista = useRef<HTMLDivElement>(null);
@@ -155,6 +157,7 @@ export default function PainelConversa({
           </div>
 
           <footer className="border-t border-borda p-3">
+            {rodape}
             {encerrada ? (
               <p className="px-2 py-2 text-center text-sm text-texto-suave">
                 {rotuloVoltar === "Voltar a programar" ? "Voltando para o código…" : "Encerrando…"}

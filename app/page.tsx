@@ -9,7 +9,7 @@ import { salaDaEntrevista } from "@/lib/convites/sala";
 import { COOKIE_ONBOARDING } from "@/lib/vagas/onboarding";
 import "./tema-recrutador.css";
 
-export const metadata = { title: "Converge — Antes de começar" };
+export const metadata = { title: "Totti — Antes de começar" };
 
 /**
  * `?config=<id>` (o link do candidato) mostra a vaga e leva a entrevista para a mesma config.

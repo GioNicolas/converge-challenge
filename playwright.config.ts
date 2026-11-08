@@ -60,6 +60,8 @@ export default defineConfig({
         viewport: { width: 1440, height: 900 },
         launchOptions: {
           args: [
+            // Sem som nos alto-falantes de quem roda os testes (a voz do navegador fala as perguntas).
+            "--mute-audio",
             "--use-fake-ui-for-media-stream",
             "--use-fake-device-for-media-stream",
             `--use-file-for-fake-audio-capture=${audioSilencioso()}`,

@@ -97,6 +97,7 @@ test("URL e mensagem seguem o protocolo e usam somente token temporário", () =>
   assert.equal(url.searchParams.get("model_id"), "scribe_v2_realtime");
   assert.equal(url.searchParams.get("audio_format"), "pcm_16000");
   assert.equal(url.searchParams.get("commit_strategy"), "vad");
+  assert.equal(url.searchParams.get("vad_silence_threshold_secs"), "0.9");
   assert.equal(url.searchParams.get("language_code"), "pt");
   assert.equal(url.searchParams.has("xi-api-key"), false);
   assert.deepEqual(JSON.parse(mensagemDeAudio(new Float32Array([0, 1]))), {

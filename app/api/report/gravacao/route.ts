@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { gravacaoDaSessao } from "@/lib/session/gravacao";
+import { exemploHabilitado, GRAVACAO_EXEMPLO } from "@/lib/session/relatorio-exemplo";
 import { findReport } from "@/lib/session/reports";
 import { getSession } from "@/lib/session/store";
 
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get("sessionId") ?? "";
+  if (exemploHabilitado(sessionId)) return NextResponse.json(GRAVACAO_EXEMPLO);
   const session = getSession(sessionId);
   if (session) return NextResponse.json(gravacaoDaSessao(session));
 

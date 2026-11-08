@@ -9,6 +9,7 @@ import type { ReportListItem } from "@/app/api/report/route";
 import MomentoDaSessao, { type MomentoProva } from "@/components/report/MomentoDaSessao";
 import HistoriaDaEntrevista, { duracaoCurta, type Acontecimento } from "@/components/report/HistoriaDaEntrevista";
 import NotasDosCriterios, { type NotaCriterio } from "@/components/report/NotasDosCriterios";
+import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 
 const REC = { avancar: "Avançar", talvez: "Talvez", nao_avancar: "Não avançar" } as const;
 /** A avaliação leva de 15 s a 1 min: enquanto o servidor responde 202, consulta de novo. */
@@ -149,6 +150,7 @@ function SessionReport({ id }: { id: string }) {
     nome: c.name,
     nota: c.score,
     provas: c.score === null ? [] : provasDe(c.evidence, c.name),
+    regras: c.squadRules?.map((r) => ({ texto: r.text, efeito: r.effect })),
   }));
   const notasFora: NotaCriterio[] = [
     ...(report.adaptation
@@ -233,6 +235,9 @@ function SessionReport({ id }: { id: string }) {
                 ) : (
                   desenharProva(e, c.name, i)
                 )))}
+                <div className="mt-3 empty:hidden">
+                  <AprendidoComOTime regras={c.squadRules?.map((r) => ({ texto: r.text, efeito: r.effect }))} />
+                </div>
               </div>
             ))}
           </section>

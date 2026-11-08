@@ -15,14 +15,20 @@ export type MensagemConversa = {
   parcial?: boolean;
   /** Momento da fala, em milissegundos (Date.now()). */
   horario: number;
+  /** Elementos do desenho que o agente marcou ao dizer esta fala (ids reais do Excalidraw). */
+  alvos?: string[];
+  /** Requisito que esta fala combinou e que o agente escreveu no quadro. */
+  requisito?: string;
 };
 
 type Props = {
   aberto: boolean;
   onFechar: () => void;
   mensagens: MensagemConversa[];
-  /** Mostra "ver no quadro" nas falas do agente. */
-  onVerNoQuadro?: (id: string) => void;
+  /** "ver no quadro": leva a tela até o que a fala marcou ou combinou. */
+  onVerNoQuadro?: (mensagem: MensagemConversa) => void;
+  /** O botão só aparece quando a fala tem algo que ainda está no quadro. */
+  temNoQuadro?: (mensagem: MensagemConversa) => boolean;
   /** Envia o texto digitado; deve lançar erro se falhar. Sem ele, o campo fica desabilitado com uma dica. */
   onEnviar?: (texto: string) => Promise<void>;
   /** Dica mostrada quando o campo está desabilitado. */
@@ -43,6 +49,7 @@ export default function PainelConversa({
   onFechar,
   mensagens,
   onVerNoQuadro,
+  temNoQuadro,
   onEnviar,
   dicaSemCampo = "Digitar fica disponível quando a entrevista está conectada ao servidor.",
   onDigitando,
@@ -200,7 +207,7 @@ export default function PainelConversa({
                         animate={{ opacity: 1, y: 0 }}
                         transition={reduzir ? { duration: 0 } : { duration: 0.32, ease: CURVA }}
                       >
-                        <Fala mensagem={m} onVerNoQuadro={onVerNoQuadro} />
+                        <Fala mensagem={m} onVerNoQuadro={onVerNoQuadro && temNoQuadro?.(m) ? onVerNoQuadro : undefined} />
                       </motion.li>
                     ))}
                   </AnimatePresence>
@@ -267,7 +274,7 @@ function Fala({
   onVerNoQuadro,
 }: {
   mensagem: MensagemConversa;
-  onVerNoQuadro?: (id: string) => void;
+  onVerNoQuadro?: (mensagem: MensagemConversa) => void;
 }) {
   const doAgente = m.quem === "agente";
   return (
@@ -291,7 +298,7 @@ function Fala({
       {doAgente && onVerNoQuadro && (
         <button
           type="button"
-          onClick={() => onVerNoQuadro(m.id)}
+          onClick={() => onVerNoQuadro(m)}
           aria-label={`Ver no quadro: ${m.texto}`}
           className="mt-1.5 -ml-1 rounded-pequeno px-1 text-xs font-medium text-marca transition-opacity duration-150 ease-suave outline-none hover:opacity-75 focus-visible:ring-2 focus-visible:ring-marca"
         >

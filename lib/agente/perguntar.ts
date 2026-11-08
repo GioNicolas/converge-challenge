@@ -1,6 +1,8 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
 import { limitarFrases } from "./guardas";
+import { mapearAcoesVisuais, type AcaoVisual } from "../presenca/acoesVisuais";
+import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import {
@@ -28,6 +30,9 @@ export type EntradaPerguntar = {
   /** Itens que já estão no quadro de requisitos (para não repetir). Opcional. */
   requisitosAtuais?: string[];
   sessao_id?: string;
+  grafo?: string;
+  perguntaAtiva?: string;
+  gestosRecentes?: string[];
 };
 
 export type ResultadoPerguntar = {
@@ -36,6 +41,9 @@ export type ResultadoPerguntar = {
   requisito: string | null;
   /** O candidato disse que terminou ("pronto"): o quadro avança/reanalisa. */
   concluiu: boolean;
+  /** Falha de infraestrutura: não confundir com a decisão deliberada de escutar. */
+  falhou?: boolean;
+  visual?: AcaoVisual[];
   estado: EstadoSessao;
 };
 
@@ -62,7 +70,7 @@ export async function perguntar(
     const r = await deps.llm.completarJson({
       sistema: {
         estatico: montarSistemaEstaticoPerguntar(deps.kit, deps.problema),
-        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? []),
+        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes),
       },
       mensagens: [{ role: "user", content: entrada.texto }],
       schema: EsquemaSaidaPerguntar,
@@ -78,7 +86,7 @@ export async function perguntar(
       fase: entrada.fase,
       codigo: (e as { codigo?: string }).codigo ?? "desconhecido",
     });
-    return mudo();
+    return { ...mudo(), falhou: true };
   }
 
   // Se o candidato terminou é o modelo quem interpreta; o código não procura palavras.
@@ -92,5 +100,8 @@ export async function perguntar(
   const repetido = requisito !== null && (entrada.requisitosAtuais ?? []).includes(requisito);
 
   const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto }, agora).estado;
-  return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, estado: final };
+  const ids = extrairIdsDoGrafo(entrada.grafo ?? "");
+  const visual = mapearAcoesVisuais(saida.visual, (id) => ids.has(id) ? id : null);
+  return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, estado: final,
+    ...(visual !== undefined ? { visual } : {}) };
 }

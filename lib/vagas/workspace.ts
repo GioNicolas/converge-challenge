@@ -42,6 +42,8 @@ export type VagaEmpresa = {
   /** Recrutador(a) responsável pela vaga. */
   responsavel: string;
   encerradaHaDias?: number;
+  /** Quantas pessoas foram contratadas por esta vaga. Com valor, a vaga ganha a aba Contratações (ciclo dos 90 dias). */
+  contratados?: number;
 };
 
 /** Uma vaga ainda sendo combinada com o Totti. Não aparece no menu até ser publicada. */
@@ -237,6 +239,41 @@ Responsabilidades:
     },
     funil: { inscritos: 640, convidados: 120, emAndamento: 0, concluiram: 96, novos: 0 },
     responsavel: "Renata Siqueira",
+  },
+  {
+    // Encerrada há 3 meses: as 3 contratações passaram dos 90 dias (ou estão passando). É a demo do ciclo dos 90 dias.
+    id: "backend-pagamentos",
+    cargo: "Backend Pleno · Pagamentos",
+    area: "engenharia",
+    senioridade: "pleno",
+    time: "Pagamentos",
+    local: "Híbrido · São Paulo",
+    descricao: `Buscamos uma pessoa desenvolvedora backend para o time de Pagamentos, que processa o checkout e os repasses.
+
+Responsabilidades:
+- Evoluir os serviços de cobrança e conciliação (Node.js e PostgreSQL)
+- Tratar falhas de gateway, estornos e pagamentos duplicados sem perder dinheiro
+- Escrever testes para os casos que quebram em produção
+
+Requisitos:
+- 3+ anos com backend em produção
+- Experiência com filas, idempotência e bancos relacionais`,
+    abertaHaDias: 128,
+    etapa: "encerrada",
+    encerradaHaDias: 93,
+    resumo: {
+      configId: "config-backend-pagamentos",
+      formato: "live_coding",
+      duracaoMin: 45,
+      foco: [
+        { area: "tecnico", peso: 0.55 },
+        { area: "pressao", peso: 0.3 },
+        { area: "uso_ia", peso: 0.15 },
+      ],
+    },
+    funil: { inscritos: 1_870, convidados: 410, emAndamento: 0, concluiram: 212, novos: 0 },
+    responsavel: "Diego Fontes",
+    contratados: 3,
   },
 ];
 
@@ -505,14 +542,20 @@ export function useRecentes(): string[] {
 // Leitura para a tela: as etapas de uma vaga publicada e frases curtas sobre ela.
 // ---------------------------------------------------------------------------
 
-export const ETAPAS_VAGA = ["plano", "entrevistas", "escores"] as const;
+export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "contratacoes"] as const;
 export type EtapaVaga = (typeof ETAPAS_VAGA)[number];
 
 export const NOME_ETAPA: Record<EtapaVaga, string> = {
   plano: "Plano combinado",
   entrevistas: "Candidatos",
   escores: "Escores",
+  contratacoes: "Contratações",
 };
+
+/** As abas desta vaga: Contratações só aparece quando a vaga contratou alguém. */
+export function etapasDa(v: Pick<VagaEmpresa, "contratados">): EtapaVaga[] {
+  return ETAPAS_VAGA.filter((e) => e !== "contratacoes" || !!v.contratados);
+}
 
 /** Número com separador de milhar (70.412). */
 export const numero = (n: number) => n.toLocaleString("pt-BR");
@@ -525,6 +568,7 @@ export const numeroCurto = (n: number) =>
 export function contagemDa(v: VagaEmpresa, etapa: EtapaVaga): number | null {
   if (etapa === "entrevistas") return v.funil.inscritos;
   if (etapa === "escores") return v.funil.concluiram;
+  if (etapa === "contratacoes") return v.contratados ?? null;
   return null;
 }
 

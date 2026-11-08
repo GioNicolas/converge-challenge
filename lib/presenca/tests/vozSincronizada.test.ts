@@ -246,6 +246,41 @@ test("voz real toca o MP3 e dispara o desenho no trecho alinhado", async (t) => 
   assert.equal(progressos.at(-1), 8);
 });
 
+test("áudio fica preparado enquanto aguarda a pessoa terminar o turno", async (t) => {
+  ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "1" });
+  const a = audioFalso(t);
+  let sintetizou = false;
+  t.mock.method(globalThis, "fetch", async () => {
+    sintetizou = true;
+    return Response.json({ audio_base64: "T2k=", alinhamento });
+  });
+  let liberar!: (valor: boolean) => void;
+  const pausa = new Promise<boolean>((resolver) => { liberar = resolver; });
+  const tocando = falarComMarcas("Oi banco", [], undefined, () => pausa);
+  await andar();
+  assert.equal(sintetizou, true);
+  assert.equal(a.instancias.length, 0);
+  liberar(true);
+  await andar();
+  assert.equal(a.instancias.length, 1);
+  a.instancias[0].onended?.();
+  await tocando;
+});
+
+test("cancelar durante a espera pelo turno descarta o áudio preparado", async (t) => {
+  ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "1" });
+  const a = audioFalso(t);
+  t.mock.method(globalThis, "fetch", async () => Response.json({ audio_base64: "T2k=", alinhamento }));
+  let liberar!: (valor: boolean) => void;
+  const pausa = new Promise<boolean>((resolver) => { liberar = resolver; });
+  const tocando = falarComMarcas("Oi banco", [], undefined, () => pausa);
+  await andar();
+  calar();
+  liberar(true);
+  await tocando;
+  assert.equal(a.instancias.length, 0);
+});
+
 test("falha da rota cai na voz do navegador e falha total ainda completa a legenda", async (t) => {
   ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "1" });
   const falas = vozDoNavegador(t, true);

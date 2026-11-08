@@ -85,6 +85,13 @@ test("perguntar envia sessão, fase e texto e aceita requisito nulo", async (t) 
   assert.deepEqual(corpo(chamadas[0]), { sessao_id: "sessao-1", fase: "REQUISITOS", texto: "Qual a escala?" });
 });
 
+test("perguntar envia o desenho e a pergunta ativa no mesmo pedido", async (t) => {
+  const chamadas = substituirFetch(t, () => json({ responder: true, texto: "Você separou as leituras.", requisito: null }));
+  const contexto = { grafo: "- [e1] API", pergunta_ativa: "Como funciona a leitura?", requisitos: ["100 leituras/s"] };
+  await perguntar("sessao-1", "ALTO_NIVEL", "A API consulta o banco.", contexto);
+  assert.deepEqual(corpo(chamadas[0]), { sessao_id: "sessao-1", fase: "ALTO_NIVEL", texto: "A API consulta o banco.", ...contexto });
+});
+
 test("sintetizarFala converte base64 em Blob MP3 sem alterar os bytes nem o alinhamento", async (t) => {
   const bytes = [0xff, 0xfb, 0x90, 0, 0x49, 0x44, 0x33];
   const controlador = new AbortController();

@@ -32,6 +32,7 @@ export type EventoEntrevista =
   | { tipo: "COMECAR" }
   | { tipo: "APRESENTACAO_TERMINOU" }
   | { tipo: "CANDIDATO_DESENHOU" }
+  | { tipo: "CANDIDATO_CONTINUOU" }
   | { tipo: "TEMPO_DA_FASE_ACABOU" }
   | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise }
   /** Só para demonstração: põe uma dúvida pendente ignorando fase, intervalo e limite. */
@@ -150,6 +151,11 @@ export function transicionar(
         ? { ...novo, plin: "LIVRE", perguntaPendente: null, perguntaAtiva: null }
         : novo;
     }
+
+    case "CANDIDATO_CONTINUOU":
+      return estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo
+        ? { ...estado, plin: "LIVRE", perguntaPendente: null }
+        : estado;
 
     case "ANALISE_RECEBIDA": {
       const { resposta } = evento;

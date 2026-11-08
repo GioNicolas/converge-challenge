@@ -42,3 +42,18 @@ test("falha ou resposta estranha do ElevenLabs vira 502", async () => {
   globalThis.fetch = (async () => Response.json({ audio_base64: "AAAA", alignment: null })) as typeof fetch;
   assert.equal((await POST(pedido({ texto: "oi" }))).status, 502);
 });
+
+test("bloqueia origem externa e não permite cache mesmo sem configuração", async () => {
+  const externo = new NextRequest("http://localhost/api/falar", {
+    method: "POST", headers: { origin: "https://outro.example" }, body: JSON.stringify({ texto: "oi" }),
+  });
+  assert.equal((await POST(externo)).status, 403);
+  const semChave = await POST(pedido({ texto: "oi" }));
+  assert.equal(semChave.headers.get("cache-control"), "no-store");
+});
+
+test("rejeita horários incompletos em vez de produzir legenda sem sincronia", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  globalThis.fetch = async () => Response.json({ audio_base64: "AAAA", alignment: { ...alinhamento, character_end_times_seconds: [0.1] } });
+  assert.equal((await POST(pedido({ texto: "oi" }))).status, 502);
+});

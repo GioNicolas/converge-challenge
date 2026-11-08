@@ -16,8 +16,9 @@ import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { FilaFalas } from "@/lib/audio/filaFalas";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
-import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
+import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
 
 /** Demonstração: o que o agente pergunta, o que o candidato responde e o requisito que fica combinado. */
@@ -63,7 +64,7 @@ function useDemoRequisitos() {
     setPasso((p) => p + 1);
     const idPergunta = `demo-${passo}-agente`;
     const idResposta = `demo-${passo}-candidato`;
-    setMensagens((m) => [...m, { id: idPergunta, quem: "agente", texto: item.pergunta, horario: Date.now() }]);
+    setMensagens((m) => [...m, { id: idPergunta, quem: "agente", texto: item.pergunta, horario: Date.now(), requisito: item.requisito }]);
 
     // A resposta chega aos poucos (parcial), como a transcrição da voz, e depois fica final.
     const palavras = item.resposta.split(" ");
@@ -114,6 +115,10 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const entrevista = useEntrevista(quadro, cursor, { configId, convite });
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
+  const liberarMidia = midia.liberar;
+  useEffect(() => {
+    if (estado.fase === "ENCERRADA") liberarMidia();
+  }, [estado.fase, liberarMidia]);
   const demo = useDemoRequisitos();
 
   // Cada requisito combinado é escrito pelo agente no próprio quadro, abaixo do enunciado.
@@ -134,39 +139,11 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
 
   // A resposta a um plin termina sozinha quando o candidato fala e depois fica em silêncio.
   useFimPorSilencio({
-    ativo: estado.plin === "PERGUNTA_ATIVA",
+    ativo: estado.plin === "PERGUNTA_ATIVA" && !usarServidor(),
     agenteFalando: entrevista.agenteFalando,
     volume: midia.volume,
     aoTerminar: entrevista.terminarResposta,
   });
-
-  // Frase final da voz do candidato: mesmo caminho do texto digitado (o cérebro responde; o requisito vai ao quadro).
-  const { falaDoCandidato } = entrevista;
-  const { combinar: combinarRequisito } = demo;
-  const aoFalaTranscrita = useCallback(
-    (texto: string) => {
-      falaDoCandidato(texto).then(
-        ({ requisito }) => {
-          if (requisito) combinarRequisito(requisito);
-        },
-        (erro) => console.warn("[voz] a fala não chegou ao cérebro:", erro),
-      );
-    },
-    [falaDoCandidato, combinarRequisito],
-  );
-
-  // Transcrição da fala do candidato: pausa enquanto o agente fala e fora da entrevista.
-  useTranscricao({
-    stream: midia.stream,
-    ativo: midia.microfoneLigado && !entrevista.agenteFalando && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA",
-    sessaoId: sessao?.sessao_id ?? null,
-    aoParcial: entrevista.setParcialDoCandidato,
-    aoFinal: aoFalaTranscrita,
-  });
-  const legenda = entrevista.falaAtual
-    ?? (entrevista.parcialDoCandidato
-      ? { quem: "candidato" as const, texto: entrevista.parcialDoCandidato, ate: entrevista.parcialDoCandidato.length }
-      : null);
 
   function aoMudarDesenho(elementos: NonDeletedExcalidrawElement[]) {
     if (process.env.NODE_ENV === "development") {
@@ -191,6 +168,21 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   // Conversa por texto: só com servidor real e entrevista em andamento. Demo e digitadas aparecem juntas, por horário.
   const podeDigitar = usarServidor() && sessao !== null && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA";
   const mensagensDaConversa = [...demo.mensagens, ...entrevista.mensagens].sort((a, b) => a.horario - b.horario);
+
+  // "ver no quadro": o que a fala marcou no desenho, ou o requisito que ela combinou e o agente escreveu.
+  const elementosDaFala = useCallback((m: MensagemConversa) => {
+    if (!quadro || (!m.alvos?.length && !m.requisito)) return [];
+    const alvos = new Set(m.alvos ?? []);
+    const requisito = m.requisito ? normalizar(m.requisito) : null;
+    return quadro.api.getSceneElements().filter((e) => alvos.has(e.id)
+      || (requisito !== null && e.type === "text" && /^agente-requisito-\d+$/.test(e.id) && normalizar(e.originalText) === requisito));
+  }, [quadro]);
+  const verNoQuadro = useCallback((m: MensagemConversa) => {
+    const elementos = elementosDaFala(m);
+    if (!quadro || !elementos.length) return;
+    quadro.api.scrollToContent(elementos, { fitToContent: false, animate: true, duration: 450 });
+    quadro.api.updateScene({ appState: { selectedElementIds: Object.fromEntries(elementos.map((e) => [e.id, true as const])) } });
+  }, [quadro, elementosDaFala]);
   const { enviarTexto } = entrevista;
   const { combinar } = demo;
   const enviarDigitado = useCallback(
@@ -200,6 +192,38 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     },
     [enviarTexto, combinar],
   );
+
+  const [parcialVoz, setParcialVoz] = useState("");
+  const { registrarSom, registrarFalaParcial } = entrevista;
+  useEffect(() => {
+    if (midia.microfoneLigado && midia.volume > 0.08) registrarSom();
+  }, [midia.microfoneLigado, midia.volume, registrarSom]);
+  const receberParcial = useCallback((texto: string) => {
+    setParcialVoz(texto);
+    registrarFalaParcial(texto);
+  }, [registrarFalaParcial]);
+  const [falaPendente, setFalaPendente] = useState<string | null>(null);
+  const enviarVozRef = useRef(enviarDigitado);
+  enviarVozRef.current = enviarDigitado;
+  const filaVoz = useRef<FilaFalas | null>(null);
+  if (!filaVoz.current) filaVoz.current = new FilaFalas(
+    async (texto) => { await enviarVozRef.current(texto); setFalaPendente(null); },
+    (texto) => setFalaPendente(texto),
+  );
+  useEffect(() => {
+    if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
+  }, [estado.fase]);
+  useEffect(() => () => filaVoz.current?.limpar(), []);
+  const receberVoz = useCallback((texto: string) => filaVoz.current?.adicionar(texto), []);
+  const escuta = useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,
+    sessaoId: sessao?.sessao_id ?? null,
+    contexto: "quadro",
+    servidor: usarServidor(),
+    aoParcial: receberParcial,
+    aoFinal: receberVoz,
+  });
 
   const pronto = quadro !== null && sessao !== null;
   const mostrarCartao = estado.fase === "AGUARDANDO" || estado.fase === "ENCERRADA";
@@ -224,7 +248,20 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
         />
       )}
 
-      <Legenda fala={legenda} />
+      <Legenda fala={entrevista.falaAtual} />
+      {estado.fase !== "ENCERRADA" && (parcialVoz || escuta.erro || falaPendente || entrevista.aguardandoResposta) && (
+        <div role="status" className="absolute bottom-20 left-4 z-10 max-w-md rounded-padrao bg-superficie p-3 text-sm shadow-padrao">
+          {parcialVoz && <p>{parcialVoz}</p>}
+          {entrevista.aguardandoResposta && !parcialVoz && <p>O agente está preparando a resposta…</p>}
+          {escuta.erro && <p>{escuta.erro}</p>}
+          {falaPendente && (
+            <div>
+              <p>Não consegui enviar sua fala: “{falaPendente}”</p>
+              <button type="button" onClick={() => filaVoz.current?.tentarNovamente()} className="mt-2 underline">Tentar enviar novamente</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
       {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
@@ -249,6 +286,17 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
 
       {estado.fase !== "AGUARDANDO" && (
         <div data-painel-direito className="absolute top-[72px] right-4 z-10 flex items-start gap-2">
+          <button type="button" onClick={entrevista.alternarVoz}
+            aria-label={entrevista.vozHabilitada ? "Silenciar respostas por voz" : "Ativar respostas por voz"}
+            aria-pressed={entrevista.vozHabilitada}
+            className="rounded-full border border-borda bg-vidro px-3 py-2 text-xs shadow-padrao">
+            {entrevista.vozHabilitada ? "Silenciar voz" : "Ativar voz"}
+          </button>
+          {entrevista.agenteFalando && (
+            <button type="button" onClick={entrevista.silenciar} className="rounded-full border border-borda bg-vidro px-3 py-2 text-xs shadow-padrao">
+              Interromper voz
+            </button>
+          )}
           <button
             onClick={() => setConversaAberta(true)}
             aria-label="Abrir conversa"
@@ -278,7 +326,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
         mensagens={mensagensDaConversa}
         onEnviar={podeDigitar ? enviarDigitado : undefined}
         onDigitando={entrevista.registrarAtividade}
-        onVerNoQuadro={(id) => console.debug("[conversa] ver no quadro", id)}
+        onVerNoQuadro={verNoQuadro}
+        temNoQuadro={(m) => elementosDaFala(m).length > 0}
       />
 
       <ConfirmarEncerrar
@@ -320,7 +369,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
                   <h1 className="text-2xl font-semibold tracking-tight">Pronto para começar?</h1>
                   <p className="leading-relaxed text-texto-suave">
                     O entrevistador vai apresentar o problema no quadro e acompanhar o seu desenho. Fale com
-                    ele sempre que quiser.
+                    ele sempre que quiser. Quando terminar uma etapa ou quiser um comentário sobre o desenho,
+                    é só avisar. O agente também pode fazer perguntas nas pausas da conversa.
                   </p>
                   <p className="text-sm leading-relaxed text-texto-suave">
                     Vamos pedir a câmera e o microfone. A sua câmera aparece só para você: não é gravada nem

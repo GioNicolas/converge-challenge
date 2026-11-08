@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ErroHttp, tokenTranscricao } from "../sessao/servidor";
+import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
 import {
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
-  misturarMono, reamostrar, urlDoScribe,
+  energiaRms, LIMIAR_VOZ_RMS, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
   type EstadoReamostragem, type TrechoTranscrito,
 } from "./transcricao";
 
@@ -56,6 +56,8 @@ export function criarEscutaTranscricao(opcoes: {
   let conectando = false;
   let pronto = false;
   let segmento = 0;
+  /** Quanto de voz (ms) o microfone captou desde o último trecho fechado. */
+  let vozNoTrecho = 0;
   let socket: WebSocket | null = null;
   let contexto: AudioContext | null = null;
   let fonte: MediaStreamAudioSourceNode | null = null;
@@ -73,7 +75,8 @@ export function criarEscutaTranscricao(opcoes: {
   let navegadorBloqueado = false;
   let aceitaTrilha = true;
 
-  const podeOuvir = () => ativo && !!trilha && trilha.readyState === "live" && trilha.enabled && !trilha.muted;
+  const podeOuvir = () => ativo && (typeof document === "undefined" || !document.hidden)
+    && !!trilha && trilha.readyState === "live" && trilha.enabled && !trilha.muted;
   const agora = () => inicio === null ? 0 : Math.max(0, performance.now() - inicio);
   function publicar(novo: EstadoEscuta) {
     if (encerrado) return;
@@ -84,6 +87,7 @@ export function criarEscutaTranscricao(opcoes: {
   function limparParcial() {
     if (texto.parcial && !encerrado) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
     texto = { ...texto, parcial: null };
+    vozNoTrecho = 0;
     reamostragem = { soma: 0, peso: 0 };
     pendentes = new Float32Array(0);
   }
@@ -150,6 +154,7 @@ export function criarEscutaTranscricao(opcoes: {
         if (encerrado || !contexto || !pronto) return;
         const canais = Array.from({ length: evento.inputBuffer.numberOfChannels }, (_, i) => evento.inputBuffer.getChannelData(i));
         const amostras = podeOuvir() ? misturarMono(canais) : new Float32Array(evento.inputBuffer.length);
+        if (energiaRms(amostras) >= LIMIAR_VOZ_RMS) vozNoTrecho += (amostras.length / contexto.sampleRate) * 1000;
         const convertido = reamostrar(amostras, contexto.sampleRate, 16000, reamostragem);
         reamostragem = convertido.estado;
         const junto = new Float32Array(pendentes.length + convertido.amostras.length);
@@ -184,9 +189,8 @@ export function criarEscutaTranscricao(opcoes: {
       try {
         token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
       } catch (erro) {
-        // Recusa do servidor (sem chave, sessão inválida/encerrada, limite): repetir não adianta.
-        const recusa = erro instanceof ErroHttp && (erro.status === 503 || (erro.status >= 400 && erro.status < 500));
-        if (!encerrado && atual === geracao) falharScribe(recusa);
+        // Sem chave, sessão inexistente ou encerrada: repetir não resolve, vai direto ao navegador.
+        if (!encerrado && atual === geracao) falharScribe(erro instanceof ErroTokenTranscricao && erro.permanente);
         return;
       }
       if (encerrado || atual !== geracao) return;
@@ -206,9 +210,17 @@ export function criarEscutaTranscricao(opcoes: {
           conectadoEm = performance.now();
           publicar({ motor: "elevenlabs", escutando: podeOuvir(), erro: null });
         } else if (m.message_type === "partial_transcript" && typeof m.text === "string") {
-          receber(m.text, false, `${atual}:${segmento}`);
+          // Sem voz no microfone, o parcial é alucinação: não mostra nem segura o turno do agente.
+          if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, false, `${atual}:${segmento}`);
         } else if (m.message_type === "committed_transcript" && typeof m.text === "string") {
-          receber(m.text, true, `${atual}:${segmento++}`);
+          if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
+          else if (m.text.trim()) {
+            console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
+            if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
+            texto = { ...texto, parcial: null };
+          }
+          segmento++;
+          vozNoTrecho = 0;
         } else if (typeof m.error === "string") {
           falharScribe(["quota_exceeded", "unaccepted_terms", "input_error", "invalid_request", "chunk_size_exceeded"].includes(m.message_type ?? ""));
         }
@@ -352,12 +364,16 @@ export function useTranscricao(opcoes: {
   sessaoId: string | null;
   aoParcial?: (texto: string) => void;
   aoFinal?: (texto: string) => void;
+  contexto?: "coding" | "quadro";
+  servidor?: boolean;
 }): EstadoEscuta {
   const { stream, ativo, sessaoId, aoParcial, aoFinal } = opcoes;
   const [estado, setEstado] = useState<EstadoEscuta>({ motor: "nenhum", escutando: false, erro: null });
   const callbacks = useRef({ aoParcial, aoFinal });
   const escuta = useRef<ReturnType<typeof criarEscutaTranscricao> | null>(null);
-  const servidor = process.env.NEXT_PUBLIC_USAR_SERVIDOR === "1";
+  // Scribe por padrão; "0" (demonstração) usa só a transcrição do navegador.
+  const servidor = opcoes.servidor ?? (process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0");
+  const contexto = opcoes.contexto ?? "coding";
   useEffect(() => { callbacks.current = { aoParcial, aoFinal }; }, [aoParcial, aoFinal]);
   useEffect(() => {
     if (!stream) {
@@ -366,6 +382,7 @@ export function useTranscricao(opcoes: {
     }
     const controle = criarEscutaTranscricao({
       stream, sessaoId, servidor, aoEstado: setEstado,
+      obterToken: (id) => tokenTranscricao(id, contexto),
       aoTrecho: (trecho) => {
         if (trecho.final) {
           callbacks.current.aoParcial?.("");
@@ -375,7 +392,7 @@ export function useTranscricao(opcoes: {
     });
     escuta.current = controle;
     return () => { escuta.current = null; controle.parar(); };
-  }, [stream, sessaoId, servidor]);
+  }, [stream, sessaoId, servidor, contexto]);
   useEffect(() => { escuta.current?.ativar(ativo); }, [ativo, stream, sessaoId, servidor]);
   return estado;
 }

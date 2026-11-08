@@ -230,7 +230,7 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
     <main className="min-h-dvh w-full bg-fundo">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 pt-10 pb-24 print:max-w-none print:pt-0">
         <Surgir className="flex items-center justify-between">
-          <span className="text-sm font-semibold tracking-tight">Converge</span>
+          <span className="text-sm font-semibold tracking-tight">Totti</span>
           <div className="flex items-center gap-2">
             {r.demonstracao && (
               <span className="rounded-full bg-superficie-2 px-2.5 py-1 text-xs text-texto-suave">

@@ -25,12 +25,14 @@ export interface ChatRequest<T> {
   schema: z.ZodType<T>;
   maxTokens: number;
   reasoningEffort?: ReasoningEffort;
+  priorizarLatencia?: boolean;
   /** Cancela a chamada: para de esperar, aborta o fetch em voo e não faz retry. */
   signal?: AbortSignal;
 }
 
 export interface ExtraBodyOpts {
   reasoningEffort?: ReasoningEffort;
+  priorizarLatencia?: boolean;
 }
 
 export interface ProviderConfig {
@@ -305,7 +307,7 @@ function parseContent<T>(c: Completion, schema: z.ZodType<T>): Parsed<T> {
 export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<T>): Promise<ChatJsonResult<T>> {
   const apiKey = process.env[provider.apiKeyEnv];
   if (!apiKey) throw new Error(`${provider.apiKeyEnv} não definida (confira .env.local)`);
-  const extra = provider.buildExtraBody({ reasoningEffort: req.reasoningEffort });
+  const extra = provider.buildExtraBody({ reasoningEffort: req.reasoningEffort, priorizarLatencia: req.priorizarLatencia });
   const baseBody = { model: req.model, max_tokens: req.maxTokens, ...extra };
 
   const started = Date.now();

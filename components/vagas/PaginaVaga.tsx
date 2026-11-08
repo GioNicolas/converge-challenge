@@ -5,7 +5,8 @@
 //   Candidatos → o funil (Inscritos · Convidados · Fazendo agora · Relatório pronto) é o filtro principal;
 //                embaixo, busca por nome ou e-mail, filtros, ordenação, páginas e convite em lote.
 //   Escores    → só quem concluiu, com o lugar do escore reservado (o escore ainda vai ser construído).
-//   Plano      → o que foi combinado com o Totti e o link de convite.
+//   Plano      → o que foi combinado com o Totti, o que ele aprendeu com o time e o link de convite.
+//   Contratações → (só em vaga que contratou) o ciclo dos 90 dias: como foi cada contratação.
 // Em Candidatos e Escores, as entrevistas feitas de verdade pelo link vêm antes, com o relatório.
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -13,11 +14,11 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, ArrowUpRight, ChevronRight, Link2, X } from "lucide-react";
 import { NOME_AREA } from "@/components/pre-entrevista/textos";
 import {
-  ETAPAS_VAGA,
   NOME_AREA_VAGA,
   NOME_ETAPA,
   NOME_FORMATO_VAGA,
   NOME_SENIORIDADE_VAGA,
+  etapasDa,
   marcarRecente,
   numero,
   quandoFoi,
@@ -45,7 +46,9 @@ import {
   type EntrevistaReal,
 } from "@/lib/vagas/entrevistas";
 import { curvaSuave } from "@/lib/design/motion";
+import AprendidoNoPlano from "./AprendidoNoPlano";
 import Casca from "./Casca";
+import Contratacoes from "./Contratacoes";
 import { Abas, Busca, Paginacao, Seletor, Voltar } from "./controles";
 
 const POR_PAGINA = 50;
@@ -111,13 +114,16 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
           </div>
           {vaga.etapa !== "encerrada" && <CopiarLink vaga={vaga} />}
         </div>
-        <nav className="mt-3 flex gap-0.5 self-start rounded-full bg-superficie-2/70 p-1" aria-label="Etapas da vaga">
-          {ETAPAS_VAGA.map((e) => (
+        <nav
+          className="mt-3 flex max-w-full gap-0.5 self-start overflow-x-auto rounded-full bg-superficie-2/70 p-1 [scrollbar-width:none]"
+          aria-label="Etapas da vaga"
+        >
+          {etapasDa(vaga).map((e) => (
             <Link
               key={e}
               href={href(e)}
               aria-current={e === etapa ? "page" : undefined}
-              className={`rounded-full px-4 py-1.5 text-[13.5px] transition-colors ${
+              className={`shrink-0 rounded-full px-3 py-1.5 text-[13px] whitespace-nowrap transition-colors sm:px-4 sm:text-[13.5px] ${
                 e === etapa ? "bg-superficie text-texto shadow-[0_1px_3px_rgb(17_17_17/0.1)]" : "text-texto-suave hover:text-texto"
               }`}
             >
@@ -128,9 +134,10 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
       </header>
 
       {etapa === "plano" && <Plano vaga={vaga} />}
-      {etapa !== "plano" && reais.length > 0 && <EntrevistasReais reais={reais} />}
+      {(etapa === "entrevistas" || etapa === "escores") && reais.length > 0 && <EntrevistasReais reais={reais} />}
       {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} temReais={reais.length > 0} />}
       {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} temReais={reais.length > 0} />}
+      {etapa === "contratacoes" && <Contratacoes vaga={vaga} />}
     </motion.div>
   );
 }
@@ -728,6 +735,8 @@ function Plano({ vaga }: { vaga: VagaEmpresa }) {
           </div>
         ))}
       </section>
+
+      {vaga.etapa !== "encerrada" && <AprendidoNoPlano formato={r.formato} />}
 
       {vaga.etapa !== "encerrada" && (
         <section className="cartao flex flex-col gap-3 p-5">

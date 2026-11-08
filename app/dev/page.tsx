@@ -17,6 +17,8 @@ import type { FakeRunKind } from "./_lib/problem";
 import { useChat } from "./_lib/useChat";
 import { useCodeCapture } from "./_lib/useCodeCapture";
 import { useSession } from "./_lib/useSession";
+import { useVozAgente } from "@/lib/voz/useVozAgente";
+import ControleVoz from "@/components/voz/ControleVoz";
 
 const DURATION_MS = DEFAULT_CONFIG.durationMin * 60_000;
 const WARNING_MS = 5 * 60_000;
@@ -25,6 +27,7 @@ const BTN = "border border-neutral-600 bg-neutral-800 px-3 py-1 hover:bg-neutral
 /** Página de debug: o desenvolvedor joga de candidato e acompanha o estado do agente. */
 export default function DevPage() {
   const session = useSession();
+  const voz = useVozAgente({ bloqueada: session.ended });
   const capture = useCodeCapture({
     sendEvent: session.sendEvent,
     nowT: session.nowT,
@@ -47,6 +50,8 @@ export default function DevPage() {
     sessionId: session.sessionId,
     sendEvent: session.sendEvent,
     applyCommands,
+    onAgentReply: voz.falar,
+    onCancelReply: voz.parar,
   });
 
   const remainingMs = Math.max(0, DURATION_MS - session.elapsedMs);
@@ -75,6 +80,7 @@ export default function DevPage() {
   return (
     <div className="min-h-screen bg-neutral-950 font-mono text-[13px] text-neutral-200">
       <header className="flex flex-wrap items-center gap-4 border-b border-neutral-800 px-3 py-2">
+        <ControleVoz voz={voz} texto={chat.messages.at(-1)?.role === "agent" ? chat.messages.at(-1)?.text : undefined} disabled={session.ended || chat.busy || chat.ended} />
         <span className="font-bold">DEV · fake IDE</span>
         <span className="text-neutral-500">sessão {session.sessionId?.slice(0, 8) ?? "..."}</span>
         <span className={warning ? "font-bold text-yellow-300" : ""}>

@@ -2,6 +2,7 @@
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
 import { SILENCIO_INICIAL_S, SILENCIO_S } from "../../contracts";
+import { mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
 import type { Fase, RespostaAnalise, StatusAnalise } from "./tipos";
 
@@ -140,7 +141,7 @@ function cortar(texto: string, max: number) {
 
 /** Resposta de silêncio, mantendo as observações (elas valem para o scorecard mesmo sem plin). */
 function silenciar(resposta: RespostaAnalise): RespostaAnalise {
-  return { ...resposta, status: "ok", pergunta: null, nota: null, elementos: [], degrau: null };
+  return { ...resposta, status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, ...(resposta.visual ? { visual: [] } : {}) };
 }
 
 /**
@@ -175,5 +176,6 @@ function filtrarPlin(
   }
   const nota = cortar((resposta.nota?.trim() || pergunta).trim(), regras.maxCaracteresNota);
   const elementos = [...new Set(resposta.elementos)].filter((id) => idsDoGrafo.has(id));
-  return { ...resposta, pergunta, nota, elementos };
+  return { ...resposta, pergunta, nota, elementos,
+    ...(resposta.visual ? { visual: mapearAcoesVisuais(resposta.visual, (id) => idsDoGrafo.has(id) ? id : null) } : {}) };
 }

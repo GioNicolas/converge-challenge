@@ -14,6 +14,14 @@ export function useMidiaLocal() {
   const [microfoneLigado, setMicrofoneLigado] = useState(false);
   const [volume, setVolume] = useState(0);
   const streamRef = useRef<MediaStream | null>(null);
+  const liberar = useCallback(() => {
+    streamRef.current?.getTracks().forEach((trilha) => trilha.stop());
+    streamRef.current = null;
+    setStream(null);
+    setCameraLigada(false);
+    setMicrofoneLigado(false);
+    setVolume(0);
+  }, []);
 
   /** Pede câmera e microfone. Chamar a partir de um clique (exigência do navegador). */
   const pedir = useCallback(async () => {
@@ -80,6 +88,7 @@ export function useMidiaLocal() {
     raf = requestAnimationFrame(medir);
     return () => {
       cancelAnimationFrame(raf);
+      fonte.disconnect();
       void contexto.close();
     };
   }, [stream]);
@@ -92,5 +101,5 @@ export function useMidiaLocal() {
     [],
   );
 
-  return { stream, erro, cameraLigada, microfoneLigado, volume, pedir, alternarCamera, alternarMicrofone };
+  return { stream, erro, cameraLigada, microfoneLigado, volume, pedir, liberar, alternarCamera, alternarMicrofone };
 }

@@ -7,6 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:transcricao": "tsx --test lib/transcricao/*.test.ts lib/presenca/tests/transcricao.test.ts lib/presenca/tests/useTranscricao.test.ts app/api/stt-token/__tests__/*.test.ts app/api/transcricao/sessao/*.test.ts",
+    "test:voz": "tsx --test lib/audio/*.test.ts lib/voz/*.test.ts app/api/falar/__tests__/*.test.ts",
+    "voz:validar": "tsx --env-file-if-exists=.env.local scripts/validar-voz.ts",
+    "test:e2e:voz": "playwright test --config playwright.voz.config.ts",
     "postinstall": "node scripts/copy-vendor.mjs",
     "predev": "node scripts/copy-vendor.mjs",
     "prebuild": "node scripts/copy-vendor.mjs",
@@ -28,6 +32,7 @@
     "test:kits": "tsx --test lib/agente/kits/__tests__/*.test.ts",
     "test:vagas": "tsx --test lib/agente/kits/__tests__/vagas-*.test.ts app/api/__tests__/avaliacoes.test.ts",
     "test:squad": "tsx --test lib/squad-memory/__tests__/*.test.ts",
+    "test:noventa-dias": "tsx --test lib/noventa-dias/__tests__/*.test.ts",
     "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts"
   },
