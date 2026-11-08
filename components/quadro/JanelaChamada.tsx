@@ -190,7 +190,7 @@ export default function JanelaChamada({
               className="flex h-11 cursor-pointer items-center gap-2.5 pr-4 pl-2 text-sm"
             >
               {/* O agente continua "vivo" na pílula: o mesmo anel, pequeno */}
-              <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={32} />
+              <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
               <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
               {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
               <span className={midia.microfoneLigado ? "text-texto-claro/70" : "text-perigo"}>
@@ -226,7 +226,7 @@ export default function JanelaChamada({
                     temDuvida ? "cursor-pointer" : "cursor-default"
                   }`}
                 >
-                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={124} />
+                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="xl" />
                 </button>
 
                 <AnimatePresence>
