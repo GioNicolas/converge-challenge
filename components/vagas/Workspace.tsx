@@ -66,7 +66,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const [filtro, setFiltro] = useState<Filtro>(null);
   const lista = useRef<HTMLElement>(null);
   useEffect(() => {
-    // O menu lateral muda a URL: "Escopos em definição" abre o estágio, "Todas as vagas" volta à lista com tudo.
+    // O estágio pode vir na URL (?estagio=...); "Todas as vagas", no menu lateral, volta à lista com tudo.
     setFiltro(daUrl && (ESTAGIOS.includes(daUrl as Estagio) || daUrl === "encerradas") ? (daUrl as Filtro) : null);
     setPagina(0);
   }, [daUrl]);
