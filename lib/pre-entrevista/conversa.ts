@@ -70,10 +70,9 @@ Como falar:
   restrições de horário?"). A questão de algoritmo é sorteada do banco pelo nível e pelo que pesa, e não tem o tema da vaga.
   Pergunte sobre o que avaliar no candidato, nunca sobre qual problema dar.
 
-Exemplos de tom (não copie as palavras):
-- "Se o tempo acabar, conta mais ele ter uma solução funcionando ou ter explicado bem o caminho?"
-- "Você falou de pedido sem internet: o que é pior pra vocês, perder um pedido ou o app demorar pra sincronizar?"
-- "IA aplicada fica de lado, e escalabilidade entra no foco. Basta ele saber dizer se fica lento com muitos dados, ou ele precisa chegar na versão mais rápida?"
+O formato de uma boa pergunta: parte do que ela acabou de dizer ou de um detalhe concreto desta vaga, e oferece duas
+posturas que times diferentes escolheriam diferente, em palavras de RH. Uma mudança que ela pediu é confirmada numa frase
+curta antes da pergunta. Nunca reaproveite um cenário que não apareceu nesta conversa nem nesta vaga.
 
 A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, o PASSO desta fala e a transcrição.
 Siga o PASSO. Responda somente com a fala do Totti, sem prefixo, sem aspas e sem explicações.`;
@@ -338,7 +337,7 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         `Assunto: ${area}, na vaga de ${r.roleTitle}. Faça UMA pergunta que decida algo da entrevista nesse assunto.\n` +
         `O que a entrevista já avalia por padrão (não pergunte isso, a resposta seria óbvia): ${padrao}\n` +
         "Se a última fala dela trouxe algo concreto desse assunto, pergunte a escolha que falta sobre aquilo, com as palavras dela " +
-        "(ex.: ela falou de app sem internet; pergunte o que é pior, perder pedido ou demorar pra sincronizar). " +
+        "(ex.: ela citou um problema que a vaga enfrenta; pergunte qual de dois jeitos de errar nele é pior pra eles). " +
         `Senão, use a pergunta abaixo que mais combina com a vaga, adaptando as palavras:\n${opcoes}\n` +
         `A pergunta oferece duas opções concretas que alguém de RH entende. ${SEM_LOGISTICA}`
       );
