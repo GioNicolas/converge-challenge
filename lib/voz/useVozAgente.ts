@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { focoAudio } from "../audio/foco";
 import { useLiberarAudio } from "../presenca/useLiberarAudio";
 import { reproduzirFala, type ProvedorVoz } from "./cliente";
+import { criarFilaDeFalas, type EstadoVoz, type FilaDeFalas, type LegendaAgente } from "./filaDeFalas";
 
+export { PAUSA_ENTRE_FALAS_MS } from "./filaDeFalas";
 export type FalaAgente = { id: string; texto: string };
-type EstadoVoz = "inativa" | "preparando" | "falando" | "erro";
 
 export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
   ultimaFala?: FalaAgente | null;
@@ -19,25 +20,20 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [provedor, setProvedor] = useState<ProvedorVoz | null>(null);
-  const [fala, setFala] = useState<{ quem: "agente"; texto: string; ate: number } | null>(null);
-  const atual = useRef<AbortController | null>(null);
-  const liberar = useRef<(() => void) | undefined>(undefined);
+  const [fala, setFala] = useState<LegendaAgente | null>(null);
+  // Uma fala por vez, com pausa entre elas (lib/voz/filaDeFalas.ts). Os setters do React são estáveis.
+  const [fila] = useState<FilaDeFalas>(() => criarFilaDeFalas({
+    reproduzir: reproduzirFala,
+    foco: focoAudio,
+    tela: { estado: setEstado, erro: setErro, aviso: setAviso, provedor: setProvedor, fala: setFala },
+  }));
   const habilitadaRef = useRef(true);
   const bloqueadaRef = useRef(bloqueada);
   bloqueadaRef.current = bloqueada;
   const montado = useRef(false);
   const ultimaProgramada = useRef<string | null>(null);
 
-  const parar = useCallback(() => {
-    const anterior = atual.current;
-    atual.current = null;
-    anterior?.abort();
-    liberar.current?.();
-    liberar.current = undefined;
-    setEstado("inativa");
-    setFala(null);
-    setAviso(null);
-  }, []);
+  const parar = fila.parar;
 
   useEffect(() => {
     montado.current = true;
@@ -52,49 +48,15 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
   }, [parar]);
 
   /**
-   * `antesDeTocar`: com o áudio pronto, espera a vez de falar (ver criarVoz); false desiste da fala.
-   * Devolve true se a fala tocou até o fim (false: voz desligada, bloqueada, cancelada ou com erro).
+   * Uma fala nova não corta a que está tocando: toca depois dela, com uma pausa (ver criarFilaDeFalas).
+   * `antesDeTocar`: com o áudio pronto e a vez do agente, espera a pessoa fazer uma pausa; false desiste da fala.
+   * Devolve true se a fala tocou até o fim (false: voz desligada, bloqueada, cancelada, substituída ou com erro).
    */
   const falar = useCallback(async (texto: string, opcoes?: { antesDeTocar?: () => Promise<boolean> }): Promise<boolean> => {
     if (!montado.current || document.hidden) return false;
-    parar();
     if (!habilitadaRef.current || bloqueadaRef.current || !texto.trim()) return false;
-    const controle = new AbortController();
-    atual.current = controle;
-    const vigente = () => atual.current === controle && !controle.signal.aborted;
-    setErro(null);
-    setEstado("preparando");
-    setFala({ quem: "agente", texto, ate: 0 });
-    let liberarFoco: (() => void) | undefined;
-    let tocou = false;
-    try {
-      await focoAudio.aguardarMicrofone(controle.signal);
-      controle.signal.throwIfAborted();
-      liberarFoco = focoAudio.assumir("saida", parar);
-      liberar.current = liberarFoco;
-      await reproduzirFala(texto, controle.signal, {
-        aoIniciar: (fonte) => { if (vigente()) { tocou = true; setEstado("falando"); setProvedor(fonte); setAviso(null); } },
-        aoAguardarGesto: () => { if (vigente()) setAviso("Toque na tela para ouvir o Totti."); },
-        aoProgresso: (ate) => { if (vigente()) setFala({ quem: "agente", texto, ate }); },
-      }, opcoes?.antesDeTocar);
-      if (vigente()) { setEstado("inativa"); setFala(null); setAviso(null); return tocou; }
-      return false;
-    } catch (e) {
-      if (vigente()) {
-        setErro(e instanceof Error ? e.message : "A voz está indisponível. A resposta continua no texto.");
-        setEstado("erro");
-        setFala(null);
-        setAviso(null);
-      }
-      return false;
-    } finally {
-      liberarFoco?.();
-      if (atual.current === controle) {
-        atual.current = null;
-        liberar.current = undefined;
-      }
-    }
-  }, [parar]);
+    return fila.falar(texto, opcoes);
+  }, [fila]);
 
   const alternar = useCallback(() => {
     habilitadaRef.current = !habilitadaRef.current;
