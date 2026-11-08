@@ -4,7 +4,7 @@
 //   1. Concordância Totti × Tech Lead por vaga: o número da vaga atual e a série subindo.
 //   2. As regras que o Totti aprendeu, cada uma com a decisão de onde veio. Dá para editar, desligar e apagar.
 //   3. O que o guarda-corpo ignorou: motivo não técnico nunca vira regra, mas fica visível.
-//   4. (só em desenvolvimento) Simular o Tech Lead decidindo no Slack, pelo mesmo caminho do clique de verdade.
+//   4. (só em desenvolvimento) Simular o Tech Lead decidindo, pelo mesmo caminho do clique de verdade.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-react";
@@ -75,7 +75,7 @@ export default function Aprendizado() {
           <span className="rotulo text-texto-suave">Memória da squad</span>
           <h1 className="titulo-display text-[34px] text-texto sm:text-[40px]">O que o Totti aprendeu</h1>
           <p className="max-w-[640px] text-[15px] leading-relaxed text-texto-suave">
-            Cada vez que o Tech Lead aprova ou reprova alguém no Slack, o Totti aprende um critério técnico deste time e usa na
+            Cada vez que o Tech Lead aprova ou reprova alguém, o Totti aprende um critério técnico deste time e usa na
             próxima entrevista. Nada fica escondido: edite, desligue ou apague o que quiser.
           </p>
         </header>
@@ -111,7 +111,7 @@ export default function Aprendizado() {
             >
               {memoria.regras.length === 0 ? (
                 <div className="cartao p-6 text-[14px] text-texto-suave">
-                  Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão no Slack, o Totti guarda aqui o critério
+                  Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão, o Totti guarda aqui o critério
                   técnico.
                 </div>
               ) : (
@@ -228,7 +228,7 @@ function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
             </p>
           </>
         ) : (
-          <p className="text-[14.5px] text-texto-suave">A concordância aparece depois das primeiras decisões no Slack.</p>
+          <p className="text-[14.5px] text-texto-suave">A concordância aparece depois das primeiras decisões.</p>
         )}
       </div>
       {comNumero.length > 0 && <GraficoConcordancia vagas={comNumero} />}
@@ -740,7 +740,7 @@ function Simulador({ onAprendeu }: { onAprendeu: (memoria: VisaoMemoria, novas: 
   return (
     <section className="flex flex-col gap-3 rounded-[18px] border border-dashed border-texto/20 p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Simular o Tech Lead no Slack</h2>
+        <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Simular o Tech Lead</h2>
         <span className="text-[12px] text-texto-suave">
           Só em desenvolvimento · Rafael Moura, Backend Pleno · o Totti recomendou avançar
         </span>
@@ -776,7 +776,7 @@ function Simulador({ onAprendeu }: { onAprendeu: (memoria: VisaoMemoria, novas: 
           value={motivo}
           onChange={(e) => setMotivo(e.target.value)}
           maxLength={500}
-          placeholder="Motivo (opcional), como o Tech Lead escreveria no Slack"
+          placeholder="Motivo (opcional), como o Tech Lead escreveria"
           className="h-10 w-full min-w-0 shrink-0 rounded-full bg-superficie px-4 sm:w-auto sm:flex-1 text-[14px] text-texto outline-none ring-texto/15 placeholder:text-texto-suave/70 focus:ring-2"
         />
         <button

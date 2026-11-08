@@ -1,6 +1,6 @@
 /**
  * O Totti aprende com uma decisão: registra a decisão (para a concordância), extrai as regras do motivo,
- * guarda as regras e os trechos ignorados. Quem chama (o hook do Slack) responde na thread com o resultado.
+ * guarda as regras e os trechos ignorados. 
  */
 import type { Report } from "@/lib/contracts";
 import { chamarModeloPadrao, extrairRegras, type ChamarModelo, type ResultadoExtrator } from "./extrator";
@@ -23,7 +23,7 @@ async function guardar(
   return { regras, ignorados, via: resultado.via };
 }
 
-/** Aprovar ou Reprovar no Slack. */
+/** Aprovar ou Reprovar. */
 export async function aprenderComDecisao(
   input: {
     empresaId: string;
