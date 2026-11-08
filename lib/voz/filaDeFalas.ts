@@ -22,19 +22,25 @@ export type TelaVoz = {
 /** Uma fala pedida: tocando, com a vez ou na fila atrás da que toca. */
 type Entrada = {
   controle: AbortController;
-  /** Já assumiu o áudio (ou está tocando): daqui em diante termina antes da próxima, não é substituída. */
+  /**
+   * O áudio já começou a sair: daqui em diante termina antes da próxima, não é substituída. Uma fala com a vez que
+   * ainda não tocou (por exemplo, esperando um toque na tela para o navegador liberar o som) continua substituível.
+   */
   emReproducao: boolean;
   /** Resolve quando esta fala e todas as anteriores a ela pararam (terminaram, foram cortadas ou substituídas). */
   terminou: Promise<void>;
 };
 
 /** Espera `promessa`, mas desiste (rejeita) se o sinal abortar antes. */
-function esperar(promessa: Promise<unknown>, sinal: AbortSignal): Promise<void> {
-  return new Promise((resolver, rejeitar) => {
+function esperar<T>(promessa: Promise<T>, sinal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolver, rejeitar) => {
     if (sinal.aborted) { rejeitar(sinal.reason); return; }
     const abortar = () => rejeitar(sinal.reason);
     sinal.addEventListener("abort", abortar, { once: true });
-    promessa.then(() => { sinal.removeEventListener("abort", abortar); resolver(); });
+    promessa.then(
+      (valor) => { sinal.removeEventListener("abort", abortar); resolver(valor); },
+      (erro) => { sinal.removeEventListener("abort", abortar); rejeitar(erro); },
+    );
   });
 }
 
@@ -46,8 +52,8 @@ function dormir(ms: number, sinal: AbortSignal): Promise<void> {
 /**
  * Fila das falas do agente: só uma toca por vez e entre duas há sempre PAUSA_ENTRE_FALAS_MS.
  * Uma fala nova não corta a que está tocando: o áudio dela é preparado em paralelo e toca depois que a anterior
- * termina, com a pausa. Uma fala que ainda não tinha começado a tocar (esperando a vez ou a pausa do candidato)
- * fica velha e é substituída pela nova. `parar` corta a que toca e descarta as da fila.
+ * termina, com a pausa. Uma fala que ainda não tinha começado a tocar (esperando a vez, a pausa do candidato ou um
+ * toque na tela) fica velha e é substituída pela nova. `parar` corta a que toca e descarta as da fila.
  */
 export function criarFilaDeFalas(dependencias: {
   reproduzir: typeof reproduzirFala;
@@ -64,7 +70,16 @@ export function criarFilaDeFalas(dependencias: {
   const vivas = new Set<AbortController>();
   /** Quando o áudio do agente parou pela última vez (fim natural ou corte). */
   let fimDaUltimaFala = Number.NEGATIVE_INFINITY;
-  let liberar: (() => void) | undefined;
+  /**
+   * A fila segura o foco de saída do áudio do primeiro pedido até esvaziar (síntese, pausa e reprodução), como a fala
+   * única fazia antes: se o microfone assume no meio, ele chama `parar` e nenhuma fala velha toca depois do ditado.
+   */
+  let soltarFoco: (() => void) | undefined;
+
+  function liberarFoco() {
+    soltarFoco?.();
+    soltarFoco = undefined;
+  }
 
   function parar() {
     if (vez?.emReproducao) fimDaUltimaFala = agora();
@@ -73,8 +88,7 @@ export function criarFilaDeFalas(dependencias: {
     ultima = null;
     vez = null;
     controles.forEach((c) => c.abort());
-    liberar?.();
-    liberar = undefined;
+    liberarFoco();
     tela.estado("inativa");
     tela.fala(null);
     tela.aviso(null);
@@ -99,14 +113,21 @@ export function criarFilaDeFalas(dependencias: {
     ultima = entrada;
     const daVez = () => vez === entrada && !controle.signal.aborted;
     if (vez === null) { tela.erro(null); tela.estado("preparando"); }
-    let liberarFoco: (() => void) | undefined;
     let tocou = false;
     let falhou = false;
     try {
       await foco.aguardarMicrofone(controle.signal);
       controle.signal.throwIfAborted();
+      soltarFoco ??= foco.assumir("saida", parar);
       await reproduzir(texto, controle.signal, {
-        aoIniciar: (fonte) => { if (daVez()) { tocou = true; tela.estado("falando"); tela.provedor(fonte); tela.aviso(null); } },
+        aoIniciar: (fonte) => {
+          if (!daVez()) return;
+          tocou = true;
+          entrada.emReproducao = true;
+          tela.estado("falando");
+          tela.provedor(fonte);
+          tela.aviso(null);
+        },
         aoAguardarGesto: () => { if (daVez()) tela.aviso("Toque na tela para ouvir o Totti."); },
         aoProgresso: (ate) => { if (daVez()) tela.fala({ quem: "agente", texto, ate }); },
       }, async () => {
@@ -118,12 +139,9 @@ export function criarFilaDeFalas(dependencias: {
         tela.erro(null);
         tela.estado("preparando");
         tela.fala({ quem: "agente", texto, ate: 0 });
-        if (opcoes?.antesDeTocar && !(await opcoes.antesDeTocar())) return false;
+        // Substituída ou cortada enquanto espera a pausa do candidato: desiste na hora, sem segurar a próxima.
+        if (opcoes?.antesDeTocar && !(await esperar(opcoes.antesDeTocar(), controle.signal))) return false;
         controle.signal.throwIfAborted();
-        await foco.aguardarMicrofone(controle.signal);
-        liberarFoco = foco.assumir("saida", parar);
-        liberar = liberarFoco;
-        entrada.emReproducao = true;
         return true;
       });
       return tocou && !controle.signal.aborted;
@@ -138,10 +156,10 @@ export function criarFilaDeFalas(dependencias: {
     } finally {
       vivas.delete(controle);
       if (tocou) fimDaUltimaFala = agora();
-      liberarFoco?.();
-      if (liberar === liberarFoco) liberar = undefined;
       const ultimaDaFila = ultima === null || ultima === entrada;
       if (ultima === entrada) ultima = null;
+      // A fila esvaziou: devolve o foco (o microfone pode abrir). Com outra fala atrás, segue com ele na pausa.
+      if (ultima === null) liberarFoco();
       if (vez === entrada) {
         vez = null;
         tela.fala(null);

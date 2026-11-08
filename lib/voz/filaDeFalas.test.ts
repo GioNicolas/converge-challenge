@@ -14,7 +14,7 @@ const FOLGA = 3;
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Monta uma fila com um "ElevenLabs" falso que registra quando cada áudio começa e termina de tocar. */
-function montar(opcoes: { falhar?: string[]; duracao?: Record<string, number> } = {}) {
+function montar(opcoes: { falhar?: string[]; duracao?: Record<string, number>; aguardarGesto?: string[] } = {}) {
   const t0 = Date.now();
   const agora = () => Date.now() - t0;
   const audios: { texto: string; inicio: number; fim?: number; cortado?: boolean }[] = [];
@@ -28,6 +28,11 @@ function montar(opcoes: { falhar?: string[]; duracao?: Record<string, number> } 
     if (opcoes.falhar?.includes(texto)) throw new Error(`voz indisponível para ${texto}`);
     if (antesDeTocar && !(await antesDeTocar())) return;
     sinal.throwIfAborted();
+    if (opcoes.aguardarGesto?.includes(texto)) {
+      // O navegador bloqueou o som: o áudio fica parado até um toque que nunca vem (só sai abortado).
+      eventos.aoAguardarGesto?.();
+      await new Promise<never>((_, falha) => sinal.addEventListener("abort", () => falha(sinal.reason), { once: true }));
+    }
     const audio: (typeof audios)[number] = { texto, inicio: agora() };
     audios.push(audio);
     tocandoAgora++;
@@ -47,9 +52,10 @@ function montar(opcoes: { falhar?: string[]; duracao?: Record<string, number> } 
     }
   };
 
+  const foco = new FocoAudio();
   const fila = criarFilaDeFalas({
     reproduzir,
-    foco: new FocoAudio(),
+    foco,
     pausaMs: PAUSA,
     tela: {
       estado: (estado) => estados.push({ em: agora(), estado }),
@@ -64,7 +70,7 @@ function montar(opcoes: { falhar?: string[]; duracao?: Record<string, number> } 
     assert.ok(a, `o áudio "${texto}" deveria ter tocado`);
     return a;
   };
-  return { fila, audios, estados, audio, agora, maximoSimultaneo: () => maximoSimultaneo };
+  return { fila, foco, audios, estados, audio, agora, maximoSimultaneo: () => maximoSimultaneo };
 }
 
 test("fala nova com outra tocando espera ela terminar e a pausa, sem sobrepor", async () => {
@@ -167,4 +173,67 @@ test("a fala espera o candidato fazer uma pausa (antesDeTocar) só depois da pau
   await Promise.all([a, b]);
   assert.ok(perguntouEm >= audio("A").fim! + PAUSA - FOLGA, "a vez do candidato só é consultada depois da pausa");
   assert.ok(audio("B").inicio >= perguntouEm + 40 - FOLGA);
+});
+
+test("o microfone abrindo durante a preparação cancela a fala, que não toca depois do ditado", async () => {
+  const { fila, foco, audios } = montar();
+  const a = fila.falar("A");
+  await dormir(SINTESE / 2); // A ainda sintetizando
+  const soltarMicrofone = foco.assumir("entrada", () => {});
+  assert.equal(await a, false);
+  soltarMicrofone();
+  await dormir(SINTESE + PAUSA + DURACAO);
+  assert.deepEqual(audios, [], "nenhuma fala velha toca depois do ditado");
+});
+
+test("o microfone abrindo na pausa entre duas falas descarta a da fila", async () => {
+  const { fila, foco, audios, audio } = montar();
+  const a = fila.falar("A");
+  await dormir(SINTESE + 30);
+  const b = fila.falar("B");
+  await a;
+  await dormir(PAUSA / 2); // na pausa entre A e B
+  const soltarMicrofone = foco.assumir("entrada", () => {});
+  assert.equal(await b, false);
+  soltarMicrofone();
+  await dormir(PAUSA + DURACAO);
+  assert.deepEqual(audios.map((x) => x.texto), ["A"]);
+  assert.ok(audio("A").fim! > 0);
+});
+
+test("com a fila vazia o foco volta: o microfone abre sem cancelar nada", async () => {
+  const { fila, foco } = montar();
+  assert.equal(await fila.falar("A"), true);
+  let cancelou = false;
+  const soltar = foco.assumir("entrada", () => { cancelou = true; });
+  soltar();
+  assert.equal(cancelou, false);
+  assert.equal(await fila.falar("B"), true, "a fila assume o foco de novo na fala seguinte");
+});
+
+test("fala substituída enquanto espera a pausa do candidato não segura a próxima", async () => {
+  const { fila, audio, agora } = montar();
+  const a = fila.falar("A");
+  await dormir(SINTESE + 30);
+  let liberarCandidato!: () => void;
+  const candidatoPausou = new Promise<boolean>((r) => { liberarCandidato = () => r(true); });
+  const b = fila.falar("B", { antesDeTocar: () => candidatoPausou }); // o candidato não para de falar
+  await a;
+  await dormir(PAUSA + SINTESE); // B já tem a vez e está presa no antesDeTocar
+  const pedidaEm = agora();
+  const c = fila.falar("C");
+  assert.equal(await b, false);
+  assert.equal(await c, true);
+  assert.ok(audio("C").inicio < pedidaEm + SINTESE + PAUSA, "C não esperou o antesDeTocar velho de B");
+  liberarCandidato();
+});
+
+test("fala presa esperando um toque na tela é substituída pela mais nova", async () => {
+  const { fila, audios, audio } = montar({ aguardarGesto: ["A"] });
+  const a = fila.falar("A");
+  await dormir(SINTESE + 30); // A tem a vez, mas o navegador não deixou o som sair
+  const b = fila.falar("B");
+  assert.deepEqual(await Promise.all([a, b]), [false, true]);
+  assert.deepEqual(audios.map((x) => x.texto), ["B"]);
+  assert.ok(audio("B").inicio >= 0);
 });
