@@ -11,7 +11,7 @@ import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
-import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
+import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {
@@ -844,8 +844,9 @@ export function useEntrevista(
           setTimeout(() => gatilho.current?.dispararAgora(), 0);
         }
       }
-      // Resposta sem pergunta de volta: o Totti analisa o desenho logo depois, para seguir com a socrática.
-      if (r.responder && r.texto && !r.texto.includes("?") && !r.concluiu) {
+      // Resposta que não devolveu a vez: o Totti analisa o desenho logo depois, para seguir com a socrática.
+      // Se ela já devolveu (pergunta ou convite), a bola está com o candidato: a análise espera a pausa dele.
+      if (r.responder && deveAnalisarLogoAposResposta(r.texto, r.concluiu)) {
         setTimeout(() => gatilho.current?.dispararAgora(), 0);
       }
       return { requisito: r.responder ? r.requisito : null };
