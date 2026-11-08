@@ -34,7 +34,7 @@ const MARGEM_PROBLEMA = 392;
 /** `vaga`: o que a IDE usa da config da vaga (padrão: DEFAULT_CONFIG). */
 export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty">;
 
-/** Frases finais com menos palavras que isso são descartadas. */
+/** Fora da conversa, frases finais com menos palavras que isso são descartadas. */
 const MIN_PALAVRAS_FALA = 2;
 
 /** `convite`: id do link do e-mail; liga esta sessão ao candidato no painel da vaga. */
@@ -96,17 +96,38 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   // Fala do candidato (Scribe, ou o navegador como reserva): com a conversa aberta vira a resposta dele;
   // fora dela, entra só na linha do tempo da sessão.
   const falaRef = useRef<(texto: string) => void>(() => {});
+  /** Fala dita enquanto o agente ainda respondia: vai como resposta assim que o chat liberar. */
+  const falaPendenteRef = useRef<string | null>(null);
+  const registrarFala = (texto: string) => {
+    session.sendEvent({ type: "speech", role: "candidate", text: texto }).catch((err) => {
+      console.error("Falha ao registrar a fala do candidato", err);
+    });
+  };
   falaRef.current = (texto) => {
     const limpo = texto.trim();
-    // Murmúrio solto ("hum", "é") não vira resposta nem evento.
-    if (limpo.split(/\s+/).filter(Boolean).length < MIN_PALAVRAS_FALA) return;
-    if (chat.open && !chat.busy && !chat.ended) chat.send(limpo);
-    else {
-      session.sendEvent({ type: "speech", role: "candidate", text: limpo }).catch((err) => {
-        console.error("Falha ao registrar a fala do candidato", err);
-      });
+    if (!limpo) return;
+    if (chat.open && !chat.ended) {
+      // Dentro da conversa qualquer resposta vale, até "sim" ou "não".
+      if (chat.busy) falaPendenteRef.current = [falaPendenteRef.current, limpo].filter(Boolean).join(" ");
+      else chat.send(limpo);
+      return;
     }
+    // Murmúrio solto ("hum", "é") não vira evento na linha do tempo.
+    if (limpo.split(/\s+/).filter(Boolean).length < MIN_PALAVRAS_FALA) return;
+    registrarFala(limpo);
   };
+  useEffect(() => {
+    const pendente = falaPendenteRef.current;
+    if (!pendente) return;
+    if (chat.open && !chat.ended) {
+      if (chat.busy) return;
+      falaPendenteRef.current = null;
+      chat.send(pendente);
+    } else {
+      falaPendenteRef.current = null;
+      registrarFala(pendente);
+    }
+  });
   const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
   useTranscricao({
     stream: midia.stream,
