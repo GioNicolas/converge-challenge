@@ -1,6 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
-import { limitarFrases, semPerguntaNoFim, semPerguntaNoFimV2 } from "./guardas";
+import { eSoReacao, limitarFrases, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimV2 } from "./guardas";
 import { mapearAcoesVisuais, type AcaoVisual } from "../presenca/acoesVisuais";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
@@ -135,8 +135,9 @@ export async function perguntar(
   const haPerguntaAtiva = !!(entrada.perguntaAtiva || estado.perguntaAtiva);
   const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho });
-  // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
-  const curto = limitarFrases(saida.texto, MAX_FRASES_FALA);
+  // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas. Antes, sai a frase de
+  // abertura que só repete o candidato ("Entendi que…", "Contador com base 62."): o modelo rápido fazia isso em quase toda fala.
+  const curto = limitarFrases(semEcoNoComeco(saida.texto, entrada.texto), MAX_FRASES_FALA);
   // Assunto solto ("não sei", "pula") ou resposta já justificada: a vez volta com um convite, nunca com outra
   // pergunta. Só a resposta vaga ganha um aprofundamento; o modelo marca qual é qual ("aprofundar"), porque a
   // regra só no prompt o modelo rápido não seguia (abria outro assunto depois de uma resposta justificada).
@@ -145,6 +146,9 @@ export async function perguntar(
   // v2: só tira a pergunta do fim; o convite enlatado entra apenas se não sobrar fala nenhuma.
   const texto = semAprofundar ? (v2 ? semPerguntaNoFimV2(curto) : semPerguntaNoFim(curto)) : curto;
   if (!saida.responder || !texto) return mudoOuConcluiu();
+  // "Hm." atrás de "Hm." vira bordão na voz: a segunda reação vazia seguida fica em silêncio (a vez já é dele).
+  const minhaUltima = estado.conversa.findLast((f) => f.quem === "agente")?.texto;
+  if (eSoReacao(texto) && eSoReacao(minhaUltima)) return mudoOuConcluiu();
   const requisito = saida.requisito?.trim()
     ? saida.requisito.trim().slice(0, MAX_CARACTERES_REQUISITO)
     : null;

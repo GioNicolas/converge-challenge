@@ -11,6 +11,20 @@ const estado = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm
 const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {} });
 
 describe("perguntar", () => {
+  it("segunda reação vazia seguida (\"Hm.\" depois de \"Hm.\") vira silêncio; a primeira passa", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Hm.", requisito: null, concluiu: false }]);
+    const comHm = { ...estado, conversa: [{ quem: "agente" as const, texto: "Hm.", em: AGORA }] };
+    const segunda = await perguntar(deps(llm), comHm, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
+    assert.equal(segunda.responder, false);
+    const primeira = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
+    assert.equal(primeira.responder, true);
+    assert.equal(primeira.texto, "Hm.");
+  });
+  it("tira a abertura com eco da fala do candidato", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Entendi que você vai usar um contador. E onde ele fica?", requisito: null, concluiu: false }]);
+    const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Vou usar um contador em base 62." }, AGORA);
+    assert.equal(r.texto, "E onde ele fica?");
+  });
   it("registra no log quem respondeu o turno (modelo, provedor, tempo e custo)", async () => {
     const falso = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false }]);
     const llm = {
