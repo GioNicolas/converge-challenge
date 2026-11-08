@@ -51,6 +51,24 @@ export function respostaSilencio(): RespostaAnalise {
   return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
 }
 
+/**
+ * Refiltra uma resposta já filtrada com o estado MAIS RECENTE da sessão. A análise leva até alguns segundos
+ * e, nesse intervalo, o agente pode ter falado (`ultimaFalaDoAgenteEm`): o estado lido no início não enxerga
+ * isso. Conservador: o tempo decorrido desde o início soma-se ao `parado_ha_s`, ou seja, assume que o
+ * candidato não agiu durante a análise. Idempotente para resposta já silenciada (nada é ressuscitado).
+ */
+export function refiltrarComEstadoAtual(
+  atual: EstadoSessao,
+  resposta: RespostaAnalise,
+  pedido: PedidoAnalise,
+  inicio: number,
+  agora: number,
+  regras: Regras = REGRAS_PADRAO,
+): RespostaAnalise {
+  const paradoHaS = pedido.parado_ha_s === undefined ? undefined : pedido.parado_ha_s + Math.max(0, agora - inicio) / 1000;
+  return filtrarResposta(atual, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS });
+}
+
 export async function analisar(
   deps: DepsAnalisar,
   estado: EstadoSessao,
