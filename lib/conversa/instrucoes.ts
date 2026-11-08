@@ -19,7 +19,11 @@ export function comoFuncionaQuadro(temposDasFasesS: Partial<Record<string, numbe
 export const DESPEDIDA_LIVE_CODING =
   "Combinado, vamos encerrar por aqui. Obrigado pela conversa! O retorno vem pela equipe que está cuidando do processo.";
 
-/** Live coding: duração da vaga, onde está cada coisa e o mesmo combinado do "não sei". */
-export function comoFuncionaLiveCoding(duracaoMin: number): string {
-  return `Oi, eu sou o Totti e vou acompanhar a sua entrevista de programação. Ela tem uns ${Math.max(1, Math.round(duracaoMin))} minutos: o problema está no painel à esquerda, você programa no editor e pode rodar os testes quando quiser. Pensa em voz alta, pode tirar dúvidas do enunciado comigo e, se não souber alguma coisa, é só dizer que a gente segue.`;
+/**
+ * Live coding: quem é o Totti, a vaga, a duração, onde está cada coisa e como a conversa funciona. É tudo por
+ * voz e ele acompanha o código o tempo todo, então o candidato precisa saber que pode (e deve) falar com ele.
+ */
+export function comoFuncionaLiveCoding(duracaoMin: number, cargo?: string): string {
+  const vaga = cargo?.trim() ? ` para a vaga de ${cargo.trim()}` : "";
+  return `Oi, eu sou o Totti e vou conduzir a sua entrevista de programação${vaga}. Ela tem uns ${Math.max(1, Math.round(duracaoMin))} minutos. O problema está no painel à esquerda, você programa no editor e pode rodar os testes quando quiser. Eu vou acompanhar o seu código o tempo todo e, de vez em quando, te perguntar sobre as suas ideias, tudo por voz: pensa em voz alta, me chama quando quiser e, se não souber alguma coisa, é só dizer que a gente segue. Dá uma lida no problema com calma.`;
 }
