@@ -63,7 +63,8 @@ export async function POST(request: Request) {
   }
 
   const { blip, dismissBlipId } = decideBlip(session, event.t);
-  await guardarSessao(session);
+  // Snapshots e pausas são frequentes: gravam depois da resposta. Início e fim já gravaram antes.
+  after(() => guardarSessao(session));
   const response: EventsResponse = { blip, dismissBlipId };
   return NextResponse.json(response);
 }

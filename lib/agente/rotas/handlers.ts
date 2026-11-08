@@ -178,10 +178,10 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   const ctx = contexto();
   const sessao = await ctx.repositorio.obter(id);
   if (!sessao) return notFound();
-  const alvo = await resolverAvaliacao(sessao.avaliacaoId);
+  // Cada ida ao banco custa ~300 ms de Washington a São Paulo: a avaliação e a contagem andam juntas.
+  const [alvo, analises] = await Promise.all([resolverAvaliacao(sessao.avaliacaoId), ctx.repositorio.contarAnalise(id)]);
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
-
-  if ((await ctx.repositorio.contarAnalise(id)) > MAX_ANALISES_POR_SESSAO) {
+  if (analises > MAX_ANALISES_POR_SESSAO) {
     return erro(429, "limite de análises da sessão");
   }
 
