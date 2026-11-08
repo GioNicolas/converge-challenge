@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Flag, Play } from "lucide-react";
+import { Flag, Play, Mic, MicOff } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import type { EditorCommand, InterviewConfig } from "@/lib/contracts";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
@@ -19,6 +19,9 @@ import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { useVozAgente } from "@/lib/voz/useVozAgente";
+import ControleVoz from "./voz/ControleVoz";
+import Legenda from "./Legenda";
 import { postEncerramento } from "./ide/api";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
@@ -75,6 +78,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const encerramentoAbertoRef = useRef(false);
   // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
+  const voz = useVozAgente({ bloqueada: session.ended });
+  const [parcial, setParcial] = useState("");
 
   const executorRef = useRef<CommandExecutor | null>(null);
   const cursorRef = useRef<FakeCursorHandle>(null);
@@ -91,6 +96,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     sessionId: session.sessionId,
     sendEvent: session.sendEvent,
     applyCommands,
+    onAgentReply: voz.falar,
+    onCancelReply: voz.parar,
   });
 
   // Fala do candidato (Scribe, ou o navegador como reserva): com a conversa aberta vira a resposta dele;
@@ -129,17 +136,18 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     }
   });
   const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
-  useTranscricao({
+  const escuta = useTranscricao({
     stream: midia.stream,
-    ativo: midia.microfoneLigado && !session.ended && !finalizando,
+    ativo: midia.microfoneLigado && !session.ended && (!finalizando || chat.open) && !voz.ativa,
     sessaoId: session.sessionId,
+    aoParcial: setParcial,
     aoFinal: aoFalar,
   });
 
   useEffect(() => warmUp(), []);
   const pedirMidia = midia.pedir;
   useEffect(() => {
-    void pedirMidia();
+    void pedirMidia().catch(() => {});
   }, [pedirMidia]);
 
   // Fim da sessão (botão ou tempo): vai para o agradecimento. O relatório é só da recrutadora.
@@ -325,11 +333,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
           encerrada={session.ended}
           iniciadaEm={session.startedAtRef.current || null}
           midia={midia}
-          agenteFalando={false}
+          agenteFalando={voz.estado === "falando"}
           onClicarPlin={abrirConversa}
           onAdiar={adiarPergunta}
         />
 
+        <Legenda fala={voz.fala} />
         <PainelConversa
           aberto={chat.open}
           assunto={chat.blip?.preview}
@@ -342,6 +351,20 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
           onTentarDeNovo={chat.retry}
           onVoltar={chat.close}
           rotuloVoltar={finalizando ? "Encerrar agora" : undefined}
+          rodape={
+            <div className="flex flex-col gap-1 px-4 py-2 text-texto-suave">
+              <div className="flex items-center justify-between gap-2">
+                <ControleVoz voz={voz} texto={chat.messages.at(-1)?.role === "agent" ? chat.messages.at(-1)?.text : undefined} disabled={chat.busy || chat.ended || session.ended} />
+                <button type="button" onClick={midia.alternarMicrofone} disabled={!midia.stream || session.ended}
+                  aria-label={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
+                  aria-pressed={midia.microfoneLigado} className="rounded-full p-2 disabled:opacity-40">
+                  {midia.microfoneLigado ? <Mic size={16} /> : <MicOff size={16} />}
+                </button>
+              </div>
+              {parcial && <p role="status" className="text-[13px] italic">{parcial}</p>}
+              {escuta.erro && <p role="status" className="text-[12px]">{escuta.erro}</p>}
+            </div>
+          }
         />
 
         <ConfirmarEncerrar

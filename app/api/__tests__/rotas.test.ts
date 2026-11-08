@@ -1,6 +1,7 @@
 // Testes das rotas do cérebro: chamam os handlers exportados com Request de verdade, sem rede e sem LLM real.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { NextRequest } from "next/server";
 import { criarRepositorioEmMemoria, type RepositorioSessoes } from "../../../lib/agente/armazenamento";
 import { resolverAvaliacao } from "../../../lib/agente/kits";
 import { criarClienteFalso } from "../../../lib/agente/llm/cliente";
@@ -327,13 +328,19 @@ describe("imagens", () => {
   });
 });
 
-describe("voz (stubs)", () => {
-  it("/falar e /stt-token respondem 501 {erro}", async () => {
-    const a = await falarPost();
-    const b = await sttGet();
-    for (const r of [a, b]) {
-      assert.equal(r.status, 501);
-      assert.deepEqual(await r.json(), { erro: "voz ainda não implementada" });
+describe("voz", () => {
+  it("sem chave a síntese indica fallback e o token exige sessão", async () => {
+    const chave = process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_API_KEY;
+    try {
+      const a = await falarPost(post("/api/falar", { texto: "Olá" }));
+      const b = await sttGet(new NextRequest("http://localhost/api/stt-token"));
+      assert.equal(a.status, 501);
+      assert.equal(b.status, 400);
+      assert.equal(typeof (await a.json()).erro, "string");
+      assert.equal(typeof (await b.json()).erro, "string");
+    } finally {
+      if (chave !== undefined) process.env.ELEVENLABS_API_KEY = chave;
     }
   });
 });

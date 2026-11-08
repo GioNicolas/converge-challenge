@@ -94,8 +94,11 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   // O que o agente está falando agora (para o orb e a legenda).
   const [falaAtual, setFalaAtual] = useState<FalaNaTela | null>(null);
   const [agenteFalando, setAgenteFalando] = useState(false);
+  const [vozHabilitada, setVozHabilitada] = useState(true);
+  const vozHabilitadaRef = useRef(true);
   const fimDaLegenda = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versaoDaFala = useRef(0);
+  const cicloDaSala = useRef(0);
 
   const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
     const versao = ++versaoDaFala.current;
@@ -103,6 +106,13 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(true);
     linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
+    if (!vozHabilitadaRef.current) {
+      marcas?.forEach((marca) => marca.aoChegar());
+      setAgenteFalando(false);
+      setFalaAtual({ quem: "agente", texto, ate: texto.length });
+      fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 8000);
+      return;
+    }
     const aoProgresso = (ate: number) => {
       if (versao !== versaoDaFala.current) return;
       setFalaAtual((atual) => (versao === versaoDaFala.current && atual && atual.texto === texto && atual.ate !== ate ? { ...atual, ate } : atual));
@@ -122,8 +132,14 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     setAgenteFalando(false);
     setFalaAtual(null);
   }, []);
+  const alternarVoz = useCallback(() => {
+    vozHabilitadaRef.current = !vozHabilitadaRef.current;
+    setVozHabilitada(vozHabilitadaRef.current);
+    if (!vozHabilitadaRef.current) silenciar();
+  }, [silenciar]);
 
   useEffect(() => () => {
+    cicloDaSala.current++;
     versaoDaFala.current++;
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     calar();
@@ -464,6 +480,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
    */
   const enviarTexto = useCallback(
     async (bruto: string): Promise<{ requisito: string | null }> => {
+      const ciclo = cicloDaSala.current;
       const texto = limparTextoDigitado(bruto);
       const atual = estadoAtual.current;
       if (!texto || !sessao || atual.fase === "AGUARDANDO" || atual.fase === "ENCERRADA") return { requisito: null };
@@ -497,6 +514,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         if (i >= 0) conversa.current.splice(i, 1);
         throw erro;
       }
+      if (ciclo !== cicloDaSala.current || estadoAtual.current.fase === "ENCERRADA") return { requisito: null };
       const novas = [registrarFalaDoCandidato()];
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
@@ -523,6 +541,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     ultimaAtividade.current = Date.now();
   }, []);
   const encerrar = useCallback(() => {
+    cicloDaSala.current++;
     silenciar();
     enviar({ tipo: "ENCERRAR" });
     // Entrevista encerrada: o desenho salvo localmente não é mais necessário (a prova fica no servidor).
@@ -537,6 +556,9 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     iniciadaEm,
     falaAtual,
     agenteFalando,
+    vozHabilitada,
+    alternarVoz,
+    silenciar,
     desenhoMudou,
     comecar,
     clicarPlin,

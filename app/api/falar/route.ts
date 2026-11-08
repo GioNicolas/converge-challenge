@@ -1,7 +1,55 @@
-import { naoImplementado } from "@/lib/agente/rotas/handlers";
+import { NextResponse } from "next/server";
+import { RespostaVoz } from "@/lib/voz/contrato";
+import { criarLimitador, ipDe, lerTexto } from "@/lib/agente/rotas/http";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Voz ainda não implementada: o quadro cai na voz do navegador e no texto escrito.
-export const POST = () => naoImplementado();
+// Voz do agente: ElevenLabs com tempos por caractere (a legenda e a mão do agente seguem a fala).
+// Sem ELEVENLABS_API_KEY responde 501 e o quadro usa a voz do navegador.
+// Voz do agente: Fernando - Casual (pt-BR, voz da biblioteca: a API exige plano pago).
+// ELEVENLABS_VOICE_ID só é preciso para trocar de voz (copie o ID em Voices, no painel do ElevenLabs).
+const VOZ_PADRAO = "jyRzzBWbHll8EUfOjmhe";
+const MODELO_PADRAO = "eleven_multilingual_v2";
+const MAXIMO_CARACTERES = 2000;
+const porIp = criarLimitador(60, 60_000);
+const global = criarLimitador(300, 600_000);
+
+const headers = { "Cache-Control": "no-store" };
+const erro = (status: number, mensagem: string) => NextResponse.json({ erro: mensagem }, { status, headers });
+
+export async function POST(req: Request) {
+  const origem = req.headers.get("origin");
+  if (origem && origem !== new URL(req.url).origin) return erro(403, "Origem não permitida.");
+  const chave = process.env.ELEVENLABS_API_KEY;
+  if (!chave) return erro(501, "voz ainda não configurada");
+  let texto = "";
+  try {
+    const lido = await lerTexto(req, 16 * 1024);
+    if (!lido.ok) return lido.resposta;
+    const corpo: unknown = JSON.parse(lido.dados);
+    if (corpo && typeof corpo === "object" && typeof (corpo as { texto?: unknown }).texto === "string") texto = (corpo as { texto: string }).texto.trim();
+  } catch {
+    return erro(400, "JSON inválido.");
+  }
+  if (!texto || texto.length > MAXIMO_CARACTERES) return erro(400, `texto obrigatório (até ${MAXIMO_CARACTERES} caracteres).`);
+  if (porIp.estourou(ipDe(req)) || global.estourou("global")) return erro(429, "Limite de voz atingido. Tente em instantes.");
+
+  const voz = encodeURIComponent(process.env.ELEVENLABS_VOICE_ID?.trim() || VOZ_PADRAO);
+  try {
+    const resposta = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voz}/with-timestamps?output_format=mp3_44100_128`, {
+      method: "POST",
+      headers: { "xi-api-key": chave, "Content-Type": "application/json" },
+      body: JSON.stringify({ text: texto, model_id: process.env.ELEVENLABS_MODEL_ID?.trim() || MODELO_PADRAO, language_code: "pt" }),
+      cache: "no-store",
+      signal: AbortSignal.any([req.signal, AbortSignal.timeout(20000)]),
+    });
+    if (!resposta.ok) return erro(502, "ElevenLabs recusou o pedido de voz.");
+    const dados = (await resposta.json()) as { audio_base64?: unknown; alignment?: Record<string, unknown> | null };
+    const vozGerada = RespostaVoz.safeParse({ audio_base64: dados.audio_base64, alinhamento: dados.alignment });
+    if (!vozGerada.success) return erro(502, "Resposta inesperada do ElevenLabs.");
+    return NextResponse.json(vozGerada.data, { headers });
+  } catch {
+    return erro(502, "ElevenLabs indisponível.");
+  }
+}

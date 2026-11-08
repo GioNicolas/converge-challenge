@@ -73,7 +73,8 @@ export function criarEscutaTranscricao(opcoes: {
   let navegadorBloqueado = false;
   let aceitaTrilha = true;
 
-  const podeOuvir = () => ativo && !!trilha && trilha.readyState === "live" && trilha.enabled && !trilha.muted;
+  const podeOuvir = () => ativo && (typeof document === "undefined" || !document.hidden)
+    && !!trilha && trilha.readyState === "live" && trilha.enabled && !trilha.muted;
   const agora = () => inicio === null ? 0 : Math.max(0, performance.now() - inicio);
   function publicar(novo: EstadoEscuta) {
     if (encerrado) return;
@@ -351,13 +352,16 @@ export function useTranscricao(opcoes: {
   sessaoId: string | null;
   aoParcial?: (texto: string) => void;
   aoFinal?: (texto: string) => void;
+  contexto?: "coding" | "quadro";
+  servidor?: boolean;
 }): EstadoEscuta {
   const { stream, ativo, sessaoId, aoParcial, aoFinal } = opcoes;
   const [estado, setEstado] = useState<EstadoEscuta>({ motor: "nenhum", escutando: false, erro: null });
   const callbacks = useRef({ aoParcial, aoFinal });
   const escuta = useRef<ReturnType<typeof criarEscutaTranscricao> | null>(null);
   // Scribe por padrão; "0" (demonstração) usa só a transcrição do navegador.
-  const servidor = process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0";
+  const servidor = opcoes.servidor ?? (process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0");
+  const contexto = opcoes.contexto ?? "coding";
   useEffect(() => { callbacks.current = { aoParcial, aoFinal }; }, [aoParcial, aoFinal]);
   useEffect(() => {
     if (!stream) {
@@ -366,6 +370,7 @@ export function useTranscricao(opcoes: {
     }
     const controle = criarEscutaTranscricao({
       stream, sessaoId, servidor, aoEstado: setEstado,
+      obterToken: (id) => tokenTranscricao(id, contexto),
       aoTrecho: (trecho) => {
         if (trecho.final) {
           callbacks.current.aoParcial?.("");
@@ -375,7 +380,7 @@ export function useTranscricao(opcoes: {
     });
     escuta.current = controle;
     return () => { escuta.current = null; controle.parar(); };
-  }, [stream, sessaoId, servidor]);
+  }, [stream, sessaoId, servidor, contexto]);
   useEffect(() => { escuta.current?.ativar(ativo); }, [ativo, stream, sessaoId, servidor]);
   return estado;
 }

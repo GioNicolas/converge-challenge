@@ -141,6 +141,25 @@ test("Scribe só inicia quando ativo e envia PCM mono em blocos de 200 ms", asyn
   assert.equal(m.contextos[0].ganho.gain.value, 0);
 });
 
+test("ocultar a aba suspende envio de voz e retomar não duplica finais", async (t) => {
+  const pagina = { hidden: false };
+  globalFalso(t, "document", pagina);
+  const m = montar(t);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  pagina.hidden = true;
+  t.mock.timers.tick(200);
+  ws.mensagem({ message_type: "committed_transcript", text: "não gravar" });
+  assert.equal(m.estado()?.escutando, false);
+  assert.equal(m.trechos.some((t) => t.final), false);
+  pagina.hidden = false;
+  t.mock.timers.tick(200);
+  ws.mensagem({ message_type: "committed_transcript", text: "retomou" });
+  assert.equal(m.trechos.at(-1)?.texto, "retomou");
+});
+
 test("pausa mantém socket e contexto, envia silêncio e ignora transcrições atrasadas", async (t) => {
   const m = montar(t);
   m.controle.ativar(true);

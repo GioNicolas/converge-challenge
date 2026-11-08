@@ -11,6 +11,9 @@ import { ACEITOS, lerDocumento, type Documento } from "@/lib/pre-entrevista/tela
 import { curvaSuave } from "@/lib/design/motion";
 import Passos from "./Passos";
 import ListaDocumentos from "./ListaDocumentos";
+import { useTranscricao } from "@/lib/transcricao/useTranscricao";
+import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
 
 type Anexo = Documento & { uso: "descrição" | "contexto" };
 type Props = {
@@ -51,6 +54,15 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
   const [arrastando, setArrastando] = useState(false);
   const [erroArquivo, setErroArquivo] = useState<string | null>(null);
   const seletor = useRef<HTMLInputElement>(null);
+  const ditadoDescricao = useTranscricao({
+    bloqueada: lendo > 0,
+    aoTexto: (texto) => setDescricao((atual) => acrescentarFala(atual, texto)),
+  });
+  const ditadoContexto = useTranscricao({
+    bloqueada: lendo > 0,
+    aoTexto: (texto) => setContexto((atual) => acrescentarFala(atual, texto)),
+  });
+  const ditando = ditadoDescricao.ativa || ditadoContexto.ativa;
 
   async function adicionar(arquivos: FileList | File[]) {
     setErroArquivo(null);
@@ -90,6 +102,8 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
   }
 
   function usarExemplo() {
+    ditadoDescricao.cancelar();
+    ditadoContexto.cancelar();
     const exemplo = VAGAS.find((v) => v.id === "backend-senior-pagamentos") ?? VAGAS[0];
     setCargo(exemplo.roleTitle);
     setDescricao(exemplo.jobDescription);
@@ -102,11 +116,11 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
       .filter((a) => a.uso === "contexto")
       .map((a) => `Documento anexado: ${a.nome}\n${a.texto}`);
     const contextoFinal = [contexto.trim(), ...extras].filter(Boolean).join("\n\n");
-    if (!cargo.trim() || !descricao.trim()) return;
+    if (!cargo.trim() || !descricao.trim() || ditando) return;
     onEnviar({ roleTitle: cargo.trim(), jobDescription: descricao.trim(), context: contextoFinal || undefined });
   }
 
-  const pronto = cargo.trim() && descricao.trim() && lendo === 0;
+  const pronto = cargo.trim() && descricao.trim() && lendo === 0 && !ditando;
   const falta = !cargo.trim() ? "Falta o cargo" : !descricao.trim() ? "Falta a descrição" : lendo > 0 ? "Lendo o documento…" : null;
 
   return (
@@ -156,6 +170,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
           >
             <textarea
               value={descricao}
+              readOnly={ditadoDescricao.ativa}
               onChange={(e) => setDescricao(e.target.value)}
               placeholder="Responsabilidades, requisitos, ferramentas do dia a dia…"
               rows={9}
@@ -163,6 +178,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
               required
             />
             <div className="flex items-center justify-between gap-3 border-t border-borda px-1.5 py-1.5">
+              <BotaoDitado transcricao={ditadoDescricao} disabled={lendo > 0 || ditadoContexto.ativa} />
               <button
                 type="button"
                 onClick={() => seletor.current?.click()}
@@ -193,6 +209,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
               }}
             />
           </div>
+          <EstadoDitado transcricao={ditadoDescricao} />
           {anexos.length > 0 && <ListaDocumentos documentos={anexos} onRemover={remover} />}
           {erroArquivo && <p className="text-[13.5px] text-perigo">{erroArquivo}</p>}
         </Linha>
@@ -201,12 +218,17 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
           <div className={moldura}>
             <textarea
               value={contexto}
+              readOnly={ditadoContexto.ativa}
               onChange={(e) => setContexto(e.target.value)}
               placeholder="Ex.: time de 5 pessoas, primeira contratação sênior, precisa de autonomia"
               rows={3}
               className={`${campo} block resize-y leading-relaxed`}
             />
+            <div className="flex justify-end border-t border-borda p-1.5">
+              <BotaoDitado transcricao={ditadoContexto} disabled={lendo > 0 || ditadoDescricao.ativa} />
+            </div>
           </div>
+          <EstadoDitado transcricao={ditadoContexto} />
         </Linha>
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-padrao border-t border-borda bg-fundo/40 px-6 py-4">

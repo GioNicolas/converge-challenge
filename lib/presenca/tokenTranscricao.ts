@@ -6,8 +6,10 @@ export class ErroTokenTranscricao extends Error {
 }
 
 /** Pede ao servidor um token temporário do Scribe (a chave do ElevenLabs nunca chega ao navegador). */
-export async function tokenTranscricao(sessaoId: string): Promise<string> {
-  const rota = `/api/stt-token?${new URLSearchParams({ sessao_id: sessaoId })}`;
+export async function tokenTranscricao(sessaoId: string, contexto: "coding" | "quadro" = "coding"): Promise<string> {
+  const parametros = new URLSearchParams({ sessao_id: sessaoId });
+  if (contexto !== "coding") parametros.set("contexto", contexto);
+  const rota = `/api/stt-token?${parametros}`;
   const resposta = await fetch(rota, { cache: "no-store" });
   if (!resposta.ok) {
     const permanente = resposta.status === 503 || (resposta.status >= 400 && resposta.status < 500 && resposta.status !== 429);

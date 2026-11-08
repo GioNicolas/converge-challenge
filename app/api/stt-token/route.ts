@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { criarLimitador, ipDe } from "@/lib/agente/rotas/http";
 import { getSession } from "@/lib/session/store";
+import { contexto as contextoAgente } from "@/lib/agente/rotas/contexto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,9 +19,13 @@ const limitadorPorSessao = criarLimitador(20, 600_000);
 const limitadorPorSessaoNaHora = criarLimitador(60, 3_600_000);
 const limitadorGlobal = criarLimitador(300, 600_000);
 
-const erro = (status: number, mensagem: string) => NextResponse.json({ erro: mensagem }, { status });
+const erro = (status: number, mensagem: string) => NextResponse.json({ erro: mensagem }, { status, headers: { "Cache-Control": "no-store" } });
 
 export async function GET(req: NextRequest) {
+  const origem = req.headers.get("origin");
+  if (origem && origem !== req.nextUrl.origin) return erro(403, "Origem não permitida.");
+  const contexto = req.nextUrl.searchParams.get("contexto") ?? "coding";
+  if (contexto !== "coding" && contexto !== "quadro") return erro(400, "Contexto inválido.");
   const sessaoId = req.nextUrl.searchParams.get("sessao_id")?.trim() ?? "";
   if (!sessaoId || sessaoId.length > 80) return erro(400, "sessao_id obrigatório.");
   const chave = process.env.ELEVENLABS_API_KEY;
@@ -28,10 +33,13 @@ export async function GET(req: NextRequest) {
 
   if (limitadorPorIp.estourou(ipDe(req))) return erro(429, "muitos pedidos de token; tente em instantes");
   // Só sai token para sessão real e em andamento.
-  const sessao = getSession(sessaoId);
+  const sessao = contexto === "quadro"
+    ? await contextoAgente().repositorio.obter(sessaoId)
+    : getSession(sessaoId);
   if (!sessao) return erro(404, "sessão não encontrada");
-  if (sessao.ended) return erro(409, "sessão encerrada");
-  if (limitadorPorSessao.estourou(sessaoId) || limitadorPorSessaoNaHora.estourou(sessaoId)) {
+  if (("ended" in sessao && sessao.ended) || ("estado" in sessao && sessao.estado.fase === "ENCERRADA")) return erro(409, "sessão encerrada");
+  const chaveSessao = `${contexto}:${sessaoId}`;
+  if (limitadorPorSessao.estourou(chaveSessao) || limitadorPorSessaoNaHora.estourou(chaveSessao)) {
     return erro(429, "muitos pedidos de token para esta sessão");
   }
   if (limitadorGlobal.estourou("global")) return erro(429, "limite de transcrição atingido; tente em instantes");

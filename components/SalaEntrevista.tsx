@@ -15,6 +15,8 @@ import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
+import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { FilaFalas } from "@/lib/audio/filaFalas";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
@@ -112,6 +114,10 @@ export default function SalaEntrevista() {
   const entrevista = useEntrevista(quadro, cursor);
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
+  const liberarMidia = midia.liberar;
+  useEffect(() => {
+    if (estado.fase === "ENCERRADA") liberarMidia();
+  }, [estado.fase, liberarMidia]);
   const demo = useDemoRequisitos();
 
   // Cada requisito combinado é escrito pelo agente no próprio quadro, abaixo do enunciado.
@@ -132,7 +138,7 @@ export default function SalaEntrevista() {
 
   // A resposta a um plin termina sozinha quando o candidato fala e depois fica em silêncio.
   useFimPorSilencio({
-    ativo: estado.plin === "PERGUNTA_ATIVA",
+    ativo: estado.plin === "PERGUNTA_ATIVA" && !usarServidor(),
     agenteFalando: entrevista.agenteFalando,
     volume: midia.volume,
     aoTerminar: entrevista.terminarResposta,
@@ -171,6 +177,30 @@ export default function SalaEntrevista() {
     [enviarTexto, combinar],
   );
 
+  const [parcialVoz, setParcialVoz] = useState("");
+  const [falaPendente, setFalaPendente] = useState<string | null>(null);
+  const enviarVozRef = useRef(enviarDigitado);
+  enviarVozRef.current = enviarDigitado;
+  const filaVoz = useRef<FilaFalas | null>(null);
+  if (!filaVoz.current) filaVoz.current = new FilaFalas(
+    async (texto) => { await enviarVozRef.current(texto); setFalaPendente(null); },
+    (texto) => setFalaPendente(texto),
+  );
+  useEffect(() => {
+    if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
+  }, [estado.fase]);
+  useEffect(() => () => filaVoz.current?.limpar(), []);
+  const receberVoz = useCallback((texto: string) => filaVoz.current?.adicionar(texto), []);
+  const escuta = useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,
+    sessaoId: sessao?.sessao_id ?? null,
+    contexto: "quadro",
+    servidor: usarServidor(),
+    aoParcial: setParcialVoz,
+    aoFinal: receberVoz,
+  });
+
   const pronto = quadro !== null && sessao !== null;
   const mostrarCartao = estado.fase === "AGUARDANDO" || estado.fase === "ENCERRADA";
 
@@ -195,6 +225,18 @@ export default function SalaEntrevista() {
       )}
 
       <Legenda fala={entrevista.falaAtual} />
+      {estado.fase !== "ENCERRADA" && (parcialVoz || escuta.erro || falaPendente) && (
+        <div role="status" className="absolute bottom-20 left-4 z-10 max-w-md rounded-padrao bg-superficie p-3 text-sm shadow-padrao">
+          {parcialVoz && <p>{parcialVoz}</p>}
+          {escuta.erro && <p>{escuta.erro}</p>}
+          {falaPendente && (
+            <div>
+              <p>Não consegui enviar sua fala: “{falaPendente}”</p>
+              <button type="button" onClick={() => filaVoz.current?.tentarNovamente()} className="mt-2 underline">Tentar enviar novamente</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
       {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
@@ -219,6 +261,17 @@ export default function SalaEntrevista() {
 
       {estado.fase !== "AGUARDANDO" && (
         <div data-painel-direito className="absolute top-[72px] right-4 z-10 flex items-start gap-2">
+          <button type="button" onClick={entrevista.alternarVoz}
+            aria-label={entrevista.vozHabilitada ? "Silenciar respostas por voz" : "Ativar respostas por voz"}
+            aria-pressed={entrevista.vozHabilitada}
+            className="rounded-full border border-borda bg-vidro px-3 py-2 text-xs shadow-padrao">
+            {entrevista.vozHabilitada ? "Silenciar voz" : "Ativar voz"}
+          </button>
+          {entrevista.agenteFalando && (
+            <button type="button" onClick={entrevista.silenciar} className="rounded-full border border-borda bg-vidro px-3 py-2 text-xs shadow-padrao">
+              Interromper voz
+            </button>
+          )}
           <button
             onClick={() => setConversaAberta(true)}
             aria-label="Abrir conversa"

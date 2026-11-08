@@ -261,7 +261,7 @@ export default function PreEntrevistaTotti({
 
             {etapa === "conversa" ? (
               <div className="relative mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col [&>section]:flex-1">
-                <ConversaTotti transcricao={estado.transcricao} pensando={pensando} erro={erro} onEnviar={responder} />
+                <ConversaTotti transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
                 <AnimatePresence>
                   {planoPronto && (
                     <ConversaConcluida
