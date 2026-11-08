@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
   const { sessionId, blipId, messages } = parsed.data;
   // O contrato não carrega o código; ele vem à parte, validado aqui.
-  const extra = (body ?? {}) as { code?: unknown; language?: unknown };
+  const extra = (body ?? {}) as { code?: unknown; language?: unknown; reconheceu?: unknown };
   const liveCode = typeof extra.code === "string" && extra.code.length <= MAX_CODE_CHARS ? extra.code : undefined;
   const liveLanguage = typeof extra.language === "string" && extra.language.length > 0 && extra.language.length <= 40 ? extra.language : undefined;
 
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const response = await runInterviewerTurn(session, { blipId: conhecida ? blipId : undefined, messages });
+  const response = await runInterviewerTurn(session, { blipId: conhecida ? blipId : undefined, messages, reconheceu: extra.reconheceu === true });
   await guardarSessao(session);
   // Concluiu uma etapa: o analista olha o código agora (momento-chave), e a próxima pergunta já vem sobre o que segue.
   const gatilho = session.events.at(-1);

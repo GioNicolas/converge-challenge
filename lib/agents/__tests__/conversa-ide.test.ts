@@ -133,3 +133,25 @@ test("pergunta do candidato sem '?': o Totti responde antes de perguntar", async
     assert.equal(candidatoPerguntou(c(nao)), false, nao);
   }
 });
+
+test("sem 'entendi, entendi': a resposta não abre com outro reconhecimento depois do 'uhum' nem repete o da fala anterior", async () => {
+  const { semReconhecimentoRepetido } = await import("@/lib/agents/interviewer");
+  assert.equal(semReconhecimentoRepetido("Saquei. E o custo de memória?", [], true), "E o custo de memória?");
+  assert.equal(semReconhecimentoRepetido("Entendi, fica mais direto. Qual o custo?", [], true), "Fica mais direto. Qual o custo?");
+  assert.equal(semReconhecimentoRepetido("Saquei. E o custo?", [], false), "Saquei. E o custo?");
+  const antes = [{ role: "agent" as const, text: "Saquei. Pode seguir." }, { role: "candidate" as const, text: "beleza" }];
+  assert.equal(semReconhecimentoRepetido("Saquei, e a pilha vazia?", antes, false), "E a pilha vazia?");
+  assert.equal(semReconhecimentoRepetido("Saquei.", [], true), "Saquei.");
+});
+
+test("fim da entrevista: 'já terminei' encerra; travado ou perguntando, a pergunta do Totti não é cortada", async () => {
+  const { querEncerrar, travado, limitarPerguntas } = await import("@/lib/agents/interviewer");
+  const c = (text: string) => ({ role: "candidate" as const, text });
+  assert.equal(querEncerrar([c("pronto terminei")]), false, "o primeiro 'terminei' é etapa concluída");
+  assert.equal(querEncerrar([c("pronto terminei"), { role: "agent", text: "E a memória?" }, c("conseguiu? eu já terminei")]), true);
+  assert.equal(querEncerrar([c("terminei"), { role: "agent", text: "Por quê?" }, c("terminei pô")]), true);
+  assert.equal(travado([c("mas eu não sei como seguir, não sei porque tá quebrando")]), true);
+  const saida = { respond: true, concluded: false, finish: false, reply: "Quando você roda, o que aparece?", highlight: null, end: false, gaveHint: false, evidence: null, challenge: null, probeOutcome: null };
+  const conversa = [{ role: "agent" as const, text: "O que acontece aqui?" }, c("eu não sei o que fazer, não entendi porque tá quebrando")];
+  assert.equal(limitarPerguntas(saida, undefined, conversa, false).end, false);
+});

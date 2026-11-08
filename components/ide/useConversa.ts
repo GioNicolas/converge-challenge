@@ -60,8 +60,12 @@ const MIN_PALAVRAS_RECONHECER = 4;
 const MIN_PALAVRAS_RECONHECER_FORA_DA_CONVERSA = 8;
 /** Uma conversa recente: o Totti falou há menos que isso. */
 const CONVERSA_RECENTE_MS = 60_000;
-/** Dois "uhum" seguidos (a fala chegou em pedaços) não: no máximo um nesse intervalo. */
-const ENTRE_RECONHECIMENTOS_MS = 8_000;
+/**
+ * No máximo um "uhum" nesse intervalo, e nem sempre (CHANCE_DE_RECONHECER): um a cada fala ficava "entendi,
+ * entendi, entendi". A resposta que vem depois dele não abre com outro (o servidor tira, ver /api/chat).
+ */
+const ENTRE_RECONHECIMENTOS_MS = 30_000;
+const CHANCE_DE_RECONHECER = 0.5;
 
 /** Sem resposta à pergunta do Totti por tanto tempo (depois de ele terminar de perguntar): o assunto fecha. */
 const FIO_SEM_RESPOSTA_MS = 35_000;
@@ -117,6 +121,8 @@ export function useConversa(deps: ConversaDeps) {
   /** A pergunta do fio já foi feita e ele ainda não respondeu: desde quando. */
   const semRespostaDesdeRef = useRef<number | null>(null);
   const reconheceuEmRef = useRef(0);
+  /** A próxima fala que vai ao entrevistador veio depois de um "uhum": a resposta não abre com outro. */
+  const reconheceuRef = useRef(false);
   const reconhecimentosRef = useRef(0);
 
   const listaAtual = () => fioRef.current?.falas ?? livresRef.current;
@@ -184,6 +190,8 @@ export function useConversa(deps: ConversaDeps) {
     const fala: Fala = { role: "candidate", text: texto, at: Date.now() };
     lista.push(fala);
     const blip = fioRef.current?.blip;
+    const reconheceu = reconheceuRef.current;
+    reconheceuRef.current = false;
     let res: ChatResponse;
     comecarPedido();
     try {
@@ -193,6 +201,7 @@ export function useConversa(deps: ConversaDeps) {
         ...(live ? { code: live.code, language: live.language } : {}),
         blipId: blip?.id,
         messages: lista.map(({ role, text }) => ({ role, text })),
+        ...(reconheceu ? { reconheceu } : {}),
       }, sinal);
       if (sinal.aborted) throw new DOMException("Substituída por uma fala nova.", "AbortError");
     } catch (erro) {
@@ -279,7 +288,9 @@ export function useConversa(deps: ConversaDeps) {
     const emConversa = fioRef.current !== null || agora - ultimaFalaDoAgenteEmRef.current < CONVERSA_RECENTE_MS;
     if (n < MIN_PALAVRAS_RECONHECER || (!emConversa && n < MIN_PALAVRAS_RECONHECER_FORA_DA_CONVERSA)) return;
     if (agora - reconheceuEmRef.current < ENTRE_RECONHECIMENTOS_MS || depsRef.current.vozTocando()) return;
+    if (Math.random() >= CHANCE_DE_RECONHECER) return;
     reconheceuEmRef.current = agora;
+    reconheceuRef.current = true;
     void depsRef.current.falar(RECONHECIMENTOS[reconhecimentosRef.current++ % RECONHECIMENTOS.length]);
   };
 

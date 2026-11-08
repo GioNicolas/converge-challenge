@@ -43,7 +43,7 @@ export async function getBlipContext(blipId: string, sessionId: string): Promise
 }
 
 /** POST /api/chat. */
-export async function postChat(req: ChatRequest & { code?: string; language?: string }, signal?: AbortSignal): Promise<ChatResponse> {
+export async function postChat(req: ChatRequest & { code?: string; language?: string; reconheceu?: boolean }, signal?: AbortSignal): Promise<ChatResponse> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -3,7 +3,7 @@
  * Um turno por chamada. Erro do LLM nunca vira erro de API: volta uma fala de reserva.
  */
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
-import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
+import { buildInterviewerSystem, buildInterviewerUser, candidatoPerguntou, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
 import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
@@ -20,6 +20,13 @@ import { getProblem } from "@/problems";
 const FALLBACK_REPLIES = FALAS_DE_REPETICAO;
 /** Fala barrada duas vezes pelo filtro: uma pergunta aberta que não entrega nada (e sem repetir a mesma frase).
  * Não fecha o assunto: o candidato ainda tem a vez. Sem validar e sem pedir para ele bolar testes. */
+/** Fala barrada quando ele tinha feito uma pergunta: uma resposta que não entrega nada, e não outra pergunta
+ * (devolver "o que você quer que esse trecho faça?" a quem perguntou soava como ignorar a pergunta). */
+const SAFE_ANSWER_REPLIES = [
+  "Essa eu deixo com você: vale olhar com calma o que cada variável guarda nesse ponto.",
+  "Essa parte eu prefiro que você descubra no código, é justamente o que eu quero ver.",
+  "Aí eu não vou entregar, mas você tem tudo o que precisa no código e nos testes.",
+];
 const SAFE_CLOSE_REPLIES = [
   "Certo. O que você quer que esse trecho faça?",
   "Entendi. Qual é o seu próximo passo agora?",
@@ -49,6 +56,14 @@ function falasDoAgente(session: SessionState, messages: ChatMessage[]): string[]
 }
 
 export async function runInterviewerTurn(
+  session: SessionState,
+  req: { blipId?: string; messages: ChatMessage[]; reconheceu?: boolean },
+): Promise<ChatResponse> {
+  const resposta = await turno(session, req);
+  return resposta.reply ? { ...resposta, reply: semReconhecimentoRepetido(resposta.reply, req.messages, req.reconheceu === true) } : resposta;
+}
+
+async function turno(
   session: SessionState,
   req: { blipId?: string; messages: ChatMessage[] },
 ): Promise<ChatResponse> {
@@ -127,6 +142,11 @@ export async function runInterviewerTurn(
     messages: req.messages,
   };
 
+  // Solução funcionando e ele repete que já terminou: é para encerrar, não para mais perguntas.
+  if (!found && input.fase === "funcionando" && querEncerrar(req.messages)) {
+    return { reply: "", commands: [], end: true, finish: true };
+  }
+  const perguntou = candidatoPerguntou(req.messages);
   const system = buildInterviewerSystem(session.config, problem);
   const user = buildInterviewerUser(input);
   const candidateLines = req.messages.filter((m) => m.role === "candidate").slice(-3).map((m) => m.text);
@@ -143,6 +163,13 @@ export async function runInterviewerTurn(
     }
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
+    if (!opening && perguntou && (output.respond === false || output.reply.trim() === "") && sobra() >= MIN_PARA_REGERAR_MS) {
+      // Ele perguntou e o modelo ficou quieto: era o "você pode me explicar?" sem resposta.
+      output = limitarPerguntas(
+        await generate(session, system, `${user}\n\nATENÇÃO: ele te fez uma pergunta e você não respondeu. respond = true: responda a ela agora.`, Math.min(PRAZO_GERACAO_MS, sobra())),
+        question, req.messages, opening,
+      );
+    }
     if (!opening && (output.respond === false || output.reply.trim() === "")) {
       registrarEvidencia(session, output);
       return { reply: "", commands: [], end: false, listening: true };
@@ -160,7 +187,7 @@ export async function runInterviewerTurn(
         console.info(`[interviewer] fala barrada (${verdict.reason}) sem tempo para outra: ${output.reply}`);
         output = opening
           ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-          : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
+          : { ...output, reply: falaSegura(perguntou, falasDoAgente(session, req.messages)), highlight: null, end: perguntou, gaveHint: false, challenge: null };
       } else if (!verdict.safe) {
         console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
         const barrada = output;
@@ -175,7 +202,7 @@ export async function runInterviewerTurn(
           console.info("[interviewer] segunda geração falhou, indo de fala segura:", err instanceof Error ? err.message : err);
           return opening
             ? { ...barrada, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-            : { ...barrada, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
+            : { ...barrada, reply: falaSegura(perguntou, falasDoAgente(session, req.messages)), highlight: null, end: perguntou, gaveHint: false, challenge: null };
         });
         const second = await checkReply(output.reply, candidateLines, permitido, code, Math.max(500, Math.min(PRAZO_FILTRO_MS, sobra())));
         session.analyst.costUsd += second.costUsd;
@@ -184,7 +211,7 @@ export async function runInterviewerTurn(
           // Na abertura, a pergunta preparada (já filtrada); depois, uma pergunta aberta segura, sem fechar.
           output = opening
             ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-            : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
+            : { ...output, reply: falaSegura(perguntou, falasDoAgente(session, req.messages)), highlight: null, end: perguntou, gaveHint: false, challenge: null };
         }
       }
     }
@@ -336,7 +363,9 @@ export function perguntasSeguidas(messages: ChatMessage[]): number {
  */
 export function limiteDePerguntas(question: { kind?: string; kickoff?: boolean } | undefined): number {
   if (!question) return 1;
-  if (question.kind === "encerramento" || question.kind === "empecilho") return Number.POSITIVE_INFINITY;
+  if (question.kind === "empecilho") return Number.POSITIVE_INFINITY;
+  // Dois pontos, com um aprofundamento cada, no máximo.
+  if (question.kind === "encerramento") return 4;
   if (question.kickoff) return 1;
   if (question.kind === "retorno") return 3;
   return 2;
@@ -350,9 +379,50 @@ export function limitarPerguntas(
   opening: boolean,
 ): InterviewerOutput {
   if (opening || output.respond === false || output.finish === true || !output.reply.trim().endsWith("?")) return output;
+  // Perguntou algo ou está travado: a pergunta do Totti ali é ajuda (o que ele está vendo, onde travou), não
+  // interrogatório. Cortar deixava um "Pode seguir." seco para quem acabou de dizer que não sabe seguir.
+  if (candidatoPerguntou(messages) || travado(messages)) return output;
   if (perguntasSeguidas(messages) + 1 <= limiteDePerguntas(question)) return output;
   const jaDitas = messages.filter((m) => m.role === "agent").map((m) => m.text);
   return { ...output, reply: semPerguntaNoFim(output.reply, falaNaoRepetida(DEVOLVER_PARA_O_CODIGO, jaDitas)), end: true, highlight: null };
+}
+
+/** Ele diz que não sabe seguir, não entendeu ou travou. */
+export function travado(messages: ChatMessage[]): boolean {
+  const ultima = messages.at(-1);
+  return ultima?.role === "candidate" && /\b(n[ãa]o sei (como|o que|o porqu[êe]|porque|por que|mais)|n[ãa]o entendi|n[ãa]o t[ôo] entendendo|travei|t[ôo] travad[oa]|n[ãa]o (t[ôo]|estou) conseguindo)\b/i.test(ultima.text);
+}
+
+/** Com a solução funcionando, ele diz que já terminou (ou repete que terminou): quer encerrar. */
+export function querEncerrar(messages: ChatMessage[]): boolean {
+  const doCandidato = messages.filter((m) => m.role === "candidate");
+  const ultima = doCandidato.at(-1)?.text ?? "";
+  const terminou = /\b(terminei|acabei|finalizei)\b/i;
+  if (!terminou.test(ultima)) return false;
+  return /\bj[áa]\b/i.test(ultima) || doCandidato.slice(0, -1).some((m) => terminou.test(m.text));
+}
+
+/** A fala segura quando a geração foi barrada: resposta neutra se ele perguntou algo, senão uma pergunta aberta. */
+function falaSegura(perguntou: boolean, jaDitas: string[]): string {
+  return falaNaoRepetida(perguntou ? SAFE_ANSWER_REPLIES : SAFE_CLOSE_REPLIES, jaDitas);
+}
+
+const RECONHECIMENTO_NO_COMECO = /^(uhum|hum|hm+|saquei|entendi|entendido|certo|beleza|ok|t[áa]|legal|show|ah|ent[ãa]o)\b[,.!]?\s*/i;
+
+/**
+ * Tira o "Saquei."/"Entendi." do começo da resposta quando a IDE já disse um "uhum" agora, ou quando a fala
+ * anterior do Totti abriu com a mesma palavra: era o "entendi, entendi, entendi".
+ */
+export function semReconhecimentoRepetido(reply: string, messages: ChatMessage[], reconheceu: boolean): string {
+  const primeira = (t: string) => t.trim().match(RECONHECIMENTO_NO_COMECO)?.[1]?.toLowerCase();
+  const anterior = messages.filter((m) => m.role === "agent").at(-1)?.text;
+  const abre = primeira(reply);
+  if (!abre || (!reconheceu && abre !== (anterior && primeira(anterior)))) return reply;
+  let texto = reply.trim();
+  for (let i = 0; i < 2 && RECONHECIMENTO_NO_COMECO.test(texto); i++) texto = texto.replace(RECONHECIMENTO_NO_COMECO, "");
+  // Só a reação ("Saquei."): sem ela não sobra fala; fica como está.
+  if (texto.length < 3) return reply;
+  return texto[0].toUpperCase() + texto.slice(1);
 }
 
 /** Uma fala curta e sem pergunta: só reconhece e devolve a vez. */
@@ -365,8 +435,9 @@ function falaSoDeReconhecer(reply: string): boolean {
 function semPerguntaNoFim(reply: string, fechamento: string): string {
   const frases = reply.trim().split(/(?<=[.!?])\s+/);
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
-  // A fala é curta (no máximo 2 frases): o que sobrou é a reação ou a resposta ao que ele perguntou.
-  return [...frases.slice(0, 2), fechamento].join(" ");
+  // Sobrou a reação ou a resposta ao que ele perguntou: ela basta (o "Pode seguir." em toda fala cansava).
+  // O fechamento só entra quando não sobrou nada.
+  return frases.length ? frases.slice(0, 2).join(" ") : fechamento;
 }
 
 /** O entrevistador já fez alguma pergunta nesta conversa livre (as falas que vieram no pedido). */

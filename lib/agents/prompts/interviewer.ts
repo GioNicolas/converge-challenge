@@ -51,7 +51,7 @@ Decida pela INTENÇÃO, pelo contexto da conversa e do código, nunca por palavr
 - Falando sozinho sobre o que vê na tela ("hmm deixa eu ver esse índice", "ué, deu errado no segundo teste, deixa eu olhar") também é pensar em voz alta → respond = false. Ele não pediu nada: interromper quem está pensando é pior que esperar. Na dúvida, fique quieto.
 - Toda fala com end = false termina numa pergunta curta ligada ao que ele disse ou ao código: é ela que devolve a vez. Uma paráfrase sozinha deixa os dois esperando; se não há o que perguntar, feche (end = true).
 - Avisou que concluiu uma etapa do trabalho (entendeu o problema e tem um plano, terminou a primeira versão, terminou de corrigir o que falhava, terminou a melhoria ou o desafio que topou) ou que está pronto para seguir → concluded = true, respond = true. Reconheça em uma frase breve e neutra, sem avaliar o que ele fez. Se ele também pediu feedback, dê o comentário como acima. Feche (end = true) se a sua fala não traz pergunta; numa pergunta sua, feche com o probeOutcome do critério. Nos outros casos, concluded = false.
-- Pediu para ENCERRAR a entrevista inteira agora ("pode encerrar", "quero finalizar", "por mim é isso, pode fechar a entrevista") ou disse que precisa sair, ir embora ou parar agora ("vou ter que sair", "tenho que ir") → finish = true, respond = false, reply = "". A despedida sai por outro caminho. Terminar uma etapa ou o código é concluded, não finish; perguntar quanto tempo falta também não é finish. Nos outros casos, finish = false.
+- Pediu para ENCERRAR a entrevista inteira agora ("pode encerrar", "quero finalizar", "por mim é isso, pode fechar a entrevista"), disse que precisa sair, ir embora ou parar agora ("vou ter que sair", "tenho que ir"), ou, com a solução já funcionando, repetiu que já terminou ("eu já terminei", "já acabei") → finish = true, respond = false, reply = "". A despedida sai por outro caminho. Terminar uma etapa ou o código é concluded, não finish; perguntar quanto tempo falta também não é finish. Nos outros casos, finish = false.
 - Pergunta sempre concreta: cite a linha, a função ou a decisão de que fala. Nunca faça pergunta genérica que só devolve a vez sem direção ("me conta o que você está pensando", "e aí?", "o que mais?").
 
 # Pergunta de abertura (Tipo: abertura)
@@ -197,7 +197,7 @@ export function candidatoPerguntou(messages: ChatMessage[]): boolean {
   const texto = ultima.text.toLowerCase();
   return (
     texto.includes("?") ||
-    /\b(o que (que )?(tu|voc[êe]) (acha|achou|pensa|diz)|tu acha|voc[êe] acha|t[áa] certo|est[áa] certo|t[áa] bom assim|faz sentido|pode ser assim|posso (usar|fazer|come[çc]ar|seguir|pesquisar)|quanto tempo|vou ser (penalizado|prejudicado|avaliado)|como (vai|vou) ser avaliado|tenho que|preciso (usar|tratar|considerar)|qual (é|e) a|devo)\b/.test(texto) ||
+    /\b(o que (que )?(tu|voc[êe]) (acha|achou|pensa|diz)|tu acha|voc[êe] acha|t[áa] certo|est[áa] certo|t[áa] bom assim|faz sentido|pode ser assim|posso (usar|fazer|come[çc]ar|seguir|pesquisar)|(voc[êe] |tu )?(pode|podia|poderia) me (explicar|ajudar|dizer|falar)|me explica|n[ãa]o entendi|qual (é|e) (a|o)|[ée] de (abertura|fechamento)|quanto tempo|vou ser (penalizado|prejudicado|avaliado)|como (vai|vou) ser avaliado|tenho que|preciso (usar|tratar|considerar)|qual (é|e) a|devo)\b/.test(texto) ||
     /\b(n[ée]|certo|beleza|ok)\s*$/.test(texto.trim())
   );
 }
@@ -235,7 +235,7 @@ Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.joi
   const mudanca = input.mudanca ? `\nMudança no problema: ${input.mudanca}${respostas}` : "";
 
   const pergunta = candidatoPerguntou(input.messages)
-    ? `\nATENÇÃO: a última fala do candidato tem uma PERGUNTA PARA VOCÊ. A sua fala começa respondendo a ela, de forma direta (sem avaliar o código dele). Só depois, se couber, uma pergunta sua.`
+    ? `\nATENÇÃO: a última fala do candidato tem uma PERGUNTA PARA VOCÊ: respond = true, e a sua fala começa respondendo a ela, de forma direta (sem avaliar o código dele). Dúvida sobre o enunciado ou sobre o que uma linha dele faz (o que a linha faz, não se está certa) se responde. Só depois, se couber, uma pergunta sua.`
     : "";
   return `Modo: ${input.mode}. Fase: ${input.fase}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
 ${blip}${mudanca}

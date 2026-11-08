@@ -292,6 +292,11 @@ function isFinalStretchForAgenda(session: SessionState, q: QueuedQuestion, t: nu
 
 /** Perguntas preparadas que entram no encerramento, no máximo. */
 const CLOSING_MAX_QUESTIONS = 2;
+/**
+ * Pontos do encerramento, no máximo (perguntas preparadas mais critérios sem evidência). Com todos os critérios
+ * pendentes viravam cinco, seis perguntas com o candidato querendo sair.
+ */
+const CLOSING_MAX_TOPICS = 2;
 /** Faltando esse tempo, o agente oferece o encerramento sozinho (com o que ficou pendente), sem esperar o Finalizar. */
 const CLOSING_BEFORE_END_MS = 3 * 60_000;
 
@@ -321,7 +326,7 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
   const topics = [
     ...prepared.map((q) => `pergunta preparada${q.criterionId ? ` (critério ${q.criterionId})` : ""}: ${q.question}`),
     ...criteria,
-  ];
+  ].slice(0, CLOSING_MAX_TOPICS);
   if (topics.length === 0) return undefined;
 
   // O que entrou no encerramento sai da fila; o balão que estava na tela vira esta conversa.
