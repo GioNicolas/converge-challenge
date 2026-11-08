@@ -12,6 +12,7 @@ import type { Report, SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
 import { saveReport } from "@/lib/session/reports";
+import { regrasDoCriterio } from "@/lib/squad-memory/prompt";
 import { latestCode, numberCode } from "@/lib/session/store";
 import type { CodeVersion, ProbeKind, ReportStatus, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -91,7 +92,7 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
   const output = await judge(system, user, judgedIds, status);
   const byId = new Map(output.criteria.map((c) => [c.id, c]));
 
-  const criteria = config.criteria.map((c) => {
+  const scoredCriteria = config.criteria.map((c) => {
     if (c.id === OBJECTIVE_CRITERION) return { id: c.id, name: c.name, ...correctness(session, hidden, endT) };
     const judged = byId.get(c.id);
     if (!judged || !judgedIds.includes(c.id) || judged.score === null) {
@@ -107,6 +108,11 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
         return t === undefined ? [] : [{ t, text: e.text }];
       }),
     };
+  });
+  // Critério que uma regra da squad afeta sai marcado como "aprendido com o time" (só os que tiveram nota).
+  const criteria = scoredCriteria.map((c) => {
+    const regras = c.score === null ? [] : regrasDoCriterio(config.squadRules, c.id);
+    return regras.length ? { ...c, squadRules: regras } : c;
   });
 
   // Média só dos critérios explorados (corretude sempre tem nota).

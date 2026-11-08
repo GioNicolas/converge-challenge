@@ -18,6 +18,20 @@ export const FocusArea = z.enum([
 ]);
 export type FocusArea = z.infer<typeof FocusArea>;
 
+/**
+ * Regra aprendida com o Tech Lead da squad (Memória Viva da Squad, `lib/squad-memory/`). Entra nos prompts
+ * do entrevistador e do avaliador; o relatório marca o critério que ela afetou como "aprendido com o time".
+ */
+export const SquadRule = z.object({
+  id: z.string(),
+  /** "Penaliza over-engineering: reprovou quem propôs Kafka para volume baixo". */
+  text: z.string(),
+  effect: z.enum(["valoriza", "penaliza"]),
+  /** Id do critério que ela afeta (o mesmo de `Criterion.id`, ou um equivalente da rubrica de system design). */
+  criterion: z.string(),
+});
+export type SquadRule = z.infer<typeof SquadRule>;
+
 export const Criterion = z.object({
   id: z.string(),
   name: z.string(),
@@ -53,6 +67,8 @@ export const InterviewConfig = z.object({
   problemId: z.string(),
   languages: z.array(z.string()).min(1),
   durationMin: z.number().int().positive().default(30),
+  /** Regras ativas da squad quando a entrevista começou. Sem valor: nenhuma regra aprendida. */
+  squadRules: z.array(SquadRule).optional(),
 });
 export type InterviewConfig = z.infer<typeof InterviewConfig>;
 
@@ -189,6 +205,8 @@ export const CriterionScore = z.object({
   /** null = critério não explorado na entrevista: fica de fora da média. */
   score: z.number().int().min(1).max(4).nullable(),
   evidence: z.array(Evidence),
+  /** Regras da squad que pesaram neste critério: o relatório mostra "critério aprendido com o time". */
+  squadRules: z.array(SquadRule).optional(),
 });
 
 export const Report = z.object({

@@ -6,6 +6,7 @@ import { resolveConfig } from "@/lib/config/store";
 import { EventsResponse, SessionEvent, type InterviewConfig } from "@/lib/contracts";
 import { problems } from "@/lib/problems";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
+import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hasProblem } from "@/problems";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   const event = parsed.data;
 
   // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started.
-  const config = event.type === "session_started" ? withProblem(await resolveConfig(event.configId), event.problemId) : undefined;
+  const config = event.type === "session_started" ? comRegrasDaSquad(withProblem(await resolveConfig(event.configId), event.problemId)) : undefined;
   const session = getOrCreateSession(event.sessionId, config);
   appendEvent(session, event);
   if (event.type === "session_started") enqueueKickoff(session, event.t);

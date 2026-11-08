@@ -48,9 +48,12 @@ export async function postCandidateDecision(input: {
   candidateEmail: string;
   roleTitle: string;
   report: Report;
+  /** Id da vaga (do plano). Sem valor: o `configId` do relatório. */
+  vagaId?: string;
 }): Promise<DecisionRecord> {
   const record: DecisionRecord = {
     id: input.sessionId,
+    vagaId: input.vagaId,
     candidateId: input.candidateId,
     candidateName: input.candidateName,
     candidateEmail: input.candidateEmail,
