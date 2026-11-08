@@ -143,6 +143,23 @@ describe("bloco dinâmico", () => {
     assert.ok(dp.includes('"E se o cache cair?"'));
   });
 
+  it("traz o briefing: o que já temos do candidato e o que falta cobrir", () => {
+    const comEvidencia: EstadoSessao = {
+      ...estado,
+      cobertura: { ...estado.cobertura, escalabilidade: { positivo: 1, negativo: 0, neutro: 0 } },
+      observacoes: [{ criterio: "escalabilidade", sinal: "positivo", espontaneo: true, evidencia: "cache de leitura para o pico", em: AGORA - 30_000, fase: "APROFUNDAMENTO" }],
+    };
+    const db = montarPromptAvaliador(kitDemo, problema, comEvidencia, pedido(), AGORA).sistema.dinamico;
+    assert.ok(db.includes("BRIEFING DA ENTREVISTA"));
+    assert.ok(db.includes("cache de leitura para o pico"));
+    assert.match(db, /O que ainda falta/);
+    // Só o dinâmico muda com a evidência: o bloco estático segue igual.
+    assert.equal(
+      montarPromptAvaliador(kitDemo, problema, comEvidencia, pedido(), AGORA).sistema.estatico,
+      montarPromptAvaliador(kitDemo, problema, estado, pedido(), AGORA).sistema.estatico,
+    );
+  });
+
   it("o bloco dinâmico não carrega a ficha nem a rubrica", () => {
     assert.ok(!d.includes(problema.ficha[0].resposta));
     assert.ok(!d.includes(kitDemo.criterios[0].niveis[1]));

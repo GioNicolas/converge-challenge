@@ -2,6 +2,7 @@
 // - ESTÁTICO: depende só do kit e do problema (string determinística, boa para cache de prompt).
 // - DINÂMICO: fase, tempo, grafo, mudanças, conversa e o estado do cérebro.
 // Tudo aqui é só servidor: a ficha, a rubrica e os motivos nunca vão ao navegador.
+import { blocoDoBriefing } from "../briefing";
 import type { Kit, Problema } from "../kits/tipos";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
@@ -159,6 +160,8 @@ export function montarSistemaDinamico(
   estado: EstadoSessao,
   pedido: PedidoAnalise,
   agora: number,
+  /** Briefing da entrevista (ver `blocoDoBriefing`): o que já temos do candidato e o que falta. */
+  briefing = "",
 ): string {
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
   const bloqueio = motivoBloqueioPlin(estado, agora);
@@ -183,7 +186,9 @@ Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: um plin NÃO pode ser levantado agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Um plin pode ser levantado agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
-${blocoDaAgenda(estado, pedido, semEvidencia)}
+${blocoDaAgenda(estado, pedido, semEvidencia)}${briefing ? `
+${briefing}
+` : ""}
 Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):
 ${perguntasFeitasEmTexto(estado.perguntas)}
 
@@ -223,7 +228,7 @@ export function montarPromptAvaliador(
   return {
     sistema: {
       estatico: montarSistemaEstatico(kit, problema),
-      dinamico: montarSistemaDinamico(estado, pedido, agora),
+      dinamico: montarSistemaDinamico(estado, pedido, agora, blocoDoBriefing(kit, estado, agora)),
     },
     mensagens: [{ role: "user", content: "Analise o quadro agora e responda somente com o JSON da decisão." }],
   };
