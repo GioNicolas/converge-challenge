@@ -45,7 +45,12 @@ export type PerguntaFeita = {
   desfecho?: Desfecho;
   /** O que ele respondeu (curto), para a análise não perguntar de novo o que já foi dito. */
   resposta?: string;
+  /** Perguntas de continuação que o Totti emendou no mesmo fio, na conversa (no máximo MAX_SEGUIMENTOS). */
+  seguimentos?: string[];
 };
+
+/** Quantas perguntas de continuação um fio aceita antes de a conversa mudar de assunto. */
+export const MAX_SEGUIMENTOS = 2;
 
 export const DESFECHOS = ["respondeu", "nao_sabe", "pulou"] as const;
 export type Desfecho = (typeof DESFECHOS)[number];
@@ -131,6 +136,8 @@ export type EventoSessao =
   | { tipo: "AGENTE_FALOU"; texto: string }
   /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
   | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
+  /** O Totti emendou uma pergunta de continuação na resposta: o fio segue ativo. */
+  | { tipo: "SEGUIMENTO_FEITO"; numero: number; pergunta: string }
   /** O entrevistador trouxe a mudança no problema (só a primeira vale). */
   | { tipo: "EMPECILHO_ANUNCIADO"; empecilho: Omit<EmpecilhoAnunciado, "anunciadoEm" | "fase"> };
 
@@ -403,6 +410,20 @@ export function transicionar(
       if (i < 0) return nada;
       const resposta = evento.resposta.trim().slice(0, MAX_CARACTERES_RESPOSTA);
       const atualizar = (p: PerguntaFeita): PerguntaFeita => ({ ...p, desfecho: evento.desfecho, resposta });
+      return {
+        estado: {
+          ...estado,
+          perguntas: estado.perguntas.map((p, j) => (j === i ? atualizar(p) : p)),
+          perguntaAtiva: estado.perguntaAtiva?.numero === evento.numero ? atualizar(estado.perguntaAtiva) : estado.perguntaAtiva,
+        },
+        efeitos: [],
+      };
+    }
+
+    case "SEGUIMENTO_FEITO": {
+      const i = estado.perguntas.findIndex((p) => p.numero === evento.numero);
+      if (i < 0) return nada;
+      const atualizar = (p: PerguntaFeita): PerguntaFeita => ({ ...p, seguimentos: [...(p.seguimentos ?? []), evento.pergunta] });
       return {
         estado: {
           ...estado,

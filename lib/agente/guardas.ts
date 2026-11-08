@@ -93,6 +93,26 @@ export function trocarIdsPorNomes(texto: string, grafo: string): string {
 
 const CONVITES = ["Pode continuar de onde parou.", "Continua daí.", "Pode seguir com o desenho."];
 
+/** A frase devolve a vez: um próximo passo dirigido ao candidato (o mesmo critério do scripts/validar-conversa.ts). */
+export const PROXIMO_PASSO = /^(pode|podemos|vamos|me (conta|conte|mostra|mostre|explica|explique|diz|diga|fala|fale)|mostra|mostre|explica|explique|conta|conte|segue|siga|continua|continue|desenha|desenhe|marca|marque|aponta|aponte|começa|comece|escolhe|escolha|traz|traga|fica à vontade|fique à vontade|quando quiser|é só)/i;
+
+/** A fala já termina devolvendo a vez: numa pergunta ou num próximo passo (também depois de uma vírgula). */
+export function devolveAVez(texto: string): boolean {
+  const ultima = (frasesDe(texto.trim()).at(-1) ?? "").trim();
+  const oracoes = [ultima, ultima.split(/,\s+/).at(-1) ?? ""];
+  return ultima.endsWith("?") || oracoes.some((o) => PROXIMO_PASSO.test(o.replace(/^(e|então|agora|com isso|beleza|certo),?\s+/i, "")));
+}
+
+/**
+ * Toda fala termina com a bola com ele. O modelo às vezes para no fato ("Isso, um bilhão por mês.") e o candidato
+ * fica sem saber se é a vez dele: aí entra um convite curto no fim.
+ */
+export function comVezDevolvida(texto: string): string {
+  const t = texto.trim();
+  if (!t || devolveAVez(t)) return t;
+  return `${t} ${CONVITES[t.length % CONVITES.length]}`;
+}
+
 /**
  * Depois de um "não sei" ou de um "pula", a fala não termina em pergunta: o modelo às vezes fecha com uma
  * pergunta de condução ("quer olhar outra parte?") e o candidato, que acabou de soltar o assunto, fica com outra

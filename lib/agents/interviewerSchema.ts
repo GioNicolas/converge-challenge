@@ -21,6 +21,8 @@ export const InterviewerOutput = z.object({
   respond: z.boolean().optional(),
   /** O candidato avisou que concluiu uma etapa do trabalho e quer avançar (pela intenção, não por palavra fixa). */
   concluded: z.boolean().optional(),
+  /** O candidato pediu para encerrar a ENTREVISTA inteira agora (não só a conversa): a IDE se despede e fecha. */
+  finish: z.boolean().optional(),
   /** A fala, como um entrevistador humano falaria: 1–2 frases curtas. */
   reply: z.string().default(""),
   /** Linhas pra grifar junto com a fala, ou null quando não fala de um trecho. */

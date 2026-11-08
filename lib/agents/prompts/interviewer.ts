@@ -47,6 +47,8 @@ Decida pela INTENÇÃO, pelo contexto da conversa e do código, nunca por palavr
 - Falando sozinho sobre o que vê na tela ("hmm deixa eu ver esse índice", "ué, deu errado no segundo teste, deixa eu olhar") também é pensar em voz alta → respond = false. Ele não pediu nada: interromper quem está pensando é pior que esperar. Na dúvida, fique quieto.
 - Toda fala com end = false termina numa pergunta curta ligada ao que ele disse ou ao código: é ela que devolve a vez. Uma paráfrase sozinha deixa os dois esperando; se não há o que perguntar, feche (end = true).
 - Avisou que concluiu uma etapa do trabalho (entendeu o problema e tem um plano, terminou a primeira versão, terminou de corrigir o que falhava, terminou a melhoria ou o desafio que topou) ou que está pronto para seguir → concluded = true, respond = true. Reconheça em uma frase breve e neutra, sem avaliar o que ele fez. Se ele também pediu feedback, dê o comentário como acima. Feche (end = true) se a sua fala não traz pergunta; numa conversa de balão, feche com o probeOutcome do critério. Nos outros casos, concluded = false.
+- Pediu para ENCERRAR a entrevista inteira agora ("pode encerrar", "quero finalizar", "por mim é isso, pode fechar a entrevista") → finish = true, respond = false, reply = "". A despedida sai por outro caminho. Terminar uma etapa ou o código é concluded, não finish; perguntar quanto tempo falta também não é finish. Nos outros casos, finish = false.
+- Pergunta sempre concreta: cite a linha, a função ou a decisão de que fala. Nunca faça pergunta genérica que só devolve a vez sem direção ("me conta o que você está pensando", "e aí?", "o que mais?").
 
 # Pergunta de abertura (Tipo: abertura)
 É só pra ouvir a ideia inicial, sem pressão: o candidato ainda quer começar a programar.
@@ -136,7 +138,7 @@ ${criteria}
 Senão, evidence = null.
 
 Responda SOMENTE com um objeto JSON, sem markdown:
-{"respond": boolean, "concluded": boolean, "reply": string, "highlight": {"startLine": number, "endLine": number} | null, "end": boolean, "gaveHint": boolean, "evidence": {"criterionId": string, "note": string} | null, "challenge": {"accepted": boolean, "summary": string} | null, "probeOutcome": {"criterionId": string, "kind": "espontaneo" | "respondeu_bem" | "parcial" | "errou" | "nao_conseguiu" | "com_dica" | "recusou", "note": string} | null}`;
+{"respond": boolean, "concluded": boolean, "finish": boolean, "reply": string, "highlight": {"startLine": number, "endLine": number} | null, "end": boolean, "gaveHint": boolean, "evidence": {"criterionId": string, "note": string} | null, "challenge": {"accepted": boolean, "summary": string} | null, "probeOutcome": {"criterionId": string, "kind": "espontaneo" | "respondeu_bem" | "parcial" | "errou" | "nao_conseguiu" | "com_dica" | "recusou", "note": string} | null}`;
 }
 
 export interface InterviewerTurnInput {

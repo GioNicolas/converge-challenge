@@ -105,11 +105,11 @@ test("ciclo completo do plin no aprofundamento", () => {
   assert.equal(e.ultimaRespostaEm, 5_000);
 });
 
-test("respeita 60s entre perguntas", () => {
+test("respeita 30s entre perguntas", () => {
   const depois = { ...noAprofundamento(), ultimaRespostaEm: 10_000 };
-  const cedo = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 69_999);
+  const cedo = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 39_999);
   assert.equal(cedo.plin, "LIVRE");
-  const tarde = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 70_000);
+  const tarde = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 40_000);
   assert.equal(tarde.plin, "PLIN_PENDENTE");
 });
 
@@ -206,4 +206,19 @@ test("encerrada ignora tudo", () => {
   const fim = transicionar(noAprofundamento(), { tipo: "ENCERRAR" }, 0);
   assert.equal(fim.fase, "ENCERRADA");
   assert.equal(transicionar(fim, { tipo: "COMECAR" }, 1), fim);
+});
+
+test("pergunta de continuação mantém o fio ativo, com a fala nova", () => {
+  let e: EstadoEntrevista = { ...estadoInicial(), fase: "APROFUNDAMENTO", faseIniciadaEm: 0 };
+  e = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 1000);
+  e = transicionar(e, { tipo: "PLIN_CLICADO" }, 2000);
+  const numero = e.perguntaAtiva?.numero;
+  e = transicionar(e, { tipo: "SEGUIMENTO", pergunta: "E se o cache cair num pico?" }, 3000);
+  assert.equal(e.plin, "PERGUNTA_ATIVA");
+  assert.equal(e.perguntaAtiva?.pergunta, "E se o cache cair num pico?");
+  assert.equal(e.perguntaAtiva?.numero, numero);
+  assert.equal(e.perguntasFeitas, 1, "a continuação não gasta a cota de perguntas");
+  // Sem pergunta ativa, não há fio para continuar.
+  const livre = transicionar({ ...estadoInicial(), fase: "APROFUNDAMENTO" }, { tipo: "SEGUIMENTO", pergunta: "x?" }, 0);
+  assert.equal(livre.perguntaAtiva, null);
 });

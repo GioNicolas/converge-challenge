@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deveAguardarParaFalar, podeTomarTurno } from "../turnos";
 
-const pausa = { agora: 2000, ultimaFalaEm: 1000, falaParcial: false, agenteFalando: false, aguardandoResposta: false };
+const pausa = { agora: 4000, ultimaFalaEm: 1000, falaParcial: false, agenteFalando: false, aguardandoResposta: false };
 test("agente entra numa pausa sem exigir clique", () => {
   assert.equal(podeTomarTurno(pausa), true);
-  assert.equal(podeTomarTurno({ ...pausa, agora: 1899 }), false);
+  assert.equal(podeTomarTurno({ ...pausa, agora: 3999 }), false);
 });
 test("pausa dentro de uma transcrição parcial não encerra o turno", () => {
   assert.equal(podeTomarTurno({ ...pausa, agora: 30000, falaParcial: true }), false);

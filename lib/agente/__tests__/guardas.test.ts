@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { limitarFrases, semPerguntaNoFim, trocarIdsPorNomes } from "../guardas";
+import { comVezDevolvida, limitarFrases, semPerguntaNoFim, trocarIdsPorNomes } from "../guardas";
 
 describe("trocarIdsPorNomes", () => {
   const grafo = "COMPONENTES\n- [r5] Cache Redis (retângulo)\n- [e2] Réplica de leitura (elipse)\nCONEXÕES\n- [s5] Cache Redis → Réplica de leitura \"miss\"";
@@ -35,5 +35,16 @@ describe("limitarFrases", () => {
   });
   it("texto sem pontuação final fica inteiro", () => {
     assert.equal(limitarFrases("Saquei, continua daí", 2), "Saquei, continua daí");
+  });
+});
+
+describe("comVezDevolvida", () => {
+  it("fala que para no fato ganha um convite no fim", () => {
+    const t = comVezDevolvida("Isso, um bilhão de links novos por mês.");
+    assert.match(t, /^Isso, um bilhão de links novos por mês\. (Pode|Continua)/);
+  });
+  it("pergunta ou próximo passo no fim ficam como estão", () => {
+    assert.equal(comVezDevolvida("Saquei. E se o cache cair?"), "Saquei. E se o cache cair?");
+    assert.equal(comVezDevolvida("São 5 anos. Pode seguir com esse número."), "São 5 anos. Pode seguir com esse número.");
   });
 });

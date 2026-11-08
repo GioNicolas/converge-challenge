@@ -27,6 +27,7 @@ import {
   type RespostaAnalise,
 } from "../sessao/tipos";
 import { kvPadrao } from "@/lib/storage/kv";
+import { semFalaSubstituida } from "@/lib/conversa/substituir";
 import { contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
 import { registrarNoIndice } from "../resultados";
 import { contexto } from "./contexto";
@@ -271,6 +272,8 @@ const EsquemaPerguntar = z.object({
   /** O que acabou de mudar no desenho. */
   // Texto longo é cortado, não recusado: perder a fala do candidato por causa do contexto seria pior.
   mudancas: z.string().transform((v) => v.slice(0, 8000)).optional(),
+  /** A fala junta a anterior, que ele continuou antes de ouvir a resposta: a anterior sai do histórico. */
+  substitui: z.boolean().optional(),
   /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
   conversa_do_quadro: z
     .array(EsquemaFalaRecente.extend({ texto: z.string().transform((v) => v.slice(0, 4000)) }))
@@ -286,7 +289,7 @@ function perguntaRespondida(estado: EstadoSessao, perguntaAtiva: string | undefi
   if (estado.perguntaAtiva) return estado.perguntaAtiva.numero;
   const texto = perguntaAtiva?.trim();
   if (!texto) return null;
-  return estado.perguntas.findLast((p) => p.pergunta.trim() === texto)?.numero ?? null;
+  return estado.perguntas.findLast((p) => p.pergunta.trim() === texto || p.seguimentos?.some((s) => s.trim() === texto))?.numero ?? null;
 }
 
 export async function perguntarHandler(req: Request, { params }: ParamsId): Promise<Response> {
@@ -304,11 +307,14 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
 
   const agora = ctx.agora();
   const { fase, texto } = corpo.dados;
-  let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "visual"> = { responder: false, texto: "", requisito: null, concluiu: false };
+  let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual"> = { responder: false, texto: "", requisito: null, concluiu: false };
   let desfecho: Desfecho | null = null;
+  // A fala substitui a anterior (ele continuou antes de ouvir a resposta): a anterior e a resposta não ouvida saem.
+  const semSubstituida = (e: EstadoSessao): EstadoSessao =>
+    corpo.dados.substitui ? { ...e, conversa: semFalaSubstituida(e.conversa, texto) } : e;
 
   if (ctx.llm) {
-    const estado = sincronizarFase(sessao.estado, fase, agora);
+    const estado = semSubstituida(sincronizarFase(sessao.estado, fase, agora));
     const r = await comPrazo(
       perguntar(
         { llm: ctx.llm, kit: alvo.kit, problema: alvo.problema },
@@ -322,13 +328,15 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       null,
     );
     if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
-    resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu, ...(r.visual !== undefined ? { visual: r.visual } : {}) };
+    resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu,
+      ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),
+      ...(r.visual !== undefined ? { visual: r.visual } : {}) };
     desfecho = r.desfecho;
   }
 
   // Reaplica as falas sobre o estado mais recente (eventos podem ter mexido nele no meio do caminho).
   const atual = (await ctx.repositorio.obter(id))?.estado ?? sessao.estado;
-  let novo = sincronizarFase(atual, fase, agora);
+  let novo = semSubstituida(sincronizarFase(atual, fase, agora));
   novo = transicionar(novo, { tipo: "CANDIDATO_FALOU", texto, fimDeResposta: false }, agora).estado;
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
@@ -336,8 +344,12 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   if (desfecho && numeroDaPergunta !== null) {
     novo = transicionar(novo, { tipo: "DESFECHO_DA_PERGUNTA", numero: numeroDaPergunta, desfecho, resposta: texto }, agora).estado;
   }
+  if (resposta.seguimento && numeroDaPergunta !== null) {
+    novo = transicionar(novo, { tipo: "SEGUIMENTO_FEITO", numero: numeroDaPergunta, pergunta: resposta.texto }, agora).estado;
+  }
   await ctx.repositorio.salvarEstado(id, novo);
-  console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder });
+  console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder,
+    seguimento: !!resposta.seguimento, encerrar: !!resposta.encerrar, substitui: !!corpo.dados.substitui });
 
   return json(resposta);
 }

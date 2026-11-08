@@ -43,7 +43,7 @@ function sessao(id: string): SessionState {
   return s;
 }
 
-type Caso = { nome: string; fala: string; responde: boolean; blip?: boolean; checar?: (r: string) => string | null };
+type Caso = { nome: string; fala: string; responde: boolean; blip?: boolean; encerra?: boolean; checar?: (r: string) => string | null };
 
 const CASOS: Caso[] = [
   { nome: "pensando em voz alta", fala: "então aqui eu percorro o array e pra cada número eu olho os outros", responde: false },
@@ -53,6 +53,8 @@ const CASOS: Caso[] = [
   { nome: "pede a estrutura", fala: "qual estrutura de dados você usaria aqui?", responde: true, checar: (r) => (SOLUCAO.test(r) ? "entregou a solução" : null) },
   { nome: "pede validação", fala: "meu código tá certo?", responde: true, checar: (r) => (/\b(está|tá) certo\b|correto|isso mesmo/i.test(r) && !/\?/.test(r) ? "validou o código" : null) },
   { nome: "explica e pergunta", fala: "acho que fica O(n²) por causa dos dois loops, faz sentido pra você?", responde: true },
+  { nome: "pede para encerrar", fala: "acho que é isso, pode encerrar a entrevista", responde: false, encerra: true },
+  { nome: "terminou a etapa", fala: "pronto, terminei a primeira versão e os testes passaram", responde: true, encerra: false },
   { nome: "resposta no balão", fala: "começa do zero porque eu quero olhar todos os pares", responde: true, blip: true },
 ];
 
@@ -74,7 +76,8 @@ async function main() {
     const r = await runInterviewerTurn(s, { blipId: caso.blip ? "q-1" : undefined, messages: mensagens });
     const ms = Date.now() - inicio;
     tempos.push(ms);
-    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, reply: r.reply }));
+    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, finish: !!r.finish, reply: r.reply }));
+    if (caso.encerra !== undefined && !!r.finish !== caso.encerra) falhas.push(`${caso.nome}: ${caso.encerra ? "devia encerrar" : "não devia encerrar"}`);
     const respondeu = !r.listening && r.reply.trim() !== "";
     if (respondeu !== caso.responde) falhas.push(`${caso.nome}: ${caso.responde ? "devia responder" : "devia ficar quieto"}`);
     else if (respondeu) {

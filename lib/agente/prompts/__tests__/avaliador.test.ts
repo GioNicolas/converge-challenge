@@ -52,9 +52,9 @@ describe("bloco estático", () => {
 
   it("traz os princípios, a tabela de ações e as regras de saída", () => {
     for (const trecho of [
-      "O candidato conduz", "Não valide nem corrija", "espontaneo", "Escada de ajuda", "degrau",
+      "você conduz a conversa", "Não valide nem corrija", "espontaneo", "Escada de ajuda", "degrau",
       "\"ok\"", "\"duvida\"", "\"redirecionar\"", "\"dica\"", "40 caracteres", "UMA pergunta concreta",
-      "1 ou 2 áreas", "justo e igual",
+      "2 ou 3 áreas", "justo e igual",
     ]) {
       assert.ok(e.toLowerCase().includes(trecho.toLowerCase()), `faltou: ${trecho}`);
     }

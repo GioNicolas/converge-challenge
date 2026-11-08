@@ -1,6 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
-import { limitarFrases, semPerguntaNoFim } from "./guardas";
+import { comVezDevolvida, limitarFrases, semPerguntaNoFim } from "./guardas";
 import { mapearAcoesVisuais, type AcaoVisual } from "../presenca/acoesVisuais";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
@@ -11,7 +11,7 @@ import {
   montarSistemaEstaticoPerguntar,
   NOME_SCHEMA_PERGUNTAR,
 } from "./prompts/entrevistador";
-import { transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
+import { MAX_SEGUIMENTOS, transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
 import type { Fase, FalaRecente } from "./sessao/tipos";
 import { logPadrao, type LogMeta } from "./analisar";
 
@@ -49,6 +49,10 @@ export type ResultadoPerguntar = {
   concluiu: boolean;
   /** Como ele reagiu à pergunta ativa (só quando havia uma). */
   desfecho: Desfecho | null;
+  /** A fala termina numa pergunta de continuação do mesmo fio: a pergunta ativa segue aberta. */
+  seguimento?: boolean;
+  /** Ele pediu para encerrar a entrevista: o quadro se despede e fecha. */
+  encerrar?: boolean;
   /** Falha de infraestrutura: não confundir com a decisão deliberada de escutar. */
   falhou?: boolean;
   visual?: AcaoVisual[];
@@ -105,14 +109,23 @@ export async function perguntar(
   const haPerguntaAtiva = !!(entrada.perguntaAtiva || estado.perguntaAtiva);
   const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho });
+  // Pedido para encerrar a entrevista: quem fecha é o quadro (com a despedida), nada mais a decidir aqui.
+  if (saida.encerrar === true) return { ...mudo(), encerrar: true };
   // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
   const curto = limitarFrases(saida.texto, MAX_FRASES_FALA);
-  // Assunto solto ("não sei", "pula") ou resposta já justificada: a vez volta com um convite, nunca com outra
-  // pergunta. Só a resposta vaga ganha um aprofundamento; o modelo marca qual é qual ("aprofundar"), porque a
-  // regra só no prompt o modelo rápido não seguia (abria outro assunto depois de uma resposta justificada).
-  const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && saida.aprofundar !== true);
-  const texto = semAprofundar ? semPerguntaNoFim(curto) : curto;
+  // "Não sei" ou "pula": a vez volta com um convite, nunca com outra pergunta. Depois de uma resposta, o modelo
+  // pode emendar UMA pergunta de continuação ("aprofundar"), que faz a entrevista andar no mesmo fio, até
+  // MAX_SEGUIMENTOS por fio e só nas fases de desenho: depois disso o assunto muda pela análise.
+  const ativa = estado.perguntaAtiva ?? (entrada.perguntaAtiva
+    ? estado.perguntas.findLast((p) => p.pergunta === entrada.perguntaAtiva || p.seguimentos?.includes(entrada.perguntaAtiva!))
+    : undefined);
+  const fioAberto = (ativa?.seguimentos?.length ?? 0) < MAX_SEGUIMENTOS;
+  const faseDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO";
+  const podeSeguir = desfecho === "respondeu" && saida.aprofundar === true && fioAberto && faseDeDesenho;
+  const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && !podeSeguir);
+  const texto = comVezDevolvida(semAprofundar ? semPerguntaNoFim(curto) : curto);
   if (!saida.responder || !texto) return mudoOuConcluiu();
+  const seguimento = podeSeguir && texto.endsWith("?");
   const requisito = saida.requisito?.trim()
     ? saida.requisito.trim().slice(0, MAX_CARACTERES_REQUISITO)
     : null;
@@ -122,5 +135,6 @@ export async function perguntar(
   const ids = extrairIdsDoGrafo(entrada.grafo ?? "");
   const visual = mapearAcoesVisuais(saida.visual, (id) => ids.has(id) ? id : null);
   return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, desfecho, estado: final,
+    ...(seguimento ? { seguimento } : {}),
     ...(visual !== undefined ? { visual } : {}) };
 }

@@ -18,6 +18,7 @@ import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { useLiberarAudio } from "@/lib/presenca/useLiberarAudio";
 import { FilaFalas } from "@/lib/audio/filaFalas";
+import { PAUSA_FIM_DA_FALA_MS } from "@/lib/conversa/turnos";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
@@ -206,8 +207,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const { enviarTexto } = entrevista;
   const { combinar } = demo;
   const enviarDigitado = useCallback(
-    async (texto: string) => {
-      const { requisito } = await enviarTexto(texto);
+    async (texto: string, opcoes?: { sinal?: AbortSignal; substitui?: boolean }) => {
+      const { requisito } = await enviarTexto(texto, opcoes);
       if (requisito) combinar(requisito);
     },
     [enviarTexto, combinar],
@@ -224,19 +225,24 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const pedirParaRepetirRef = useRef(entrevista.pedirParaRepetir);
   pedirParaRepetirRef.current = entrevista.pedirParaRepetir;
   const filaVoz = useRef<FilaFalas | null>(null);
+  const respostaRef = useRef({ naoOuvida: entrevista.respostaNaoOuvida, descartar: entrevista.descartarRespostaNaoOuvida });
+  respostaRef.current = { naoOuvida: entrevista.respostaNaoOuvida, descartar: entrevista.descartarRespostaNaoOuvida };
   if (!filaVoz.current) filaVoz.current = new FilaFalas(
-    async (texto) => { await enviarVozRef.current(texto); setFalaPendente(null); },
+    async (texto, sinal, { substitui }) => { await enviarVozRef.current(texto, { sinal, substitui }); setFalaPendente(null); },
     // Falhou mesmo com a nova tentativa: o agente pede para repetir (a conversa segue) e o texto fica para reenviar.
     (texto) => { setFalaPendente(texto); pedirParaRepetirRef.current(); },
+    // Ele continuou falando antes de ouvir a resposta: a resposta sai e as duas partes vão juntas.
+    { respostaNaoOuvida: () => respostaRef.current.naoOuvida(), descartarResposta: () => respostaRef.current.descartar() },
   );
   useEffect(() => {
     if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
   }, [estado.fase]);
   useEffect(() => () => filaVoz.current?.limpar(), []);
-  // Turn-taking: os trechos finais do STT se acumulam e só seguem após 750 ms de silêncio real.
+  // Turn-taking: os trechos finais do STT se acumulam e só seguem depois de PAUSA_FIM_DA_FALA_MS de silêncio real
+  // (~3 s sem voz, somando o 1 s que o Scribe espera para fechar o trecho): quem para para pensar não é cortado.
   // Fala parcial ou voz no microfone nesse intervalo adia o envio (não corta a frase no meio).
   // Teto: barulho constante da sala não pode segurar a fala para sempre (2,5 s depois do primeiro trecho, só o
-  // silêncio de 750 ms em curso decide).
+  // silêncio em curso decide).
   const bufferVoz = useRef("");
   const timerVoz = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inicioBufferVoz = useRef(0);
@@ -248,7 +254,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       const texto = bufferVoz.current.trim();
       bufferVoz.current = "";
       if (texto) filaVoz.current?.adicionar(texto);
-    }, 750);
+    }, PAUSA_FIM_DA_FALA_MS);
   }, []);
   const receberVoz = useCallback((texto: string) => {
     if (!texto.trim()) return;
