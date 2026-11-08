@@ -237,7 +237,7 @@ export default function JanelaChamada({
               {/* Quadro do agente */}
               <div className="relative m-2 mb-0 h-[176px] overflow-hidden rounded-[14px] bg-black/25">
                 <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-full bg-black/30 px-2.5 py-1 text-[11px] backdrop-blur-md">
-                  <span className={`size-1.5 rounded-full ${ativa ? "bg-sucesso" : "bg-texto-claro/30"}`} />
+                  <span className={`size-1.5 rounded-full ${ativa ? "animate-pulse bg-[#f5f0e8]" : "bg-[#f5f0e8]/30"}`} />
                   <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
                   <span className="text-texto-claro/50">·</span>
                   <span className="text-texto-claro/75">{fase}</span>

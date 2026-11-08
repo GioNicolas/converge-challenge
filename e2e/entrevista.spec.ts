@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 // O fluxo inteiro roda 3 vezes seguidas na mesma página, recarregando entre as rodadas,
 // e qualquer erro no console ou na página reprova a rodada.
 
-const ROTA = "/entrevista/system-design";
+const ROTA = "/entrevista/system-design?debug=1";
 const RODADAS = 3;
 const TEXTO_DO_CANDIDATO = "Servidor API";
 const REQUISITO = "100 milhões de URLs novas por mês";

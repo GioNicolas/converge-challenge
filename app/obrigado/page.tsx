@@ -1,17 +1,28 @@
-import { CheckCircle2 } from "lucide-react";
+import type { Metadata } from "next";
+import Perola from "@/components/totti/Perola";
+import TemaRecrutador from "@/components/TemaRecrutador";
 
-/** Fim da entrevista para o candidato. O relatório vai só para a recrutadora (/report). */
+export const metadata: Metadata = {
+  title: "Obrigado · Totti",
+};
+
+/** Fim da entrevista para o candidato. O relatório vai só para a recrutadora. */
 export default function Obrigado() {
   return (
-    <main className="grid min-h-screen place-items-center p-4">
-      <section className="vidro w-full max-w-md space-y-3 rounded-padrao p-8 text-center shadow-flutuante">
-        <CheckCircle2 size={40} strokeWidth={1.75} className="mx-auto text-sucesso" />
-        <h1 className="titulo text-2xl">Entrevista concluída</h1>
-        <p className="text-texto-suave">
-          Obrigado pelo seu tempo. Suas respostas foram enviadas para a equipe de recrutamento, que vai entrar em
-          contato com os próximos passos.
-        </p>
-      </section>
-    </main>
+    <TemaRecrutador>
+      <main className="grid min-h-dvh place-items-center p-6">
+        <section className="anim-subir flex w-full max-w-md flex-col items-center gap-5 text-center">
+          <Perola tamanho={44} />
+          <h1 className="font-display text-[34px] leading-[1.1] font-bold tracking-[-0.02em] text-texto">
+            Obrigado pela conversa.
+          </h1>
+          <p className="text-[17px] leading-relaxed text-texto-suave">
+            Foi um prazer ver você pensar em voz alta. A recrutadora recebe o relatório da sua entrevista e
+            volta a falar com você sobre os próximos passos. Pode fechar esta janela.
+          </p>
+          <span className="font-display text-[18px] leading-none font-bold tracking-[-0.02em] text-texto">totti</span>
+        </section>
+      </main>
+    </TemaRecrutador>
   );
 }

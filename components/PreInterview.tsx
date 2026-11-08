@@ -48,7 +48,7 @@ export default function PreInterview({ vaga = DEFAULT_CONFIG, convite }: { vaga?
   // System design abre o quadro; live coding abre o IDE. A mesma config e o mesmo convite seguem nos dois.
   const iniciar = () =>
     router.push(
-      `${mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}`,
+      `${mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}${mode === "system_design" ? "&iniciar=1" : ""}`,
     );
 
   return (
