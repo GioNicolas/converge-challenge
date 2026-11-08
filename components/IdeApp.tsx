@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Flag, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
-import type { EditorCommand, InterviewConfig } from "@/lib/contracts";
+import type { EditorCommand, EmpecilhoPublico, InterviewConfig } from "@/lib/contracts";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
@@ -21,7 +21,7 @@ import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { calar, falar } from "@/lib/sessao/cliente";
 import { liberarAudio } from "@/lib/presenca/vozSincronizada";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
-import { postEncerramento } from "./ide/api";
+import { postEncerramento, postForcarEmpecilho } from "./ide/api";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
@@ -75,6 +75,9 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   /** Pediu para finalizar e o agente abriu a última conversa: a sessão encerra quando ela fechar. */
   const [finalizando, setFinalizando] = useState(false);
   const encerramentoAbertoRef = useRef(false);
+  /** Mudança no problema que o Totti trouxe (empecilho): entra no painel e os testes dela rodam junto. */
+  const [mudanca, setMudanca] = useState<EmpecilhoPublico | null>(null);
+  const problemaRodado = mudanca ? { ...problem, visibleTests: [...problem.visibleTests, ...mudanca.tests.map(({ name, args, expected }) => ({ name, args, expected }))] } : problem;
   // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
 
@@ -196,6 +199,32 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     else editorRef.current?.focus();
   }, [conversaAberta, finalizando, encerrar]);
 
+  // Empecilho: não é pergunta que dá para adiar. A conversa abre sozinha, o Totti anuncia a mudança e o painel
+  // do problema abre com ela em destaque.
+  const balao = session.incomingBlip;
+  const abrirBalao = chat.openBlip;
+  const tirarBalao = session.setIncomingBlip;
+  useEffect(() => {
+    const empecilho = balao?.empecilho;
+    if (!balao || !empecilho || conversaAberta || finalizando || session.ended) return;
+    tirarBalao(null);
+    setMudanca(empecilho);
+    setProblemaAberto(true);
+    void abrirBalao(balao);
+  }, [balao, conversaAberta, finalizando, session.ended, tirarBalao, abrirBalao]);
+
+  /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
+  async function forcarEmpecilho() {
+    if (session.sessionId === null) return;
+    try {
+      const res = await postForcarEmpecilho(session.sessionId);
+      console.info("[dev] empecilho:", res.reason);
+      session.applyResponse(res);
+    } catch (err) {
+      console.error("POST /api/dev/empecilho falhou", err);
+    }
+  }
+
   /** Confirmou que quer finalizar: se o agente ainda tem o que perguntar, abre a última conversa antes. */
   async function finalizar() {
     setConfirmandoFim(false);
@@ -255,7 +284,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   async function rodar() {
     if (session.ended) return;
     setRun({ status: "running", loadingPyodide: firstRun, feitos: 0, passaram: 0 });
-    const result = await runCode(capture.code, problem, capture.language, (feitos, passaram) =>
+    const result = await runCode(capture.code, problemaRodado, capture.language, (feitos, passaram) =>
       setRun((r) => (r.status === "running" ? { ...r, feitos, passaram } : r)),
     );
     setFirstRun(false);
@@ -302,7 +331,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               }}
             />
           </div>
-          <RunResults state={run} total={problem.visibleTests.length} />
+          <RunResults state={run} total={problemaRodado.visibleTests.length} />
         </div>
 
         {/* Coluna da questão: o painel do problema e, logo abaixo dele, os botões */}
@@ -313,6 +342,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             durationMs={DURATION_MS}
             aberto={problemaAberto}
             onToggle={setProblemaAberto}
+            mudanca={mudanca}
           />
           <div className="flex flex-wrap items-center gap-2">
             {remaining <= 5 * 60_000 && !session.ended && (
@@ -407,6 +437,16 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             className="label-pequena absolute bottom-3 left-28 rounded-controle bg-superficie-2 px-2 py-1"
           >
             Limpar grifos
+          </button>
+        )}
+        {process.env.NODE_ENV !== "production" && (
+          <button
+            type="button"
+            onClick={() => void forcarEmpecilho()}
+            disabled={mudanca !== null || chat.open}
+            className="label-pequena absolute bottom-3 left-[13.5rem] rounded-controle bg-superficie-2 px-2 py-1 disabled:opacity-50"
+          >
+            Forçar empecilho
           </button>
         )}
       </section>

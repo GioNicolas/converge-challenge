@@ -63,3 +63,15 @@ export async function postEncerramento(sessionId: string): Promise<EventsRespons
   if (!res.ok) throw new Error(`POST /api/encerramento respondeu ${res.status}`);
   return EventsResponse.parse(await res.json());
 }
+
+/** POST /api/dev/empecilho (só fora de produção): solta o empecilho da questão agora. */
+export async function postForcarEmpecilho(sessionId: string): Promise<EventsResponse & { reason?: string }> {
+  const res = await fetch("/api/dev/empecilho", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!res.ok) throw new Error(`POST /api/dev/empecilho respondeu ${res.status}`);
+  const body = (await res.json()) as { reason?: string };
+  return { ...EventsResponse.parse(body), reason: body.reason };
+}

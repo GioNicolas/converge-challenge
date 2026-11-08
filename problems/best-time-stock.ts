@@ -4,6 +4,31 @@ import { publicFromIde } from "./_ide";
 export const BEST_TIME_STOCK: Problem = {
   public: publicFromIde("best-time-stock"),
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "dia-sem-cotacao",
+        kind: "caso_novo",
+        concept: "dado_invalido",
+        title: "Dias sem cotação",
+        statement: "Agora alguns dias vêm sem cotação, marcados com `-1`. Esses dias não podem ser usados nem para comprar nem para vender.",
+        announcement:
+          "Mudança que chegou agora: a fonte dos preços às vezes falha, e o dia vem marcado com -1. Esses dias não podem ser usados nem pra comprar nem pra vender. O resto continua igual.",
+        tests: [
+          { name: "Dias sem cotação no meio", input: { prices: [7, -1, 1, 5, -1, 6] }, expected: 5 },
+          { name: "Só dias sem cotação", input: { prices: [-1, -1] }, expected: 0 },
+          { name: "Falha antes de cair", input: { prices: [3, -1, 1] }, expected: 0 },
+        ],
+        hiddenTests: [{ name: "Falhas espalhadas", input: { prices: [-1, 4, -1, 2, 9] }, expected: 7 }],
+        clarifications: [
+          { question: "Pode vir só -1?", answer: "Pode. Aí não há lucro: retorne 0." },
+          { question: "Pode ter outro valor negativo?", answer: "Não, só o -1 marca o dia sem cotação." },
+          { question: "O dia sem cotação conta como um dia que passou?", answer: "Conta, mas não dá para operar nele." },
+        ],
+        rubricNote:
+          "Boa adaptação: percebe que o -1 vira o menor preço e corrompe a compra, e pula esses dias no mesmo passe. Fraca: filtra mal (perde a ordem dos dias) ou não percebe o efeito no mínimo.",
+      },
+    ],
     hiddenTests: [
       { name: "Só cai", input: { prices: [9, 8, 7, 6] }, expected: 0 },
       { name: "Mínimo depois do máximo", input: { prices: [10, 1, 2, 3, 0, 4] }, expected: 4 },
