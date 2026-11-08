@@ -10,16 +10,58 @@ import type { FalaRecente, Fase } from "../sessao/tipos";
 export const MAX_FALAS_NO_PROMPT = 40;
 
 /**
- * A conversa do servidor (completa) com as falas mais recentes que o quadro mandou e o servidor ainda não tem
- * (a apresentação, o desafio e a fala que acabou de chegar). Mais antigas primeiro, sem repetição.
+ * A conversa do servidor (completa) com as falas que o quadro mandou e o servidor não tem (a apresentação, o
+ * desafio e a fala que acabou de chegar), cada uma na posição em que aconteceu. Mais antigas primeiro, sem repetição.
+ *
+ * O quadro manda só uma janela das últimas falas. As duas listas são alinhadas pela maior sequência em comum, e
+ * cada fala que só o quadro tem entra logo antes da próxima fala em comum (ou no fim, se vier depois de todas).
+ * Antes, o que não estava entre as últimas 12 do servidor era tratado como "faltando" e ia para o fim: depois de
+ * umas 12 falas, todo prompt terminava com 8 falas velhas, como se fossem as mais recentes.
  */
 export function historicoDaConversa(servidor: FalaRecente[], doQuadro: FalaRecente[] = [], max = MAX_FALAS_NO_PROMPT): FalaRecente[] {
   const base = conversaSemRepeticao(servidor.map(({ quem, texto }) => ({ quem, texto })));
-  const recentes = new Set(base.slice(-12).map((f) => `${f.quem}:${normalizar(f.texto)}`));
-  const faltando = doQuadro.filter((f) => f.texto.trim() && !recentes.has(`${f.quem}:${normalizar(f.texto)}`));
+  const quadro = conversaSemRepeticao(doQuadro.filter((f) => f.texto.trim()).map(({ quem, texto }) => ({ quem, texto })));
   // Servidor vazio (estado antigo ou teste): vale a ordem do quadro.
-  const tudo = base.length ? [...base, ...faltando] : conversaSemRepeticao(doQuadro);
-  return tudo.slice(-max);
+  if (!base.length) return quadro.slice(-max);
+  return mesclarEmOrdem(base, quadro).slice(-max);
+}
+
+const chaveDaFala = (f: FalaRecente) => `${f.quem}:${normalizar(f.texto)}`;
+
+/** Junta `extra` em `base` sem mudar a ordem de nenhuma das duas, alinhando pela maior subsequência em comum. */
+function mesclarEmOrdem(base: FalaRecente[], extra: FalaRecente[]): FalaRecente[] {
+  if (!extra.length) return base;
+  const a = base.map(chaveDaFala);
+  const b = extra.map(chaveDaFala);
+  // lcs[i][j]: tamanho da maior subsequência em comum entre a[i..] e b[j..]. O quadro manda poucas falas (~20),
+  // então a tabela fica pequena mesmo com a conversa inteira do servidor.
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const saida: FalaRecente[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      saida.push(base[i]);
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      // A fala do servidor fica de fora da sequência em comum: o quadro só não a tem na janela.
+      saida.push(base[i]);
+      i++;
+    } else {
+      // Só o quadro tem esta fala: entra aqui, antes da próxima em comum.
+      saida.push(extra[j]);
+      j++;
+    }
+  }
+  while (i < a.length) saida.push(base[i++]);
+  while (j < b.length) saida.push(extra[j++]);
+  return saida;
 }
 
 export function conversaEmTexto(falas: FalaRecente[], nomeAgente = "Você (Totti)"): string {
