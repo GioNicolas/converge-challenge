@@ -7,6 +7,7 @@ import { CONCEITOS_EMPECILHO, Gravacao, Report } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import type { ReportListItem } from "@/app/api/report/route";
 import MomentoDaSessao, { type MomentoProva } from "@/components/report/MomentoDaSessao";
+import LinhaDoTempo, { type Fato, type Faixa } from "@/components/report/LinhaDoTempo";
 
 const REC = { avancar: "Avançar", talvez: "Talvez", nao_avancar: "Não avançar" } as const;
 /** A avaliação leva de 15 s a 1 min: enquanto o servidor responde 202, consulta de novo. */
@@ -131,57 +132,138 @@ function SessionReport({ id }: { id: string }) {
   }
   if (!report) return <p className="label-pequena p-8">Gerando relatório… isso leva até um minuto.</p>;
 
+  const indiceDe = (e: Evidencia, origem: string) =>
+    momentos.findIndex((m) => m.t === e.t && m.origem === origem && m.text === e.text);
+  const faixas: Faixa[] = [
+    ...report.criteria.map((c) => ({
+      id: c.id,
+      nome: c.name,
+      nota: c.score,
+      provas: c.score === null ? [] : c.evidence.map((e) => indiceDe(e, c.name)).filter((i) => i >= 0),
+    })),
+    ...(report.adaptation
+      ? [{
+          id: "adaptacao",
+          nome: ORIGEM_ADAPTACAO,
+          nota: report.adaptation.score,
+          detalhe: "fora da nota geral",
+          provas: report.adaptation.evidence.map((e) => indiceDe(e, ORIGEM_ADAPTACAO)).filter((i) => i >= 0),
+        }]
+      : []),
+    ...(report.learning
+      ? [{
+          id: "aprendizado",
+          nome: ORIGEM_APRENDIZADO,
+          nota: report.learning.score,
+          detalhe: "fora da nota geral",
+          provas: report.learning.evidence.map((e) => indiceDe(e, ORIGEM_APRENDIZADO)).filter((i) => i >= 0),
+        }]
+      : []),
+  ];
+  const a = report.adaptation;
+  const s = report.signals;
+
   return (
-    <main className="mx-auto max-w-3xl space-y-6 p-8">
-      <header>
+    <main className="mx-auto max-w-5xl space-y-8 px-4 py-8 sm:px-8">
+      <header className="space-y-3">
         <p className="label-pequena">{report.roleTitle}</p>
-        <h1 className="titulo text-3xl">
-          {REC[report.recommendation]} · <span className="numero">{report.overallScore.toFixed(1)}</span>/4
+        <h1 className="titulo-display text-4xl">
+          {REC[report.recommendation]} · {report.overallScore.toFixed(1).replace(".", ",")}
+          <span className="text-texto-suave">/4</span>
         </h1>
-        <p className="mt-2">{report.summary}</p>
+        <p className="max-w-3xl leading-relaxed text-pretty">{report.summary}</p>
+        <ul className="flex flex-wrap gap-2 pt-1 text-sm">
+          <Selo>{s.testsPassed}/{s.testsTotal} testes escondidos</Selo>
+          <Selo>{s.hintsUsed === 0 ? "sem dicas" : `${s.hintsUsed} ${s.hintsUsed === 1 ? "dica" : "dicas"}`}</Selo>
+          <Selo>{s.pastes === 0 ? "sem colagens" : `${s.pastes} ${s.pastes === 1 ? "colagem" : "colagens"}`}</Selo>
+          {a && (
+            <Selo>
+              {a.adaptedAt === null
+                ? "não se adaptou à mudança"
+                : `adaptou à mudança em ${formatMs(a.adaptedAt - a.announcedAt)}`}
+            </Selo>
+          )}
+          <Selo>{formatMs(s.durationMs)} de entrevista</Selo>
+        </ul>
       </header>
 
-      <section className="space-y-3">
-        <div>
-          <h2 className="titulo">Critérios</h2>
-          {gravacao && momentos.length > 0 && (
-            <p className="label-pequena">Clique no minuto de uma prova para ver o código e a conversa daquele momento.</p>
-          )}
-        </div>
-        {report.criteria.map((c) => (
-          <div key={c.id} className="rounded-padrao bg-superficie p-4 shadow-cartao">
-            <p className="flex justify-between font-medium">
-              {c.name}
-              <span className="numero">{c.score === null ? "Não explorado" : `${c.score}/4`}</span>
-            </p>
-            {c.evidence.map((e, i) => (c.score === null ? (
-              <p key={i} className="text-corpo text-texto-suave">{e.text}</p>
-            ) : (
-              desenharProva(e, c.name, i)
-            )))}
-          </div>
-        ))}
-      </section>
+      <LinhaDoTempo
+        duracao={gravacao?.durationMs ?? s.durationMs}
+        momentos={momentos}
+        faixas={faixas}
+        gravacao={gravacao}
+        mudanca={a ? { inicio: a.announcedAt, fim: a.adaptedAt, titulo: a.title } : undefined}
+        travamentos={(report.learning?.stuck ?? []).map((x) => ({ inicio: x.startedAt, fim: x.unstuckAt }))}
+        fatos={fatosDoRelatorio(report)}
+        onAbrir={setAberto}
+      />
 
-      {report.adaptation && <Adaptacao a={report.adaptation} desenharProva={desenharProva} />}
-      {report.learning && <Aprendizado l={report.learning} desenharProva={desenharProva} />}
-
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid gap-6 sm:grid-cols-3">
         <List title="Pontos fortes" items={report.strengths} />
         <List title="Atenção" items={report.concerns} />
         <List title="Próximos passos" items={report.nextSteps} />
       </section>
 
-      <p className="label-pequena numero">
-        {report.signals.testsPassed}/{report.signals.testsTotal} testes · {report.signals.hintsUsed} dicas ·{" "}
-        {report.signals.pastes} colagens · {formatMs(report.signals.durationMs)}
-      </p>
+      <details className="group rounded-padrao border border-borda">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-medium select-none [&::-webkit-details-marker]:hidden">
+          Ver detalhes por critério
+          <span className="text-sm text-texto-suave group-open:hidden">
+            todas as {momentos.length} provas em texto
+          </span>
+        </summary>
+        <div className="space-y-6 border-t border-borda px-4 py-4">
+          <section className="space-y-3">
+            {report.criteria.map((c) => (
+              <div key={c.id} className="rounded-padrao bg-superficie p-4 shadow-cartao">
+                <p className="flex justify-between font-medium">
+                  {c.name}
+                  <span className="numero">{c.score === null ? "Não explorado" : `${c.score}/4`}</span>
+                </p>
+                {c.evidence.map((e, i) => (c.score === null ? (
+                  <p key={i} className="text-corpo text-texto-suave">{e.text}</p>
+                ) : (
+                  desenharProva(e, c.name, i)
+                )))}
+              </div>
+            ))}
+          </section>
+          {report.adaptation && <Adaptacao a={report.adaptation} desenharProva={desenharProva} />}
+          {report.learning && <Aprendizado l={report.learning} desenharProva={desenharProva} />}
+        </div>
+      </details>
 
       {gravacao && (
         <MomentoDaSessao gravacao={gravacao} momentos={momentos} aberto={aberto} onFechar={fechar} onAbrir={setAberto} />
       )}
     </main>
   );
+}
+
+function Selo({ children }: { children: ReactNode }) {
+  return <li className="rounded-full bg-superficie-2 px-3 py-1 tabular-nums">{children}</li>;
+}
+
+/** O que foi medido em cada momento (dica, travamento, mudança), para o balão do gráfico. */
+function fatosDoRelatorio(report: Report): Fato[] {
+  const fatos: Fato[] = [];
+  const l = report.learning;
+  for (const h of l?.hints ?? []) {
+    fatos.push({
+      t: h.t,
+      texto: `Dica ${h.level} de ${l!.hintsAvailable}: “${h.text}” ${
+        h.codePassing
+          ? "Veio com o código já passando nos testes."
+          : h.unstuckAt === null
+            ? "Não passou em mais testes depois dela."
+            : `Passou em mais testes ${formatMs(h.unstuckAt - h.t)} depois.`
+      }`,
+    });
+  }
+  const a = report.adaptation;
+  if (a) {
+    fatos.push({ t: a.announcedAt, texto: `${TIPO_MUDANCA[a.kind]}: exige ${CONCEITOS_EMPECILHO[a.concept]}.` });
+  }
+  return fatos;
 }
 
 const TIPO_MUDANCA = { requisito: "O requisito mudou", caso_novo: "Entrou um caso novo" } as const;

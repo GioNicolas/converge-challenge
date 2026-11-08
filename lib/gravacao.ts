@@ -57,7 +57,7 @@ export function conversaPerto(g: Gravacao, t: number): ItemConversa[] {
   const dentro = (x: number) => x >= t - CONVERSA_ANTES_MS && x <= t + CONVERSA_DEPOIS_MS;
   const itens: ItemConversa[] = [
     ...g.falas.filter((f) => dentro(f.t)).map((f) => ({ tipo: "fala" as const, ...f })),
-    ...g.marcos.filter((m) => dentro(m.t)).map((m) => ({ tipo: "marco" as const, ...m })),
+    ...g.marcos.filter((m) => dentro(m.t)).map((m) => ({ t: m.t, text: m.text, tipo: "marco" as const })),
     ...g.execucoes
       .filter((e) => dentro(e.t))
       .map((e) => ({ tipo: "marco" as const, t: e.t, text: `Rodou o código: ${e.passed}/${e.total} testes passaram` })),
