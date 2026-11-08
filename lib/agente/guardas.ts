@@ -91,7 +91,33 @@ export function trocarIdsPorNomes(texto: string, grafo: string): string {
     .trim();
 }
 
-const CONVITES = ["Pode continuar de onde parou.", "Continua daí.", "Pode seguir com o desenho."];
+/**
+ * Os três primeiros são os de sempre; os outros existem para o convite não se repetir de uma fala para a outra
+ * (o mesmo "Continua daí." várias vezes seguidas soa como gravação).
+ */
+const CONVITES = [
+  "Pode continuar de onde parou.",
+  "Continua daí.",
+  "Pode seguir com o desenho.",
+  "Fica à vontade para seguir.",
+  "Pode retomar de onde estava.",
+  "Segue no seu ritmo.",
+];
+
+/**
+ * O convite que o agente ainda não usou nas falas recentes. Sem histórico, ou com todos já usados, vale a escolha
+ * de sempre (pelo tamanho do texto); com histórico, anda a partir dela até achar um que não foi dito.
+ */
+export function escolherConvite(texto: string, jaDitas: string[] = []): string {
+  const ditas = jaDitas.map(normalizar);
+  const inicio = texto.length % 3;
+  for (let i = 0; i < CONVITES.length; i++) {
+    const convite = CONVITES[(inicio + i) % CONVITES.length];
+    const marca = normalizar(convite);
+    if (!ditas.some((d) => d.includes(marca))) return convite;
+  }
+  return CONVITES[inicio];
+}
 
 /** A frase devolve a vez: um próximo passo dirigido ao candidato (o mesmo critério do scripts/validar-conversa.ts). */
 export const PROXIMO_PASSO = /^(pode|podemos|vamos|me (conta|conte|mostra|mostre|explica|explique|diz|diga|fala|fale)|mostra|mostre|explica|explique|conta|conte|segue|siga|continua|continue|desenha|desenhe|marca|marque|aponta|aponte|começa|comece|escolhe|escolha|traz|traga|fica à vontade|fique à vontade|quando quiser|é só)/i;
@@ -107,10 +133,10 @@ export function devolveAVez(texto: string): boolean {
  * Toda fala termina com a bola com ele. O modelo às vezes para no fato ("Isso, um bilhão por mês.") e o candidato
  * fica sem saber se é a vez dele: aí entra um convite curto no fim.
  */
-export function comVezDevolvida(texto: string): string {
+export function comVezDevolvida(texto: string, jaDitas: string[] = []): string {
   const t = texto.trim();
   if (!t || devolveAVez(t)) return t;
-  return `${t} ${CONVITES[t.length % CONVITES.length]}`;
+  return `${t} ${escolherConvite(t, jaDitas)}`;
 }
 
 /**
@@ -118,11 +144,11 @@ export function comVezDevolvida(texto: string): string {
  * pergunta de condução ("quer olhar outra parte?") e o candidato, que acabou de soltar o assunto, fica com outra
  * cobrança. Tira a frase com interrogação do fim e, se não sobrar convite, põe um curto.
  */
-export function semPerguntaNoFim(texto: string): string {
+export function semPerguntaNoFim(texto: string, jaDitas: string[] = []): string {
   const t = texto.trim();
   if (!t.endsWith("?")) return t;
   const frases = frasesDe(t);
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
-  const convite = CONVITES[t.length % CONVITES.length];
+  const convite = escolherConvite(t, jaDitas);
   return [...frases, convite].join(" ");
 }

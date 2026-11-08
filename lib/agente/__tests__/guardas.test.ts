@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { comVezDevolvida, limitarFrases, semPerguntaNoFim, trocarIdsPorNomes } from "../guardas";
+import { comVezDevolvida, escolherConvite, limitarFrases, semPerguntaNoFim, trocarIdsPorNomes } from "../guardas";
 
 describe("trocarIdsPorNomes", () => {
   const grafo = "COMPONENTES\n- [r5] Cache Redis (retângulo)\n- [e2] Réplica de leitura (elipse)\nCONEXÕES\n- [s5] Cache Redis → Réplica de leitura \"miss\"";
@@ -46,5 +46,40 @@ describe("comVezDevolvida", () => {
   it("pergunta ou próximo passo no fim ficam como estão", () => {
     assert.equal(comVezDevolvida("Saquei. E se o cache cair?"), "Saquei. E se o cache cair?");
     assert.equal(comVezDevolvida("São 5 anos. Pode seguir com esse número."), "São 5 anos. Pode seguir com esse número.");
+  });
+});
+
+describe("convite do fim da fala", () => {
+  it("sem histórico mantém a escolha de sempre, pelo tamanho do texto", () => {
+    assert.equal(comVezDevolvida("Um. São 2.5 mil por segundo. Três."), `Um. São 2.5 mil por segundo. Três. ${escolherConvite("Um. São 2.5 mil por segundo. Três.")}`);
+    assert.ok(["Pode continuar de onde parou.", "Continua daí.", "Pode seguir com o desenho."].includes(escolherConvite("abc")));
+  });
+
+  it("não repete o convite que o agente acabou de dizer", () => {
+    const texto = "São 20 mil por dia.";
+    const primeiro = escolherConvite(texto);
+    const segundo = escolherConvite(texto, [`Certo. ${primeiro}`]);
+    assert.notEqual(segundo, primeiro);
+    const terceiro = escolherConvite(texto, [primeiro, segundo]);
+    assert.ok(![primeiro, segundo].includes(terceiro));
+  });
+
+  it("ignora acento e pontuação ao comparar com o que já foi dito", () => {
+    assert.notEqual(escolherConvite("a", ["pode continuar de onde parou"]), "Pode continuar de onde parou.");
+  });
+
+  it("se todos já foram ditos, volta à escolha de sempre em vez de travar", () => {
+    const todos = ["Pode continuar de onde parou.", "Continua daí.", "Pode seguir com o desenho.", "Fica à vontade para seguir.", "Pode retomar de onde estava.", "Segue no seu ritmo."];
+    assert.equal(escolherConvite("abc", todos), escolherConvite("abc"));
+  });
+
+  it("comVezDevolvida e semPerguntaNoFim usam o histórico", () => {
+    const base = "São 20 mil por dia.";
+    const usado = escolherConvite(base);
+    assert.ok(!comVezDevolvida(base, [usado]).endsWith(usado));
+    const comPergunta = "Entendi. Quer olhar outra parte?";
+    const usado2 = escolherConvite(comPergunta);
+    assert.ok(!semPerguntaNoFim(comPergunta, [usado2]).endsWith(usado2));
+    assert.ok(!semPerguntaNoFim(comPergunta, [usado2]).includes("?"));
   });
 });

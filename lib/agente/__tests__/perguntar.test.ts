@@ -193,3 +193,15 @@ describe("briefing da entrevista no /perguntar", () => {
     assert.match(llm.chamadas[0].sistema.estatico, /BRIEFING DA ENTREVISTA mostra o que você já tem/);
   });
 });
+
+describe("convite do fim no /perguntar", () => {
+  it("não repete o convite que o Totti acabou de dizer", async () => {
+    const respostaDoModelo = { responder: true, texto: "São 20 mil por dia.", requisito: null, concluiu: false };
+    const primeira = await perguntar(deps(criarClienteFalso([respostaDoModelo])), estado, { fase: "REQUISITOS", texto: "Quantos usuários?" }, AGORA);
+    const convite1 = primeira.texto.replace("São 20 mil por dia. ", "");
+    // A segunda pergunta parte do estado em que o Totti já disse o primeiro convite.
+    const segunda = await perguntar(deps(criarClienteFalso([respostaDoModelo])), primeira.estado, { fase: "REQUISITOS", texto: "E de escrita?" }, AGORA);
+    const convite2 = segunda.texto.replace("São 20 mil por dia. ", "");
+    assert.notEqual(convite2, convite1);
+  });
+});

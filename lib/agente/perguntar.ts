@@ -61,6 +61,8 @@ export type ResultadoPerguntar = {
 };
 
 const MAX_CARACTERES_REQUISITO = 60;
+/** Quantas falas recentes do agente o convite do fim evita repetir. */
+const MAX_FALAS_PARA_VARIAR_CONVITE = 8;
 export const MAX_FRASES_FALA = 3;
 
 export async function perguntar(
@@ -124,7 +126,9 @@ export async function perguntar(
   const faseDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO";
   const podeSeguir = desfecho === "respondeu" && saida.aprofundar === true && fioAberto && faseDeDesenho;
   const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && !podeSeguir);
-  const texto = comVezDevolvida(semAprofundar ? semPerguntaNoFim(curto) : curto);
+  // O convite do fim varia: não repete um que o Totti acabou de dizer.
+  const jaDitas = estado.conversa.filter((f) => f.quem === "agente").slice(-MAX_FALAS_PARA_VARIAR_CONVITE).map((f) => f.texto);
+  const texto = comVezDevolvida(semAprofundar ? semPerguntaNoFim(curto, jaDitas) : curto, jaDitas);
   if (!saida.responder || !texto) return mudoOuConcluiu();
   const seguimento = podeSeguir && texto.endsWith("?");
   const requisito = saida.requisito?.trim()
