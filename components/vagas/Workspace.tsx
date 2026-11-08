@@ -3,7 +3,8 @@
 // A tela inicial da recrutadora. Ela separa as vagas pelo que cada uma precisa, na ordem do fluxo:
 //   1. Definir o plano → vagas que ainda não andaram: o plano da entrevista está parado com o Totti.
 //   2. Totti cuidando  → vagas publicadas em que o Totti convida e entrevista sozinho; nada a fazer.
-//   3. Você decide     → vagas com relatório pronto: aprovar ou reprovar os candidatos.
+//   3. Você decide     → vagas em que metade ou mais dos convidados já fez a entrevista: aprovar ou reprovar.
+//      Antes disso a vaga fica com o Totti, mesmo com alguns relatórios prontos (ver prontaParaDecidir).
 // O topo mostra os três passos com a contagem de cada um (e leva até a seção); embaixo vêm as seções, com
 // busca e filtros valendo para todas. As encerradas ficam num link no fim.
 // Os convites saem sozinhos ao publicar, então não há estágio de "enviar convites".
@@ -21,7 +22,10 @@ import {
   descartarRascunho,
   diasDoRascunho,
   estagioDa,
+  FRACAO_PARA_DECIDIR,
+  fracaoEntrevistada,
   novosDa,
+  prontaParaDecidir,
   numero,
   quandoFoi,
   situacaoDoRascunho,
@@ -112,8 +116,13 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
       ),
     [rascunhos, temFiltro, termo, ordem],
   );
-  const decidir = base.filter((v) => v.estagio !== "encerrada" && novosDa(v) > 0);
-  const totti = base.filter((v) => v.estagio !== "encerrada" && novosDa(v) === 0);
+  const decidir = base.filter((v) => v.estagio !== "encerrada" && prontaParaDecidir(v));
+  // Quem ainda não chegou na metade fica com o Totti. As mais adiantadas vêm primeiro (são as próximas a ir para a
+  // decisão); as que passaram da metade sem nada a decidir (já foi tudo decidido) vão para o fim.
+  const proximidade = (v: Linha) => (novosDa(v) === 0 && fracaoEntrevistada(v) >= FRACAO_PARA_DECIDIR ? -1 : fracaoEntrevistada(v));
+  const totti = base
+    .filter((v) => v.estagio !== "encerrada" && !prontaParaDecidir(v))
+    .sort((a, b) => (ordem === "pendentes" ? proximidade(b) - proximidade(a) : 0));
   const encerradas = base.filter((v) => v.estagio === "encerrada");
 
   const refPlano = useRef<HTMLElement>(null);
@@ -230,7 +239,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
           key={`totti-${chaveFiltro}`}
           passo={2}
           titulo="O Totti está cuidando"
-          dica="Publicadas e em andamento: ele convida os inscritos e conduz as entrevistas sozinho. Nada a fazer por agora."
+          dica={`Ele convida e entrevista sozinho. Quando ${Math.round(FRACAO_PARA_DECIDIR * 100)}% dos convidados tiverem feito a entrevista, a vaga passa para a decisão.`}
           vazio={filtrando ? "Nenhuma vaga em andamento nesse filtro." : "Nenhuma vaga em andamento."}
           total={totti.length}
         >
@@ -242,7 +251,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
           key={`decidir-${chaveFiltro}`}
           passo={3}
           titulo="Aprovar ou reprovar candidatos"
-          dica="O Totti terminou estas entrevistas. Abra os relatórios e decida quem segue."
+          dica="Mais da metade dos convidados já fez a entrevista: dá para comparar e decidir quem segue."
           vazio={filtrando ? "Nenhuma vaga com relatório pronto nesse filtro." : "Nenhum relatório esperando por você."}
           total={decidir.length}
           pede={decidir.length > 0}
@@ -312,7 +321,7 @@ function Fluxo({ planos, totti, decidir, onIr }: { planos: number; totti: number
   const passos: { id: IdGrupo; rotulo: string; n: number; texto: string; acao: string; voce: boolean }[] = [
     { id: "plano", rotulo: "Você define o plano", n: planos, texto: planos === 1 ? "vaga parada" : "vagas paradas", acao: "Terminar os planos", voce: true },
     { id: "totti", rotulo: "Totti entrevista", n: totti, texto: totti === 1 ? "vaga em andamento" : "vagas em andamento", acao: "Ver vagas", voce: false },
-    { id: "decidir", rotulo: "Você decide", n: decidir, texto: decidir === 1 ? "vaga com relatórios" : "vagas com relatórios", acao: "Ver relatórios", voce: true },
+    { id: "decidir", rotulo: "Você decide", n: decidir, texto: decidir === 1 ? "vaga pronta para decidir" : "vagas prontas para decidir", acao: "Ver relatórios", voce: true },
   ];
   return (
     <nav aria-label="Etapas das vagas" className="grid gap-3 md:grid-cols-3">
@@ -444,7 +453,7 @@ const entradaLinha = (i: number) =>
 // ---------------------------------------------------------------------------
 
 const classeLinha =
-  "group grid items-center gap-x-6 gap-y-3 px-5 py-4 transition-colors outline-none hover:bg-superficie-2/40 focus-visible:bg-superficie-2/60 md:grid-cols-[minmax(0,1fr)_240px_190px]";
+  "group grid items-center gap-x-6 gap-y-3 px-5 py-4 transition-colors outline-none hover:bg-superficie-2/40 focus-visible:bg-superficie-2/60 xl:grid-cols-[minmax(0,1fr)_240px_190px]";
 
 type Estado = { texto: string; ativo: boolean };
 
@@ -453,7 +462,7 @@ function estadoDa(v: Linha): Estado {
   const f = v.funil;
   const novos = novosDa(v);
   if (v.estagio === "encerrada") return { texto: `Encerrada ${quandoFoi(v.encerradaHaDias ?? 0)}`, ativo: false };
-  if (novos > 0) return { texto: `${plural(novos, "relatório pronto", "relatórios prontos")} para decidir`, ativo: false };
+  if (prontaParaDecidir(v)) return { texto: `${plural(novos, "relatório pronto", "relatórios prontos")} para decidir`, ativo: false };
   if (f.emAndamento > 0) return { texto: `Entrevistando agora · ${plural(f.emAndamento, "pessoa", "pessoas")}`, ativo: true };
   if (f.inscritos === 0) return { texto: "Esperando os primeiros inscritos", ativo: false };
   if (f.convidados === 0) return { texto: "Enviando os convites", ativo: true };
@@ -465,7 +474,9 @@ function estadoDa(v: Linha): Estado {
 function acaoDa(v: Linha): { href: string; texto: string; forte: boolean } {
   const novos = novosDa(v);
   if (v.estagio === "encerrada") return { href: hrefVaga(v.id, "escores"), texto: "Ver resultados", forte: false };
-  if (novos > 0) return { href: hrefVaga(v.id, "escores"), texto: "Ver relatórios", forte: true };
+  if (prontaParaDecidir(v)) return { href: hrefVaga(v.id, "escores"), texto: "Ver relatórios", forte: true };
+  // Com alguns relatórios, mas ainda longe da metade: dá para espiar, sem pressa.
+  if (novos > 0) return { href: hrefVaga(v.id, "escores"), texto: `Espiar ${plural(novos, "relatório", "relatórios")}`, forte: false };
   if (v.funil.concluiram > 0) return { href: hrefVaga(v.id, "escores"), texto: "Ver resultados", forte: false };
   return { href: hrefVaga(v.id, "entrevistas"), texto: "Acompanhar", forte: false };
 }
@@ -473,12 +484,12 @@ function acaoDa(v: Linha): { href: string; texto: string; forte: boolean } {
 /** A ação da linha: pílula preta quando é com você, link discreto quando é só para olhar. */
 function AcaoLinha({ texto, forte }: { texto: string; forte: boolean }) {
   return forte ? (
-    <span className="flex h-9 items-center gap-1.5 justify-self-start rounded-full bg-texto px-4 text-[13.5px] font-medium whitespace-nowrap text-texto-claro transition-transform group-hover:-translate-y-px md:justify-self-end">
+    <span className="flex h-9 items-center gap-1.5 justify-self-start rounded-full bg-texto px-4 text-[13.5px] font-medium whitespace-nowrap text-texto-claro transition-transform group-hover:-translate-y-px xl:justify-self-end">
       {texto}
       <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
     </span>
   ) : (
-    <span className="flex items-center gap-1 text-[13.5px] font-medium text-texto md:justify-end">
+    <span className="flex items-center gap-1 text-[13.5px] font-medium text-texto xl:justify-end">
       <span className="sublinha">{texto}</span>
       <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
     </span>
@@ -497,7 +508,8 @@ function LinhaVaga({ v, indice }: { v: Linha; indice: number }) {
   ]
     .filter(Boolean)
     .join(" · ");
-  const fatia = f.inscritos ? Math.max(f.concluiram ? 2 : 0, (f.concluiram / f.inscritos) * 100) : 0;
+  const fracao = fracaoEntrevistada(v);
+  const fatia = Math.max(f.concluiram ? 2 : 0, fracao * 100);
 
   return (
     <motion.li {...entradaLinha(indice)} className="linha-lista">
@@ -509,15 +521,18 @@ function LinhaVaga({ v, indice }: { v: Linha; indice: number }) {
           <span className="truncate text-[12.5px] text-texto-suave">{meta}</span>
         </span>
 
-        {/* Em que pé está, e quanto do volume o Totti já entrevistou. */}
+        {/* Em que pé está, e quanto dos convidados já fez a entrevista. O traço marca a metade: dali, a vaga vai para a decisão. */}
         <span className="flex flex-col gap-1.5">
           <span className={`flex items-center gap-1.5 text-[13px] ${acao.forte ? "font-medium text-texto" : "text-texto-suave"}`}>
             {estado.ativo && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-texto/60 anim-pulso" />}
             {estado.texto}
           </span>
-          {f.inscritos > 0 && (
-            <span className="flex items-center gap-2" title={`${numero(f.concluiram)} de ${numero(f.inscritos)} inscritos entrevistados`}>
-              <span aria-hidden className="h-1 flex-1 overflow-hidden rounded-full bg-superficie-2">
+          {f.convidados > 0 && (
+            <span className="flex items-center gap-2" title={`${numero(f.concluiram)} de ${numero(f.convidados)} convidados entrevistados`}>
+              <span aria-hidden className="relative h-1 flex-1 overflow-hidden rounded-full bg-superficie-2">
+                {v.estagio !== "encerrada" && (
+                  <span className="absolute inset-y-0 w-px bg-texto/35" style={{ left: `${FRACAO_PARA_DECIDIR * 100}%` }} />
+                )}
                 <motion.span
                   className="block h-full rounded-full bg-texto"
                   initial={{ width: 0 }}
@@ -525,9 +540,7 @@ function LinhaVaga({ v, indice }: { v: Linha; indice: number }) {
                   transition={{ duration: 0.9, delay: 0.1 + Math.min(indice, 8) * 0.04, ease: curvaSaida }}
                 />
               </span>
-              <span className="numero shrink-0 text-[11.5px] text-texto-suave">
-                {numero(f.concluiram)} de {numero(f.inscritos)}
-              </span>
+              <span className="numero w-9 shrink-0 text-right text-[11.5px] text-texto-suave">{Math.round(fracao * 100)}%</span>
             </span>
           )}
         </span>
@@ -550,7 +563,7 @@ function LinhaRascunho({ r, indice }: { r: RascunhoVaga; indice: number }) {
           <span className="truncate text-[12.5px] text-texto-suave">criada {quandoFoi(diasDoRascunho(r))}</span>
         </span>
         <span className="text-[13px] text-texto-suave">{situacaoDoRascunho(r)}</span>
-        <span className="flex md:justify-end md:pr-8">
+        <span className="flex xl:justify-end xl:pr-8">
           <AcaoLinha texto={r.sessaoId ? "Continuar com o Totti" : "Começar com o Totti"} forte />
         </span>
       </Link>
@@ -558,7 +571,7 @@ function LinhaRascunho({ r, indice }: { r: RascunhoVaga; indice: number }) {
         onClick={() => descartarRascunho(r.id)}
         aria-label={`Descartar a vaga ${r.cargo}`}
         title="Descartar esta vaga"
-        className="absolute right-3 bottom-4 flex size-7 items-center justify-center rounded-full text-texto-suave opacity-0 transition-[opacity,color,background-color] group-hover/rascunho:opacity-100 hover:bg-superficie-2 hover:text-perigo focus-visible:opacity-100 md:top-1/2 md:bottom-auto md:-translate-y-1/2"
+        className="absolute right-3 bottom-4 flex size-7 items-center justify-center rounded-full text-texto-suave opacity-0 transition-[opacity,color,background-color] group-hover/rascunho:opacity-100 hover:bg-superficie-2 hover:text-perigo focus-visible:opacity-100 xl:top-1/2 xl:bottom-auto xl:-translate-y-1/2"
       >
         <X size={13} />
       </button>
