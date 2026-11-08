@@ -301,7 +301,11 @@ function describeEvent(event: SessionEvent): string | undefined {
     }
     case "paste":
       return `colou ${event.lines} linhas a partir da linha ${event.startLine}`;
-    // As falas vão inteiras, agrupadas por conversa, em `conversations`.
+    // As falas de um balão vão inteiras, agrupadas por conversa, em `conversations`. As de fora (microfone
+    // aberto: o candidato pensando em voz alta ou falando com o entrevistador) entram aqui, no momento delas.
+    case "speech":
+      if (event.blipId !== undefined) return undefined;
+      return `${event.role === "candidate" ? "falou" : "o entrevistador respondeu"}: "${truncate(event.text, 220)}"`;
     case "hint":
       return "pediu dica";
     case "language_changed":

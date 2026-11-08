@@ -20,10 +20,10 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "conversa" | "evaluator" | "fast" | "interviewer";
+export type LlmRole = "analyst" | "conversa" | "evaluator" | "fast" | "filtro" | "interviewer";
 
 /** Papéis que respondem a uma fala ao vivo: passam na frente na fila e nunca esperam uma análise acabar. */
-const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "fast", "interviewer"]);
+const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "fast", "filtro", "interviewer"]);
 
 interface RoleConfig {
   featherlessEnv: string;
@@ -86,6 +86,18 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // Mais baixa que o padrão: as regras de fala (devolver a vez, recusar, ficar quieto) variavam entre rodadas.
     temperatura: 0.3,
   },
+  filtro: {
+    // Confere a fala do live coding antes de ela sair (spoiler, validação): fica no caminho de cada resposta.
+    // O gemma na Featherless passava de 1,8 s e o filtro era pulado; no OpenRouter fica abaixo de 1 s.
+    primario: "openrouter",
+    openrouterEnv: "FILTRO_MODEL",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
+    featherlessEnv: "FILTRO_RESERVA_MODEL",
+    featherlessDefault: "google/gemma-4-31B-it",
+    maxTokens: 300,
+    hedgeMs: 2_000,
+    temperatura: 0,
+  },
   interviewer: {
     featherlessEnv: "INTERVIEWER_MODEL",
     featherlessDefault: "zai-org/GLM-5.3-Flash",
@@ -145,6 +157,7 @@ const state: LlmState = (globalWithLlm.__llmState ??= {
     analyst: { consecutiveSlow: 0 },
     conversa: { consecutiveSlow: 0 },
     fast: { consecutiveSlow: 0 },
+    filtro: { consecutiveSlow: 0 },
     evaluator: { consecutiveSlow: 0 },
     interviewer: { consecutiveSlow: 0 },
   },
@@ -206,6 +219,7 @@ export function getLlmStats(): LlmStatsSnapshot {
       analyst: roleSnapshot("analyst", state.roles.analyst, now),
       conversa: roleSnapshot("conversa", state.roles.conversa, now),
       fast: roleSnapshot("fast", state.roles.fast, now),
+      filtro: roleSnapshot("filtro", state.roles.filtro, now),
       evaluator: roleSnapshot("evaluator", state.roles.evaluator, now),
       interviewer: roleSnapshot("interviewer", state.roles.interviewer, now),
     },

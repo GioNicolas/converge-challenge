@@ -37,7 +37,8 @@
     "test:noventa-dias": "tsx --test lib/noventa-dias/__tests__/*.test.ts",
     "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts",
-    "test:llm": "tsx --test lib/llm/*.test.ts"
+    "test:llm": "tsx --test lib/llm/*.test.ts",
+    "test:conversa": "tsx --test lib/conversa/__tests__/*.test.ts lib/audio/filaFalas.test.ts lib/llm/*.test.ts"
   },
   "dependencies": {
     "@elevenlabs/client": "^1.35.0",

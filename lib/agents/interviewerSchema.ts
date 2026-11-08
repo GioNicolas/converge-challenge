@@ -15,8 +15,10 @@ export const ProbeKindSchema = z.enum([
 ]);
 
 export const InterviewerOutput = z.object({
+  /** false quando o candidato só pensa em voz alta: o agente escuta e não fala (reply vazio). */
+  responder: z.boolean().default(true),
   /** A fala, como um entrevistador humano falaria: 1–2 frases curtas. */
-  reply: z.string(),
+  reply: z.string().default(""),
   /** Linhas pra grifar junto com a fala, ou null quando não fala de um trecho. */
   highlight: z.object({ startLine: z.number().int().min(1), endLine: z.number().int().min(1) }).nullable().default(null),
   /** true quando a conversa terminou (assunto respondido, ou o candidato quer voltar a codar). */

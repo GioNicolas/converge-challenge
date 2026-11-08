@@ -9,7 +9,7 @@ import { pedirEmpecilho, perguntar } from "@/lib/sessao/servidor";
 import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
-import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/sessao/turnos";
+import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {

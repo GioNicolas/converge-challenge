@@ -59,8 +59,27 @@ export interface ConversaFeita {
   falas: { quem: "candidato" | "entrevistador"; texto: string }[];
 }
 
-/** Conversas que já aconteceram (balões abertos), na ordem, com as falas gravadas nos eventos. */
+/** Rótulo da conversa livre em `conversasFeitas`. */
+export const CONVERSA_LIVRE = "(conversa livre: o candidato falou sem uma pergunta sua)";
+/** Falas fora de balão que entram como contexto (as mais recentes). */
+const MAX_FALAS_LIVRES = 10;
+
+/**
+ * Conversas que já aconteceram (balões abertos), na ordem, com as falas gravadas nos eventos. A conversa
+ * livre (fora de balão, com o microfone aberto) vem no fim, com as falas mais recentes.
+ */
 export function conversasFeitas(session: SessionState): ConversaFeita[] {
+  const livres = session.events
+    .flatMap((e) =>
+      e.type === "speech" && e.blipId === undefined
+        ? [{ quem: e.role === "candidate" ? ("candidato" as const) : ("entrevistador" as const), texto: e.text }]
+        : [],
+    )
+    .slice(-MAX_FALAS_LIVRES);
+  return [...conversasDeBalao(session), ...(livres.length ? [{ pergunta: CONVERSA_LIVRE, falas: livres }] : [])];
+}
+
+function conversasDeBalao(session: SessionState): ConversaFeita[] {
   return session.queue
     .filter((q) => q.status === "asked")
     .map((q) => ({

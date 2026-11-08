@@ -25,6 +25,14 @@ function withProblem(config: InterviewConfig, problemId: string): InterviewConfi
 
 // A conversa conta como gatilho quando termina (blip_closed), não a cada fala.
 const ANALYZED_TRIGGERS = new Set<SessionEvent["type"]>(["pause", "run", "paste", "blip_closed"]);
+/** Fala solta (fora de balão) longa o bastante para mudar a leitura do Analyst: ele explicou o raciocínio. */
+const PALAVRAS_PARA_ANALISAR = 12;
+
+function disparaAnalise(event: SessionEvent): boolean {
+  if (ANALYZED_TRIGGERS.has(event.type)) return true;
+  return event.type === "speech" && event.role === "candidate" && event.blipId === undefined
+    && event.text.trim().split(/\s+/).length >= PALAVRAS_PARA_ANALISAR;
+}
 
 export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
@@ -49,7 +57,7 @@ export async function POST(request: Request) {
     // Na Vercel, o que roda depois da resposta é interrompido a menos que a plataforma saiba que ainda há trabalho.
     after(() => waitForEvaluation(session).then(() => undefined));
   }
-  if (ANALYZED_TRIGGERS.has(event.type)) {
+  if (disparaAnalise(event)) {
     try {
       await runAnalyst(session, event);
     } catch (err) {

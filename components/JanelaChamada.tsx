@@ -45,16 +45,24 @@ type Props = {
   iniciadaEm: number | null;
   midia: ReturnType<typeof useMidiaLocal>;
   agenteFalando: boolean;
+  /** Uma resposta está sendo preparada: o orbe mostra que o agente pensa. */
+  agentePensando?: boolean;
   onClicarPlin: () => void;
   /** "Agora não": tira a pergunta da tela sem abrir a conversa. */
   onAdiar: () => void;
 };
 
-export default function JanelaChamada({ pergunta, oculta, encerrada, iniciadaEm, midia, agenteFalando, onClicarPlin, onAdiar }: Props) {
+export default function JanelaChamada({ pergunta, oculta, encerrada, iniciadaEm, midia, agenteFalando, agentePensando = false, onClicarPlin, onAdiar }: Props) {
   const duvidaPendente = pergunta !== null;
   const ativa = iniciadaEm !== null && !encerrada;
   const segundos = useCronometro(iniciadaEm, ativa);
-  const estadoAgente: EstadoAgente = duvidaPendente ? "duvida" : agenteFalando ? "falando" : "ouvindo";
+  const estadoAgente: EstadoAgente = duvidaPendente
+    ? "duvida"
+    : agenteFalando
+      ? "falando"
+      : agentePensando
+        ? "pensando"
+        : "ouvindo";
 
   // --- Arrastar e encaixar no canto ---
   const caixa = useRef<HTMLDivElement>(null);

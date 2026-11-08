@@ -1,3 +1,4 @@
+/** Regras de turno da conversa ao vivo, comuns ao quadro e ao live coding. */
 /** Uma transcrição parcial mantém o turno aberto, mesmo durante pausas da pessoa. */
 export function podeTomarTurno(opcoes: {
   agora: number;

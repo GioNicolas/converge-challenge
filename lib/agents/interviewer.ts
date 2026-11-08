@@ -6,7 +6,7 @@ import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
-import { conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
+import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
@@ -88,7 +88,8 @@ export async function runInterviewerTurn(
     analystNotes: analystNotesOf(session),
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(
-      conversasFeitas(session).filter((c) => c.pergunta !== found?.question.question),
+      // Na conversa livre, as falas recentes já vêm em `messages`.
+      conversasFeitas(session).filter((c) => c.pergunta !== found?.question.question && (found || c.pergunta !== CONVERSA_LIVRE)),
     ),
     messages: req.messages,
   };
@@ -103,6 +104,12 @@ export async function runInterviewerTurn(
     output = await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra()));
     // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
     const opening = found !== undefined && req.messages.length === 0;
+    // O modelo escolheu escutar: não há fala para filtrar. A pergunta de um blip sempre sai.
+    if (!opening && (!output.responder || !output.reply.trim())) {
+      registrarObservacoes(session, output, question?.id);
+      return { reply: "", commands: [], end: false, silent: true };
+    }
+    if (opening && !output.reply.trim()) output = { ...output, responder: true, reply: found.question.question };
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
     if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
       const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
@@ -162,18 +169,7 @@ export async function runInterviewerTurn(
       text: hint,
     });
   }
-  if (output.evidence) {
-    session.evidence.push({
-      t: elapsedMs(session),
-      criterionId: output.evidence.criterionId,
-      note: output.evidence.note,
-      source: "interviewer",
-    });
-  }
-  const outcome = output.probeOutcome;
-  if (outcome) {
-    recordOutcome(session, { t, ...outcome, questionId: question?.id, source: "interviewer" });
-  }
+  registrarObservacoes(session, output, question?.id);
   // Topou um desafio (da pergunta de desafio ou emendado numa sondagem): o agente volta depois para ver
   // como foi (policy.enqueueDueCheckIns). Nunca a partir de um retorno, para não virar um ciclo.
   if (
@@ -197,6 +193,16 @@ export async function runInterviewerTurn(
   if (output.end) session.lastConversationEndedAt = t;
 
   return { reply: output.reply, commands, end: output.end };
+}
+
+/** Evidência e resultado de sondagem que o modelo registrou (falando ou não). */
+function registrarObservacoes(session: SessionState, output: InterviewerOutput, questionId: string | undefined): void {
+  const t = elapsedMs(session);
+  if (output.evidence) {
+    session.evidence.push({ t, criterionId: output.evidence.criterionId, note: output.evidence.note, source: "interviewer" });
+  }
+  const outcome = output.probeOutcome;
+  if (outcome) recordOutcome(session, { t, ...outcome, questionId, source: "interviewer" });
 }
 
 /**
