@@ -272,7 +272,8 @@ function sinaisDo(): Pergunta[] {
       id: "pediu_system_design",
       pergunta: "Na última fala, a recrutadora pediu para fazer system design (desenhar a arquitetura num quadro) nesta entrevista?",
       sinal_sim:
-        "Sim se ela pediu o formato de system design: 'quero system design', 'prefiro desenhar a arquitetura', 'faz system design'.",
+        "Sim se ela pediu o formato de system design, com qualquer nome: 'quero system design', 'prefiro desenhar a arquitetura', " +
+        "'faz system design', 'vamos de quadro', 'quero no quadro', 'quero que seja no Excalidraw', 'ele desenha o sistema'.",
       sinal_nao:
         "Não se ela só perguntou ou criticou o system design ('por que system design?'), escolheu live coding, ou respondeu outra coisa.",
     },
@@ -280,8 +281,9 @@ function sinaisDo(): Pergunta[] {
       id: "pediu_live_coding",
       pergunta: "Na última fala, a recrutadora pediu para fazer live coding (resolver um problema de código numa IDE) nesta entrevista?",
       sinal_sim:
-        "Sim se ela pediu o formato de live coding ou desistiu do system design: 'melhor live coding', 'volta pro código', " +
-        "'prefiro que ele programe', 'esquece o system design'.",
+        "Sim se ela pediu o formato de live coding (com qualquer nome) ou desistiu do system design: 'melhor live coding', " +
+        "'volta pro código', 'prefiro que ele programe', 'código ao vivo', 'quero ver ele codar', 'construir um algoritmo', " +
+        "'na IDE', 'esquece o system design', 'esquece o quadro'.",
       sinal_nao:
         "Não se ela só perguntou ou criticou o live coding ('por que live coding?'), escolheu system design, ou respondeu outra coisa.",
     },

@@ -539,9 +539,36 @@ export function sincronizarSessao(id: string, copia?: unknown): Sessao | undefin
 }
 
 /** A extração não acompanhou a última fala (rodou em outra instância ou falhou): roda agora. */
-export async function extrairSeAtrasada(sessao: Sessao): Promise<void> {
-  await aguardarExtracao(sessao);
-  if (sessao.status.versaoExtraida < sessao.transcricao.length) await extrairAgora(sessao);
+/** Fala que só aprova o que já está na tela ("pode", "sim, pode finalizar", "tá ótimo"): não muda o plano. */
+const SO_APROVACAO =
+  /^(?:(?:pode|podemos|sim|isso|ok|okay|beleza|blz|fechado|perfeito|otimo|show|bora|vamos|vai|manda|confirmo|confirmado|certo|ta|esta|tudo|bom|boa|finaliza|finalizar|publica|publicar|pode finalizar|pode publicar|manda ver|segue|seguir|assim|mesmo|ficou|isso mesmo|tudo certo)[\s,.!]*)+$/;
+
+function normalizarFala(texto: string): string {
+  return texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z\s,.!]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Depois da última extração só entraram falas do Totti e aprovações dela: extrair de novo não muda nada e só
+ * segurava o "Montando o plano…" por uma volta inteira do extrator.
+ */
+export function soAprovacaoDesdeAExtracao(transcricao: Turno[], versaoExtraida: number): boolean {
+  if (versaoExtraida <= 0) return false;
+  return transcricao.slice(versaoExtraida).every((t) => t.role !== "recrutadora" || SO_APROVACAO.test(normalizarFala(t.text)));
+}
+
+/** Teto da espera pela extração ao finalizar: passou disso, o plano sai com o rascunho que a conversa já montou. */
+const LIMITE_EXTRACAO_AO_FINALIZAR_MS = 25_000;
+
+export async function extrairSeAtrasada(sessao: Sessao, limiteMs = LIMITE_EXTRACAO_AO_FINALIZAR_MS): Promise<void> {
+  const inicio = Date.now();
+  await aguardarExtracao(sessao, limiteMs);
+  if (sessao.status.extraindo) return;
+  if (sessao.status.versaoExtraida >= sessao.transcricao.length) return;
+  if (soAprovacaoDesdeAExtracao(sessao.transcricao, sessao.status.versaoExtraida)) return;
+  const resto = Math.max(0, limiteMs - (Date.now() - inicio));
+  let prazo: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([extrairAgora(sessao), new Promise<void>((r) => { prazo = setTimeout(r, resto); })]);
+  clearTimeout(prazo);
 }
 
 /** Guarda a config final em memória e em `data/configs/<id>.json`. */
