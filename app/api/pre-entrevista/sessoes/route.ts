@@ -6,7 +6,7 @@ import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { criarSessao, estadoDaSessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa } from "@/lib/pre-entrevista/turno";
 import { paraContrato } from "@/lib/squad-memory/config";
-import { empresaAtual, regrasAtivas } from "@/lib/squad-memory/store";
+import { empresaAtual, hidratarSquadMemory, regrasAtivas } from "@/lib/squad-memory/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +47,7 @@ export async function POST(req: Request) {
   // Competências da vaga: uma chamada rápida. Se falhar, a sessão segue sem elas (o log registra o motivo).
   const competencias = await extrairCompetencias(vaga);
   // As regras ativas da empresa entram na conversa: o Totti pergunta "da última vez vocês pediram X, mantenho?".
+  await hidratarSquadMemory();
   const regrasSquad = regrasAtivas(empresaAtual()).map(paraContrato);
   const sessao = criarSessao(vaga, classificacao, criadaEm, competencias, regrasSquad);
   abrirConversa(sessao);

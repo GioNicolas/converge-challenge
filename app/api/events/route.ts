@@ -9,6 +9,7 @@ import { problems } from "@/lib/problems";
 import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
+import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { hasProblem } from "@/problems";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
 
   // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started,
   // e com as regras ativas aprendidas nesta vaga (não as de outras vagas da empresa).
+  if (event.type === "session_started") await hidratarSquadMemory();
   const config = event.type === "session_started" ? comRegrasDaSquad(withProblem(await resolveConfig(event.configId), event.problemId)) : undefined;
   // Outra instância pode ter a sessão (Vercel): restaura antes de criar uma nova por cima.
   if (event.type !== "session_started") await sessaoViva(event.sessionId);

@@ -24,7 +24,7 @@ export const CRITERIOS_SQUAD: CriterioSquad[] = [
   { id: "componentes", nome: "Componentes e dados", equivalentes: ["componentes_fluxo", "dados_consistencia"] },
   { id: "tradeoffs", nome: "Trade-offs", equivalentes: [] },
   { id: "gargalos_falhas", nome: "Gargalos e falhas", equivalentes: ["escalabilidade"] },
-  { id: "uso_ia_criterio", nome: "Solução com IA", equivalentes: [] },
+  { id: "uso_ia_criterio", nome: "Solução com IA", equivalentes: ["uso_ia"] },
 ];
 
 const POR_ID = new Map(CRITERIOS_SQUAD.map((c) => [c.id, c]));

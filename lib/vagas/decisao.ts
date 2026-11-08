@@ -3,6 +3,9 @@
 import { listarConvites } from "@/lib/convites/store";
 import { recebeEmail } from "@/lib/convites/teste";
 import { sendInterviewFeedback } from "@/lib/email";
+import { findReport } from "@/lib/session/reports";
+import { aprenderComDecisao } from "@/lib/squad-memory/aprender";
+import { empresaAtual } from "@/lib/squad-memory/store";
 import { kvPadrao } from "@/lib/storage/kv";
 
 const NS = "decisoes";
@@ -26,7 +29,11 @@ export async function lerDecisoes(): Promise<Map<string, DecisaoRegistrada>> {
 }
 
 /** Registra a decisão (a primeira vale) e avisa o candidato por e-mail. Nunca lança por causa do e-mail. */
-export async function decidir(sessionId: string, decisao: Decisao): Promise<{ registro: DecisaoRegistrada; jaDecidida: boolean }> {
+export async function decidir(
+  sessionId: string,
+  decisao: Decisao,
+  motivo?: string,
+): Promise<{ registro: DecisaoRegistrada; jaDecidida: boolean }> {
   const kv = kvPadrao();
   const existente = await kv.get<DecisaoRegistrada>(NS, sessionId);
   if (existente) return { registro: existente, jaDecidida: true };
@@ -50,4 +57,25 @@ export async function decidir(sessionId: string, decisao: Decisao): Promise<{ re
   const registro: DecisaoRegistrada = { decisao, em: Date.now(), email };
   await kv.set(NS, sessionId, registro);
   return { registro, jaDecidida: false };
+}
+
+/** Passa a decisão (e o motivo) para a memória da squad. Best-effort: qualquer falha só vai para o log. */
+export async function ensinarOTotti(sessionId: string, decisao: Decisao, motivo: string | undefined): Promise<void> {
+  try {
+    const convite = (await listarConvites()).find((c) => c.sessoes?.includes(sessionId));
+    const salvo = await findReport(sessionId);
+    if (!salvo) return;
+    const { report } = salvo;
+    await aprenderComDecisao({
+      empresaId: empresaAtual(),
+      vagaId: convite?.vagaId ?? report.configId,
+      vagaTitulo: convite?.cargo ?? report.roleTitle,
+      candidato: convite?.candidato.nome ?? "Candidato",
+      decisao: decisao === "avancar" ? "aprovado" : "reprovado",
+      motivo: motivo?.trim() || undefined,
+      report,
+    });
+  } catch (err) {
+    console.error("[decisao] não ensinou o Totti:", err instanceof Error ? err.message : "erro");
+  }
 }
