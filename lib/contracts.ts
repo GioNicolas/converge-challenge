@@ -89,7 +89,7 @@ export type EmpecilhoKind = z.infer<typeof EmpecilhoKind>;
 
 /**
  * O conceito que o empecilho exige para o candidato se adaptar. Vocabulário fixo de propósito: o relatório
- * de aprendizado (F2) agrupa por ele ("quanto tempo levou para destravar em valores repetidos").
+ * de aprendizado (`Report.learning.change`) guarda por ele ("quanto tempo levou para destravar em valores repetidos").
  * Conceito novo? Acrescente aqui e em CONCEITOS_EMPECILHO.
  */
 export const ConceitoEmpecilho = z.enum([
@@ -266,6 +266,26 @@ export const CriterionScore = z.object({
   evidence: z.array(Evidence),
 });
 
+/**
+ * Um momento em que ele travou, medido pelos eventos (não pelo LLM). Mede só os testes do problema original;
+ * a mudança (empecilho) tem a medida dela em `Report.learning.change`.
+ */
+export const StuckEpisode = z.object({
+  startedAt: z.number(),
+  /** Primeira execução depois disso com mais testes passando que o melhor até ali (ou todos). null = não destravou até o fim. */
+  unstuckAt: z.number().nullable(),
+  /**
+   * falhas_seguidas: duas ou mais execuções seguidas falhando sem passar em mais testes.
+   * parado: 2 min ou mais sem mexer no código e sem conversa, com o código ainda falhando.
+   */
+  cause: z.enum(["falhas_seguidas", "parado"]),
+  /** Execuções falhando entre o começo e o destrave (ou o fim). */
+  failedRuns: z.number().int(),
+  /** Níveis das dicas que ele recebeu enquanto estava travado. Vazio = destravou (ou não) sem dica. */
+  hintLevels: z.array(z.number().int()),
+});
+export type StuckEpisode = z.infer<typeof StuckEpisode>;
+
 export const Report = z.object({
   sessionId: z.string(),
   configId: z.string(),
@@ -293,6 +313,48 @@ export const Report = z.object({
       testsPassed: z.number().int(),
       testsTotal: z.number().int(),
       /** null = não deu para observar (ex.: anunciado no último minuto). */
+      score: z.number().int().min(1).max(4).nullable(),
+      evidence: z.array(Evidence),
+    })
+    .optional(),
+  /**
+   * Como ele pensa e aprende: que dica precisou, quanto levou para destravar e como reagiu à mudança.
+   * Só no live coding. Fatos medidos pelos eventos; o LLM só dá a nota e as evidências. Fora da nota geral.
+   */
+  learning: z
+    .object({
+      hints: z.array(
+        z.object({
+          t: z.number(),
+          level: z.number().int(),
+          text: z.string(),
+          /** O código já passava nos testes visíveis quando a dica veio (ex.: desafio de otimização): o avanço não se mede pelos testes. */
+          codePassing: z.boolean(),
+          /** Primeira execução depois da dica com mais testes passando que antes dela (ou todos). null = não avançou (ou codePassing). */
+          unstuckAt: z.number().nullable(),
+          /** Execuções entre a dica e o avanço (ou o fim). */
+          runsAfter: z.number().int(),
+        }),
+      ),
+      /** Quantas dicas a política da vaga deixava dar nesta questão. */
+      hintsAvailable: z.number().int(),
+      stuck: z.array(StuckEpisode),
+      /** Reação à mudança no problema, quando o Totti anunciou uma. */
+      change: z
+        .object({
+          concept: ConceitoEmpecilho,
+          announcedAt: z.number(),
+          /** Primeiro run com todos os testes da mudança passando (o mesmo de `adaptation.adaptedAt`). */
+          adaptedAt: z.number().nullable(),
+          /** Execuções depois do anúncio que não passaram nos testes da mudança, até adaptar (ou até o fim). */
+          failedAttempts: z.number().int(),
+          /** Dicas recebidas entre o anúncio e a adaptação (ou o fim). */
+          hintsUsed: z.number().int(),
+          /** Quantas vezes ele falou na conversa da mudança (tirar dúvida conta a favor). */
+          conversationTurns: z.number().int(),
+        })
+        .optional(),
+      /** null = não houve momento de aprendizado para observar (não travou, sem dica e sem mudança). */
       score: z.number().int().min(1).max(4).nullable(),
       evidence: z.array(Evidence),
     })

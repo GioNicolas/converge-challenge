@@ -3,6 +3,7 @@
  * o LLM só julga os critérios subjetivos, e cada evidência dele precisa citar um momento real da sessão.
  * Nota geral e recomendação também saem daqui, não do LLM.
  */
+import { learningFacts, learningScore } from "@/lib/agents/aprendizado";
 import { OBJECTIVE_CRITERION } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, PREFIXO_TESTE, primeiraAdaptacao } from "@/lib/agents/empecilho";
 import { EvaluatorOutput } from "@/lib/agents/evaluatorSchema";
@@ -92,6 +93,11 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     .map((c) => c.id)
     .filter((id) => id !== OBJECTIVE_CRITERION && isExplored(session, id));
   const adaptacao = anunciado && mudancaTests ? adaptationFacts(session, mudancaTests, endT) : undefined;
+  // Aprendizado (só live coding): os tempos que ele cita, como o início de uma parada, viram citáveis.
+  const aprendizado = config.mode === "system_design" ? undefined : learningFacts(session, endT);
+  for (const t of aprendizado?.times ?? []) {
+    if (!timeline.labels.has(formatMs(t))) timeline.labels.set(formatMs(t), t);
+  }
   const system = buildEvaluatorSystem(
     config,
     problem,
@@ -102,6 +108,7 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
       conceito: CONCEITOS_EMPECILHO[anunciado.empecilho.concept],
       rubricNote: anunciado.empecilho.rubricNote,
     },
+    aprendizado?.hasMoment ?? false,
   );
   const user = buildEvaluatorUser({
     coverage: timeline.coverage,
@@ -112,6 +119,7 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     codeVersions: timeline.codeVersions,
     analystNotes: timeline.analystNotes,
     adaptation: adaptacao?.lines,
+    learning: aprendizado?.hasMoment ? aprendizado.lines : undefined,
   });
 
   const output = await judge(system, user, judgedIds, status);
@@ -175,13 +183,31 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
             testsPassed: adaptacao.passed,
             testsTotal: adaptacao.total,
             score: adaptationScore(output.adaptation?.score ?? null, adaptacao),
-            evidence: (output.adaptation?.evidence ?? []).flatMap((e) => {
-              const t = timeline.labels.get(e.at.trim());
-              return t === undefined ? [] : [{ t, text: e.text }];
-            }),
+            evidence: citaveis(output.adaptation?.evidence, timeline.labels),
           }
         : undefined,
+    learning: aprendizado
+      ? {
+          hints: aprendizado.hints,
+          hintsAvailable: aprendizado.hintsAvailable,
+          stuck: aprendizado.stuck,
+          change: aprendizado.change,
+          score: learningScore(output.learning?.score ?? null, aprendizado, endT),
+          evidence: aprendizado.hasMoment ? citaveis(output.learning?.evidence, timeline.labels) : [],
+        }
+      : undefined,
   };
+}
+
+/** Evidência com tempo que não existe na sessão é invenção do modelo: sai do relatório. */
+function citaveis(
+  evidence: { at: string; text: string }[] | undefined,
+  labels: Map<string, number>,
+): Report["criteria"][number]["evidence"] {
+  return (evidence ?? []).flatMap((e) => {
+    const t = labels.get(e.at.trim());
+    return t === undefined ? [] : [{ t, text: e.text }];
+  });
 }
 
 // ---------------------------------------------------------------------------

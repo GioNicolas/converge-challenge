@@ -20,6 +20,13 @@ const ADAPTATION_SCALE = `4 — Entendeu a mudança rápido (perguntou o que pre
 1 — Não adaptou: ignorou a mudança, desistiu ou o código não reflete a regra nova.
 null — a mudança veio tarde demais para ele ter tido chance de reagir.`;
 
+/** Escala do aprendizado: como ele destrava e usa a ajuda (dicas, travamentos e a mudança). */
+const LEARNING_SCALE = `4 — Quando travou, destravou sozinho ou com a primeira dica, sem demorar, e mostrou que entendeu a ideia (aplicou do jeito dele, explicou por que funciona). Na mudança, tirou as dúvidas que precisava e adaptou sem ajuda. Também é 4 quem não travou nem precisou de ajuda e se adaptou bem à mudança.
+3 — Precisou de ajuda e destravou, mas levou tempo, várias tentativas, ou aplicou a dica sem mostrar que entendeu.
+2 — Precisou de várias dicas, ou depois da dica ficou muito tempo sem avançar; ou repetiu tentativas parecidas sem mudar a abordagem.
+1 — Mesmo com ajuda não destravou, ou ignorou a dica.
+null — não deu para observar (ex.: o único travamento foi no último minuto).`;
+
 export interface MudancaParaAvaliar {
   title: string;
   statement: string;
@@ -33,6 +40,8 @@ export function buildEvaluatorSystem(
   problem: Problem,
   judgedIds: string[],
   mudanca?: MudancaParaAvaliar,
+  /** Houve dica, travamento ou mudança: pede a nota de aprendizado. */
+  aprendizado = false,
 ): string {
   const judged = config.criteria.filter((c) => judgedIds.includes(c.id));
   const criteria = judged
@@ -60,7 +69,20 @@ ${ADAPTATION_SCALE}
 - Essa nota não entra nos critérios acima: não repita a mudança como evidência de outro critério, a não ser de comunicação.
 `
     : "";
-  const adaptationFormat = mudanca ? `, "adaptation": {"score": 1 | 2 | 3 | 4 | null, "evidence": [{"at": "mm:ss", "text": string}]}` : "";
+  const learning = aprendizado
+    ? `
+# Aprendizado (nota separada, de 1 a 4)
+Como ele pensa e aprende quando trava: que ajuda precisou, quanto levou para destravar e o que fez com a ajuda.
+
+Escala:
+${LEARNING_SCALE}
+
+- A seção "Aprendizado" traz os fatos medidos pelo sistema (dicas, travamentos, tempos, a reação à mudança). Não recalcule: julgue o que ele fez com eles. O código depois da dica reflete a ideia dela? Ele explicou com as próprias palavras? Pediu ajuda na hora certa ou ficou muito tempo parado tentando a mesma coisa?
+- Pedir dica não é fraqueza: o que pesa é o que ele fez com ela.
+- Essa nota não entra nos critérios acima e não repete a nota de adaptação: na mudança, olhe como ele aprendeu a regra nova (perguntou, testou, entendeu), não só se passou.
+`
+    : "";
+  const notasExtras = `${mudanca ? `, "adaptation": {"score": 1 | 2 | 3 | 4 | null, "evidence": [{"at": "mm:ss", "text": string}]}` : ""}${aprendizado ? `, "learning": {"score": 1 | 2 | 3 | 4 | null, "evidence": [{"at": "mm:ss", "text": string}]}` : ""}`;
 
   return `Você é o avaliador de uma entrevista técnica para a vaga "${config.roleTitle}" (${config.seniority}).
 A entrevista acabou. Você lê a sessão inteira e dá a nota de cada critério para a recrutadora. Você nunca fala com o candidato.
@@ -82,7 +104,7 @@ ${criteria}
 
 Escala:
 ${SCALE}
-${adaptation}
+${adaptation}${learning}
 # Regras
 - Julgue só pelo que está na sessão: código, execuções e o que o CANDIDATO disse. O que o entrevistador disse não conta como mérito do candidato.
 - A seção "Cobertura" lista como ele se saiu em cada sondagem. Ela é a base da nota; a linha do tempo confirma e dá contexto.
@@ -101,7 +123,7 @@ ${adaptation}
 - Tudo em português do Brasil.
 
 Responda SOMENTE com JSON neste formato, com um item em criteria para cada critério acima (${judgedIds.join(", ")}):
-{"criteria": [{"id": string, "score": 1 | 2 | 3 | 4 | null, "evidence": [{"at": "mm:ss", "text": string}]}]${adaptationFormat}, "summary": string, "strengths": [string], "concerns": [string], "nextSteps": [string]}`;
+{"criteria": [{"id": string, "score": 1 | 2 | 3 | 4 | null, "evidence": [{"at": "mm:ss", "text": string}]}]${notasExtras}, "summary": string, "strengths": [string], "concerns": [string], "nextSteps": [string]}`;
 }
 
 export function buildEvaluatorUser(input: {
@@ -114,13 +136,18 @@ export function buildEvaluatorUser(input: {
   analystNotes: string[];
   /** Fatos objetivos da adaptação à mudança, quando houve empecilho. */
   adaptation?: string[];
+  /** Fatos do aprendizado (dicas, travamentos, reação à mudança), quando houve algum. */
+  learning?: string[];
 }): string {
   const adaptation = input.adaptation?.length
     ? `\n# Adaptação (fatos sobre a mudança no problema)\n${input.adaptation.map((s) => `- ${s}`).join("\n")}\n`
     : "";
+  const learning = input.learning?.length
+    ? `\n# Aprendizado (dicas, travamentos e destraves medidos pelo sistema)\n${input.learning.map((s) => `- ${s}`).join("\n")}\n`
+    : "";
   return `# Sinais objetivos (calculados pelo sistema)
 ${input.signals.map((s) => `- ${s}`).join("\n")}
-${adaptation}
+${adaptation}${learning}
 # Cobertura (como ele se saiu em cada critério explorado)
 ${input.coverage.join("\n")}
 

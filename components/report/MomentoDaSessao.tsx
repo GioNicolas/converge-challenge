@@ -98,7 +98,9 @@ function Conteudo({
   const prova = momentos[indice];
   const [t, setT] = useState(prova.t);
   const fecharRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => fecharRef.current?.focus(), []);
+  useEffect(() => {
+    fecharRef.current?.focus();
+  }, []);
 
   const { atual, anterior } = versaoEm(gravacao, t);
   const novas = useMemo(() => (atual ? linhasNovas(anterior?.code, atual.code) : new Set<number>()), [atual, anterior]);
@@ -107,7 +109,10 @@ function Conteudo({
   const execucao = execucaoAte(gravacao, t);
   // Conversa longa: a lista rola até o que está em destaque.
   const destaqueRef = useRef<HTMLLIElement>(null);
-  useEffect(() => destaqueRef.current?.scrollIntoView({ block: "nearest" }), [destaque]);
+  // Com chaves: o scrollIntoView devolve uma Promise no Chromium, e o React tomaria isso como limpeza.
+  useEffect(() => {
+    destaqueRef.current?.scrollIntoView({ block: "nearest" });
+  }, [destaque]);
   const duracao = Math.max(gravacao.durationMs, prova.t, 1);
 
   return (
