@@ -17,6 +17,8 @@ import { DESCRICAO_FORMATO, NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./
 type Props = {
   rascunho: Rascunho;
   enviando: boolean;
+  /** Já publicada: o botão sai daqui e voa para o que vem depois (mesmo `layoutId`). */
+  publicado?: boolean;
   erros: string[];
   onConfirmar: (rascunho: Rascunho) => void;
   onVoltar: () => void;
@@ -125,7 +127,7 @@ function pesosDoFormato(p: Pesos, mode: InterviewMode): Pesos {
   return novo;
 }
 
-export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, onVoltar }: Props) {
+export default function RevisaoPlano({ rascunho, enviando, publicado = false, erros, onConfirmar, onVoltar }: Props) {
   const [inicial] = useState(() => {
     const base = Object.fromEntries(FocusArea.options.map((a) => [a, 0])) as Pesos;
     for (const f of rascunho.focus) base[f.area] = Math.round(f.weight * 100);
@@ -444,14 +446,22 @@ export default function RevisaoPlano({ rascunho, enviando, erros, onConfirmar, o
             <span className="numero ml-auto hidden text-[13px] text-texto-suave sm:block">
               {NOME_FORMATO[r.mode]} · {NOME_SENIORIDADE[r.seniority]} · {duracao} min · {r.criteria.length} critérios
             </span>
-            <button
-              onClick={confirmar}
-              disabled={!podePublicar}
-              className="group flex items-center gap-2 rounded-full bg-texto px-5 py-2.5 text-[14px] font-medium text-texto-claro transition-[opacity,transform] duration-150 hover:opacity-85 active:scale-[0.98] disabled:opacity-40 max-sm:ml-auto"
-            >
-              {enviando ? "Publicando…" : "Publicar vaga"}
-              {!enviando && <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />}
-            </button>
+            {publicado ? (
+              <span className="h-[42px] w-[150px] max-sm:ml-auto" aria-hidden />
+            ) : (
+              <motion.button
+                layoutId="cta-publicar"
+                onClick={confirmar}
+                disabled={!podePublicar}
+                transition={{ type: "spring", stiffness: 260, damping: 30 }}
+                className="group flex items-center gap-2 rounded-full bg-texto px-5 py-2.5 text-[14px] font-medium text-texto-claro transition-opacity duration-150 hover:opacity-85 disabled:opacity-40 max-sm:ml-auto"
+              >
+                <motion.span layout="position" className="flex items-center gap-2">
+                  {enviando ? "Publicando…" : "Publicar vaga"}
+                  {!enviando && <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />}
+                </motion.span>
+              </motion.button>
+            )}
           </div>
         </div>
       </motion.div>

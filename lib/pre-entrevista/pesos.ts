@@ -202,6 +202,7 @@ export function recalcularRascunho(r: Rascunho, cp: ContextoPesos, cg: ContextoG
   for (const c of criteria) origens[c.id] = r.origens[c.id] ?? "catalogo";
 
   const guia: EntradaGuia = {
+    mode: r.mode,
     focus: areas,
     enfase: Object.fromEntries(detalhe.filter((d) => d.noFoco).map((d) => [d.area, d.enfase])),
     dispensadas: leitura.dispensadas,

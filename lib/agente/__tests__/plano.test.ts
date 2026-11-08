@@ -4,6 +4,8 @@ import type { InterviewConfig } from "../../contracts";
 import { avaliacaoDoPlano, blocoDoPlano, escalarTempos, planoDaConfig } from "../plano";
 import { estadoInicial, TEMPOS_PADRAO } from "../sessao/estado";
 import { statusPermitidoNoEstado } from "../sessao/politica";
+import { resolverAvaliacaoEstatica } from "../kits";
+import { problemaPadrao } from "../../pre-entrevista/catalogo";
 
 const config = (extra: Partial<InterviewConfig> = {}): InterviewConfig => ({
   id: "cfg-1",
@@ -45,7 +47,24 @@ describe("planoDaConfig", () => {
 describe("avaliacaoDoPlano", () => {
   it("mapeia os problemas do catálogo da pré-entrevista para kits do cérebro", () => {
     assert.equal(avaliacaoDoPlano(config({ problemId: "encurtador-de-url" })), "demo");
-    assert.equal(avaliacaoDoPlano(config({ problemId: "chatbot-atendimento-ia" })), "demo-chat");
+    assert.equal(avaliacaoDoPlano(config({ problemId: "chat-tempo-real" })), "demo-chat");
+    assert.equal(avaliacaoDoPlano(config({ problemId: "pagamentos-instantaneos" })), "demo-pagamentos");
+    assert.equal(avaliacaoDoPlano(config({ problemId: "chatbot-atendimento-ia" })), "demo-chatbot-ia");
+  });
+
+  it("todo problema de system design que a pré-entrevista escolhe tem avaliação estática no cérebro", () => {
+    const tec = [{ area: "tecnico" as const, weight: 1 }];
+    const ids = [
+      problemaPadrao("system_design", tec),
+      problemaPadrao("system_design", tec, "Engenheira de Software Sênior — Backend (pagamentos)"),
+      problemaPadrao("system_design", tec, "Backend do app de mensagens em tempo real"),
+      problemaPadrao("system_design", [{ area: "uso_ia", weight: 1 }]),
+    ];
+    assert.deepEqual(ids, ["encurtador-de-url", "pagamentos-instantaneos", "chat-tempo-real", "chatbot-atendimento-ia"]);
+    for (const id of ids) {
+      const avaliacao = avaliacaoDoPlano(config({ problemId: id }));
+      assert.ok(avaliacao && resolverAvaliacaoEstatica(avaliacao), `${id} sem avaliação estática`);
+    }
   });
   it("problema desconhecido: undefined (quem chama usa a avaliação padrão)", () => {
     assert.equal(avaliacaoDoPlano(config({ problemId: "nao-existe" })), undefined);

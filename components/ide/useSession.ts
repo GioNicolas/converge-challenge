@@ -143,6 +143,7 @@ export function useSession(
     log,
     incomingBlip,
     setIncomingBlip,
+    applyResponse,
     nowT,
     sendEvent,
     endSession,

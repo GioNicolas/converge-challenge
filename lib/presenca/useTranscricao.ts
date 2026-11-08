@@ -10,6 +10,9 @@ import {
 
 export type { TrechoTranscrito } from "./transcricao";
 
+/** Tempo de pausa em que o socket ainda recebe silêncio antes de ser fechado. */
+const PAUSA_MAXIMA_MS = 30_000;
+
 export type EstadoEscuta = { motor: "elevenlabs" | "navegador" | "nenhum"; escutando: boolean; erro: string | null };
 
 // Tipos locais: a Web Speech API ainda não integra todas as versões de lib.dom.
@@ -45,6 +48,7 @@ export function criarEscutaTranscricao(opcoes: {
   let texto = estadoInicialTranscricao();
   let ativo = false;
   let ouvindoAntes = false;
+  let pausadoDesde: number | null = null;
   let encerrado = false;
   let geracao = 0;
   let tentativas = 0;
@@ -304,6 +308,9 @@ export function criarEscutaTranscricao(opcoes: {
       }
     }
     ouvindoAntes = ouvir;
+    pausadoDesde = ouvir ? null : (pausadoDesde ?? performance.now());
+    // Pausa longa: o silêncio enviado ao Scribe é cobrado, então fecha o socket (retomar pede token novo).
+    if (!ouvir && socket && pausadoDesde !== null && performance.now() - pausadoDesde >= PAUSA_MAXIMA_MS) limparSocket();
     if (estado.motor === "elevenlabs") {
       publicar({ ...estado, escutando: ouvir && pronto });
       if (ouvir && !socket && !conectando && repetir === null) void conectarScribe();

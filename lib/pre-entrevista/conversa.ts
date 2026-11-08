@@ -6,7 +6,7 @@
  * vêm do modelo: Featherless primeiro, OpenRouter depois, com 12 s por alvo.
  */
 import type { FocusArea } from "@/lib/contracts";
-import { areasEmJogo, AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
+import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
 import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
@@ -128,7 +128,9 @@ function rotulosDoFoco(r: Rascunho, quantos: number): string[] {
   const medidas = ordenadas.filter((a) => mede(r.mode, a));
   for (const area of medidas.length ? medidas : ordenadas) {
     const achados = ROTULOS_NA_VAGA[area].filter(([re]) => re.test(vaga)).map(([, nome]) => nome);
-    for (const nome of achados.length ? achados : [ROTULO_PADRAO[area]]) {
+    // Em system design a área técnica é o desenho, não algoritmos (ver `nomeAreaFala`).
+    const padrao = area === "tecnico" && r.mode === "system_design" ? "arquitetura" : ROTULO_PADRAO[area];
+    for (const nome of achados.length ? achados : [padrao]) {
       if (rotulos.length < quantos && !rotulos.includes(nome)) rotulos.push(nome);
     }
   }
@@ -141,7 +143,7 @@ function nomesDoFoco(r: Rascunho, quantos = r.focus.length): string {
     [...r.focus]
       .sort((a, b) => b.weight - a.weight)
       .slice(0, quantos)
-      .map((f) => NOME_AREA_FALA[f.area]),
+      .map((f) => nomeAreaFala(f.area, r.mode)),
   );
 }
 
@@ -263,9 +265,9 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
   // Área já decidida (trocada, para a próxima etapa ou deixada de lado) não aparece como "quer avaliar".
   const decididas = new Set<string>(Object.keys(sessao.plano.decisoesTradeoff));
   const pedidas = AREAS.filter((a) => !decididas.has(a) && !r.focus.some((f) => f.area === a) && sinal(`quer_${a}`) >= LIMIAR).map(
-    (a) => NOME_AREA_FALA[a],
+    (a) => nomeAreaFala(a, r.mode),
   );
-  const reduzidas = AREAS.filter((a) => sinal(`dispensa_${a}`) >= LIMIAR).map((a) => NOME_AREA_FALA[a]);
+  const reduzidas = AREAS.filter((a) => sinal(`dispensa_${a}`) >= LIMIAR).map((a) => nomeAreaFala(a, r.mode));
 
   const nivelAberto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, r.confirmado.seniority);
   const linhas = [
@@ -318,7 +320,7 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         : "";
       return (
         confirma +
-        `Pergunte o que separa um candidato ótimo de um candidato fraco em ${NOME_AREA_FALA[passo.area]}, ` +
+        `Pergunte o que separa um candidato ótimo de um candidato fraco em ${nomeAreaFala(passo.area, r.mode)}, ` +
         `de forma concreta e ligada ao cargo ${r.roleTitle}. Uma pergunta só. ${SEM_LOGISTICA}`
       );
     }
@@ -337,12 +339,12 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     }
     case "confirmar_mudanca_foco": {
       const partes: string[] = [];
-      if (passo.entra.length) partes.push(`${listar(passo.entra.map((a) => NOME_AREA_FALA[a]))} passa a fazer parte da avaliação`);
+      if (passo.entra.length) partes.push(`${listar(passo.entra.map((a) => nomeAreaFala(a, r.mode)))} passa a fazer parte da avaliação`);
       if (passo.sai.length)
-        partes.push(`${listar(passo.sai.map((a) => NOME_AREA_FALA[a]))} deixa de ser prioridade ou pesa menos, como ela disse`);
+        partes.push(`${listar(passo.sai.map((a) => nomeAreaFala(a, r.mode)))} deixa de ser prioridade ou pesa menos, como ela disse`);
       let texto = partes.length ? `Confirme a mudança numa frase, com as palavras dela: ${partes.join("; ")}.` : "";
       if (passo.duvida.length) {
-        texto += ` Pergunte se ${listar(passo.duvida.map((a) => NOME_AREA_FALA[a]))} ainda contam para a avaliação ou se ficam de lado. Uma pergunta só. ${SEM_LOGISTICA}`;
+        texto += ` Pergunte se ${listar(passo.duvida.map((a) => nomeAreaFala(a, r.mode)))} ainda contam para a avaliação ou se ficam de lado. Uma pergunta só. ${SEM_LOGISTICA}`;
       } else if (passo.proximo) {
         texto += ` Na mesma fala, emende a pergunta do próximo assunto: ${instrucaoDoPasso(passo.proximo, sessao)}`;
       }
@@ -397,7 +399,7 @@ function perguntaParaRetomar(passo: Passo, sessao: Sessao): string {
       return "pergunte se ela quer mudar algo ou se pode finalizar.";
     case "confirmar_mudanca_foco":
       if (passo.duvida.length) {
-        return `pergunte se ${listar(passo.duvida.map((a) => NOME_AREA_FALA[a]))} ainda contam para a avaliação ou se ficam de lado.`;
+        return `pergunte se ${listar(passo.duvida.map((a) => nomeAreaFala(a, sessao.rascunho.mode)))} ainda contam para a avaliação ou se ficam de lado.`;
       }
       return passo.proximo ? instrucaoDoPasso(passo.proximo, sessao) : "confirme a mudança numa frase.";
     case "responder_duvida":
@@ -662,7 +664,7 @@ export function contarFrases(texto: string): number {
   return texto.split(/[.!?]+/).filter((s) => s.trim()).length;
 }
 
-/** Aviso de que system design não está disponível: fala fixa, sem modelo (ver `SYSTEM_DESIGN_ATIVO`). */
+/** Aviso de que system design não está disponível: fala fixa, sem modelo. Só com a trava desligada (ver `SYSTEM_DESIGN_ATIVO`). */
 export function falaFormatoIndisponivel(modo: Rascunho["mode"]): string {
   return `System design ainda não está disponível nesta versão, então a entrevista segue em ${FORMATO_CURTO[modo]}. Prefere seguir assim ou mudar alguma coisa?`;
 }

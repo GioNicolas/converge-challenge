@@ -3,14 +3,17 @@
  * o LLM só julga os critérios subjetivos, e cada evidência dele precisa citar um momento real da sessão.
  * Nota geral e recomendação também saem daqui, não do LLM.
  */
+import { learningFacts, learningScore } from "@/lib/agents/aprendizado";
 import { OBJECTIVE_CRITERION } from "@/lib/agents/coverage";
+import { empecilhoAnunciado, PREFIXO_TESTE, primeiraAdaptacao } from "@/lib/agents/empecilho";
 import { EvaluatorOutput } from "@/lib/agents/evaluatorSchema";
-import { runHiddenTests, type HiddenTestsResult } from "@/lib/agents/hiddenTests";
+import { runHiddenTests, runServerTests, type HiddenTestsResult } from "@/lib/agents/hiddenTests";
 import { allPassed } from "@/lib/agents/policy";
 import { buildEvaluatorSystem, buildEvaluatorUser } from "@/lib/agents/prompts/evaluator";
-import type { Report, SessionEvent } from "@/lib/contracts";
+import { CONCEITOS_EMPECILHO, type Report, type SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
+import { gravacaoDaSessao } from "@/lib/session/gravacao";
 import { saveReport } from "@/lib/session/reports";
 import { regrasDoCriterio } from "@/lib/squad-memory/prompt";
 import { latestCode, numberCode } from "@/lib/session/store";
@@ -43,7 +46,7 @@ export function startEvaluation(session: SessionState, opts: { retry?: boolean }
       status.report = report;
       status.state = "done";
       // Em disco para o painel da vaga sobreviver a restart; falhar aqui não derruba o relatório.
-      saveReport(session.startedAt, report).catch((err: unknown) => console.error("[evaluator] não salvou o relatório:", err));
+      saveReport(session.startedAt, report, gravacaoDaSessao(session)).catch((err: unknown) => console.error("[evaluator] não salvou o relatório:", err));
     })
     .catch((err: unknown) => {
       status.error = err instanceof Error ? err.message : String(err);
@@ -72,13 +75,42 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
   const hidden = await runHiddenTests(problem, code, session.language);
   status.hiddenTests = hidden;
 
+  // Empecilho: os testes da mudança (os que a IDE mostrou e os escondidos dela) rodam no código final.
+  const anunciado = empecilhoAnunciado(session);
+  const mudancaTests = anunciado
+    ? await runServerTests(
+        problem,
+        [...anunciado.empecilho.tests, ...(anunciado.empecilho.hiddenTests ?? [])],
+        code,
+        session.language,
+        PREFIXO_TESTE,
+      )
+    : undefined;
+
   const timeline = buildTimeline(session);
   // Sem nenhuma sondagem, observação ou fala do candidato, nem vai para o LLM: vira null. O resto o LLM julga
   // (e pode devolver null se não houve oportunidade de observar).
   const judgedIds = config.criteria
     .map((c) => c.id)
     .filter((id) => id !== OBJECTIVE_CRITERION && isExplored(session, id));
-  const system = buildEvaluatorSystem(config, problem, judgedIds);
+  const adaptacao = anunciado && mudancaTests ? adaptationFacts(session, mudancaTests, endT) : undefined;
+  // Aprendizado (só live coding): os tempos que ele cita, como o início de uma parada, viram citáveis.
+  const aprendizado = config.mode === "system_design" ? undefined : learningFacts(session, endT);
+  for (const t of aprendizado?.times ?? []) {
+    if (!timeline.labels.has(formatMs(t))) timeline.labels.set(formatMs(t), t);
+  }
+  const system = buildEvaluatorSystem(
+    config,
+    problem,
+    judgedIds,
+    anunciado && {
+      title: anunciado.empecilho.title,
+      statement: anunciado.empecilho.statement,
+      conceito: CONCEITOS_EMPECILHO[anunciado.empecilho.concept],
+      rubricNote: anunciado.empecilho.rubricNote,
+    },
+    aprendizado?.hasMoment ?? false,
+  );
   const user = buildEvaluatorUser({
     coverage: timeline.coverage,
     durationLabel: formatMs(endT),
@@ -87,6 +119,8 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     timeline: timeline.lines,
     codeVersions: timeline.codeVersions,
     analystNotes: timeline.analystNotes,
+    adaptation: adaptacao?.lines,
+    learning: aprendizado?.hasMoment ? aprendizado.lines : undefined,
   });
 
   const output = await judge(system, user, judgedIds, status);
@@ -143,7 +177,98 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
       pastes: session.events.filter((e) => e.type === "paste").length,
       durationMs: endT,
     },
+    adaptation:
+      anunciado && adaptacao
+        ? {
+            empecilhoId: anunciado.empecilho.id,
+            kind: anunciado.empecilho.kind,
+            concept: anunciado.empecilho.concept,
+            title: anunciado.empecilho.title,
+            announcedAt: anunciado.announcedAt,
+            adaptedAt: adaptacao.adaptedAt,
+            testsPassed: adaptacao.passed,
+            testsTotal: adaptacao.total,
+            score: adaptationScore(output.adaptation?.score ?? null, adaptacao),
+            evidence: citaveis(output.adaptation?.evidence, timeline.labels),
+          }
+        : undefined,
+    learning: aprendizado
+      ? {
+          hints: aprendizado.hints,
+          hintsAvailable: aprendizado.hintsAvailable,
+          stuck: aprendizado.stuck,
+          change: aprendizado.change,
+          score: learningScore(output.learning?.score ?? null, aprendizado, endT),
+          evidence: aprendizado.hasMoment ? citaveis(output.learning?.evidence, timeline.labels) : [],
+        }
+      : undefined,
   };
+}
+
+/** Evidência com tempo que não existe na sessão é invenção do modelo: sai do relatório. */
+function citaveis(
+  evidence: { at: string; text: string }[] | undefined,
+  labels: Map<string, number>,
+): Report["criteria"][number]["evidence"] {
+  return (evidence ?? []).flatMap((e) => {
+    const t = labels.get(e.at.trim());
+    return t === undefined ? [] : [{ t, text: e.text }];
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Adaptação à mudança (empecilho)
+// ---------------------------------------------------------------------------
+
+interface AdaptationFacts {
+  /** Para o prompt. */
+  lines: string[];
+  adaptedAt: number | null;
+  passed: number;
+  total: number;
+}
+
+/** Fatos objetivos da adaptação: quando a mudança veio, quando passou e como ficou no código final. */
+function adaptationFacts(session: SessionState, tests: HiddenTestsResult, endT: number): AdaptationFacts | undefined {
+  const anunciado = empecilhoAnunciado(session);
+  if (!anunciado) return undefined;
+  const adapted = primeiraAdaptacao(session);
+  const adaptedAt = adapted?.t ?? null;
+  const runsAfter = session.events.filter((e): e is RunEvent => e.type === "run" && e.t >= anunciado.announcedAt);
+
+  // Sem execução no servidor, vale a última execução do candidato depois da mudança.
+  let passed = 0;
+  let total = 0;
+  let failed: string[] = [];
+  if (tests.ran) {
+    passed = tests.passed;
+    total = tests.total;
+    failed = tests.cases.filter((c) => !c.passed).map((c) => `${c.name}${c.detail ? ` (${c.detail})` : ""}`);
+  } else {
+    const cases = runsAfter.at(-1)?.result.cases.filter((c) => c.name.startsWith(PREFIXO_TESTE)) ?? [];
+    passed = cases.filter((c) => c.passed).length;
+    total = cases.length;
+    failed = cases.filter((c) => !c.passed).map((c) => c.name);
+  }
+
+  const restante = Math.max(0, endT - anunciado.announcedAt);
+  const lines = [
+    `A mudança veio em ${formatMs(anunciado.announcedAt)}, faltando ${formatMs(restante)} para o fim da sessão.`,
+    `Execuções depois da mudança: ${runsAfter.length}.`,
+    adaptedAt === null
+      ? "Nenhuma execução depois da mudança passou em todos os testes dela."
+      : `Os testes da mudança passaram pela primeira vez em ${formatMs(adaptedAt)} (${formatMs(adaptedAt - anunciado.announcedAt)} depois do anúncio).`,
+    total > 0
+      ? `Código final nos testes da mudança${tests.ran ? " (incluindo os escondidos dela)" : " (última execução dele)"}: ${passed}/${total}${failed.length ? `; falharam: ${failed.join("; ")}` : ""}.`
+      : `Testes da mudança não rodaram no código final${tests.ran ? "" : ` (${tests.reason})`}.`,
+  ];
+  return { lines, adaptedAt, passed, total };
+}
+
+/** Código final que não cumpre a regra nova não passa de 2, diga o LLM o que disser. */
+function adaptationScore(judged: number | null, facts: AdaptationFacts): number | null {
+  if (judged === null) return null;
+  return facts.total > 0 && facts.passed < facts.total ? Math.min(judged, 2) : judged;
 }
 
 /** Chama o LLM; tenta de novo se faltar critério na resposta. */
@@ -286,9 +411,12 @@ function buildTimeline(session: SessionState): Timeline {
     const items = outcomes.map((o) => `  ${label(o.t)} ${OUTCOME_LABELS[o.kind]}: ${o.note}`);
     return `- ${c.id}:${items.length ? `\n${items.join("\n")}` : " nenhuma sondagem registrada (use a linha do tempo e as observações)"}`;
   });
-  const challenges = session.checkIns.map(
-    (ci) => `${label(ci.createdAt)} topou o desafio de ${ci.challenge}${ci.status === "feito" ? " (o entrevistador voltou para conferir)" : " (o entrevistador não chegou a voltar)"}`,
-  );
+  const challenges = session.checkIns.map((ci) => {
+    const volta = ci.status === "feito" ? " (o entrevistador voltou para conferir)" : " (o entrevistador não chegou a voltar)";
+    return ci.empecilhoId
+      ? `${label(ci.createdAt)} recebeu a mudança no problema e precisou ${ci.challenge}${volta}`
+      : `${label(ci.createdAt)} topou o desafio de ${ci.challenge}${volta}`;
+  });
   return { lines, coverage: [...coverage, ...challenges], codeVersions, analystNotes, labels };
 }
 
@@ -323,7 +451,11 @@ function describeEvent(session: SessionState, e: SessionEvent): string | undefin
         ? ` — ${failing.name}: esperado ${failing.expected ?? "?"}, obteve ${failing.got ?? failing.error ?? "?"}`
         : "";
       const fatal = e.result.cases.length === 0 && e.result.stderr ? ` — erro: ${truncate(e.result.stderr, 160)}` : "";
-      return `rodou: ${e.result.passed}/${e.result.total} testes visíveis${detail}${fatal}`;
+      const mudanca = e.result.cases.filter((c) => c.name.startsWith(PREFIXO_TESTE));
+      const daMudanca = mudanca.length
+        ? ` (${mudanca.filter((c) => c.passed).length}/${mudanca.length} da mudança)`
+        : "";
+      return `rodou: ${e.result.passed}/${e.result.total} testes${mudanca.length ? "" : " visíveis"}${daMudanca}${detail}${fatal}`;
     }
     case "paste":
       return `colou ${e.lines} linhas (${e.chars} caracteres) na linha ${e.startLine}`;
@@ -331,6 +463,8 @@ function describeEvent(session: SessionState, e: SessionEvent): string | undefin
       return `recebeu dica nível ${e.level}: ${truncate(e.text, 200)}`;
     case "language_changed":
       return `mudou a linguagem para ${e.language}`;
+    case "empecilho":
+      return `MUDANÇA NO PROBLEMA trazida pelo entrevistador (${e.kind === "requisito" ? "o requisito mudou" : "entrou um caso novo"}): ${e.title}; exige ${CONCEITOS_EMPECILHO[e.concept]}`;
     case "blip_opened": {
       const q = session.queue.find((item) => item.id === e.blipId);
       return `abriu a pergunta do entrevistador${q ? `: "${q.question}"` : ""}`;

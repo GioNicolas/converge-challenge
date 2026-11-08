@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, ChevronDown, ChevronUp, Loader2, X } from "lucide-react";
-import type { RunResult } from "@/lib/contracts";
+import { PREFIXO_TESTE_MUDANCA as PREFIXO_MUDANCA, type RunResult } from "@/lib/contracts";
 
 export type RunState =
   | { status: "idle" }
@@ -51,16 +51,12 @@ export default function RunResults({ state, total }: { state: RunState; total: n
         </button>}
       </header>
 
-      {aberto && temCorpo && (
+      {(aberto || rodando) && temCorpo && (
         <div className="max-h-[180px] overflow-y-auto border-t border-borda px-4 py-3 text-corpo">
           {state.status === "idle" && (
             <p className="label-pequena">Rode o código para ver os testes aqui.</p>
           )}
-          {rodando && (
-            <p className="label-pequena">
-              {rodando.loadingPyodide ? "Rodando… a primeira execução carrega o Python." : "Rodando…"}
-            </p>
-          )}
+          {rodando && <Testando rodando={rodando} total={total} />}
           {feito && <Done result={feito} />}
         </div>
       )}
@@ -86,7 +82,18 @@ function Done({ result }: { result: RunResult }) {
               <X size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-perigo" />
             )}
             <div className="min-w-0">
-              <p className="font-medium">{c.name}</p>
+              <p className="font-medium">
+                {c.name.startsWith(PREFIXO_MUDANCA) ? (
+                  <>
+                    <span className="mr-1.5 rounded-full bg-alerta/15 px-1.5 py-0.5 text-mini font-medium text-alerta">
+                      Mudança
+                    </span>
+                    {c.name.slice(PREFIXO_MUDANCA.length)}
+                  </>
+                ) : (
+                  c.name
+                )}
+              </p>
               {!c.passed && (
                 <p className="font-mono text-mini text-texto-suave">
                   {c.error ?? `esperado ${c.expected}, obtido ${c.got}`}
@@ -103,6 +110,28 @@ function Done({ result }: { result: RunResult }) {
           <pre className="whitespace-pre-wrap font-mono text-mini">{result.stdout}</pre>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Aviso bem visível de que a solução está sendo testada: barra de progresso e a contagem de casos. */
+function Testando({ rodando, total }: { rodando: Extract<RunState, { status: "running" }>; total: number }) {
+  const indeterminado = rodando.loadingPyodide || rodando.feitos === 0 || total === 0;
+  const pct = indeterminado ? 100 : Math.min(100, Math.round((rodando.feitos / total) * 100));
+  return (
+    <div role="status" className="space-y-2.5 py-1">
+      <p className="flex items-center gap-2 text-corpo font-medium">
+        <Loader2 size={16} strokeWidth={2} className="animate-spin text-marca" aria-hidden />
+        {rodando.loadingPyodide
+          ? "Preparando o Python… (só na primeira vez)"
+          : `Testando sua solução… ${rodando.feitos} de ${total} casos`}
+      </p>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-superficie-2" aria-hidden>
+        <div
+          className={`h-full rounded-full bg-marca transition-[width] duration-rapida ease-suave ${indeterminado ? "animate-pulse" : ""}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   );
 }

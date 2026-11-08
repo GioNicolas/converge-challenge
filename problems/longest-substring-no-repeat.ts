@@ -6,6 +6,29 @@ const ciclo = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i)).
 export const LONGEST_SUBSTRING_NO_REPEAT: Problem = {
   public: publicFromIde("longest-substring-no-repeat"),
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "espacos-nas-pontas",
+        kind: "caso_novo",
+        concept: "normalizacao_de_entrada",
+        title: "Espaços sobrando nas pontas",
+        statement: "Agora o texto vem de um formulário e pode ter espaços sobrando no começo e no fim. Esses espaços das pontas não contam: ignore-os antes de medir. Os do meio continuam contando.",
+        announcement:
+          "Uma mudança: essa função vai receber texto digitado num formulário, e o pessoal sempre deixa espaço sobrando no começo e no fim. Esses espaços das pontas não contam. Os espaços do meio continuam contando normal.",
+        tests: [
+          { name: "Espaços nas duas pontas", input: { s: "  abc  " }, expected: 3 },
+          { name: "Só espaços", input: { s: "   " }, expected: 0 },
+          { name: "Espaços só no começo", input: { s: "  xyz" }, expected: 3 },
+        ],
+        clarifications: [
+          { question: "Espaço no meio conta?", answer: "Conta, como antes." },
+          { question: "Pode vir tab ou quebra de linha?", answer: "Não, só espaço." },
+        ],
+        rubricNote:
+          "Boa adaptação: limpa as pontas antes da janela e mantém a janela igual. Fraca: remove todos os espaços (inclusive os do meio) ou mexe na lógica da janela sem necessidade.",
+      },
+    ],
     hiddenTests: [
       { name: "Um caractere", input: { s: "a" }, expected: 1 },
       { name: "Tudo distinto", input: { s: "abcdef" }, expected: 6 },

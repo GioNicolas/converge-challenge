@@ -11,6 +11,29 @@ const grande = [
 export const TOP_K_FREQUENT: Problem = {
   public: publicFromIde("top-k-frequent"),
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "k-maior-que-distintos",
+        kind: "caso_novo",
+        concept: "parametro_fora_do_limite",
+        title: "k pode passar do número de valores",
+        statement: "Agora `k` pode ser maior que a quantidade de valores distintos de `nums`. Nesse caso, retorne todos os valores distintos.",
+        announcement:
+          "Uma mudança que veio do time de dados: quem chama essa função às vezes pede um k maior do que a quantidade de valores diferentes que existem. Nesse caso, ela deve retornar todos os valores distintos, sem quebrar.",
+        tests: [
+          { name: "k maior que os distintos", input: { nums: [1, 1, 2], k: 5 }, expected: [1, 2] },
+          { name: "Um valor, k = 2", input: { nums: [3], k: 2 }, expected: [3] },
+          { name: "k passa por um", input: { nums: [4, 4, 6, 6, 6, 7], k: 4 }, expected: [4, 6, 7] },
+        ],
+        clarifications: [
+          { question: "Em que ordem?", answer: "Qualquer ordem, como antes." },
+          { question: "k pode ser zero ou negativo?", answer: "Não, k continua sendo pelo menos 1." },
+        ],
+        rubricNote:
+          "Boa adaptação: identifica onde o código assume k <= distintos (índice, laço até completar k) e limita sem reescrever tudo. Fraca: estoura índice, entra em laço infinito ou devolve repetidos.",
+      },
+    ],
     hiddenTests: [
       { name: "k igual ao total de distintos", input: { nums: [1, 2, 3, 3, 2, 3], k: 3 }, expected: [1, 2, 3] },
       { name: "Negativos", input: { nums: [-5, -5, -5, 0, 0, 9], k: 1 }, expected: [-5] },

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { findConfig } from "@/lib/config/store";
 import { sendTriagemConvite } from "@/lib/email";
 import { criarConvite, salvarConvite } from "@/lib/convites/store";
-import { ehCandidatoTeste } from "@/lib/convites/teste";
+import { recebeEmail } from "@/lib/convites/teste";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ const Body = z.object({
 
 type Status = "enviado" | "simulado" | "erro";
 
-/** Cria um convite por candidato. Só candidatos de teste recebem email; os demais são demonstração. */
+/** Cria um convite por candidato. Só quem `recebeEmail` (o Lucas) recebe email; os demais são simulados. */
 export async function POST(req: NextRequest) {
   let json: unknown;
   try {
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   const resultados: { email: string; status: Status; motivo?: string; link?: string }[] = [];
   for (const candidato of body.candidatos) {
     const email = candidato.email.toLowerCase();
-    const teste = ehCandidatoTeste(email);
+    const real = recebeEmail(email);
     const convite = criarConvite({
       vagaId: body.vagaId,
       configId: body.configId,
@@ -66,10 +66,11 @@ export async function POST(req: NextRequest) {
     });
     const link = `${base}/agendar/${convite.token}`;
 
-    // Guarda de segurança: nunca chamar o provedor de email para endereços de demonstração.
-    if (!teste) {
+    // Guarda de segurança: nunca chamar o provedor de email para endereços de demonstração (nem para o
+    // resto do time, que fica simulado para não gastar envio).
+    if (!real) {
       await salvarConvite({ ...convite, status: "simulado" });
-      resultados.push({ email, status: "simulado", motivo: "candidato de demonstração (sem envio)" });
+      resultados.push({ email, status: "simulado", motivo: "sem envio de e-mail (demonstração)", link });
       continue;
     }
 

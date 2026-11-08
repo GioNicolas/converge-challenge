@@ -1,11 +1,13 @@
 /** Registro dos kits. Só no servidor: nada daqui, além de dadosPublicosDoProblema, vai ao navegador. */
 import type { Kit, Problema } from "./tipos";
 import { KIT_SYSTEM_DESIGN } from "./system-design";
+import { KIT_SYSTEM_DESIGN_IA } from "./system-design-ia";
 import { KIT_DESIGN_PRODUTO } from "./design-produto";
 import { repositorioAvaliacoesPadrao } from "./repositorio";
 
 export const KITS: Record<string, Kit> = {
   [KIT_SYSTEM_DESIGN.id]: KIT_SYSTEM_DESIGN,
+  [KIT_SYSTEM_DESIGN_IA.id]: KIT_SYSTEM_DESIGN_IA,
   [KIT_DESIGN_PRODUTO.id]: KIT_DESIGN_PRODUTO,
 };
 
@@ -22,6 +24,7 @@ const AVALIACOES: Record<string, { kitId: string; problemaId: string }> = {
   demo: { kitId: "system_design", problemaId: "encurtador_url" },
   "demo-chat": { kitId: "system_design", problemaId: "chat_tempo_real" },
   "demo-pagamentos": { kitId: "system_design", problemaId: "pagamentos_instantaneos" },
+  "demo-chatbot-ia": { kitId: "system_design_ia", problemaId: "chatbot_atendimento_ia" },
   "demo-produto": { kitId: "design_produto", problemaId: "onboarding_60_mais" },
 };
 

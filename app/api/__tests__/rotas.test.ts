@@ -117,7 +117,7 @@ describe("POST /api/sessoes", () => {
       const r = await criar(post("/api/sessoes", { avaliacao_id: "demo", candidato_id: "c1", config_id: "cfg-teste-sd" }));
       assert.equal(r.status, 200);
       const corpo = await r.json();
-      assert.equal((corpo.problema as { titulo: string }).titulo, "Chat em tempo real", "o plano trocou o kit pelo do problema");
+      assert.equal((corpo.problema as { titulo: string }).titulo, "Chatbot de atendimento com IA", "o plano trocou o kit pelo do problema");
       const estado = (await repo.obter(corpo.sessao_id))?.estado;
       assert.equal(estado?.plano?.cargo, "Staff Engineer");
       assert.equal(estado?.plano?.dicas, "nenhuma");

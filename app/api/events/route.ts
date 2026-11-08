@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { runAnalyst } from "@/lib/agents/analyst";
-import { startEvaluation } from "@/lib/agents/evaluator";
+import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
 import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { resolveConfig } from "@/lib/config/store";
+import { prewarmPyodide } from "@/lib/execution/pyodide-node";
 import { EventsResponse, SessionEvent, type InterviewConfig } from "@/lib/contracts";
 import { problems } from "@/lib/problems";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
@@ -10,6 +11,8 @@ import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hasProblem } from "@/problems";
 
 export const dynamic = "force-dynamic";
+// A avaliação (testes escondidos + LLM) roda depois da resposta e leva de 15 s a 1 min: a função precisa continuar viva.
+export const maxDuration = 120;
 
 /**
  * A questão que a IDE está mostrando vence a da config (o `?problema=` dos testes troca a questão na tela):
@@ -35,9 +38,17 @@ export async function POST(request: Request) {
   const config = event.type === "session_started" ? comRegrasDaSquad(withProblem(await resolveConfig(event.configId), event.problemId)) : undefined;
   const session = getOrCreateSession(event.sessionId, config);
   appendEvent(session, event);
-  if (event.type === "session_started") enqueueKickoff(session, event.t);
+  if (event.type === "session_started") {
+    enqueueKickoff(session, event.t);
+    // Carrega o Python agora: quando a sessão acabar e os testes escondidos rodarem, ele já está pronto.
+    if (event.language === "python") prewarmPyodide();
+  }
   // A avaliação leva de 15 s a 1 min: começa já, em segundo plano, e o GET /api/report busca o resultado.
-  if (event.type === "session_ended") startEvaluation(session);
+  if (event.type === "session_ended") {
+    startEvaluation(session);
+    // Na Vercel, o que roda depois da resposta é interrompido a menos que a plataforma saiba que ainda há trabalho.
+    after(() => waitForEvaluation(session).then(() => undefined));
+  }
   if (ANALYZED_TRIGGERS.has(event.type)) {
     try {
       await runAnalyst(session, event);

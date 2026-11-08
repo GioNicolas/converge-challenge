@@ -6,10 +6,13 @@
 import type { RunResult } from "@/lib/contracts";
 import { isNativeLanguage, runNativeTests } from "@/lib/execution/native";
 import { runPythonTests } from "@/lib/execution/python";
+import { runPythonTestsPyodide } from "@/lib/execution/pyodide-node";
 import { problems as IDE_PROBLEMS, type PublicProblem, type PublicTest } from "@/lib/problems";
 import type { Problem, ProblemTest } from "@/lib/problems/types";
 
-const SMALL_TIMEOUT_MS = 5_000;
+// Medido no Pyodide (worker quente): os casos pequenos levam milissegundos e o grande (10^5) ~100 ms com hashmap.
+// Os limites têm folga de dezenas de vezes e mantêm curto o tempo de quem tem laço infinito ou força bruta.
+const SMALL_TIMEOUT_MS = 3_000;
 /** Hashmap em Python resolve 10^5 em ~50 ms; força bruta leva minutos. */
 const LARGE_TIMEOUT_MS = 4_000;
 
@@ -25,15 +28,30 @@ export type HiddenTestsResult =
   | { ran: true; passed: number; total: number; cases: HiddenTestCase[]; durationMs: number }
   | { ran: false; reason: string };
 
-export async function runHiddenTests(problem: Problem, code: string, language: string): Promise<HiddenTestsResult> {
-  if (process.env.NODE_ENV === "production" && process.env.ENABLE_NATIVE_RUN !== "1") {
-    return { ran: false, reason: "execução no servidor desligada neste ambiente" };
+export function runHiddenTests(problem: Problem, code: string, language: string): Promise<HiddenTestsResult> {
+  return runServerTests(problem, problem.private.hiddenTests, code, language);
+}
+
+/**
+ * Roda uma lista qualquer de testes do pacote no servidor (os escondidos, ou os da mudança do empecilho).
+ * `prefix` vai na frente do nome de cada caso ("Mudança: ").
+ */
+export async function runServerTests(
+  problem: Problem,
+  tests: ProblemTest[],
+  code: string,
+  language: string,
+  prefix = "",
+): Promise<HiddenTestsResult> {
+  // Python roda no Pyodide (WebAssembly), então vale em produção. C/C++ precisam de compilador no servidor: só com ENABLE_NATIVE_RUN=1.
+  if (isNativeLanguage(language) && process.env.NODE_ENV === "production" && process.env.ENABLE_NATIVE_RUN !== "1") {
+    return { ran: false, reason: "execução de C/C++ no servidor desligada neste ambiente" };
   }
   const ide = IDE_PROBLEMS[problem.public.id];
   if (!ide) return { ran: false, reason: `problema ${problem.public.id} sem assinatura na IDE` };
   if (code.trim() === "") return { ran: false, reason: "código vazio" };
+  if (tests.length === 0) return { ran: false, reason: "nenhum teste" };
 
-  const tests = problem.private.hiddenTests;
   const started = Date.now();
   const small = tests.filter((t) => !t.large);
   const batches: { tests: ProblemTest[]; timeoutMs: number }[] = [
@@ -42,10 +60,20 @@ export async function runHiddenTests(problem: Problem, code: string, language: s
   ];
 
   const cases: HiddenTestCase[] = [];
+  // Se os casos pequenos já estouraram o tempo (laço infinito, por exemplo), os grandes também estourariam:
+  // não gasta mais segundos esperando por eles.
+  let estourouNosPequenos = false;
   for (const batch of batches) {
-    const publicTests = batch.tests.map((t, i) => toPublicTest(ide, t, cases.length + i));
+    if (estourouNosPequenos && batch.tests.every((t) => t.large)) {
+      for (const t of batch.tests) {
+        cases.push({ name: `${prefix}${t.name ?? `Escondido ${cases.length + 1}`}`, passed: false, large: true, detail: "tempo esgotado" });
+      }
+      continue;
+    }
+    const publicTests = batch.tests.map((t, i) => toPublicTest(ide, t, cases.length + i, prefix));
     const result = await runBatch(ide, code, language, publicTests, batch.timeoutMs);
     if (result === undefined) return { ran: false, reason: `linguagem ${language} sem runner no servidor` };
+    if (!batch.tests.some((t) => t.large) && result.stderr.startsWith("Tempo esgotado")) estourouNosPequenos = true;
     batch.tests.forEach((t, i) => {
       const c = result.cases[i];
       const timedOut = !c?.passed && result.stderr.startsWith("Tempo esgotado");
@@ -73,16 +101,20 @@ function runBatch(
   tests: PublicTest[],
   timeoutMs: number,
 ): Promise<RunResult> | undefined {
-  if (language === "python") return runPythonTests(ide, code, { tests, runTimeoutMs: timeoutMs });
+  // PYTHON_RUNNER=process usa o python3 local (só para depurar); o padrão é o Pyodide, igual em dev e em produção.
+  if (language === "python") {
+    const rodar = process.env.PYTHON_RUNNER === "process" ? runPythonTests : runPythonTestsPyodide;
+    return rodar(ide, code, { tests, runTimeoutMs: timeoutMs });
+  }
   if (isNativeLanguage(language)) return runNativeTests(language, ide, code, { tests, runTimeoutMs: timeoutMs });
   return undefined;
 }
 
 /** `input` do teste escondido é um objeto por nome de parâmetro; o runner quer os argumentos em ordem. */
-function toPublicTest(ide: PublicProblem, test: ProblemTest, index: number): PublicTest {
+function toPublicTest(ide: PublicProblem, test: ProblemTest, index: number, prefix: string): PublicTest {
   const input = test.input as Record<string, unknown>;
   return {
-    name: test.name ?? `Escondido ${index + 1}`,
+    name: `${prefix}${test.name ?? `Escondido ${index + 1}`}`,
     args: ide.native.params.map((p) => input[p.name]),
     expected: test.expected,
   };

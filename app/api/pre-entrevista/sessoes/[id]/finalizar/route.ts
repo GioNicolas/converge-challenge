@@ -2,24 +2,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { registrarEvento } from "@/lib/pre-entrevista/log";
-import { aguardarExtracao, aplicarPesosNaSessao, getSessao, salvarConfig, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
+import { aplicarPesosNaSessao, extrairSeAtrasada, salvarConfig, sincronizarSessao, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
 import { atualizarNaoAvaliado } from "@/lib/pre-entrevista/turno";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const Corpo = z.object({ rascunho: Rascunho.optional() });
+// `copia`: a sessão como a tela a guardou, para reconstruir se esta instância não a tiver (ver `sincronizarSessao`).
+const Corpo = z.object({ rascunho: Rascunho.optional(), copia: z.unknown().optional() });
 
 /**
  * Gera o InterviewConfig a partir do rascunho. Se vier `rascunho` no corpo, é a versão revisada
- * à mão e substitui o da sessão (com diff no log). Espera a extração em curso terminar antes.
+ * à mão e substitui o da sessão (com diff no log). Espera a extração em curso terminar antes (e a refaz
+ * se ela não acompanhou a última fala, como numa sessão reconstruída da cópia).
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const sessao = getSessao(id);
-  if (!sessao) return NextResponse.json({ erro: "sessão não encontrada" }, { status: 404 });
-
   const texto = await req.text();
   let bruto: unknown = {};
   if (texto.trim()) {
@@ -30,6 +29,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
   const lido = Corpo.safeParse(bruto);
+  // A cópia vale mesmo com a revisão inválida: o 422 precisa da sessão para registrar o erro.
+  const sessao = sincronizarSessao(id, (bruto as { copia?: unknown } | null)?.copia);
+  if (!sessao) return NextResponse.json({ erro: "sessão não encontrada" }, { status: 404 });
   if (!lido.success) {
     const erros = lido.error.issues.map((i) => `${i.path.join(".") || "(raiz)"}: ${i.message}`);
     registrarEvento(sessao, {
@@ -41,7 +43,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: false, erros }, { status: 422 });
   }
 
-  await aguardarExtracao(sessao);
+  await extrairSeAtrasada(sessao);
   if (lido.data.rascunho) substituirRascunho(sessao, lido.data.rascunho, "revisão manual");
 
   atualizarNaoAvaliado(sessao);

@@ -7,6 +7,30 @@ const grandeResp = [...Array.from({ length: 99_999 }, (_, i) => 99_999 - i), 0];
 export const DAILY_TEMPERATURES: Problem = {
   public: publicFromIde("daily-temperatures"),
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "sensor-com-falha",
+        kind: "caso_novo",
+        concept: "dado_invalido",
+        title: "Leituras com falha",
+        statement: "Agora o sensor às vezes falha e manda `-1`. Um dia com `-1` tem resposta `0` e nunca conta como dia mais quente para os outros.",
+        announcement:
+          "Chegou uma mudança do time de hardware: o sensor às vezes falha e manda -1 no lugar da temperatura. O dia com -1 tem resposta 0, e ele nunca conta como um dia mais quente pros outros.",
+        tests: [
+          { name: "Falha no meio", input: { temperatures: [70, -1, 72] }, expected: [2, 0, 0] },
+          { name: "Só falhas", input: { temperatures: [-1, -1] }, expected: [0, 0] },
+          { name: "Falha antes de um dia mais frio", input: { temperatures: [75, -1, 74, 76] }, expected: [3, 0, 1, 0] },
+        ],
+        hiddenTests: [{ name: "Falhas espalhadas", input: { temperatures: [-1, 50, -1, 40, 60] }, expected: [0, 3, 0, 1, 0] }],
+        clarifications: [
+          { question: "Os dias com -1 contam na contagem de dias?", answer: "Contam: a resposta continua sendo quantos dias de calendário até o mais quente." },
+          { question: "Pode ter outro valor inválido?", answer: "Não, só o -1." },
+        ],
+        rubricNote:
+          "Boa adaptação: trata o -1 tanto como dia que não procura resposta quanto como dia que não serve de resposta, mantendo a mesma abordagem. Fraca: trata só um dos dois lados.",
+      },
+    ],
     hiddenTests: [
       { name: "Temperaturas iguais", input: { temperatures: [70, 70, 70] }, expected: [0, 0, 0] },
       { name: "Vale no meio", input: { temperatures: [80, 60, 70, 90] }, expected: [3, 1, 1, 0] },

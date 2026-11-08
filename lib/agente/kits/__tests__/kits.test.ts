@@ -19,9 +19,9 @@ test("ids únicos de kits, problemas e critérios", () => {
   }
 });
 
-test("cada critério tem 4 níveis não vazios; rubricas têm 6 critérios", () => {
+test("cada critério tem 4 níveis não vazios; rubricas têm 6 ou 7 critérios", () => {
   for (const k of kits) {
-    assert.equal(k.criterios.length, 6, k.id);
+    assert.ok(k.criterios.length >= 6 && k.criterios.length <= 7, k.id);
     for (const c of k.criterios)
       for (const n of [1, 2, 3, 4] as const) assert.ok(c.niveis[n].trim().length > 0, `${k.id}/${c.id}/${n}`);
   }
@@ -46,6 +46,9 @@ test("modos de leitura e problemas por kit", () => {
   assert.equal(obterKit("system_design")!.modoLeitura, "grafo");
   assert.equal(obterKit("design_produto")!.modoLeitura, "visual");
   assert.equal(obterKit("system_design")!.problemas.length, 3);
+  assert.equal(obterKit("system_design_ia")!.modoLeitura, "grafo");
+  assert.deepEqual(obterKit("system_design_ia")!.criterios.map((c) => c.id).at(-1), "uso_ia");
+  assert.equal(obterProblema("system_design_ia", "chatbot_atendimento_ia")?.titulo, "Chatbot de atendimento com IA");
   assert.equal(obterKit("inexistente"), undefined);
   assert.equal(obterKit("__proto__"), undefined);
   assert.equal(obterProblema("system_design", "chat_tempo_real")?.titulo, "Chat em tempo real");
@@ -57,6 +60,7 @@ test("resolverAvaliacao", async () => {
     demo: ["system_design", "encurtador_url"],
     "demo-chat": ["system_design", "chat_tempo_real"],
     "demo-pagamentos": ["system_design", "pagamentos_instantaneos"],
+    "demo-chatbot-ia": ["system_design_ia", "chatbot_atendimento_ia"],
     "demo-produto": ["design_produto", "onboarding_60_mais"],
   };
   for (const [id, [kitId, problemaId]] of Object.entries(casos)) {
