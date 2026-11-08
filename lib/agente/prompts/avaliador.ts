@@ -101,7 +101,7 @@ Escolha no máximo 1 ou 2 áreas para aprofundar. Critérios de escolha: armadil
 REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
 - "visual": composição dos gestos descritos acima, ou [] para só falar. Não precisa decorar toda pergunta com uma marca.
 - "status": um de ${STATUS_ANALISE.map((s) => `"${s}"`).join(", ")}.
-- "pergunta": para status diferente de "ok", a fala do entrevistador, em pt-BR, natural e clara (princípio 11): no máximo duas frases curtas, a primeira dizendo o que você vê ou quer entender e por que importa para o cargo, a segunda com UMA pergunta concreta (com as opções, se for uma escolha). Sem elogio, sem dizer se está certo ou errado. Para "ok", null.
+- "pergunta": para status diferente de "ok", a fala do entrevistador, em pt-BR, natural e clara (princípio 11): no máximo duas frases curtas, a primeira dizendo o que você vê ou quer entender e por que importa para o cargo, a segunda com UMA pergunta concreta (com as opções, se for uma escolha). Termine na pergunta, ligada ao que o candidato desenhou ou disse: a bola fica com ele, e nada vem depois dela. Sem elogio, sem dizer se está certo ou errado. Para "ok", null.
 - "nota": versão escrita no quadro, no máximo 40 caracteres (ex.: "Prazo: e se atrasar?"), coerente com a pergunta e com os elementos circulados. Para "ok", null.
 - "elementos": ids curtos que existem no grafo recebido (ex.: "e1"), SOMENTE os elementos sobre os quais a pergunta fala. Se a pergunta é sobre um requisito, sobre algo que ainda não está no quadro, ou sobre o desenho como um todo, use lista vazia. Nunca invente ids.
 - "degrau": 1, 2 ou 3 conforme a escada de ajuda; senão null.
