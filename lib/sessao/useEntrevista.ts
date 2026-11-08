@@ -781,7 +781,7 @@ export function useEntrevista(
     void dizer(texto, undefined, { origem: "iniciativa" });
   }, [dizer]);
 
-  // Conversa por texto (enquanto não há voz do candidato): as falas digitadas e as respostas do /perguntar.
+  // Transcrição da conversa: as falas do candidato (a voz já transcrita) e as respostas do /perguntar.
   const [mensagens, setMensagens] = useState<MensagemConversa[]>([]);
   const contadorDeMensagens = useRef(0);
   /** A última fala do candidato e a resposta dela, enquanto a resposta não tocou (saem se forem substituídas). */
@@ -949,11 +949,6 @@ export function useEntrevista(
     ultimaFalaEm.current = Date.now();
     ultimaAtividade.current = Date.now();
   }, []);
-  /** Digitar na Conversa é atividade: o silêncio só conta depois que o candidato para de escrever. */
-  const registrarAtividade = useCallback(() => {
-    ultimaAtividade.current = Date.now();
-    ultimaFalaEm.current = Date.now();
-  }, []);
   const encerrar = useCallback(() => {
     cicloDaSala.current++;
     silenciar();
@@ -986,7 +981,6 @@ export function useEntrevista(
     respostaNaoOuvida,
     descartarRespostaNaoOuvida,
     pedirParaRepetir,
-    registrarAtividade,
     encerrar,
     empecilho,
     forcarEmpecilho,

@@ -541,15 +541,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         <FakeCursor ref={cursorRef} />
 
         <JanelaChamada
-          pergunta={null}
           oculta={false}
           encerrada={session.ended}
           iniciadaEm={session.startedAtRef.current || null}
           midia={midia}
           agenteFalando={voz.estado === "falando"}
           agentePensando={conversa.pensando || voz.estado === "preparando"}
-          onClicarPlin={() => {}}
-          onAdiar={() => {}}
         />
 
         <Legenda fala={voz.fala ?? legendaSemVoz} />
