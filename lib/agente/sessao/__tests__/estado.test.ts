@@ -227,11 +227,11 @@ describe("limite e intervalo", () => {
     return transicionar(c, { tipo: "CANDIDATO_FALOU", texto: "ok", fimDeResposta: true }, quando + 2).estado;
   }
 
-  it("não aceita plin antes de 60s da última pergunta", () => {
+  it("não aceita plin antes do intervalo desde a última pergunta (25 s)", () => {
     const e = pergunta(emFase("APROFUNDAMENTO"), T0 + MIN);
-    const cedo = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 1 + 59_000);
+    const cedo = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 1 + 24_000);
     assert.equal(cedo.estado.plin, "LIVRE");
-    const ok = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 1 + 60_000);
+    const ok = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 1 + 25_000);
     assert.equal(ok.estado.plin, "PLIN_PENDENTE");
   });
 

@@ -239,8 +239,11 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     pergunta: resposta.pergunta,
     nota: resposta.nota,
     elementos: resposta.elementos,
+    // Sem estes dois, os gestos do modelo nunca chegavam ao quadro e a fase não avançava sozinha.
+    ...(resposta.visual !== undefined ? { visual: resposta.visual } : {}),
     degrau: resposta.degrau,
     observacoes: resposta.observacoes,
+    ...(resposta.avancar_fase ? { avancar_fase: true } : {}),
   } satisfies RespostaAnalise);
 }
 
@@ -415,6 +418,21 @@ function idsDe(dados: unknown): string[] {
   return [];
 }
 
+/** Desenho mínimo para sair de REQUISITOS: um traço solto no começo não encerra as perguntas de requisito. */
+export const MIN_PECAS_PARA_SAIR_DOS_REQUISITOS = 2;
+
+/** Componentes + conexões no grafo em texto (as linhas "- [id]" dessas duas seções). */
+export function pecasDoDesenho(grafo: string): number {
+  let secao = "";
+  let n = 0;
+  for (const linha of grafo.split("\n")) {
+    const t = linha.trim();
+    if (!t.startsWith("-")) secao = t;
+    else if ((secao === "COMPONENTES" || secao === "CONEXÕES") && /^- \[/.test(t)) n++;
+  }
+  return n;
+}
+
 /** Traduz um evento da linha do tempo em eventos da máquina (tipos desconhecidos: nenhum). */
 export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
   const d = (dados ?? {}) as Record<string, unknown>;
@@ -435,7 +453,9 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       ];
     case "desenho": {
       const ids = idsDe(dados);
-      const eventos: EventoSessao[] = [{ tipo: "CANDIDATO_DESENHOU" }];
+      // Sem grafo (cliente antigo), vale o comportamento de antes: qualquer desenho sai de REQUISITOS.
+      const estruturado = typeof d.grafo !== "string" || pecasDoDesenho(d.grafo) >= MIN_PECAS_PARA_SAIR_DOS_REQUISITOS;
+      const eventos: EventoSessao[] = estruturado ? [{ tipo: "CANDIDATO_DESENHOU" }] : [];
       if (ids.length) eventos.push({ tipo: "ELEMENTOS_ALTERADOS", ids });
       return eventos;
     }

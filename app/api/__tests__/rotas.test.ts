@@ -77,7 +77,7 @@ describe("POST /api/sessoes", () => {
     assert.ok((corpo.tempos as Record<string, number>).REQUISITOS > 0);
     assert.equal((await repo.obter(sessao_id))?.estado.fase, "APRESENTACAO");
   });
-  it("a abertura (apresentação e despedida) vem do modelo; sem LLM ou com erro vem null", async () => {
+  it("a abertura (apresentação e despedida) vem do modelo; sem LLM vem null; com erro vem a de reserva", async () => {
     const { corpo } = await novaSessao();
     assert.equal(typeof corpo.apresentacao, "string");
     assert.equal(typeof corpo.despedida, "string");
@@ -91,9 +91,10 @@ describe("POST /api/sessoes", () => {
     const quebrado = criarClienteFalso([new Error("fora do ar")]);
     definirContextoParaTestes({ repositorio: repo, llm: quebrado, agora: () => relogio });
     const comErro = (await novaSessao()).corpo;
-    assert.equal(comErro.apresentacao, null);
-    assert.equal(comErro.despedida, null);
-    assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura");
+    // O Totti não pode ir direto ao desafio sem se apresentar: com o modelo fora do ar, vale a fala de reserva.
+    assert.match(String(comErro.apresentacao), /Totti/);
+    assert.equal(typeof comErro.despedida, "string");
+    assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura do modelo");
   });
   it("a abertura é guardada por kit+problema: a 2ª sessão não chama o modelo de novo", async () => {
     const llm = criarClienteFalso([{ apresentacao: "Olá, tudo bem? Vamos começar.", despedida: "Obrigado. Daremos retorno." }]);

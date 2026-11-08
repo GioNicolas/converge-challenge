@@ -466,6 +466,9 @@ export async function completeJson<T>(opts: {
 
   // Sem chave do OpenRouter: comportamento de antes, só Featherless.
   if (!process.env.OPENROUTER_API_KEY) return callOnly(call, "featherless", opts.signal);
+  // Sem chave da Featherless: só OpenRouter. Sem isso, duas lentidões do OpenRouter abriam o disjuntor e
+  // mandavam tudo para a Featherless (que falha na hora) por minutos.
+  if (!process.env.FEATHERLESS_API_KEY) return callOnly(call, "openrouter", opts.signal);
   if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
   if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
   return callHedged(opts.role, call, cfg.hedgeMs, opts.signal);
