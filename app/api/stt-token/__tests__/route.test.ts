@@ -68,3 +68,16 @@ test("limita pedidos repetidos da mesma sessão (429)", async () => {
   assert.equal(status[19], 200);
   assert.equal(status[20], 429);
 });
+
+test("teto global barra o gasto mesmo com muitas sessões e IPs diferentes (429)", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  let chamadas = 0;
+  globalThis.fetch = (async () => { chamadas++; return Response.json({ token: "tk" }); }) as typeof fetch;
+  let barrou = false;
+  for (let i = 0; i < 400 && !barrou; i++) {
+    getOrCreateSession(`s-global-${i}`);
+    barrou = (await GET(pedido(`?sessao_id=s-global-${i}`))).status === 429;
+  }
+  assert.equal(barrou, true);
+  assert.ok(chamadas <= 300);
+});

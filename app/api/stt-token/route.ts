@@ -10,8 +10,13 @@ export const dynamic = "force-dynamic";
 const URL_TOKEN = "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe";
 
 // Uma conexão usa 1 token + até 5 reconexões; os limites deixam folga e barram laços de pedidos.
+// Os contadores ficam em memória, como o store de sessões (lib/session/store): uma sessão só existe na
+// instância que a criou, então o limite por sessão vale onde a sessão vale. O teto global limita o gasto
+// total com o ElevenLabs, mesmo que alguém crie muitas sessões novas (o evento session_started não exige login).
 const limitadorPorIp = criarLimitador(30, 60_000);
 const limitadorPorSessao = criarLimitador(20, 600_000);
+const limitadorPorSessaoNaHora = criarLimitador(60, 3_600_000);
+const limitadorGlobal = criarLimitador(300, 600_000);
 
 const erro = (status: number, mensagem: string) => NextResponse.json({ erro: mensagem }, { status });
 
@@ -26,7 +31,10 @@ export async function GET(req: NextRequest) {
   const sessao = getSession(sessaoId);
   if (!sessao) return erro(404, "sessão não encontrada");
   if (sessao.ended) return erro(409, "sessão encerrada");
-  if (limitadorPorSessao.estourou(sessaoId)) return erro(429, "muitos pedidos de token para esta sessão");
+  if (limitadorPorSessao.estourou(sessaoId) || limitadorPorSessaoNaHora.estourou(sessaoId)) {
+    return erro(429, "muitos pedidos de token para esta sessão");
+  }
+  if (limitadorGlobal.estourou("global")) return erro(429, "limite de transcrição atingido; tente em instantes");
 
   try {
     const resposta = await fetch(URL_TOKEN, {
