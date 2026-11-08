@@ -54,6 +54,56 @@
   color: var(--texto);
 }
 
+/* Selo clicável: a pílula inteira abre o relatório. Em repouso é areia; no hover ganha tinta cheia e a seta anda. */
+.tema-recrutador .selo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px 0 12px;
+  border-radius: 999px;
+  background: var(--superficie-2);
+  box-shadow: inset 0 0 0 1px var(--borda);
+  color: var(--texto);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 220ms var(--curva-saida),
+    color 220ms var(--curva-saida),
+    box-shadow 220ms var(--curva-saida),
+    transform 220ms var(--curva-saida);
+}
+.tema-recrutador .selo-link[data-peso="leve"] {
+  color: var(--texto-suave);
+}
+.tema-recrutador .selo-link svg {
+  flex: none;
+  opacity: 0.55;
+  transition:
+    transform 220ms var(--curva-saida),
+    opacity 220ms var(--curva-saida);
+}
+.tema-recrutador .selo-link:hover {
+  background: var(--texto);
+  color: var(--texto-claro);
+  box-shadow: inset 0 0 0 1px var(--texto);
+}
+.tema-recrutador .selo-link:hover svg {
+  opacity: 1;
+  transform: translate(1.5px, -1.5px);
+}
+.tema-recrutador .selo-link:active {
+  transform: scale(0.97);
+}
+.tema-recrutador .selo-link:focus-visible {
+  outline: 2px solid var(--texto);
+  outline-offset: 2px;
+}
+
 /* Cartão: superfície branca, raio 20, sombra longa e suave no lugar dos traços */
 .tema-recrutador .cartao {
   background: var(--superficie);

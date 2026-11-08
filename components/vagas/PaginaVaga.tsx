@@ -9,7 +9,7 @@
 //   O que o Totti aprendeu → a memória da squad (regras, o que ele ignorou e a concordância com o Tech Lead).
 //   Contratações → (só em vaga que contratou) o ciclo dos 90 dias: como foi cada contratação.
 // Em Candidatos e Escores, as entrevistas feitas de verdade pelo link vêm antes, com o relatório.
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, ArrowUpRight, ChevronRight, Link2, X } from "lucide-react";
@@ -549,7 +549,7 @@ function Candidatos({
         <div className="cartao overflow-hidden">
         <div
           className={`hidden gap-5 px-5 pt-4 pb-2 md:grid ${
-            podeConvidar ? "grid-cols-[20px_minmax(0,1fr)_150px_150px_110px_100px]" : "grid-cols-[minmax(0,1fr)_150px_150px_110px_100px]"
+            podeConvidar ? "grid-cols-[20px_minmax(0,1fr)_140px_190px_110px_100px]" : "grid-cols-[minmax(0,1fr)_140px_190px_110px_100px]"
           }`}
         >
           {podeConvidar && (
@@ -579,8 +579,8 @@ function Candidatos({
                 style={{ animation: `subir .48s var(--curva-saida) ${Math.min(ordem, 12) * 0.03}s both` }}
                 className={`linha-lista mx-2 grid items-center gap-x-5 gap-y-1 rounded-xl px-3 py-3 ${
                   podeConvidar
-                    ? "grid-cols-[20px_minmax(0,1fr)_auto] md:grid-cols-[20px_minmax(0,1fr)_150px_150px_110px_100px]"
-                    : "grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_150px_150px_110px_100px]"
+                    ? "grid-cols-[20px_minmax(0,1fr)_auto] md:grid-cols-[20px_minmax(0,1fr)_140px_190px_110px_100px]"
+                    : "grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_140px_190px_110px_100px]"
                 } ${selecionados.has(c.i) ? "bg-superficie-2/60" : ""}`}
               >
                 {podeConvidar && (
@@ -602,16 +602,15 @@ function Candidatos({
                 </div>
                 <span className="hidden truncate text-[13px] text-texto-suave md:block">{c.cidade}</span>
                 {escores && c.recomendacao ? (
-                  <Link
+                  <SeloLink
                     href={RELATORIO_DEMO}
-                    className={`justify-self-end text-[13px] underline decoration-transparent underline-offset-4 transition-[text-decoration-color] duration-[240ms] hover:decoration-texto md:justify-self-start ${
-                      c.recomendacao === "nao_avancar" ? "text-texto-suave" : "text-texto"
-                    }`}
+                    leve={c.recomendacao === "nao_avancar"}
+                    titulo={`Abrir o relatório de ${c.nome}`}
                   >
                     {NOME_RECOMENDACAO[c.recomendacao]}
-                  </Link>
+                  </SeloLink>
                 ) : (
-                  <Selo s={c.situacao} href={c.situacao === "concluiu" ? RELATORIO_DEMO : undefined} />
+                  <Selo s={c.situacao} href={c.situacao === "concluiu" ? RELATORIO_DEMO : undefined} nome={c.nome} />
                 )}
                 <span className="numero hidden text-right text-[13px] text-texto-suave md:block">{quandoFoi(c.haDias)}</span>
                 <span className="hidden text-right md:block">
@@ -723,16 +722,28 @@ const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "0%
 /** Os candidatos desta lista são de demonstração: o relatório pronto abre o relatório de exemplo. */
 const RELATORIO_DEMO = "/report?sessionId=exemplo";
 
-function Selo({ s, href }: { s: Situacao; href?: string }) {
+/** Pílula inteira clicável que abre o relatório do candidato (classe .selo-link em tema-recrutador.css). */
+function SeloLink({ href, leve, titulo, children }: { href: string; leve?: boolean; titulo: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      title={titulo}
+      data-peso={leve ? "leve" : undefined}
+      className="selo-link justify-self-end md:justify-self-start"
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpRight size={13} strokeWidth={2.2} aria-hidden />
+    </Link>
+  );
+}
+
+function Selo({ s, href, nome }: { s: Situacao; href?: string; nome: string }) {
   const classe = `justify-self-end text-[13px] md:justify-self-start ${s === "concluiu" ? "text-texto" : "text-texto-suave"}`;
   if (href)
     return (
-      <Link
-        href={href}
-        className={`${classe} underline decoration-transparent underline-offset-4 transition-[text-decoration-color] duration-[240ms] hover:decoration-texto`}
-      >
+      <SeloLink href={href} titulo={`Abrir o relatório de ${nome}`}>
         {NOME_SITUACAO[s]}
-      </Link>
+      </SeloLink>
     );
   return (
     <span className={classe}>
