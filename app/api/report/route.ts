@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { candidatosPorSessao } from "@/lib/convites/store";
 import type { Report } from "@/lib/contracts";
 import { startEvaluation } from "@/lib/agents/evaluator";
+import { exemploHabilitado, relatorioExemplo } from "@/lib/session/relatorio-exemplo";
 import { findReport, listReports } from "@/lib/session/reports";
 import { getSession, listSessions } from "@/lib/session/store";
 
@@ -64,6 +65,9 @@ export async function GET(request: NextRequest) {
     for (const item of items) item.candidato = nomes.get(item.sessionId);
     return NextResponse.json(items.sort((a, b) => b.startedAt - a.startedAt));
   }
+
+  // Exemplo de dev (`/report?sessionId=exemplo`): abre o relatório sem fazer uma entrevista.
+  if (exemploHabilitado(sessionId)) return NextResponse.json(relatorioExemplo());
 
   const session = getSession(sessionId);
   if (!session) {

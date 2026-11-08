@@ -104,7 +104,7 @@ Atualizar a cada frente concluída. Cada item diz o que mostrar, a frase de palc
 2. **Resposta na thread, em segundos:** ":brain: Aprendi: Penaliza over-engineering: reprovou quem propôs Kafka sem necessidade para esse volume" e ":no_entry_sign: Ignorei "muito novo para o cargo": idade não é critério técnico. O Totti só aprende critério técnico." O botão "Ver o que aprendi" abre a tela.
 3. **Tela "O que o Totti aprendeu"** (`/vagas/aprendizado`, também no menu lateral de Vagas): a regra nova no topo, com a origem ("Da reprovação de Rafael Moura · Backend Pleno"); o motivo de idade em "O que o Totti ignorou"; e o gráfico de concordância por vaga.
 4. Desligar uma regra no interruptor (vale já para a próxima entrevista) e mostrar que dá para editar ou apagar: o aprendizado nunca fica escondido.
-5. **Fecha no relatório** (`/relatorio/exemplo` em dev): no critério Escalabilidade, o bloco "Critério aprendido com o time" mostra a regra que pesou ali.
+5. **Fecha no relatório** (`/report?sessionId=exemplo` em dev, o relatório papel e tinta de live coding): na lista de Notas, embaixo de Complexidade, o bloco "Critério aprendido com o time" mostra a regra que pesou ali. As regras do exemplo saem da memória da squad na hora em que a página abre: depois do passo 7 (os 90 dias da Bianca), Casos de borda também ganha o bloco, com a regra nova.
 
 **Ciclo dos 90 dias (F5, ~30 s, logo depois):** "Mas o Tech Lead também erra. Quem diz se o time acertou é o resultado."
 6. **Vaga Backend Pleno · Pagamentos → aba Contratações.** No topo, "2 de 3 aprovadas aos 90 dias · 1 esperando a sua resposta". A ficha da Bianca Nunes está em destaque: a entrevista disse **Avançar**, 3,3 de 4, e deu **4 em Casos de borda**.
