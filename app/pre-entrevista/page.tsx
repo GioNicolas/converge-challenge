@@ -225,7 +225,7 @@ export default function PaginaPreEntrevista() {
   }
 
   // Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
-  const teclaNaFala = useEnterDoDitado(ditado, campoFalaRef, () => void enviarFala());
+  const teclaNaFala = useEnterDoDitado(ditado, () => void enviarFala());
 
   function abrirRevisao() {
     if (!estado) return;
@@ -399,10 +399,10 @@ export default function PaginaPreEntrevista() {
               onKeyDown={teclaNaFala}
               disabled={enviando}
               rows={2}
-              placeholder="Responda ao Totti (Enter envia, Shift+Enter quebra linha; com o microfone, Enter para e outro Enter envia)"
+              placeholder="Responda ao Totti (Enter envia, Shift+Enter quebra linha)"
               className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
             />
-            <BotaoDitado transcricao={ditado} disabled={enviando} />
+            <BotaoDitado transcricao={ditado} campo={campoFalaRef} disabled={enviando} />
             <button
               onClick={() => void enviarFala()}
               disabled={enviando || !fala.trim() || ditado.ativa}

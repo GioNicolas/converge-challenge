@@ -36,6 +36,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const campoRef = useRef<HTMLInputElement>(null);
   const ditado = useTranscricao({
     bloqueada: busy || disabled || ended || !open,
     aoTexto: (texto) => setDraft((atual) => acrescentarFala(atual, texto)),
@@ -100,6 +101,7 @@ export function ChatPanel({
 
       <form onSubmit={submit} className="flex gap-2">
         <input
+          ref={campoRef}
           value={draft}
           readOnly={ditado.ativa}
           onChange={(e) => setDraft(e.target.value)}
@@ -107,7 +109,7 @@ export function ChatPanel({
           placeholder="responda ao entrevistador"
           className="min-w-0 flex-1 border border-neutral-700 bg-neutral-900 px-2 py-1 outline-none"
         />
-        <BotaoDitado transcricao={ditado} disabled={busy || disabled || ended} />
+        <BotaoDitado transcricao={ditado} campo={campoRef} disabled={busy || disabled || ended} />
         <button type="submit" disabled={busy || disabled || ended || draft.trim() === "" || ditado.ativa} className={BTN}>
           Enviar
         </button>

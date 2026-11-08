@@ -2,40 +2,39 @@
 
 // Enter no campo de conversa, com o ditado por voz (como no Claude): o primeiro Enter para de ouvir e deixa o texto
 // transcrito no campo para revisar; o segundo Enter envia. Shift+Enter continua quebrando a linha.
-import { useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+// O foco volta para o campo pelo próprio BotaoDitado (prop `campo`), só quando a pessoa clica nele.
+import type { KeyboardEvent } from "react";
 import type { EstadoTranscricao } from "./tipos";
 import type { Transcricao } from "./useTranscricao";
 
 export const DICA_DITADO_ENTER = "Ouvindo… Enter para parar, Enter de novo para enviar.";
 
-/** O que o Enter faz em cada estado do ditado. */
-export function acaoDoEnter(estado: EstadoTranscricao): "parar" | "esperar" | "enviar" {
-  if (estado === "conectando" || estado === "ouvindo") return "parar";
-  if (estado === "finalizando") return "esperar";
+type AcaoDoEnter = "parar" | "esperar" | "enviar";
+
+/** O que o Enter faz em cada estado do ditado. Enquanto conecta não há nada gravado: o Enter só espera. */
+export function acaoDoEnter(estado: EstadoTranscricao): AcaoDoEnter {
+  if (estado === "ouvindo") return "parar";
+  if (estado === "conectando" || estado === "finalizando") return "esperar";
   return "enviar";
 }
 
-/**
- * Devolve o onKeyDown do campo. Também põe o foco no campo quando o ditado começa e quando termina: quem clicou no
- * microfone fica com o foco no botão, e o Enter seguinte ligaria o microfone de novo em vez de parar ou enviar.
- */
-export function useEnterDoDitado(
-  ditado: Transcricao,
-  campo: RefObject<HTMLTextAreaElement | null>,
-  enviar: () => void,
-) {
-  const ativa = ditado.ativa;
-  const anterior = useRef(ativa);
-  useEffect(() => {
-    if (anterior.current === ativa) return;
-    anterior.current = ativa;
-    campo.current?.focus();
-  }, [ativa, campo]);
+export type Tecla = { key: string; shiftKey: boolean; isComposing: boolean; keyCode: number };
 
+/**
+ * O que fazer com uma tecla no campo, ou null para deixar o navegador seguir (outras teclas, Shift+Enter e o Enter
+ * que confirma uma composição de IME; no Safari esse Enter chega com isComposing=false e keyCode 229).
+ */
+export function acaoDaTecla(tecla: Tecla, estado: EstadoTranscricao): AcaoDoEnter | null {
+  if (tecla.key !== "Enter" || tecla.shiftKey || tecla.isComposing || tecla.keyCode === 229) return null;
+  return acaoDoEnter(estado);
+}
+
+/** Devolve o onKeyDown do campo. */
+export function useEnterDoDitado(ditado: Transcricao, enviar: () => void) {
   return (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+    const acao = acaoDaTecla({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode }, ditado.estado);
+    if (!acao) return;
     e.preventDefault();
-    const acao = acaoDoEnter(ditado.estado);
     if (acao === "parar") void ditado.parar();
     else if (acao === "enviar") enviar();
   };

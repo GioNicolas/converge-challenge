@@ -102,7 +102,14 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
     if (!atual) return;
     if (!atual.sessao) { cancelar(); return; }
     setEstado("finalizando");
-    await atual.sessao.parar();
+    try {
+      await atual.sessao.parar();
+    } catch (e) {
+      // Sem isso o estado ficaria preso em "finalizando" e o envio, bloqueado.
+      if (referencia.current !== atual) return;
+      setErro(erroMicrofone(e).message);
+      cancelar();
+    }
   }, [cancelar]);
 
   useEffect(() => {

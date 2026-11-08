@@ -1,9 +1,16 @@
 "use client";
 
+import type { RefObject } from "react";
 import { LoaderCircle, Mic, Square } from "lucide-react";
 import type { Transcricao } from "@/lib/transcricao/useTranscricao";
+import { deveFocarCampo } from "@/lib/transcricao/focoDoDitado";
 
-export function BotaoDitado({ transcricao: t, disabled = false }: { transcricao: Transcricao; disabled?: boolean }) {
+export function BotaoDitado({ transcricao: t, disabled = false, campo }: {
+  transcricao: Transcricao;
+  disabled?: boolean;
+  /** Campo que recebe o foco depois do clique (exceto em toque), para o Enter seguinte agir no campo e não no botão. */
+  campo?: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
+}) {
   const ocupado = t.estado === "conectando" || t.estado === "finalizando";
   const rotulo = t.estado === "conectando" ? "Cancelar conexão do microfone"
     : t.estado === "finalizando" ? "Finalizando transcrição"
@@ -11,7 +18,11 @@ export function BotaoDitado({ transcricao: t, disabled = false }: { transcricao:
   return (
     <button
       type="button"
-      onClick={() => t.ativa ? void t.parar() : void t.iniciar()}
+      onClick={(e) => {
+        if (t.ativa) void t.parar();
+        else void t.iniciar();
+        if (deveFocarCampo((e.nativeEvent as Partial<PointerEvent>).pointerType)) campo?.current?.focus();
+      }}
       disabled={disabled || t.estado === "finalizando"}
       aria-label={rotulo}
       title={rotulo}

@@ -106,7 +106,7 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
   }
 
   // Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
-  const aoTeclar = useEnterDoDitado(ditado, campo, enviar);
+  const aoTeclar = useEnterDoDitado(ditado, enviar);
 
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-padrao bg-superficie">
@@ -220,7 +220,7 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
             aria-label="Mensagem para o Totti"
             className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
-          <BotaoDitado transcricao={ditado} disabled={pensando || lendo || bloqueada || pausarEntrada} />
+          <BotaoDitado transcricao={ditado} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} />
           <button
             onClick={enviar}
             disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo || bloqueada || ditado.ativa}
