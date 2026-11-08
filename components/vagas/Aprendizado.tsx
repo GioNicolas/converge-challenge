@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-react";
-import type { ConcordanciaVaga, EfeitoRegra, MotivoIgnorado, OrigemRegra, RegraSquad } from "@/lib/squad-memory/tipos";
+import type { ConcordanciaVaga, EfeitoRegra, FatiaConcordancia, MotivoIgnorado, OrigemRegra, RegraSquad } from "@/lib/squad-memory/tipos";
 import type { VisaoMemoria } from "@/lib/squad-memory/visao";
 import { curvaSuave } from "@/lib/design/motion";
 import Perola from "@/components/totti/Perola";
@@ -64,11 +64,20 @@ export default function Aprendizado() {
   );
 }
 
+/** A vaga em que a pessoa está, quando a memória aparece como aba dela. */
+type VagaDaAba = { id: string; cargo: string };
+
+/** Só a ordem muda: o que veio desta vaga sobe, o resto segue na ordem da memória. */
+const desta = <T extends { origem: { vagaId: string } }>(lista: T[], vaga?: VagaDaAba) =>
+  vaga ? [...lista].sort((a, b) => Number(b.origem.vagaId === vaga.id) - Number(a.origem.vagaId === vaga.id)) : lista;
+
 /**
  * A memória da squad. `embutido`: dentro da aba de uma vaga, que já tem o próprio título e as abas,
  * então some o título grande e fica só a voz do Totti com a frase de apoio.
+ * `vaga`: as regras valem para a squad toda, então nada some; o que veio desta vaga sobe e ganha a marca
+ * "Desta vaga", e a concordância mostra o número desta vaga (ou o da squad, dito com todas as letras).
  */
-export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
+export function MemoriaDaSquad({ embutido = false, vaga }: { embutido?: boolean; vaga?: VagaDaAba }) {
   const [memoria, setMemoria] = useState<VisaoMemoria | null>(null);
   const [erro, setErro] = useState(false);
   /** Regras que acabaram de chegar pela simulação: ganham destaque na lista. */
@@ -94,6 +103,10 @@ export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
   const tirarRegra = (id: string) => setMemoria((m) => (m ? { ...m, regras: m.regras.filter((r) => r.id !== id) } : m));
 
   const ativas = memoria?.regras.filter((r) => r.ativa).length ?? 0;
+  const regras = desta(memoria?.regras ?? [], vaga);
+  const ignorados = desta(memoria?.ignorados ?? [], vaga);
+  const ehDesta = (o: { vagaId: string }) => !!vaga && o.vagaId === vaga.id;
+  const regrasDesta = regras.filter((r) => ehDesta(r.origem)).length;
 
   return (
     <motion.div
@@ -115,7 +128,8 @@ export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
           </h1>
         )}
         <p className="text-[15px] text-texto-suave">
-          Cada decisão do time vira regra{embutido ? " e vale para todas as vagas da squad" : ""}. Edite ou apague à vontade.
+          Cada decisão do time vira regra{embutido ? " e vale para todas as vagas da squad" : ""}.
+          {vaga && regrasDesta > 0 ? " O que veio desta vaga aparece primeiro." : " Edite ou apague à vontade."}
         </p>
       </header>
 
@@ -132,7 +146,7 @@ export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
 
       {memoria && (
         <>
-          <Concordancia porVaga={memoria.concordancia.porVaga} />
+          <Concordancia porVaga={memoria.concordancia.porVaga} geral={memoria.concordancia.geral} vaga={vaga} />
 
           {MODO_DEV && (
             <Simulador
@@ -145,7 +159,9 @@ export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
 
           <Secao
             titulo="Critérios aprendidos"
-            detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
+            detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}${
+              regrasDesta ? ` · ${regrasDesta} desta vaga` : ""
+            }`}
             apoio=""
           >
             {memoria.regras.length === 0 ? (
@@ -156,11 +172,12 @@ export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
             ) : (
               <ul className="cartao overflow-hidden py-1">
                 <AnimatePresence initial={false}>
-                  {memoria.regras.map((r) => (
+                  {regras.map((r) => (
                     <LinhaRegra
                       key={r.id}
                       regra={r}
                       nova={novas.has(r.id)}
+                      destaVaga={ehDesta(r.origem)}
                       criterios={memoria.criterios}
                       vagas={memoria.vagas}
                       onMudou={trocarRegra}
@@ -181,8 +198,8 @@ export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
               <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado até agora.</div>
             ) : (
               <ul className="cartao overflow-hidden py-1">
-                {memoria.ignorados.map((m) => (
-                  <LinhaIgnorado key={m.id} item={m} vagas={memoria.vagas} />
+                {ignorados.map((m) => (
+                  <LinhaIgnorado key={m.id} item={m} vagas={memoria.vagas} destaVaga={ehDesta(m.origem)} />
                 ))}
               </ul>
             )}
@@ -221,11 +238,18 @@ function Esqueleto() {
 // 1. Concordância
 // ---------------------------------------------------------------------------
 
-function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
+function Concordancia({ porVaga, geral, vaga }: { porVaga: ConcordanciaVaga[]; geral: FatiaConcordancia; vaga?: VagaDaAba }) {
   const comNumero = porVaga.filter((v) => v.pct !== null);
-  const atual = comNumero.at(-1);
   const primeira = comNumero[0];
+  const maisRecente = comNumero.at(-1);
+  const daVaga = vaga ? comNumero.find((v) => v.vagaId === vaga.id) : undefined;
+  // Na página solta, a vaga atual é a mais recente. Na aba de uma vaga, só vale o número dela.
+  const atual = vaga ? daVaga : maisRecente;
   const delta = atual && primeira && atual !== primeira ? atual.pct! - primeira.pct! : null;
+  // Vaga sem decisões ainda: o número da squad, e a subida da primeira à mais recente.
+  const deltaSquad = maisRecente && primeira && maisRecente !== primeira ? maisRecente.pct! - primeira.pct! : null;
+  const coluna = daVaga ?? maisRecente;
+  const rotuloDaColuna = daVaga ? "esta vaga" : vaga ? "mais recente" : "atual";
 
   return (
     <section className="cartao grid gap-8 p-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-end md:gap-12 md:p-8">
@@ -243,7 +267,7 @@ function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
               {atual.pct}%
             </motion.span>
             <p className="max-w-[420px] text-[14.5px] leading-relaxed text-texto">
-              Na vaga atual ({atual.vagaTitulo}), o Tech Lead decidiu igual ao Totti em{" "}
+              {vaga ? "Nesta vaga" : `Na vaga atual (${atual.vagaTitulo})`}, o Tech Lead decidiu igual ao Totti em{" "}
               <span className="numero font-medium">
                 {atual.concordou} de {atual.total}
               </span>{" "}
@@ -265,19 +289,64 @@ function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
               Quando o Totti fica no &ldquo;talvez&rdquo;, a decisão não entra na conta.
             </p>
           </>
+        ) : vaga && geral.pct !== null ? (
+          <>
+            <motion.span
+              key={geral.pct}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: curvaSuave }}
+              className="titulo-display text-[64px] text-texto"
+            >
+              {geral.pct}%
+            </motion.span>
+            <p className="max-w-[420px] text-[14.5px] leading-relaxed text-texto">
+              Nesta vaga o Tech Lead ainda não decidiu ninguém. Na squad, ele decidiu igual ao Totti em{" "}
+              <span className="numero font-medium">
+                {geral.concordou} de {geral.total}
+              </span>{" "}
+              candidatos.
+            </p>
+            {deltaSquad !== null && primeira && maisRecente && (
+              <span className="flex items-center gap-1.5 text-[13.5px] text-texto-suave">
+                {deltaSquad >= 0 ? <ArrowUp size={14} className="text-texto" /> : <ArrowDown size={14} className="text-texto" />}
+                <span>
+                  <span className="numero font-medium text-texto">
+                    {deltaSquad >= 0 ? "+" : "−"}
+                    {Math.abs(deltaSquad)} pontos
+                  </span>{" "}
+                  da primeira vaga ({primeira.pct}%) à mais recente ({maisRecente.pct}%)
+                </span>
+              </span>
+            )}
+            <p className="mt-1 text-[12.5px] text-texto-suave">
+              O número desta vaga aparece com as primeiras decisões. Quando o Totti fica no &ldquo;talvez&rdquo;, a decisão
+              não entra na conta.
+            </p>
+          </>
         ) : (
           <p className="text-[14.5px] text-texto-suave">A concordância aparece depois das primeiras decisões.</p>
         )}
       </div>
-      {comNumero.length > 0 && <GraficoConcordancia vagas={comNumero} />}
+      {comNumero.length > 0 && coluna && (
+        <GraficoConcordancia vagas={comNumero} destaque={coluna.vagaId} rotuloDestaque={rotuloDaColuna} />
+      )}
     </section>
   );
 }
 
 const ALTURA_GRAFICO = 148;
 
-/** Colunas por vaga, da mais antiga para a atual. A atual em tinta, as anteriores em cinza. */
-function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
+/** Colunas por vaga, da mais antiga para a atual. A destacada (a atual, ou esta vaga) em tinta, as outras em cinza. */
+function GraficoConcordancia({
+  vagas,
+  destaque,
+  rotuloDestaque,
+}: {
+  vagas: ConcordanciaVaga[];
+  destaque: string;
+  rotuloDestaque: string;
+}) {
   const [foco, setFoco] = useState<string | null>(null);
   return (
     <figure className="flex flex-col gap-2">
@@ -308,7 +377,7 @@ function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
           </div>
           <ul className="relative flex">
             {vagas.map((v, i) => {
-              const atual = i === vagas.length - 1;
+              const atual = v.vagaId === destaque;
               const aberto = foco === v.vagaId;
               const altura = Math.max(2, (ALTURA_GRAFICO * (v.pct ?? 0)) / 100);
               return (
@@ -373,7 +442,7 @@ function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
                   >
                     {v.vagaTitulo}
                   </span>
-                  <span className="text-[11px] text-texto-suave/80">{atual ? "atual" : `desde ${dataCurta(v.inicio)}`}</span>
+                  <span className="text-[11px] text-texto-suave/80">{atual ? rotuloDestaque : `desde ${dataCurta(v.inicio)}`}</span>
                 </li>
               );
             })}
@@ -425,6 +494,7 @@ function SeloEfeito({ efeito }: { efeito: EfeitoRegra }) {
 function LinhaRegra({
   regra,
   nova,
+  destaVaga,
   criterios,
   vagas,
   onMudou,
@@ -432,6 +502,7 @@ function LinhaRegra({
 }: {
   regra: RegraSquad;
   nova: boolean;
+  destaVaga: boolean;
   criterios: VisaoMemoria["criterios"];
   vagas: Record<string, string>;
   onMudou: (r: RegraSquad) => void;
@@ -507,6 +578,7 @@ function LinhaRegra({
                   Pesa em <span className="text-texto">{nomeCriterio}</span>
                 </span>
                 {nova && <span className="rotulo-destaque">Acabou de aprender</span>}
+                {destaVaga && <span className="rotulo rotulo-neutro">Desta vaga</span>}
                 {!regra.ativa && <span className="text-[12.5px] text-texto-suave">· desligado</span>}
               </div>
               <p className="text-[15px] leading-snug text-texto">{regra.texto}</p>
@@ -702,7 +774,7 @@ function EditorRegra({
 // 3. Ignorados
 // ---------------------------------------------------------------------------
 
-function LinhaIgnorado({ item, vagas }: { item: MotivoIgnorado; vagas: Record<string, string> }) {
+function LinhaIgnorado({ item, vagas, destaVaga }: { item: MotivoIgnorado; vagas: Record<string, string>; destaVaga: boolean }) {
   return (
     <li className="linha-lista flex gap-3 px-5 py-4">
       <ShieldOff size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-texto-suave" />
@@ -711,7 +783,8 @@ function LinhaIgnorado({ item, vagas }: { item: MotivoIgnorado; vagas: Record<st
           <span className="text-texto-suave line-through decoration-texto/30">&ldquo;{item.trecho}&rdquo;</span>
         </p>
         <p className="text-[13px] text-texto">Ignorado: {item.porque}.</p>
-        <p className="text-[12.5px] text-texto-suave">
+        <p className="flex flex-wrap items-center gap-2 text-[12.5px] text-texto-suave">
+          {destaVaga && <span className="rotulo rotulo-neutro">Desta vaga</span>}
           {textoDaOrigem(item.origem, vagas)} · {dataCurta(item.criadoEm)}
         </p>
       </div>

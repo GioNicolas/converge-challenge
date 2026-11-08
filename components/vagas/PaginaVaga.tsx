@@ -142,7 +142,7 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
       {etapa === "escores" && reais.length > 0 && <ResultadosDaVaga reais={reais} />}
       {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} temReais={reais.length > 0} />}
       {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} temReais={reais.length > 0} />}
-      {etapa === "aprendizado" && <MemoriaDaSquad embutido />}
+      {etapa === "aprendizado" && <MemoriaDaSquad embutido vaga={{ id: vaga.id, cargo: vaga.cargo }} />}
       {etapa === "contratacoes" && <Contratacoes vaga={vaga} />}
     </motion.div>
   );
