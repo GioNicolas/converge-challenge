@@ -1,6 +1,7 @@
 // Relatório final para a recrutadora. A avaliação começa no session_ended (lib/agents/evaluator.ts);
 // aqui só se consulta o resultado.
 import { NextRequest, NextResponse } from "next/server";
+import { candidatosPorSessao } from "@/lib/convites/store";
 import type { Report } from "@/lib/contracts";
 import { startEvaluation } from "@/lib/agents/evaluator";
 import { findReport, listReports } from "@/lib/session/reports";
@@ -19,6 +20,8 @@ export interface ReportListItem {
   state?: "running" | "done" | "error";
   overallScore?: number;
   recommendation?: Report["recommendation"];
+  /** Nome do candidato, quando a entrevista foi aberta pelo link do convite. */
+  candidato?: string;
 }
 
 /**
@@ -57,6 +60,8 @@ export async function GET(request: NextRequest) {
         recommendation: report.recommendation,
       });
     }
+    const nomes = await candidatosPorSessao();
+    for (const item of items) item.candidato = nomes.get(item.sessionId);
     return NextResponse.json(items.sort((a, b) => b.startedAt - a.startedAt));
   }
 

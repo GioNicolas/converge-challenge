@@ -18,7 +18,7 @@ export function InterviewInviteEmail(props: InterviewInvitePayload) {
         <strong>{when}</strong> ({props.durationMin} min).
       </Text>
       <Text style={emailTypography.body}>No horário, acesse o link abaixo — não é preciso instalar nada.</Text>
-      <Section style={{ textAlign: "center", margin: "28px 0" }}>
+      <Section style={{ margin: "24px 0" }}>
         <Button href={props.joinUrl} style={emailTypography.button}>
           Entrar na entrevista
         </Button>

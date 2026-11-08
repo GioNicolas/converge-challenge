@@ -1,10 +1,11 @@
 "use client";
 
-// Página do candidato para escolher o horário da entrevista. Abre pelo link do email, então é
-// pensada para celular: uma coluna, alvos grandes. Os horários são sempre de Brasília.
+// Página do candidato para escolher o horário da entrevista. Abre pelo link do e-mail, quase sempre
+// no celular: uma coluna, alvos de 48px e o botão de confirmar preso no rodapé, à mão do polegar.
+// O tema (papel e tinta) vem de app/agendar/layout.tsx. Os horários são sempre de Brasília.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { CheckCircle2 } from "lucide-react";
+import { Check } from "lucide-react";
 
 const FUSO = "America/Sao_Paulo";
 
@@ -17,31 +18,47 @@ type Convite = {
   primeiroNome: string;
   status: "enviado" | "simulado" | "agendado";
   agendadoPara?: string;
+  joinUrl?: string;
   horarios: string[];
+  horariosTeste?: string[];
 };
 type Confirmado = { agendadoPara: string; joinUrl: string; emailStatus: "enviado" | "simulado" | "erro" };
 
 const FORMATO: Record<Modo, string> = {
-  live_coding: "programação ao vivo no navegador",
-  system_design: "desenho de arquitetura num quadro",
+  live_coding: "Programação ao vivo, no navegador",
+  system_design: "Desenho de arquitetura, num quadro",
 };
-const LINGUAGEM: Record<string, string> = { python: "Python", cpp: "C++", c: "C" };
+const LINGUAGEM: Record<string, string> = { python: "Python", cpp: "C++", c: "C", java: "Java", javascript: "JavaScript", typescript: "TypeScript", go: "Go", rust: "Rust" };
 
-const dia = (iso: string) => new Date(iso);
+const fmt = (opcoes: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, ...opcoes });
+const fmtSemana = fmt({ weekday: "long" });
+const fmtDiaMes = fmt({ day: "numeric", month: "long" });
+const fmtExtenso = fmt({ weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const fmtHora = fmt({ hour: "2-digit", minute: "2-digit" });
+const fmtCurto = fmt({ weekday: "short", day: "numeric", month: "short" });
 
-/** "seg, 9 de nov" (Brasília). */
-function textoDia(iso: string) {
-  const d = dia(iso);
-  const semana = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, weekday: "short" }).format(d).replace(".", "");
-  const numeroDia = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "numeric" }).format(d);
-  const mes = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, month: "short" }).format(d).replace(".", "");
-  return `${semana}, ${numeroDia} de ${mes}`;
+const horaDe = (iso: string) => fmtHora.format(new Date(iso));
+const maiuscula = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** Chave de agrupamento: a data civil em Brasília (não a UTC). */
+const chaveDia = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: FUSO }).format(d);
+
+/** "Hoje" / "Amanhã" / "Segunda-feira", e "9 de novembro" ao lado. */
+function rotuloDia(iso: string) {
+  const d = new Date(iso);
+  const hoje = new Date();
+  const k = chaveDia(d);
+  const titulo =
+    k === chaveDia(hoje)
+      ? "Hoje"
+      : k === chaveDia(new Date(hoje.getTime() + 24 * 60 * 60 * 1000))
+        ? "Amanhã"
+        : maiuscula(fmtSemana.format(d));
+  return { titulo, data: fmtDiaMes.format(d) };
 }
 
-const horaDe = (iso: string) => new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" }).format(dia(iso));
-
-/** Chave de agrupamento: a data civil em Brasília (não a UTC). */
-const chaveDia = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: FUSO }).format(dia(iso));
+/** "Seg, 9 de nov · 14:00" pro resumo no rodapé. */
+const resumoCurto = (iso: string) =>
+  `${maiuscula(fmtCurto.format(new Date(iso)).replace(/\./g, ""))} · ${horaDe(iso)}`;
 
 export default function AgendarPagina() {
   const { token } = useParams<{ token: string }>();
@@ -68,15 +85,16 @@ export default function AgendarPagina() {
     carregar();
   }, [carregar]);
 
-  // Horários agrupados por dia, na ordem em que vêm do servidor.
+  // Horários agrupados por dia, na ordem em que vêm do servidor (os de teste, de hoje, primeiro).
   const dias = useMemo(() => {
     const grupos = new Map<string, string[]>();
     for (const h of convite?.horarios ?? []) {
-      const k = chaveDia(h);
+      const k = chaveDia(new Date(h));
       grupos.set(k, [...(grupos.get(k) ?? []), h]);
     }
     return [...grupos.values()];
   }, [convite]);
+  const teste = useMemo(() => new Set(convite?.horariosTeste ?? []), [convite]);
 
   async function confirmar() {
     if (!escolhido || enviando) return;
@@ -108,110 +126,215 @@ export default function AgendarPagina() {
     }
   }
 
+  const agendado = situacao === "pronto" && convite && (convite.status === "agendado" || confirmado);
+  const escolhendo = situacao === "pronto" && convite && !agendado;
+
   return (
-    <main className="grid min-h-screen place-items-center p-4">
-      <section className="vidro w-full max-w-md space-y-5 rounded-padrao p-6 shadow-flutuante sm:p-8">
-        {situacao === "carregando" && <p className="py-10 text-center text-texto-suave">Carregando…</p>}
+    <main className="mx-auto flex min-h-dvh w-full max-w-[440px] flex-col px-4 pt-8 sm:pt-16">
+      <p className="rotulo text-texto-suave">Time de Recrutamento</p>
 
-        {situacao === "naoExiste" && (
-          <p className="py-6 text-center text-texto-suave">Este convite não existe ou expirou.</p>
-        )}
+      {situacao === "carregando" && (
+        <div className="mt-6 space-y-3" aria-busy="true" aria-label="Carregando">
+          <div className="h-8 w-3/4 animate-pulse rounded-controle bg-superficie-2" />
+          <div className="h-4 w-1/2 animate-pulse rounded-controle bg-superficie-2" />
+          <div className="mt-8 h-40 animate-pulse rounded-padrao bg-superficie-2" />
+        </div>
+      )}
 
-        {situacao === "erro" && (
-          <p className="py-6 text-center text-texto-suave">Não foi possível carregar o convite. Tente de novo em instantes.</p>
-        )}
+      {situacao === "naoExiste" && (
+        <Aviso titulo="Convite não encontrado">
+          Este link não existe ou já expirou (ele vale por 7 dias). Se você ainda quer marcar a entrevista, responda o
+          e-mail do convite.
+        </Aviso>
+      )}
 
-        {situacao === "pronto" && convite && (convite.status === "agendado" || confirmado) && (
-          <Feito
-            agendadoPara={confirmado?.agendadoPara ?? convite.agendadoPara}
-            joinUrl={confirmado?.joinUrl}
-            emailStatus={confirmado?.emailStatus}
-          />
-        )}
+      {situacao === "erro" && (
+        <Aviso titulo="Não foi possível carregar">
+          Verifique a conexão e tente de novo.
+          <button
+            type="button"
+            onClick={() => {
+              setSituacao("carregando");
+              carregar();
+            }}
+            className="mt-5 block min-h-12 w-full rounded-padrao border border-borda bg-superficie text-[16px] font-medium text-texto"
+          >
+            Tentar de novo
+          </button>
+        </Aviso>
+      )}
 
-        {situacao === "pronto" && convite && convite.status !== "agendado" && !confirmado && (
-          <>
-            <div className="space-y-2">
-              <h1 className="titulo text-2xl">Olá, {convite.primeiroNome}! Escolha o horário da sua entrevista</h1>
-              <p className="text-[15px] text-texto-suave">
-                Vaga: {convite.cargo} · {convite.durationMin} min · {FORMATO[convite.mode]}
-              </p>
-              {convite.mode === "live_coding" && convite.languages.length > 0 && (
-                <p className="text-[15px] text-texto-suave">
-                  Você escolhe a linguagem: {convite.languages.map((l) => LINGUAGEM[l] ?? l).join(" ou ")}
-                </p>
-              )}
-            </div>
+      {agendado && (
+        <Feito
+          agendadoPara={confirmado?.agendadoPara ?? convite.agendadoPara}
+          joinUrl={confirmado?.joinUrl ?? convite.joinUrl}
+          emailStatus={confirmado?.emailStatus}
+          durationMin={convite.durationMin}
+        />
+      )}
 
-            {dias.length === 0 ? (
-              <p className="text-texto-suave">
-                Não há horários disponíveis no momento. Entre em contato com a equipe de recrutamento.
-              </p>
-            ) : (
-              <div className="space-y-5">
-                {dias.map((horarios) => (
-                  <div key={horarios[0]} className="space-y-2">
-                    <h2 className="text-[14px] font-medium text-texto">{textoDia(horarios[0])}</h2>
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+      {escolhendo && (
+        <>
+          <h1 className="titulo-display mt-3 text-[28px] leading-[1.12] text-texto">
+            {convite.primeiroNome ? `Olá, ${convite.primeiroNome}.` : "Olá."} Escolha o horário da sua entrevista.
+          </h1>
+
+          <dl className="cartao mt-6 text-[15px]">
+            <Linha rotulo="Vaga">{convite.cargo}</Linha>
+            <Linha rotulo="Duração">{convite.durationMin} minutos</Linha>
+            <Linha rotulo="Formato">{FORMATO[convite.mode]}</Linha>
+            {convite.mode === "live_coding" && convite.languages.length > 0 && (
+              <Linha rotulo="Linguagem">{convite.languages.map((l) => LINGUAGEM[l] ?? l).join(" ou ")}, à sua escolha</Linha>
+            )}
+          </dl>
+
+          {dias.length === 0 ? (
+            <p className="mt-8 text-[15px] text-texto-suave">
+              Não há horários disponíveis no momento. Responda o e-mail do convite e a gente combina outro.
+            </p>
+          ) : (
+            <div className="mt-8 space-y-6 pb-36">
+              <p className="rotulo text-texto-suave">Horários de Brasília</p>
+              {dias.map((horarios) => {
+                const { titulo, data } = rotuloDia(horarios[0]);
+                return (
+                  <section key={horarios[0]} aria-label={`${titulo}, ${data}`}>
+                    <h2 className="mb-2.5 flex items-baseline gap-2 text-[15px]">
+                      <span className="font-semibold text-texto">{titulo}</span>
+                      <span className="text-texto-suave">{data}</span>
+                    </h2>
+                    <div className="grid grid-cols-3 gap-2">
                       {horarios.map((h) => {
                         const ativo = escolhido === h;
+                        const ehTeste = teste.has(h);
                         return (
                           <button
                             key={h}
                             type="button"
-                            onClick={() => setEscolhido(h)}
+                            onClick={() => {
+                              setEscolhido(h);
+                              setErro(null);
+                            }}
                             aria-pressed={ativo}
-                            className={`numero min-h-12 rounded-controle text-[16px] transition-colors duration-150 ${
-                              ativo ? "bg-texto text-texto-claro" : "bg-superficie-2/70 text-texto hover:bg-superficie-2"
+                            aria-label={`${titulo}, ${data}, ${horaDe(h)}${ehTeste ? " (teste)" : ""}`}
+                            className={`numero flex min-h-12 flex-col items-center justify-center rounded-padrao border text-[16px] font-medium transition-colors duration-150 ${
+                              ativo
+                                ? "border-texto bg-texto text-texto-claro"
+                                : "border-borda bg-superficie text-texto active:bg-superficie-2 hover:border-texto/40"
                             }`}
                           >
                             {horaDe(h)}
+                            {ehTeste && (
+                              <span className={`text-[11px] font-normal leading-none ${ativo ? "text-texto-claro/70" : "text-texto-suave"}`}>
+                                teste
+                              </span>
+                            )}
                           </button>
                         );
                       })}
                     </div>
-                  </div>
-                ))}
+                  </section>
+                );
+              })}
+            </div>
+          )}
+
+          {dias.length > 0 && (
+            // Rodapé fixo: no celular a lista é longa e o botão fica sempre à vista.
+            <div className="fixed inset-x-0 bottom-0 border-t border-borda bg-fundo/95 backdrop-blur-sm">
+              <div className="mx-auto w-full max-w-[440px] px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+                {erro ? (
+                  <p role="alert" className="mb-2 text-[14px] text-perigo">
+                    {erro}
+                  </p>
+                ) : (
+                  <p className="mb-2 text-[14px] text-texto-suave" aria-live="polite">
+                    {escolhido ? (
+                      <>
+                        Escolhido: <span className="numero font-medium text-texto">{resumoCurto(escolhido)}</span>
+                      </>
+                    ) : (
+                      "Toque em um horário"
+                    )}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={confirmar}
+                  disabled={!escolhido || enviando}
+                  className="min-h-12 w-full rounded-padrao bg-texto text-[16px] font-medium text-texto-claro transition-opacity hover:opacity-90 disabled:opacity-30"
+                >
+                  {enviando ? "Confirmando…" : "Confirmar horário"}
+                </button>
               </div>
-            )}
-
-            {erro && <p className="text-[14px] text-perigo">{erro}</p>}
-
-            {dias.length > 0 && (
-              <button
-                type="button"
-                onClick={confirmar}
-                disabled={!escolhido || enviando}
-                className="min-h-12 w-full rounded-full bg-texto text-[16px] font-medium text-texto-claro transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                {enviando ? "Confirmando…" : "Confirmar horário"}
-              </button>
-            )}
-          </>
-        )}
-      </section>
+            </div>
+          )}
+        </>
+      )}
     </main>
   );
 }
 
-/** Tela final: horário marcado. `emailStatus` só vem logo após marcar; no convite já marcado não há. */
-function Feito({ agendadoPara, joinUrl, emailStatus }: { agendadoPara?: string; joinUrl?: string; emailStatus?: Confirmado["emailStatus"] }) {
-  const emailFalhou = emailStatus === "simulado" || emailStatus === "erro";
+function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-4 text-center">
-      <CheckCircle2 size={40} strokeWidth={1.75} className="mx-auto text-sucesso" />
-      <h1 className="titulo text-2xl">
-        Entrevista marcada para {agendadoPara ? `${textoDia(agendadoPara)}, às ${horaDe(agendadoPara)}` : "o horário escolhido"}
-      </h1>
-      {emailFalhou ? (
-        <p className="text-texto-suave">Não foi possível enviar o e-mail de confirmação agora. Guarde este link para entrar na hora marcada.</p>
-      ) : (
-        <p className="text-texto-suave">Você vai receber um e-mail de confirmação com o link.</p>
+    <div className="linha-lista flex gap-4 px-4 py-3">
+      <dt className="w-[84px] shrink-0 text-texto-suave">{rotulo}</dt>
+      <dd className="min-w-0 text-texto">{children}</dd>
+    </div>
+  );
+}
+
+function Aviso({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-3">
+      <h1 className="titulo-display text-[28px] leading-[1.12] text-texto">{titulo}</h1>
+      <div className="mt-3 text-[15px] leading-relaxed text-texto-suave">{children}</div>
+    </div>
+  );
+}
+
+/** Tela final: horário marcado. `emailStatus` só vem logo após marcar; no convite já marcado não há. */
+function Feito({
+  agendadoPara,
+  joinUrl,
+  emailStatus,
+  durationMin,
+}: {
+  agendadoPara?: string;
+  joinUrl?: string;
+  emailStatus?: Confirmado["emailStatus"];
+  durationMin: number;
+}) {
+  const emailFalhou = emailStatus === "simulado" || emailStatus === "erro";
+  const d = agendadoPara ? new Date(agendadoPara) : null;
+  return (
+    <div className="mt-3">
+      <span className="grid size-10 place-items-center rounded-full bg-texto text-texto-claro">
+        <Check size={20} strokeWidth={2.25} aria-hidden />
+      </span>
+      <h1 className="titulo-display mt-5 text-[28px] leading-[1.12] text-texto">Entrevista marcada</h1>
+
+      {d && (
+        <div className="cartao mt-6 px-4 py-4">
+          <p className="text-[17px] font-semibold text-texto">{maiuscula(fmtExtenso.format(d))}</p>
+          <p className="numero mt-0.5 text-[15px] text-texto-suave">
+            às {horaDe(agendadoPara!)} (horário de Brasília) · {durationMin} min
+          </p>
+        </div>
       )}
-      {emailFalhou && joinUrl && (
+
+      <p className="mt-5 text-[15px] leading-relaxed text-texto-suave">
+        {emailFalhou
+          ? "Não conseguimos enviar o e-mail de confirmação agora. Guarde este link: é por ele que você entra na hora marcada."
+          : emailStatus === "enviado"
+            ? "Mandamos um e-mail de confirmação com este mesmo link. No horário, é só entrar: não precisa instalar nada."
+            : "No horário, é só entrar pelo botão abaixo ou pelo link do e-mail de confirmação. Não precisa instalar nada."}
+      </p>
+
+      {joinUrl && (
         <a
           href={joinUrl}
-          className="inline-flex min-h-12 w-full items-center justify-center rounded-full bg-texto text-[16px] font-medium text-texto-claro hover:opacity-90"
+          className="mt-6 flex min-h-12 w-full items-center justify-center rounded-padrao bg-texto text-[16px] font-medium text-texto-claro transition-opacity hover:opacity-90"
         >
           Entrar na entrevista
         </a>
