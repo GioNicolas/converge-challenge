@@ -45,6 +45,8 @@ export const MAX_IMAGEM = 4 * 1024 * 1024;
 
 /** 10 criações de sessão por minuto por IP. */
 export const limitadorCriacao = criarLimitador(10, 60_000);
+/** Quanto a criação da sessão espera a questão da vaga ficar pronta antes de cair no problema fixo. */
+export const ESPERA_QUESTAO_MS = 90_000;
 
 const MAGIA_PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -77,8 +79,12 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   if (encontrada) await hidratarSquadMemory();
   const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
-  // A questão gerada para a vaga, se já existe; senão o problema fixo do catálogo (ver `avaliacaoDaConfig`).
-  const avaliacaoId = (config && (await avaliacaoDaConfig(config))) || corpo.dados.avaliacao_id;
+  // A questão gerada para a vaga: se ainda está sendo gerada (o candidato entrou logo depois de a vaga ser criada),
+  // espera por ela; se nunca foi gerada, gera agora. Só se falhar ou passar do prazo cai no problema fixo do
+  // catálogo (ver `avaliacaoDaConfig`). O botão "Começar" do quadro fica em "Preparando o desafio" enquanto isso.
+  const avaliacaoId =
+    (config && (await avaliacaoDaConfig(config, { llm: contexto().llm, esperarMs: ESPERA_QUESTAO_MS }))) ||
+    corpo.dados.avaliacao_id;
 
   const alvo = await resolverAvaliacao(avaliacaoId);
   if (!alvo) return erro(404, "avaliação não encontrada");

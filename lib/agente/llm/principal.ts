@@ -13,6 +13,7 @@ import { NOME_SCHEMA_PERGUNTAR } from "../prompts/entrevistador";
 import { NOME_SCHEMA_PERGUNTAR_V2 } from "../prompts/entrevistador-v2";
 import { NOME_SCHEMA_KIT } from "../prompts/gerador-kit";
 import { NOME_SCHEMA_PLANEJADOR } from "../prompts/planejador";
+import { NOME_SCHEMA_PROBLEMA } from "../prompts/gerador-problema";
 import { NOME_SCHEMA_SCORECARD } from "../prompts/scorecard";
 import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "./cliente";
 import { paraJsonSchema } from "./jsonschema";
@@ -27,6 +28,8 @@ const PAPEL: Record<string, LlmRole> = {
   [NOME_SCHEMA_ABERTURA]: "conversa", // apresentação e despedida
   [NOME_SCHEMA_SCORECARD]: "evaluator", // relatório final
   [NOME_SCHEMA_KIT]: "evaluator", // geração do kit a partir da vaga
+  // Questão do quadro de uma vaga: o candidato pode estar esperando por ela, então vai no modelo rápido.
+  [NOME_SCHEMA_PROBLEMA]: "analyst",
 };
 const PAPEL_PADRAO: LlmRole = "evaluator";
 

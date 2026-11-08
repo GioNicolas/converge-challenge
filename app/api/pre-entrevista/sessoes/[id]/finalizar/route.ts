@@ -4,14 +4,14 @@ import { paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { registrarEvento } from "@/lib/pre-entrevista/log";
 import { aplicarPesosNaSessao, extrairSeAtrasada, salvarConfig, sincronizarSessao, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
 import { atualizarNaoAvaliado } from "@/lib/pre-entrevista/turno";
-import { gerarQuestaoDaVaga, geraQuestao } from "@/lib/agente/kits/questao-da-vaga";
+import { garantirQuestaoDaVaga, geraQuestao } from "@/lib/agente/kits/questao-da-vaga";
 import { contexto } from "@/lib/agente/rotas/contexto";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// A questão do quadro é gerada depois da resposta (after) e leva ~100 s com o modelo grande.
+// A questão do quadro é gerada depois da resposta (after); leva dezenas de segundos.
 export const maxDuration = 300;
 
 // `copia`: a sessão como a tela a guardou, para reconstruir se esta instância não a tiver (ver `sincronizarSessao`).
@@ -75,18 +75,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     resumo: `config ${resultado.config.id} salva (${resultado.config.criteria.length} critérios, ${resultado.config.durationMin} min)`,
     dados: { ok: true, config: resultado.config, rascunho: sessao.rascunho },
   });
-  // System design: a questão do quadro é gerada para esta vaga em segundo plano. Até ficar pronta (ou se falhar),
-  // o quadro usa o problema fixo do catálogo (ver `lib/agente/kits/questao-da-vaga.ts`).
+  // System design: a questão do quadro é gerada para esta vaga em segundo plano. Quem entra no quadro antes de ela
+  // ficar pronta espera por ela; só se falhar o quadro usa o problema fixo (ver `lib/agente/kits/questao-da-vaga.ts`).
   const config = resultado.config;
   const llm = contexto().llm;
   if (geraQuestao(config) && llm) {
-    after(async () => {
-      try {
-        await gerarQuestaoDaVaga(config, { llm });
-      } catch (err) {
-        console.error(`[pre-entrevista] questão da vaga ${config.id} não foi gerada; o quadro usa o problema fixo:`, err);
-      }
-    });
+    after(() => garantirQuestaoDaVaga(config, { llm }, { esperarMs: 280_000 }));
   }
   return NextResponse.json({ ok: true, config });
 }
