@@ -133,9 +133,9 @@
   --ease-viagem: var(--curva-viagem);
   --ease-mola: var(--curva-mola);
 
-  /* Fontes: Inter (interface), Bricolage Grotesque (títulos e números), JetBrains Mono (voz da máquina) */
+  /* Fontes: Inter (interface), Fraunces (títulos e números), JetBrains Mono (voz da máquina) */
   --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
-  --font-display: var(--font-bricolage), "Bricolage Grotesque", var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-fraunces), "Fraunces", Georgia, serif;
   --font-mono: var(--font-jetbrains), "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 }
 
@@ -173,13 +173,14 @@
   font-weight: 600;
   letter-spacing: -0.02em;
 }
-/* Títulos e números grandes: Bricolage, peso 600, tracking −0,02 a −0,035em */
+/* Títulos e números grandes: Fraunces macia, peso 560 */
 @utility titulo-display {
   font-family: var(--font-display);
-  font-weight: 600;
-  letter-spacing: -0.035em;
+  font-weight: 560;
+  font-variation-settings: "SOFT" 100, "opsz" 96;
+  letter-spacing: -0.022em;
   line-height: 1.04;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 /* A voz da máquina: rastro do agente, código, tempos e IDs. Nunca em títulos. */
 @utility voz-maquina {
@@ -258,6 +259,10 @@ body {
 @keyframes varrer {
   from { background-size: 0% 100%; }
   to { background-size: 100% 100%; }
+}
+@keyframes revelar-palavra {
+  from { transform: translateY(105%); opacity: 0.2; }
+  to { transform: none; opacity: 1; }
 }
 @keyframes crescer {
   from { transform: scaleX(0); }
@@ -355,4 +360,27 @@ body {
 :root,
 .tema-recrutador {
   --raio-pequeno: 14px;
+}
+
+/* Títulos menores em Fraunces (h2, nomes de cartão) com o mesmo eixo macio */
+.font-display {
+  font-variation-settings: "SOFT" 100, "opsz" 48;
+}
+
+/* Sublinhado que varre da esquerda no hover (links de texto: "Decidir agora", "Relatório pronto") */
+@utility sublinha {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0% 1px;
+  transition: background-size 360ms var(--curva-saida);
+  &:hover,
+  &:focus-visible {
+    background-size: 100% 1px;
+  }
+}
+
+/* Toque: todo botão afunda um pouco ao clicar (120ms). */
+button:not(:disabled):active {
+  transform: scale(0.98);
 }

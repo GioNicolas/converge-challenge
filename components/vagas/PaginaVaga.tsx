@@ -46,6 +46,8 @@ import {
   type EntrevistaReal,
 } from "@/lib/vagas/entrevistas";
 import { curvaSuave } from "@/lib/design/motion";
+import { useContar } from "@/components/totti/useContar";
+import TituloRevelado from "@/components/totti/TituloRevelado";
 import AprendidoNoPlano from "./AprendidoNoPlano";
 import Casca from "./Casca";
 import Contratacoes from "./Contratacoes";
@@ -88,7 +90,7 @@ export default function PaginaVaga({ id, etapa }: { id: string; etapa: EtapaVaga
 }
 
 function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
-  const meta = [NOME_AREA_VAGA[vaga.area], NOME_SENIORIDADE_VAGA[vaga.senioridade], vaga.time, vaga.local]
+  const meta = [NOME_AREA_VAGA[vaga.area], NOME_SENIORIDADE_VAGA[vaga.senioridade]]
     .filter((x) => x && x !== "—")
     .join(" · ");
   const href = (e: EtapaVaga) => `/vagas/vaga?id=${encodeURIComponent(vaga.id)}&etapa=${e}`;
@@ -107,11 +109,10 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
         <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
           <div className="flex min-w-0 flex-col gap-3">
             <span className="rotulo text-texto-suave">{meta}</span>
-            <h1 className="titulo-display text-[34px] text-texto md:text-[40px]">{vaga.cargo}</h1>
-            <p className="text-[14px] text-texto-suave">
-              Aberta {quandoFoi(vaga.abertaHaDias)} · {situacaoDa({ ...vaga, funil: comReais(vaga.funil, reais) })} · Responsável:{" "}
-              {vaga.responsavel}
-            </p>
+            <h1 className="titulo-display text-[36px] text-texto md:text-[44px]">
+              <TituloRevelado texto={vaga.cargo} />
+            </h1>
+            <p className="text-[14px] text-texto-suave">{situacaoDa({ ...vaga, funil: comReais(vaga.funil, reais) })}</p>
           </div>
           {vaga.etapa !== "encerrada" && <CopiarLink vaga={vaga} />}
         </div>
@@ -327,10 +328,6 @@ function Candidatos({
       {/* 1º: o funil, que também é o filtro */}
       {escores ? (
         <div className="flex flex-col gap-4">
-          <p className="max-w-2xl text-[14px] leading-relaxed text-texto-suave">
-            O escore de cada entrevista aparece aqui quando o relatório fica pronto. Por enquanto, a lista mostra quem já
-            concluiu, para você filtrar e encontrar alguém.
-          </p>
           <div>
             <Abas
               abas={[
@@ -346,10 +343,10 @@ function Candidatos({
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {(
             [
-              ["todos", "Inscritos", contagem.todos, `${numero(contagem.aguardando)} aguardando convite`],
-              ["convidados", "Convidados", contagem.convidados, `${pct(contagem.convidados, contagem.todos)} dos inscritos`],
-              ["em_andamento", "Fazendo agora", contagem.em_andamento, "entrevistas em curso"],
-              ["concluiu", "Relatório pronto", contagem.concluiu, contagem.novos ? `+${numero(contagem.novos)} novos` : "nenhum novo"],
+              ["todos", "Inscritos", contagem.todos, ""],
+              ["convidados", "Convidados", contagem.convidados, pct(contagem.convidados, contagem.todos)],
+              ["em_andamento", "Fazendo agora", contagem.em_andamento, ""],
+              ["concluiu", "Relatório pronto", contagem.concluiu, contagem.novos ? `+${numero(contagem.novos)} novos` : ""],
             ] as const
           ).map(([id, rotulo, n, apoio]) => {
             const ativo = etapa === id;
@@ -362,19 +359,31 @@ function Candidatos({
                   setPagina(0);
                 }}
                 aria-pressed={ativo}
-                className={`relative flex flex-col items-start gap-1.5 rounded-[18px] p-5 text-left transition-[background-color,color,transform] duration-200 active:scale-[0.99] ${
+                className={`relative flex flex-col items-start gap-1.5 rounded-[20px] p-5 text-left transition-[background-color,color,transform,box-shadow] duration-[240ms] ease-saida hover:-translate-y-0.5 active:scale-[0.99] ${
                   ativo ? "bg-texto text-texto-claro" : "cartao text-texto hover:bg-superficie/70"
                 }`}
               >
                 <span className={`text-[13.5px] ${ativo ? "text-texto-claro/75" : "text-texto-suave"}`}>{rotulo}</span>
-                <span className={`titulo-display pt-2 text-[34px] leading-none ${n === 0 ? "opacity-40" : ""}`}>{numero(n)}</span>
-                <span
+                <span className={`titulo-display pt-2 text-[34px] leading-none ${n === 0 ? "opacity-40" : ""}`}>
+                  <NumeroContado n={n} />
+                </span>
+                {/* O funil desenhado: cada etapa é uma fração dos inscritos, crescendo em cascata */}
+                <span aria-hidden className={`mt-1 h-1 w-full overflow-hidden rounded-full ${ativo ? "bg-texto-claro/15" : "bg-superficie-2"}`}>
+                  <span
+                    className={`block h-full origin-left rounded-full ${ativo ? "bg-texto-claro" : "bg-texto"}`}
+                    style={{
+                      width: `${contagem.todos ? Math.max(3, Math.round((n / contagem.todos) * 100)) : 0}%`,
+                      animation: `crescer 1.1s var(--curva-saida) ${0.15 + ["todos", "convidados", "em_andamento", "concluiu"].indexOf(id) * 0.1}s both`,
+                    }}
+                  />
+                </span>
+                {apoio && <span
                   className={`text-[12px] ${
                     id === "concluiu" && contagem.novos ? "font-medium" : ativo ? "text-texto-claro/60" : "text-texto-suave/80"
                   }`}
                 >
                   {apoio}
-                </span>
+                </span>}
               </button>
             );
           })}
@@ -559,9 +568,10 @@ function Candidatos({
           <p className="px-5 py-12 text-[15px] text-texto">Ninguém com esses filtros.</p>
         ) : (
           <ul className="pb-1.5">
-            {visiveis.map((c) => (
+            {visiveis.map((c, ordem) => (
               <li
                 key={c.i}
+                style={{ animation: `subir .48s var(--curva-saida) ${Math.min(ordem, 12) * 0.03}s both` }}
                 className={`linha-lista mx-2 grid items-center gap-x-5 gap-y-1 rounded-xl px-3 py-3 ${
                   podeConvidar
                     ? "grid-cols-[20px_minmax(0,1fr)_auto] md:grid-cols-[20px_minmax(0,1fr)_150px_150px_110px_100px]"
@@ -586,7 +596,7 @@ function Candidatos({
                   <span className="truncate text-[12.5px] text-texto-suave">{c.email}</span>
                 </div>
                 <span className="hidden truncate text-[13px] text-texto-suave md:block">{c.cidade}</span>
-                <Selo s={c.situacao} />
+                <Selo s={c.situacao} href={c.situacao === "concluiu" ? RELATORIO_DEMO : undefined} />
                 <span className="numero hidden text-right text-[13px] text-texto-suave md:block">{quandoFoi(c.haDias)}</span>
                 <span className="hidden text-right md:block">
                   {escores ? (
@@ -624,10 +634,9 @@ function EntrevistasReais({ reais }: { reais: EntrevistaReal[] }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Entrevistas feitas pelo link</h2>
+        <h2 className="font-display text-[20px] font-semibold tracking-[-0.015em] text-texto">Entrevistas pelo link</h2>
         <span className="numero text-[13px] text-texto-suave">
-          {numero(reais.length)} {reais.length === 1 ? "entrevista" : "entrevistas"} · {numero(prontas)}{" "}
-          {prontas === 1 ? "relatório pronto" : "relatórios prontos"}
+          {numero(prontas)}/{numero(reais.length)} prontas
         </span>
       </div>
       <ul className="cartao overflow-hidden py-1.5">
@@ -685,13 +694,30 @@ function EntrevistasReais({ reais }: { reais: EntrevistaReal[] }) {
 
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "0%");
 
-function Selo({ s }: { s: Situacao }) {
+/** Os candidatos desta lista são de demonstração: o relatório pronto abre o relatório de exemplo. */
+const RELATORIO_DEMO = "/report?sessionId=exemplo";
+
+function Selo({ s, href }: { s: Situacao; href?: string }) {
+  const classe = `justify-self-end text-[13px] md:justify-self-start ${s === "concluiu" ? "text-texto" : "text-texto-suave"}`;
+  if (href)
+    return (
+      <Link
+        href={href}
+        className={`${classe} underline decoration-transparent underline-offset-4 transition-[text-decoration-color] duration-[240ms] hover:decoration-texto`}
+      >
+        {NOME_SITUACAO[s]}
+      </Link>
+    );
   return (
-    <span className={`justify-self-end text-[13px] md:justify-self-start ${s === "concluiu" ? "text-texto" : "text-texto-suave"}`}>
-      {s === "em_andamento" && <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-sucesso align-middle" />}
+    <span className={classe}>
+      {s === "em_andamento" && <span className="mr-1.5 inline-block size-1.5 rounded-full bg-texto align-middle anim-pulso" />}
       {NOME_SITUACAO[s]}
     </span>
   );
+}
+
+function NumeroContado({ n }: { n: number }) {
+  return <>{numero(Math.round(useContar(n)))}</>;
 }
 
 // ---------------------------------------------------------------------------

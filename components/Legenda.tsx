@@ -46,7 +46,7 @@ export default function Legenda({ fala }: { fala: FalaNaTela | null }) {
   const falando = !!fala && fala.ate < fala.texto.length;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-[76px] z-10 flex justify-center px-4">
+    <div className="pointer-events-none absolute right-4 bottom-[76px] left-4 z-10 flex justify-center md:left-[392px]">
       <AnimatePresence mode="wait">
         {fala && bloco && (
           <motion.p

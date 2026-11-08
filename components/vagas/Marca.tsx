@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Perola from "@/components/totti/Perola";
 
-// A marca: a pérola respirando e o nome em Bricolage 700. Sem cor, sem brilho além do movimento.
+// A marca: o anel do Totti e o nome em Fraunces. Sem cor, sem brilho além do movimento.
 export default function Marca({ href = "/vagas" }: { href?: string }) {
   return (
     <Link href={href} className="flex items-center gap-2.5 px-2 py-1 text-texto">

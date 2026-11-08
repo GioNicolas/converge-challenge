@@ -12,7 +12,6 @@ import Link from "next/link";
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
 import { ArrowRight, Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import {
-  DICA_ESTAGIO,
   ESTAGIOS,
   NOME_AREA_VAGA,
   NOME_ESTAGIO,
@@ -35,6 +34,7 @@ import { comReais, useEntrevistasReais } from "@/lib/vagas/entrevistas";
 import { curvaSaida, curvaSuave } from "@/lib/design/motion";
 import { BarrasDeVoz } from "@/components/totti/Perola";
 import { useContar } from "@/components/totti/useContar";
+import TituloRevelado from "@/components/totti/TituloRevelado";
 import Casca from "./Casca";
 import { Busca, Paginacao } from "./controles";
 
@@ -196,7 +196,9 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex flex-col gap-0.5">
             <span className="text-[15px] text-texto-suave first-letter:uppercase">{dataDeHoje()}</span>
-            <h1 className="titulo-display text-[40px] text-texto">{saudacao()}</h1>
+            <h1 className="titulo-display text-[44px] text-texto">
+              <TituloRevelado texto={saudacao()} />
+            </h1>
           </div>
           <div className="flex items-center gap-2">
             <Busca valor={busca} onMudar={(v) => (setBusca(v), setPagina(0))} placeholder="Buscar vaga, time ou responsável" />
@@ -221,7 +223,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         {/* Os estágios, em ordem. Clicado, o card abre a lista das vagas dele logo abaixo. */}
         <nav aria-label="Estágios das vagas" className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {ESTAGIOS.map((e, i) => (
-            <CardEstagio key={e} passo={i + 1} estagio={e} n={contagem(e)} ativo={filtro === e} onClick={() => escolher(e)} />
+            <CardEstagio key={e} passo={i + 1} estagio={e} n={contagem(e)} total={ESTAGIOS.reduce((t, x) => t + contagem(x), 0)} ativo={filtro === e} onClick={() => escolher(e)} />
           ))}
         </nav>
 
@@ -289,12 +291,14 @@ function CardEstagio({
   passo,
   estagio,
   n,
+  total,
   ativo,
   onClick,
 }: {
   passo: number;
   estagio: Estagio;
   n: number;
+  total: number;
   ativo: boolean;
   onClick: () => void;
 }) {
@@ -334,7 +338,15 @@ function CardEstagio({
       </span>
       <span className="flex flex-col gap-1">
         <span className="titulo-display text-[52px]">{contado}</span>
-        <span className={`text-[13.5px] ${ativo ? "text-[#f5f0e8]/70" : "text-texto-suave"}`}>{DICA_ESTAGIO[estagio]}</span>
+        {/* Quanto das vagas abertas está neste estágio: a barra cresce ao chegar */}
+        <span aria-hidden className={`mt-2 h-1 overflow-hidden rounded-full ${ativo ? "bg-[#f5f0e8]/15" : "bg-superficie-2"}`}>
+          <motion.span
+            className={`block h-full rounded-full ${ativo ? "bg-[#f5f0e8]" : "bg-texto"}`}
+            initial={{ width: 0 }}
+            animate={{ width: `${total ? Math.max(4, Math.round((n / total) * 100)) : 0}%` }}
+            transition={{ duration: 1.1, delay: 0.2 + passo * 0.08, ease: curvaSaida }}
+          />
+        </span>
       </span>
     </motion.button>
   );
@@ -347,17 +359,18 @@ function CardEstagio({
 function AoVivo({ linhas }: { linhas: Linha[] }) {
   if (linhas.length === 0) return null;
   return (
-    <section aria-label="Entrevistas ao vivo" className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+    <section aria-label="Entrevistas ao vivo" className="grid auto-rows-fr grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
       {linhas.slice(0, 3).map((v, i) => (
         <motion.div
           key={v.id}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.48, delay: i * 0.06, ease: curvaSaida }}
+          className="h-full"
         >
           <Link
             href={`/vagas/vaga?id=${encodeURIComponent(v.id)}&etapa=entrevistas`}
-            className="flex flex-col gap-3.5 rounded-[22px] bg-[#13110e] p-[18px] text-[#f5f0e8] transition-transform duration-[240ms] hover:-translate-y-0.5"
+            className="flex h-full min-h-[176px] flex-col gap-3.5 rounded-[22px] bg-[#13110e] p-[18px] text-[#f5f0e8] transition-transform duration-[240ms] hover:-translate-y-0.5"
           >
             <span className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-[13px] whitespace-nowrap text-[#f5f0e8]/70">
@@ -366,13 +379,14 @@ function AoVivo({ linhas }: { linhas: Linha[] }) {
               </span>
               <span className="font-mono text-[13px] whitespace-nowrap">{v.funil.emAndamento} em andamento</span>
             </span>
+            {/* Título em até 2 linhas, sempre com a altura de 2: cartões do mesmo tamanho com qualquer cargo */}
             <span className="flex flex-col">
-              <span className="font-semibold">{v.cargo}</span>
+              <span className="line-clamp-2 min-h-[2lh] font-semibold" title={v.cargo}>{v.cargo}</span>
               <span className="text-[13px] text-[#f5f0e8]/70">
                 {[v.time, NOME_SENIORIDADE_VAGA[v.senioridade]].filter((x) => x && x !== "—").join(" · ")}
               </span>
             </span>
-            <BarrasDeVoz n={9} altura={22} largura={3} className="text-[#f5f0e8]" />
+            <BarrasDeVoz n={7} altura={20} largura={3} className="mt-auto text-[#f5f0e8]" />
           </Link>
         </motion.div>
       ))}
@@ -385,7 +399,7 @@ function Atencao({ novos, rascunho }: { novos: Linha[]; rascunho?: RascunhoVaga 
   const totalNovos = novos.reduce((soma, v) => soma + novosDa(v), 0);
   if (totalNovos === 0 && !rascunho) return null;
   const carta = "anim-subir flex flex-col gap-2 rounded-[20px] bg-superficie p-[18px] shadow-padrao transition-[transform,box-shadow] duration-[240ms] ease-saida hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_44px_-22px_rgb(28_24_18/0.4)]";
-  const acao = "group/acao flex items-center gap-1 text-[14px] font-medium text-texto";
+  const acao = "group/acao flex w-fit items-center gap-1 text-[14px] font-medium text-texto sublinha";
   return (
     <section className="flex flex-col gap-3" aria-labelledby="atencao">
       <h2 id="atencao" className="font-display text-[22px] leading-none font-semibold tracking-[-0.02em]">
@@ -527,7 +541,7 @@ function Grade({
         className="group flex min-w-0 flex-1 items-center gap-4 rounded-xl px-3 py-3.5 transition-colors outline-none hover:bg-superficie-2/50 focus-visible:bg-superficie-2/70"
       >
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-[15px] text-texto">{titulo}</span>
+          <span className="truncate text-[15px] text-texto transition-transform duration-[240ms] ease-saida group-hover:translate-x-1">{titulo}</span>
           <span className="truncate text-[12.5px] text-texto-suave">{sub}</span>
           {/* No celular a situação desce para baixo do detalhe, em vez de sumir. */}
           <span className="truncate text-[13px] text-texto-suave sm:hidden">{situacao}</span>

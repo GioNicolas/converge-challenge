@@ -454,7 +454,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
             >
               <MessageCircle size={16} strokeWidth={1.75} />
-              Chamar entrevistador
+              Chamar o Totti
             </button>
             <button
               type="button"
@@ -466,6 +466,38 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               {run.status === "running" ? "Rodando…" : "Rodar"}
             </button>
           </div>
+          {/* Atalhos de desenvolvimento: no fluxo da coluna, nunca por cima dos botões */}
+          {process.env.NODE_ENV !== "production" && (
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  applyCommands([
+                    { type: "highlight_range", startLine: 2, endLine: 3, note: "Debug: grifo" },
+                    { type: "add_inline_note", line: 3, text: "nota de teste" },
+                  ])
+                }
+                className="label-pequena rounded-full bg-superficie-2 px-2.5 py-1"
+              >
+                Testar grifo
+              </button>
+              <button
+                type="button"
+                onClick={() => applyCommands([{ type: "clear_highlights" }])}
+                className="label-pequena rounded-full bg-superficie-2 px-2.5 py-1"
+              >
+                Limpar grifos
+              </button>
+              <button
+                type="button"
+                onClick={() => void forcarEmpecilho()}
+                disabled={mudanca !== null || chat.open}
+                className="label-pequena rounded-full bg-superficie-2 px-2.5 py-1 disabled:opacity-50"
+              >
+                Forçar empecilho
+              </button>
+            </div>
+          )}
         </div>
 
         <FakeCursor ref={cursorRef} />
@@ -519,39 +551,6 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         />
 
 
-        {process.env.NODE_ENV !== "production" && (
-          <button
-            type="button"
-            onClick={() => {
-              applyCommands([
-                { type: "highlight_range", startLine: 2, endLine: 3, note: "Debug: grifo" },
-                { type: "add_inline_note", line: 3, text: "nota de teste" },
-              ]);
-            }}
-            className="label-pequena absolute bottom-3 left-4 rounded-controle bg-superficie-2 px-2 py-1"
-          >
-            Testar grifo
-          </button>
-        )}
-        {process.env.NODE_ENV !== "production" && (
-          <button
-            type="button"
-            onClick={() => applyCommands([{ type: "clear_highlights" }])}
-            className="label-pequena absolute bottom-3 left-28 rounded-controle bg-superficie-2 px-2 py-1"
-          >
-            Limpar grifos
-          </button>
-        )}
-        {process.env.NODE_ENV !== "production" && (
-          <button
-            type="button"
-            onClick={() => void forcarEmpecilho()}
-            disabled={mudanca !== null || chat.open}
-            className="label-pequena absolute bottom-3 left-[13.5rem] rounded-controle bg-superficie-2 px-2 py-1 disabled:opacity-50"
-          >
-            Forçar empecilho
-          </button>
-        )}
       </section>
     </main>
   );

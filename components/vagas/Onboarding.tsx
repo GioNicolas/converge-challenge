@@ -11,6 +11,7 @@ import { ArrowRight } from "lucide-react";
 import { COOKIE_ONBOARDING } from "@/lib/vagas/onboarding";
 import Perola, { BarrasDeVoz } from "@/components/totti/Perola";
 import Revelar from "@/components/totti/Revelar";
+import TituloRevelado from "@/components/totti/TituloRevelado";
 import Marca from "./Marca";
 
 const FONTE: [string, "forte" | "normal" | "claro"][] = [
@@ -127,11 +128,11 @@ function Heroi() {
           {aoVivo} entrevistas acontecendo agora
         </span>
         <h1 className="titulo-display text-[clamp(44px,6vw,80px)] leading-[0.98]">
-          Cole a vaga.
+          <TituloRevelado texto="Cole a vaga." atraso={0.1} />
           <br />
-          O Totti entrevista.
+          <TituloRevelado texto="O Totti entrevista." atraso={0.3} />
           <br />
-          <span className="text-pedra">Você decide.</span>
+          <em className="italic text-texto [font-variation-settings:'SOFT'_100,'WONK'_1]">Você decide.</em>
         </h1>
         <p className="max-w-[520px] text-[19px] text-texto-suave">
           Um entrevistador técnico por voz que acompanha o código e o desenho do candidato em tempo real, pergunta no momento certo e
