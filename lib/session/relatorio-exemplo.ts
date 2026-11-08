@@ -13,9 +13,9 @@ import { regrasDoCriterio } from "@/lib/squad-memory/prompt";
 
 export const ID_EXEMPLO = "exemplo";
 
-/** O exemplo só existe fora de produção. */
+/** O exemplo vale também em produção (demo); desliga com DESATIVAR_RELATORIO_EXEMPLO=1. */
 export function exemploHabilitado(sessionId: string | null): boolean {
-  return sessionId === ID_EXEMPLO && process.env.NODE_ENV !== "production";
+  return sessionId === ID_EXEMPLO && process.env.DESATIVAR_RELATORIO_EXEMPLO !== "1";
 }
 
 const min = (m: number, s = 0) => (m * 60 + s) * 1000;

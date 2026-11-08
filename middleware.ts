@@ -48,7 +48,8 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  if (senha) cabecalhos.set(CABECALHO_AUTENTICADO, "1");
+  // Sem PAINEL_SENHA o painel é aberto por design (demo): quem chega aqui está liberado, e o relatório confia no cabeçalho.
+  cabecalhos.set(CABECALHO_AUTENTICADO, "1");
   const resposta = NextResponse.next({ request: { headers: cabecalhos } });
   if (senha && acesso.gravarCookie) {
     resposta.cookies.set(NOME_DO_COOKIE, await valorDoCookie(senha), {

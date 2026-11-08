@@ -31,6 +31,6 @@ export const DEFAULT_CONFIG: InterviewConfig = InterviewConfig.parse({
   // Questão de partida; a entrevista sorteia outra do mesmo nível e foco (comQuestaoSorteada).
   difficulty: "facil",
   problemId: "two-sum",
-  languages: ["python", "cpp", "c"],
+  languages: ["python"],
   durationMin: 30,
 });
