@@ -100,24 +100,27 @@ describe("aprofundar: uma pergunta por área, sem follow-up", () => {
   });
 });
 
-describe("formato que não está disponível", () => {
-  it("live coding não tem troca para uso de IA: nenhuma oferta de system design", () => {
-    assert.equal(SYSTEM_DESIGN_ATIVO, false);
-    assert.equal(modoAtivo("system_design"), false);
-    assert.equal(modoAlternativoQueMede("live_coding", "uso_ia"), undefined);
-    const passo = proximoPasso(
-      estado({
-        focus: [
-          { area: "tecnico", weight: 0.5 },
-          { area: "uso_ia", weight: 0.5 },
-        ],
-        mode: "live_coding",
-      }),
-    );
-    assert.notEqual(passo.tipo, "oferecer_tradeoff");
-    assert.deepEqual(passo, { tipo: "aprofundar", area: "tecnico", motivo: "inicial" });
+describe("system design disponível", () => {
+  it("system design está ligado e é a troca que mede uso de IA quando o plano é live coding", () => {
+    assert.equal(SYSTEM_DESIGN_ATIVO, true);
+    assert.equal(modoAtivo("system_design"), true);
+    assert.equal(modoAlternativoQueMede("live_coding", "uso_ia"), "system_design");
   });
 
+  it("pedido de system design com o formato disponível não recebe aviso de indisponível", () => {
+    const passo = proximoPasso(
+      estado({
+        focus: [{ area: "tecnico", weight: 1 }],
+        mode: "live_coding",
+        formatoIndisponivelPedido: false,
+        sinais: { pediu_system_design: 1 },
+      }),
+    );
+    assert.notEqual(passo.tipo, "informar_formato_indisponivel");
+  });
+});
+
+describe("formato que não está disponível (trava desligada)", () => {
   it("pedido de system design recebe um aviso, uma vez", () => {
     const e = estado({
       focus: [{ area: "tecnico", weight: 1 }],

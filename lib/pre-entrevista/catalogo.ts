@@ -195,11 +195,11 @@ function comoAvaliamos(): Record<InterviewMode, Record<FocusArea, string>> {
 export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = comoAvaliamos();
 
 /**
- * System design ainda não está pronto nesta versão: o agente entrevistador só conduz live coding. Enquanto for `false`,
- * a classificação vira live coding (ver `classificacaoDoFormatoAtivo`), não há oferta de troca de formato, e um pedido
- * de system design recebe um aviso. Ligar só quando o agente souber conduzir o desenho no quadro.
+ * System design está ligado: o plano com `mode: "system_design"` abre o quadro (`/entrevista/system-design`), e o agente
+ * conduz o desenho por lá. Se voltar a `false`, a classificação vira live coding (ver `classificacaoDoFormatoAtivo`),
+ * não há oferta de troca de formato, e um pedido de system design recebe um aviso.
  */
-export const SYSTEM_DESIGN_ATIVO = false;
+export const SYSTEM_DESIGN_ATIVO = true;
 
 /** O formato está disponível nesta versão? */
 export function modoAtivo(modo: InterviewMode): boolean {
