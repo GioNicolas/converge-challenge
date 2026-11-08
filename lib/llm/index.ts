@@ -20,7 +20,7 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "conversa" | "evaluator" | "fast" | "filtro" | "interviewer";
+export type LlmRole = "analyst" | "conversa" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro";
 
 /** Papéis que respondem a uma fala ao vivo: passam na frente na fila e nunca esperam uma análise acabar. */
 const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "fast", "filtro", "interviewer"]);
@@ -98,6 +98,22 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     hedgeMs: 2_000,
     temperatura: 0,
   },
+  quadro: {
+    // Análise do desenho no quadro (decide se e o que perguntar), com prazo de 8 s. O GLM com raciocínio
+    // estourava o prazo em quase toda análise (a reserva só entrava aos 12 s). Medido com
+    // scripts/simular-conducao.ts: gemini-3.7-flash responde em 3–5 s e conduz melhor que os mais rápidos
+    // (o flash-lite falava os ids do grafo; o gpt-4.1-mini elogiava e juntava duas perguntas).
+    primario: "openrouter",
+    openrouterEnv: "ANALISE_QUADRO_MODEL",
+    openrouterDefault: "google/gemini-3.7-flash",
+    featherlessEnv: "ANALYST_MODEL",
+    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    maxTokens: 4000,
+    reasoningEffort: "low",
+    raciocinioSo: "featherless",
+    hedgeMs: 6_000,
+    temperatura: 0.4,
+  },
   interviewer: {
     featherlessEnv: "INTERVIEWER_MODEL",
     featherlessDefault: "zai-org/GLM-5.3-Flash",
@@ -160,6 +176,7 @@ const state: LlmState = (globalWithLlm.__llmState ??= {
     filtro: { consecutiveSlow: 0 },
     evaluator: { consecutiveSlow: 0 },
     interviewer: { consecutiveSlow: 0 },
+    quadro: { consecutiveSlow: 0 },
   },
 });
 // Estado criado por uma versão anterior do módulo pode não ter papéis novos (aconteceu com "interviewer").
@@ -203,9 +220,11 @@ function roleSnapshot(role: LlmRole, r: RoleStore, now: number): RoleStatsSnapsh
   return { route: reserva, directUntil: r.directUntil };
 }
 
-/** [primário, reserva] do papel. */
+/** [primário, reserva] do papel. `LLM_PRIMARIO_<PAPEL>` (featherless|openrouter) troca o primário sem deploy de código. */
 function ordem(role: LlmRole): [LlmProviderName, LlmProviderName] {
-  return ROLE_CONFIG[role].primario === "openrouter" ? ["openrouter", "featherless"] : ["featherless", "openrouter"];
+  const env = process.env[`LLM_PRIMARIO_${role.toUpperCase()}`];
+  const primario = env === "openrouter" || env === "featherless" ? env : ROLE_CONFIG[role].primario;
+  return primario === "openrouter" ? ["openrouter", "featherless"] : ["featherless", "openrouter"];
 }
 
 export function getLlmStats(): LlmStatsSnapshot {
@@ -222,6 +241,7 @@ export function getLlmStats(): LlmStatsSnapshot {
       filtro: roleSnapshot("filtro", state.roles.filtro, now),
       evaluator: roleSnapshot("evaluator", state.roles.evaluator, now),
       interviewer: roleSnapshot("interviewer", state.roles.interviewer, now),
+      quadro: roleSnapshot("quadro", state.roles.quadro, now),
     },
   };
 }

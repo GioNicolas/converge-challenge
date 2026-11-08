@@ -39,7 +39,7 @@ const base = (nomeSchema: string, extra: object = {}) => ({
 describe("criarClientePrincipal (cérebro do quadro sobre o lib/llm)", () => {
   it("cada chamada do cérebro vai para o papel certo do lib/llm", async () => {
     const esperado: Array<[string, string]> = [
-      [NOME_SCHEMA_ANALISE, "analyst"],
+      [NOME_SCHEMA_ANALISE, "quadro"],
       [NOME_SCHEMA_PLANEJADOR, "analyst"],
       [NOME_SCHEMA_PERGUNTAR, "conversa"],
       [NOME_SCHEMA_ABERTURA, "conversa"],

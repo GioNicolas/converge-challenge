@@ -17,7 +17,7 @@ import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "./cli
 
 /** Papel do `lib/llm` de cada chamada do cérebro. */
 const PAPEL: Record<string, LlmRole> = {
-  [NOME_SCHEMA_ANALISE]: "analyst", // análise do desenho, ao vivo
+  [NOME_SCHEMA_ANALISE]: "quadro", // análise do desenho, ao vivo (prazo de 8 s)
   [NOME_SCHEMA_PLANEJADOR]: "analyst", // conversa de plano com a recrutadora
   // Fala com o candidato, ao vivo: modelo sem raciocínio. O GLM fica para a análise e o relatório.
   [NOME_SCHEMA_PERGUNTAR]: "conversa",

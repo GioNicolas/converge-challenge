@@ -19,6 +19,7 @@ import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { comoFuncionaLiveCoding } from "@/lib/conversa/instrucoes";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import ControleVoz from "./voz/ControleVoz";
@@ -41,9 +42,7 @@ export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" |
 
 /** Fora da conversa, frases finais com menos palavras que isso não entram na linha do tempo (o agente ainda ouve). */
 const MIN_PALAVRAS_FALA = 2;
-/** Logo no começo o agente se apresenta e avisa que o candidato pode pedir feedback ao fim de cada etapa. */
-export const SAUDACAO =
-  "Oi, eu sou o Totti e vou acompanhar a sua entrevista. Pode pensar em voz alta e, quando terminar uma etapa, é só me pedir um feedback.";
+/** Logo no começo o agente se apresenta, diz quanto tempo dura e como funciona (lib/conversa/instrucoes.ts). */
 /** Espera depois de a sessão começar, para a saudação não atropelar o carregamento da tela. */
 const ATRASO_SAUDACAO_MS = 1500;
 /** Digitou há menos que isso: o agente não abre uma pergunta no meio da digitação. */
@@ -206,6 +205,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const saudacaoFeitaRef = useRef(false);
   const lembrarFala = chat.lembrar;
   const registrarEvento = session.sendEvent;
+  const duracaoMin = vaga.durationMin;
   useEffect(() => {
     if (chat.open) saudacaoFeitaRef.current = true;
   }, [chat.open]);
@@ -219,14 +219,15 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...turno })) return;
       saudacaoFeitaRef.current = true;
       clearInterval(id);
-      lembrarFala({ role: "agent", text: SAUDACAO });
-      void registrarEvento({ type: "speech", role: "agent", text: SAUDACAO }).catch(() => {});
-      void falarNaVez(SAUDACAO).then((falou) => {
-        if (!falou) setLegendaSemVoz({ quem: "agente", texto: SAUDACAO, ate: SAUDACAO.length });
+      const saudacao = comoFuncionaLiveCoding(duracaoMin);
+      lembrarFala({ role: "agent", text: saudacao });
+      void registrarEvento({ type: "speech", role: "agent", text: saudacao }).catch(() => {});
+      void falarNaVez(saudacao).then((falou) => {
+        if (!falou) setLegendaSemVoz({ quem: "agente", texto: saudacao, ate: saudacao.length });
       });
     }, 200);
     return () => clearInterval(id);
-  }, [session.sessionId, session.ended, lembrarFala, registrarEvento, falarNaVez]);
+  }, [session.sessionId, session.ended, lembrarFala, registrarEvento, falarNaVez, duracaoMin]);
 
   useEffect(() => warmUp(), []);
   const pedirMidia = midia.pedir;

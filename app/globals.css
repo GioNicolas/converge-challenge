@@ -59,6 +59,14 @@
   --perola: radial-gradient(circle at 35% 30%, #ffffff 0%, #f1ece3 48%, #b8b0a3 100%);
 }
 
+/* Fontes como variáveis de verdade: o @theme inline não emite --font-*, então o CSS usa estas.
+ * Ficam no body (não no :root) porque o next/font põe --font-inter/--font-fraunces/--font-jetbrains na classe do body. */
+body {
+  --fonte-corpo: var(--font-inter), "Inter", system-ui, sans-serif;
+  --fonte-titulo: var(--font-fraunces), "Fraunces", Georgia, serif;
+  --fonte-maquina: var(--font-jetbrains), "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+}
+
 /* PAPEL: lado da recrutadora. Os mesmos tokens, outro chão. */
 .tema-recrutador,
 :root:has(.tema-quadro-pagina) {
@@ -134,9 +142,9 @@
   --ease-mola: var(--curva-mola);
 
   /* Fontes: Inter (interface), Fraunces (títulos e números), JetBrains Mono (voz da máquina) */
-  --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
-  --font-display: var(--font-fraunces), "Fraunces", Georgia, serif;
-  --font-mono: var(--font-jetbrains), "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-sans: var(--fonte-corpo);
+  --font-display: var(--fonte-titulo);
+  --font-mono: var(--fonte-maquina);
 }
 
 /* Durações: duration-rapida, duration-normal, duration-lenta, duration-viagem */
@@ -175,7 +183,7 @@
 }
 /* Títulos e números grandes: Fraunces macia, peso 560 */
 @utility titulo-display {
-  font-family: var(--font-display);
+  font-family: var(--fonte-titulo);
   font-weight: 560;
   font-variation-settings: "SOFT" 100, "opsz" 96;
   letter-spacing: -0.022em;
@@ -184,7 +192,7 @@
 }
 /* A voz da máquina: rastro do agente, código, tempos e IDs. Nunca em títulos. */
 @utility voz-maquina {
-  font-family: var(--font-mono);
+  font-family: var(--fonte-maquina);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -208,7 +216,7 @@
 body {
   background: var(--fundo);
   color: var(--texto);
-  font-family: var(--font-sans);
+  font-family: var(--fonte-corpo);
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -351,7 +359,7 @@ body {
 }
 .agent-inline-note {
   color: var(--marca);
-  font-family: var(--font-mono);
+  font-family: var(--fonte-maquina);
   font-style: normal;
   opacity: 0.85;
 }

@@ -54,3 +54,20 @@ export function limitarFrases(texto: string, n: number): string {
     .join(" ")
     .trim();
 }
+
+/**
+ * Troca ids do grafo ("[r5]", "o r5") pelo nome do elemento ("Cache Redis") numa fala. O modelo às vezes fala
+ * o id, que não significa nada para quem ouve. Sem nome conhecido, o id sai e fica "esse elemento".
+ */
+export function trocarIdsPorNomes(texto: string, grafo: string): string {
+  const nomes = new Map<string, string>();
+  for (const linha of grafo.split("\n")) {
+    const m = linha.match(/^\s*-\s*\[([a-z]\d+)\]\s+(.+?)(?:\s+\((?:retângulo|elipse|losango|texto|moldura|imagem|desenho)[^)]*\))?\s*(?:—.*)?$/i);
+    if (m && !/[→—]/.test(m[2])) nomes.set(m[1].toLowerCase(), m[2].replace(/^"|"$/g, "").trim());
+  }
+  return texto
+    .replace(/\[([a-z]\d+)\]/gi, (_, id: string) => nomes.get(id.toLowerCase()) ?? "esse elemento")
+    .replace(/\b([a-z]\d+)\b/g, (todo, id: string) => nomes.get(id) ?? todo)
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}

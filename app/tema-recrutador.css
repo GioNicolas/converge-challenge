@@ -6,7 +6,7 @@
 .tema-recrutador {
   background: var(--fundo);
   color: var(--texto);
-  font-family: var(--font-sans);
+  font-family: var(--fonte-corpo);
   letter-spacing: -0.003em;
   -webkit-font-smoothing: antialiased;
 }
@@ -20,7 +20,7 @@
 
 /* Rótulo "de máquina": ids, tempos, estado do agente */
 .tema-recrutador .rotulo-mono {
-  font-family: var(--font-mono);
+  font-family: var(--fonte-maquina);
   font-size: 12.5px;
   color: var(--texto-suave);
 }
