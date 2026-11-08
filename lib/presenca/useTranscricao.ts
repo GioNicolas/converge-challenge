@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { tokenTranscricao } from "../sessao/servidor";
+import { ErroHttp, tokenTranscricao } from "../sessao/servidor";
 import {
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, reamostrar, urlDoScribe,
@@ -176,7 +176,15 @@ export function criarEscutaTranscricao(opcoes: {
         return;
       }
       if (encerrado || atual !== geracao) return;
-      const token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
+      let token: string;
+      try {
+        token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
+      } catch (erro) {
+        // Recusa do servidor (sem chave, sessão inválida/encerrada, limite): repetir não adianta.
+        const recusa = erro instanceof ErroHttp && (erro.status === 503 || (erro.status >= 400 && erro.status < 500));
+        if (!encerrado && atual === geracao) falharScribe(recusa);
+        return;
+      }
       if (encerrado || atual !== geracao) return;
       const ws = new WebSocket(urlDoScribe(token));
       socket = ws;
