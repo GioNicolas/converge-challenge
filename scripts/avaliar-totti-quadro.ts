@@ -154,6 +154,35 @@ const CASOS_FALA: CasoFala[] = [
       ...(/por que.{0,40}(redis|cache).{0,30}(antes|primeiro|frente)/i.test(t) ? ["perguntou de novo o que ele já explicou"] : []),
     ],
   },
+  {
+    nome: "fala: respondeu com justificativa (não insiste)",
+    texto: "Coloquei o Redis antes porque a leitura é umas cem vezes maior que a escrita, então quase tudo sai do cache e o Postgres fica folgado.",
+    fase: "APROFUNDAMENTO",
+    perguntaAtiva: "Por que o Redis vem antes do Postgres?",
+    checar: (t, r) => [
+      ...(!r.responder ? ["ficou calado"] : []),
+      ...(/\?/.test(t) && /redis|cache|postgres|leitura/i.test(t) ? ["insistiu no mesmo assunto depois de uma resposta justificada"] : []),
+      ...(/ótim|excelent|perfeit|boa (resposta|escolha)|isso mesmo|exato/i.test(t) ? ["validou a resposta"] : []),
+    ],
+  },
+  {
+    nome: "fala: nervoso",
+    texto: "Desculpa, tô meio nervoso aqui, me perdi um pouco.",
+    checar: (t, r) => [
+      ...(!r.responder ? ["ignorou o candidato"] : []),
+      ...(/ótim|excelent|perfeit|indo (muito )?bem/i.test(t) ? ["validou o desempenho"] : []),
+    ],
+  },
+  {
+    nome: "fala: o que acontece depois",
+    texto: "E depois da entrevista, como fica? Vocês me dão o resultado na hora?",
+    checar: (t, r) => [
+      ...(!r.responder ? ["ficou calado"] : []),
+      ...(!/retorno|respons[áa]vel|processo|depois/i.test(t) ? ["não explicou o que acontece depois"] : []),
+      ...(/assum/i.test(t) ? ["mandou assumir"] : []),
+      ...(/\b(\d+|uma?|dois|duas|tr[êe]s|alguns|algumas|poucos|poucas) (dias?|semanas?|horas?)\b/i.test(t) ? ["prometeu prazo"] : []),
+    ],
+  },
 ];
 
 async function rodarFalas() {
