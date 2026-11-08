@@ -5,8 +5,9 @@ export const dynamic = "force-dynamic";
 
 // Voz do agente: ElevenLabs com tempos por caractere (a legenda e a mão do agente seguem a fala).
 // Sem ELEVENLABS_API_KEY responde 501 e o quadro usa a voz do navegador.
-// A voz vem de ELEVENLABS_VOICE_ID (copie o ID em Voices, no painel do ElevenLabs).
-const VOZ_PADRAO = "21m00Tcm4TlvDq8ikWAM";
+// Voz do agente: Fernando - Casual (pt-BR, voz da biblioteca: a API exige plano pago).
+// ELEVENLABS_VOICE_ID só é preciso para trocar de voz (copie o ID em Voices, no painel do ElevenLabs).
+const VOZ_PADRAO = "jyRzzBWbHll8EUfOjmhe";
 const MODELO_PADRAO = "eleven_multilingual_v2";
 const MAXIMO_CARACTERES = 2000;
 
