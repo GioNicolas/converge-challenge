@@ -19,6 +19,7 @@ import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { calar, falar } from "@/lib/sessao/cliente";
+import { liberarAudio } from "@/lib/presenca/vozSincronizada";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { postEncerramento } from "./ide/api";
 import { useChat } from "./ide/useChat";
@@ -163,6 +164,14 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   });
 
   useEffect(() => warmUp(), []);
+  // A voz do agente chega depois de uma chamada assíncrona: libera o áudio no primeiro gesto do candidato.
+  useEffect(() => {
+    const eventos = ["pointerdown", "keydown", "touchstart"] as const;
+    // liberarAudio ignora as chamadas depois de liberar; se o primeiro gesto falhar, o próximo tenta de novo.
+    const liberar = () => liberarAudio();
+    eventos.forEach((e) => window.addEventListener(e, liberar));
+    return () => eventos.forEach((e) => window.removeEventListener(e, liberar));
+  }, []);
   const pedirMidia = midia.pedir;
   useEffect(() => {
     void pedirMidia();
