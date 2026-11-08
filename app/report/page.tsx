@@ -7,13 +7,16 @@ import { CONCEITOS_EMPECILHO, Gravacao, Report } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import type { ReportListItem } from "@/app/api/report/route";
 import MomentoDaSessao, { type MomentoProva } from "@/components/report/MomentoDaSessao";
-import LinhaDoTempo, { type Fato, type Faixa } from "@/components/report/LinhaDoTempo";
+import HistoriaDaEntrevista, { duracaoCurta, type Acontecimento } from "@/components/report/HistoriaDaEntrevista";
+import NotasDosCriterios, { type NotaCriterio } from "@/components/report/NotasDosCriterios";
 
 const REC = { avancar: "Avançar", talvez: "Talvez", nao_avancar: "Não avançar" } as const;
 /** A avaliação leva de 15 s a 1 min: enquanto o servidor responde 202, consulta de novo. */
 const POLL_MS = 2500;
 const ORIGEM_ADAPTACAO = "Adaptação à mudança";
 const ORIGEM_APRENDIZADO = "Aprendizado";
+/** Origem dos acontecimentos do gráfico (travou, dica, mudança) no painel de momentos. */
+const ORIGEM_HISTORIA = "Acontecimento";
 
 type Evidencia = Report["criteria"][number]["evidence"][number];
 /** Desenha uma evidência; com a gravação carregada, vira botão que abre o momento. */
@@ -92,8 +95,13 @@ function SessionReport({ id }: { id: string }) {
       .flatMap((c) => c.evidence.map((e) => ({ t: e.t, origem: c.name, text: e.text })));
     const daAdaptacao = (report.adaptation?.evidence ?? []).map((e) => ({ t: e.t, origem: ORIGEM_ADAPTACAO, text: e.text }));
     const doAprendizado = (report.learning?.evidence ?? []).map((e) => ({ t: e.t, origem: ORIGEM_APRENDIZADO, text: e.text }));
-    return [...doCriterio, ...daAdaptacao, ...doAprendizado].sort((a, b) => a.t - b.t);
-  }, [report]);
+    const daHistoria = acontecimentosDoRelatorio(report, gravacao).map((a) => ({
+      t: a.t,
+      origem: ORIGEM_HISTORIA,
+      text: textoDoAcontecimento(a),
+    }));
+    return [...doCriterio, ...daAdaptacao, ...doAprendizado, ...daHistoria].sort((a, b) => a.t - b.t);
+  }, [report, gravacao]);
 
   const desenharProva: DesenharProva = (e, origem, chave) => {
     const indice = momentos.findIndex((m) => m.t === e.t && m.origem === origem && m.text === e.text);
@@ -134,32 +142,26 @@ function SessionReport({ id }: { id: string }) {
 
   const indiceDe = (e: Evidencia, origem: string) =>
     momentos.findIndex((m) => m.t === e.t && m.origem === origem && m.text === e.text);
-  const faixas: Faixa[] = [
-    ...report.criteria.map((c) => ({
-      id: c.id,
-      nome: c.name,
-      nota: c.score,
-      provas: c.score === null ? [] : c.evidence.map((e) => indiceDe(e, c.name)).filter((i) => i >= 0),
-    })),
+  const provasDe = (evidencias: Evidencia[], origem: string) =>
+    evidencias.map((e) => indiceDe(e, origem)).filter((i) => i >= 0);
+  const notas: NotaCriterio[] = report.criteria.map((c) => ({
+    id: c.id,
+    nome: c.name,
+    nota: c.score,
+    provas: c.score === null ? [] : provasDe(c.evidence, c.name),
+  }));
+  const notasFora: NotaCriterio[] = [
     ...(report.adaptation
-      ? [{
-          id: "adaptacao",
-          nome: ORIGEM_ADAPTACAO,
-          nota: report.adaptation.score,
-          detalhe: "fora da nota geral",
-          provas: report.adaptation.evidence.map((e) => indiceDe(e, ORIGEM_ADAPTACAO)).filter((i) => i >= 0),
-        }]
+      ? [{ id: "adaptacao", nome: ORIGEM_ADAPTACAO, nota: report.adaptation.score, provas: provasDe(report.adaptation.evidence, ORIGEM_ADAPTACAO) }]
       : []),
     ...(report.learning
-      ? [{
-          id: "aprendizado",
-          nome: ORIGEM_APRENDIZADO,
-          nota: report.learning.score,
-          detalhe: "fora da nota geral",
-          provas: report.learning.evidence.map((e) => indiceDe(e, ORIGEM_APRENDIZADO)).filter((i) => i >= 0),
-        }]
+      ? [{ id: "aprendizado", nome: ORIGEM_APRENDIZADO, nota: report.learning.score, provas: provasDe(report.learning.evidence, ORIGEM_APRENDIZADO) }]
       : []),
   ];
+  const acontecimentos = acontecimentosDoRelatorio(report, gravacao).map((ac) => ({
+    ...ac,
+    momento: momentos.findIndex((m) => m.t === ac.t && m.origem === ORIGEM_HISTORIA && m.text === textoDoAcontecimento(ac)),
+  }));
   const a = report.adaptation;
   const s = report.signals;
 
@@ -187,16 +189,23 @@ function SessionReport({ id }: { id: string }) {
         </ul>
       </header>
 
-      <LinhaDoTempo
+      <HistoriaDaEntrevista
         duracao={gravacao?.durationMs ?? s.durationMs}
-        momentos={momentos}
-        faixas={faixas}
         gravacao={gravacao}
-        mudanca={a ? { inicio: a.announcedAt, fim: a.adaptedAt, titulo: a.title } : undefined}
-        travamentos={(report.learning?.stuck ?? []).map((x) => ({ inicio: x.startedAt, fim: x.unstuckAt }))}
-        fatos={fatosDoRelatorio(report)}
+        acontecimentos={acontecimentos}
         onAbrir={setAberto}
       />
+
+      <div className="max-w-4xl space-y-6">
+        <NotasDosCriterios titulo="Notas" subtitulo="clique para ver as provas" notas={notas} onAbrir={gravacao ? setAberto : undefined} />
+        {notasFora.length > 0 && (
+          <NotasDosCriterios
+            titulo="Fora da nota geral"
+            notas={notasFora}
+            onAbrir={gravacao ? setAberto : undefined}
+          />
+        )}
+      </div>
 
       <section className="grid gap-6 sm:grid-cols-3">
         <List title="Pontos fortes" items={report.strengths} />
@@ -243,27 +252,66 @@ function Selo({ children }: { children: ReactNode }) {
   return <li className="rounded-full bg-superficie-2 px-3 py-1 tabular-nums">{children}</li>;
 }
 
-/** O que foi medido em cada momento (dica, travamento, mudança), para o balão do gráfico. */
-function fatosDoRelatorio(report: Report): Fato[] {
-  const fatos: Fato[] = [];
+function textoDoAcontecimento(a: Acontecimento): string {
+  return a.detalhe ? `${a.titulo}. ${a.detalhe}` : a.titulo;
+}
+
+/** O que vai escrito no gráfico: travamentos, dicas, a mudança, quando ele se adaptou e colagens. */
+function acontecimentosDoRelatorio(report: Report, gravacao: Gravacao | null): Acontecimento[] {
+  const lista: Acontecimento[] = [];
   const l = report.learning;
-  for (const h of l?.hints ?? []) {
-    fatos.push({
-      t: h.t,
-      texto: `Dica ${h.level} de ${l!.hintsAvailable}: “${h.text}” ${
-        h.codePassing
-          ? "Veio com o código já passando nos testes."
-          : h.unstuckAt === null
-            ? "Não passou em mais testes depois dela."
-            : `Passou em mais testes ${formatMs(h.unstuckAt - h.t)} depois.`
-      }`,
+  for (const s of l?.stuck ?? []) {
+    lista.push({
+      t: s.startedAt,
+      fim: s.unstuckAt,
+      tipo: "travou",
+      titulo: s.unstuckAt === null ? "Travou e não destravou" : `Travou por ${duracaoCurta(s.unstuckAt - s.startedAt)}`,
+      detalhe:
+        (s.cause === "falhas_seguidas"
+          ? `${s.failedRuns} execuções seguidas falhando sem passar em mais testes`
+          : "Parado sem mexer no código, com ele falhando") +
+        (s.hintLevels.length ? `, até a dica ${s.hintLevels.join(" e ")}.` : ", sem pedir dica."),
     });
+  }
+  if (l) {
+    for (const h of l.hints) {
+      lista.push({
+        t: h.t,
+        tipo: "dica",
+        titulo:
+          h.unstuckAt === null || h.codePassing
+            ? `Dica ${h.level} de ${l.hintsAvailable}`
+            : `Dica ${h.level} → destravou em ${duracaoCurta(h.unstuckAt - h.t)}`,
+        detalhe: `“${h.text}”${h.unstuckAt === null && !h.codePassing ? " Não passou em mais testes depois dela." : ""}`,
+      });
+    }
+  } else {
+    for (const m of gravacao?.marcos ?? []) {
+      if (m.tipo === "dica" || m.text.startsWith("Recebeu uma dica")) lista.push({ t: m.t, tipo: "dica", titulo: m.text });
+    }
   }
   const a = report.adaptation;
   if (a) {
-    fatos.push({ t: a.announcedAt, texto: `${TIPO_MUDANCA[a.kind]}: exige ${CONCEITOS_EMPECILHO[a.concept]}.` });
+    lista.push({
+      t: a.announcedAt,
+      fim: a.adaptedAt,
+      tipo: "mudanca",
+      titulo: `Mudança: ${a.title}`,
+      detalhe: `${TIPO_MUDANCA[a.kind]}. Exige ${CONCEITOS_EMPECILHO[a.concept]}.`,
+    });
+    if (a.adaptedAt !== null) {
+      lista.push({
+        t: a.adaptedAt,
+        tipo: "adaptou",
+        titulo: `Adaptou em ${duracaoCurta(a.adaptedAt - a.announcedAt)}`,
+        detalhe: "Primeira execução com todos os testes da mudança passando, sem quebrar os antigos.",
+      });
+    }
   }
-  return fatos;
+  for (const m of gravacao?.marcos ?? []) {
+    if (m.tipo === "colagem" || m.text.startsWith("Colou")) lista.push({ t: m.t, tipo: "colagem", titulo: m.text });
+  }
+  return lista;
 }
 
 const TIPO_MUDANCA = { requisito: "O requisito mudou", caso_novo: "Entrou um caso novo" } as const;
