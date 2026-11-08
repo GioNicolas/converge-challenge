@@ -18,6 +18,18 @@ interface CaptureDeps {
   initialLanguage?: string;
 }
 
+/** Linhas a mais numa única mudança a partir das quais o bloco conta como colado. */
+const PASTE_BLOCK_LINES = 6;
+
+/** Primeira linha (1-based) em que os dois textos diferem. */
+function firstChangedLine(a: string, b: string): number {
+  const la = a.split("\n");
+  const lb = b.split("\n");
+  let i = 0;
+  while (i < la.length && i < lb.length && la[i] === lb[i]) i++;
+  return i + 1;
+}
+
 /**
  * Captura de código: snapshot (debounce + throttle), pause, paste, language e run.
  */
@@ -31,6 +43,8 @@ export function useCodeCapture({ sendEvent, nowT, endedRef, starters: STARTERS, 
   const lastSentCodeRef = useRef<string | null>(null);
   const lastSnapshotAtRef = useRef(0);
   const lastTypedAtRef = useRef(0);
+  /** Última colagem que o editor avisou (onDidPaste). */
+  const lastPasteAtRef = useRef(-Infinity);
   const pausedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,10 +71,21 @@ export function useCodeCapture({ sendEvent, nowT, endedRef, starters: STARTERS, 
   const onCodeChange = useCallback(
     (next: string) => {
       if (endedRef.current) return;
+      const before = codeRef.current;
       codeRef.current = next;
       setCode(next);
 
       const now = nowT();
+      // Um bloco grande de uma vez também é colagem, mesmo quando o editor não avisa (colar pelo menu, arrastar,
+      // trocar o conteúdo inteiro): sem isso o relatório dizia "nenhuma colagem" para código copiado de fora.
+      const added = next.split("\n").length - before.split("\n").length;
+      if (added >= PASTE_BLOCK_LINES && now - lastPasteAtRef.current > 1500) {
+        lastPasteAtRef.current = now;
+        const startLine = firstChangedLine(before, next);
+        setTimeout(() => {
+          void flushSnapshot().then(() => sendEvent({ type: "paste", chars: Math.max(0, next.length - before.length), lines: added, startLine }));
+        }, 0);
+      }
       lastTypedAtRef.current = now;
       pausedRef.current = false;
 
@@ -95,12 +120,13 @@ export function useCodeCapture({ sendEvent, nowT, endedRef, starters: STARTERS, 
       if (endedRef.current) return;
       const lines = text.split("\n").length;
       if (lines < 2 && text.length < PASTE_MIN_CHARS) return;
+      lastPasteAtRef.current = nowT();
       // setTimeout: o onPaste dispara antes do onChange que atualiza codeRef.
       setTimeout(() => {
         void flushSnapshot().then(() => sendEvent({ type: "paste", chars: text.length, lines, startLine }));
       }, 0);
     },
-    [endedRef, flushSnapshot, sendEvent],
+    [endedRef, flushSnapshot, sendEvent, nowT],
   );
 
   const changeLanguage = useCallback(

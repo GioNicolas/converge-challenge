@@ -10,17 +10,14 @@ import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas } 
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
+import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import { completeJson } from "@/lib/llm";
 import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
 /** Falha do LLM: pede para repetir. Varia para não soar como gravação quando acontece mais de uma vez. */
-const FALLBACK_REPLIES = [
-  "Desculpa, me perdi aqui. Pode repetir?",
-  "Opa, não peguei essa. Fala de novo?",
-  "Perdi o fio aqui, pode repetir pra mim?",
-];
+const FALLBACK_REPLIES = FALAS_DE_REPETICAO;
 /** Fala barrada duas vezes pelo filtro: uma pergunta aberta que não entrega nada (e sem repetir a mesma frase).
  * Não fecha o assunto: o candidato ainda tem a vez. Sem validar e sem pedir para ele bolar testes. */
 const SAFE_CLOSE_REPLIES = [
@@ -66,6 +63,17 @@ export async function runInterviewerTurn(
   const code = latestCode(session);
   const lineCount = code.split("\n").length;
   const question = found?.question;
+  const problem = getProblem(session.config.problemId);
+
+  // A primeira fala de uma pergunta é a pergunta preparada, dita como está: a análise já a escreveu para este
+  // momento e o filtro já a aprovou. Reescrever com outra chamada de LLM era um segundo cérebro (mais um a
+  // dois segundos e às vezes um "oi, tudo bem?" no meio da entrevista). Só o encerramento, que junta vários
+  // pontos pendentes numa fala, passa pelo modelo.
+  if (found && req.messages.length === 0 && found.question.kind !== "encerramento") {
+    const grifo = found.question.highlight;
+    const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
+    return { reply: found.question.question, commands: highlightCommands(util ? grifo : undefined), end: false };
+  }
   const checkInDoEmpecilho = question?.checkInId
     ? session.checkIns.find((c) => c.id === question.checkInId)?.empecilhoId !== undefined
     : false;
@@ -79,7 +87,6 @@ export async function runInterviewerTurn(
       .filter(Boolean)
       .join(" | ") || undefined;
   const criterion = session.config.criteria.find((c) => c.id === question?.criterionId);
-  const problem = getProblem(session.config.problemId);
   const checkIn = question?.checkInId ? session.checkIns.find((c) => c.id === question.checkInId) : undefined;
   const input: InterviewerTurnInput = {
     mode: found ? "blip" : "candidate",
@@ -154,12 +161,20 @@ export async function runInterviewerTurn(
           : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
       } else if (!verdict.safe) {
         console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
+        const barrada = output;
+        // A segunda geração pode estourar o prazo: aí vale a fala segura, nunca o "pode repetir" (o candidato
+        // falou certo; quem falhou foi a geração).
         output = await generate(
           session,
           system,
           `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
           Math.min(PRAZO_GERACAO_MS, sobra() - PRAZO_FILTRO_MS / 2),
-        );
+        ).catch((err) => {
+          console.info("[interviewer] segunda geração falhou, indo de fala segura:", err instanceof Error ? err.message : err);
+          return opening
+            ? { ...barrada, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
+            : { ...barrada, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
+        });
         const second = await checkReply(output.reply, candidateLines, permitido, code, Math.max(500, Math.min(PRAZO_FILTRO_MS, sobra())));
         session.analyst.costUsd += second.costUsd;
         if (!second.safe) {
@@ -175,9 +190,11 @@ export async function runInterviewerTurn(
     console.error("[interviewer] falha no LLM:", err instanceof Error ? err.message : err);
     // Primeira fala de um blip: a pergunta preparada, com o grifo dela. Senão, pede pra repetir.
     if (found && req.messages.length === 0) {
+      const grifo = found.question.highlight;
+      const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
       return {
         reply: found.question.question,
-        commands: highlightCommands(found.question.highlight),
+        commands: highlightCommands(util ? grifo : undefined),
         end: false,
       };
     }
@@ -186,6 +203,17 @@ export async function runInterviewerTurn(
 
   // A primeira fala de um blip é a pergunta: encerrar ali não deixaria o candidato responder.
   if (found && req.messages.length === 0) output.end = false;
+  // Fala sem pergunta não deixa o assunto aberto: senão os dois ficam esperando, sem saber de quem é a vez.
+  else if (!output.end && !output.reply.trim().endsWith("?")) output = { ...output, end: true };
+  // Antes de ele escrever código, uma pergunta sobre o plano basta: depois disso ele é liberado para codar.
+  // Sem isso a conversa virava um interrogatório (por que, custo, bordas...) antes da primeira linha.
+  if (!found && input.fase === "entendendo" && jaPerguntouDoPlano(req.messages) && output.reply.trim().endsWith("?")) {
+    output = { ...output, reply: liberarParaCodar(output.reply), end: true, highlight: null };
+  }
+  // Grifo só com propósito: a fala tem que citar algo que está nas linhas grifadas.
+  if (output.highlight && !grifoComProposito(output.reply, code, output.highlight, problem.public.starters[session.language] ?? "")) {
+    output = { ...output, highlight: null };
+  }
   const t = elapsedMs(session);
 
   const highlight = output.highlight ? clampLines(output.highlight, lineCount) : undefined;
@@ -278,6 +306,40 @@ function anunciarEmpecilho(session: SessionState, blipId: string): string {
     empecilhoId: empecilho.id,
   });
   return empecilho.announcement;
+}
+
+/** O entrevistador já fez alguma pergunta nesta conversa livre (as falas que vieram no pedido). */
+function jaPerguntouDoPlano(messages: ChatMessage[]): boolean {
+  return messages.some((m) => m.role === "agent" && m.text.trim().endsWith("?"));
+}
+
+/** Tira a pergunta do fim e libera para codar (mantém a reação curta do começo, se houver). */
+function liberarParaCodar(reply: string): string {
+  const frases = reply.trim().split(/(?<=[.!?])\s+/);
+  while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  return [...frases, "Pode começar a codar quando quiser."].join(" ");
+}
+
+/** Mais linhas que isso já é o arquivo, não um trecho. */
+const MAX_LINHAS_GRIFO = 12;
+
+const PALAVRAS_DA_LINGUAGEM = new Set(["def", "for", "return", "not", "and", "pass", "else", "elif", "while", "len", "range", "true", "false", "none", "self", "class", "import", "from", "const", "let", "var", "function", "int", "string", "public", "static", "void", "new", "this", "null", "undefined"]);
+
+/**
+ * O grifo tem propósito quando as linhas têm código do candidato (não só o inicial) e a fala cita algo delas
+ * (um nome, uma palavra do trecho) ou aponta para ele ("essa linha", "aqui"). Grifo sem isso confunde: o
+ * candidato olha para a tela e não entende do que o Totti está falando.
+ */
+export function grifoComProposito(reply: string, code: string, range: LineRange, starter: string): boolean {
+  const linhasDoInicio = new Set(starter.split("\n").map((l) => l.trim()).filter(Boolean));
+  // Grifar a função inteira não aponta nada: o grifo é para um trecho.
+  if (range.endLine - range.startLine + 1 > MAX_LINHAS_GRIFO) return false;
+  const linhas = code.split("\n").slice(Math.max(0, range.startLine - 1), range.endLine).map((l) => l.trim()).filter(Boolean);
+  if (linhas.length === 0 || linhas.every((l) => linhasDoInicio.has(l) || l.startsWith("#") || l.startsWith("//"))) return false;
+  const fala = reply.toLowerCase();
+  if (/\b(essa linha|nessa linha|esse trecho|nesse trecho|aqui em cima|aqui embaixo|esse (loop|if|bloco|retorno|return|for)|essa (condição|função|variável|parte))\b/.test(fala)) return true;
+  const nomes = new Set(linhas.join(" ").toLowerCase().match(/[a-zà-ú_][a-zà-ú0-9_]{2,}/g) ?? []);
+  return [...nomes].some((n) => !PALAVRAS_DA_LINGUAGEM.has(n) && new RegExp(`(^|[^a-zà-ú0-9_])${n}([^a-zà-ú0-9_]|$)`).test(fala));
 }
 
 /** Uma geração da fala no modelo de conversa (rápido, sem raciocínio), cancelada de verdade no prazo. */

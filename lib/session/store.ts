@@ -11,8 +11,8 @@ const globalForSessions = globalThis as typeof globalThis & {
 };
 const sessions = (globalForSessions.__convergeSessions ??= new Map<string, SessionState>());
 
-/** Quanto tempo a pergunta adiada com "agora não" fica fora da fila. Fica aqui pra evitar import circular com a policy. */
-export const SNOOZE_MS = 150_000;
+/** Quanto tempo a pergunta adiada ("espera um pouco", ou sem resposta ao pedido de licença) fica fora da fila. Fica aqui pra evitar import circular com a policy. */
+export const SNOOZE_MS = 60_000;
 
 export function getSession(sessionId: string): SessionState | undefined {
   return sessions.get(sessionId);

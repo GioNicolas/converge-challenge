@@ -20,7 +20,7 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "conversa" | "conversa_quadro" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro";
+export type LlmRole = "analyst" | "codigo" | "conversa" | "conversa_quadro" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro";
 
 /** Papéis que respondem a uma fala ao vivo: passam na frente na fila e nunca esperam uma análise acabar. */
 const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "conversa_quadro", "fast", "filtro", "interviewer"]);
@@ -50,6 +50,7 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterDefault: "z-ai/glm-5.3-flash",
     maxTokens: 4000,
     reasoningEffort: "low",
+    // Conversa de plano com a recrutadora (alguém esperando). A análise do live coding tem o papel "codigo".
     hedgeMs: 12_000,
   },
   fast: {
@@ -58,8 +59,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterEnv: "FAST_FALLBACK_MODEL",
     openrouterDefault: "openai/gpt-oss-120b",
     maxTokens: 800,
-    // Filtro de fala fica no caminho de cada resposta do chat (normalmente ~1 s): esperar mais trava a conversa.
-    hedgeMs: 3_000,
+    // Extrator da memória da squad, em segundo plano: sem hedge (o OpenRouter só entra se a Featherless falhar).
+    // Os filtros (da fala ao vivo e das perguntas da análise) usam o papel "filtro".
   },
   evaluator: {
     featherlessEnv: "EVALUATOR_MODEL",
@@ -113,6 +114,22 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     maxTokens: 300,
     hedgeMs: 2_000,
     temperatura: 0,
+  },
+  codigo: {
+    // Análise do código no live coding (lib/agents/analyst.ts): decide o que perguntar e quando. Mesmo modelo
+    // e motivo da análise do quadro: o GLM na Featherless levava de 8 a 25 s e a pergunta do momento (o
+    // primeiro run verde, a colagem) chegava velha. A reserva é a Featherless (mensalidade fixa), então o
+    // hedge não custa nada a mais.
+    primario: "openrouter",
+    openrouterEnv: "ANALISE_CODIGO_MODEL",
+    openrouterDefault: "google/gemini-3.7-flash",
+    featherlessEnv: "ANALYST_MODEL",
+    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    maxTokens: 4000,
+    // Para os dois provedores, como no quadro: sem isso o Gemini pensa por conta própria (+2,5 s).
+    reasoningEffort: "low",
+    hedgeMs: 8_000,
+    temperatura: 0.3,
   },
   quadro: {
     // Análise do desenho no quadro (decide se e o que perguntar), com prazo de 8 s. O GLM com raciocínio
@@ -195,6 +212,7 @@ const state: LlmState = (globalWithLlm.__llmState ??= {
     evaluator: { consecutiveSlow: 0 },
     interviewer: { consecutiveSlow: 0 },
     quadro: { consecutiveSlow: 0 },
+    codigo: { consecutiveSlow: 0 },
   },
 });
 // Estado criado por uma versão anterior do módulo pode não ter papéis novos (aconteceu com "interviewer").
@@ -261,6 +279,7 @@ export function getLlmStats(): LlmStatsSnapshot {
       evaluator: roleSnapshot("evaluator", state.roles.evaluator, now),
       interviewer: roleSnapshot("interviewer", state.roles.interviewer, now),
       quadro: roleSnapshot("quadro", state.roles.quadro, now),
+      codigo: roleSnapshot("codigo", state.roles.codigo, now),
     },
   };
 }

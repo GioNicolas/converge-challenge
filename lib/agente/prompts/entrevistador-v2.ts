@@ -1,7 +1,7 @@
 // Totti 2 no quadro (docs/totti-v2-conversa.md): o prompt do loop rápido escrito como objetivos com o propósito
 // por trás, no lugar de dezenas de regras e frases-modelo. O modelo entende o PORQUÊ e decide como uma pessoa
 // decidiria; o código continua validando o que é inegociável (fatos da ficha, desfecho, limite de frases).
-// A saída é a mesma do v1 (EsquemaSaidaPerguntar), então o quadro não muda. Ligado por TOTTI_QUADRO=v2.
+// A saída é a mesma do v1 (EsquemaSaidaPerguntar), então o quadro não muda. É o padrão; TOTTI_QUADRO=v1 volta ao v1.
 // Só servidor.
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import type { Kit, Problema } from "../kits/tipos";

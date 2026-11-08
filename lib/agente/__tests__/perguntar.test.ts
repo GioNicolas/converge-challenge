@@ -8,7 +8,8 @@ import { estadoInicial } from "../sessao/estado";
 const AGORA = 1_000_000;
 const problema = kitDemo.problemas[0];
 const estado = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm: AGORA };
-const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {} });
+// A maior parte destes testes é das regras do v1; o v2 tem os seus no bloco "Totti 2 no quadro".
+const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {}, versao: "v1" as const });
 
 describe("perguntar", () => {
   it("segunda reação vazia seguida (\"Hm.\" depois de \"Hm.\") vira silêncio; a primeira passa", async () => {
@@ -222,10 +223,22 @@ describe("Totti 2 no quadro (versao v2)", () => {
     const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador por servidor.", perguntaAtiva: "Como evita colisão?" }, AGORA);
     assert.match(r.texto, /^Tudo bem\. \S/);
   });
-  it("sem versao explícita vale o v1", async () => {
-    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
-    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
-    assert.equal(llm.chamadas[0].nomeSchema, "resposta_entrevistador");
+  it("sem versao explícita vale o v2; TOTTI_QUADRO=v1 volta ao v1", async () => {
+    const { versao: _, ...semVersao } = deps(criarClienteFalso([]));
+    const anterior = process.env.TOTTI_QUADRO;
+    try {
+      delete process.env.TOTTI_QUADRO;
+      const a = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+      await perguntar({ ...semVersao, llm: a }, estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
+      assert.equal(a.chamadas[0].nomeSchema, "resposta_entrevistador_v2");
+      process.env.TOTTI_QUADRO = "v1";
+      const b = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+      await perguntar({ ...semVersao, llm: b }, estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
+      assert.equal(b.chamadas[0].nomeSchema, "resposta_entrevistador");
+    } finally {
+      if (anterior === undefined) delete process.env.TOTTI_QUADRO;
+      else process.env.TOTTI_QUADRO = anterior;
+    }
   });
 });
 

@@ -67,8 +67,11 @@ const IGNORED_RETRY_MS = 120_000;
 const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_closed", "session_started"]);
 /** Depois desse tempo sem evento novo, o candidato também conta como parado. */
 const IDLE_AFTER_MS = 8000;
-/** Escrevendo a primeira versão, só interrompe quem parou de mexer no código há esse tempo (provável travada). */
-const IMPLEMENTING_IDLE_MS = 14_000;
+/**
+ * Escrevendo a primeira versão, só interrompe quem parou de mexer no código há esse tempo. Curto porque a IDE
+ * pede licença antes ("posso te perguntar uma coisa?") quando ele está no meio do código.
+ */
+const IMPLEMENTING_IDLE_MS = 8_000;
 /** Mexendo para melhorar uma solução que já funciona: só interrompe depois desse tempo sem mexer. */
 const OPTIMIZING_IDLE_MS = 45_000;
 /** Pergunta que não virou balão nesse tempo fica velha: o candidato já está pensando em outra coisa. */
@@ -297,7 +300,8 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
   const fromQueue = session.queue
     .filter((q) => q.status === "queued" && !q.kickoff && q !== onScreen && !isStale(session, q, t))
     .sort((a, b) => b.priority - a.priority);
-  const pending = onScreen?.status === "blipped" && !onScreen.kickoff ? [onScreen, ...fromQueue] : fromQueue;
+  // A pergunta que estava na tela só entra se ainda faz sentido (um teste que já passou, um trecho que mudou: não).
+  const pending = onScreen?.status === "blipped" && !onScreen.kickoff && !isStale(session, onScreen, t) ? [onScreen, ...fromQueue] : fromQueue;
   const prepared = pending.slice(0, CLOSING_MAX_QUESTIONS);
   const askedCriteria = new Set(prepared.map((q) => q.criterionId));
   const criteria = uncoveredCriteria(session)
@@ -421,6 +425,11 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
 
   // Cada fase tem seu ritmo: não corta quem está escrevendo a primeira versão nem quem está no meio de uma melhoria.
   const fase = faseDaEntrevista(session);
+  // Antes da primeira linha de código, a conversa sobre o plano é da abertura: perguntas da análise ali viravam
+  // um interrogatório (custo, bordas, tempo) antes de ele poder começar.
+  if (fase === "entendendo" && (q.kind === undefined || q.kind === "explicar" || q.kind === "sondar" || q.kind === "desafio") && q.keyMoment === undefined && session.config.durationMin * 60_000 - t > FINAL_STRETCH_MS) {
+    return "esperando: ele ainda não começou a codar (a conversa do plano é da abertura)";
+  }
   const quiet = Math.floor((t - (session.codeHistory.at(-1)?.t ?? 0)) / 1000);
   if (fase === "implementando" && q.keyMoment === undefined && quiet * 1000 < IMPLEMENTING_IDLE_MS) {
     return `esperando: escrevendo a primeira versão (${quiet} s sem mexer, mín. ${IMPLEMENTING_IDLE_MS / 1000} s)`;

@@ -278,27 +278,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (texto && timerVoz.current) agendarEnvioVoz();
   }, [registrarFalaParcial, agendarEnvioVoz]);
 
-  // Barge-in: o candidato falou por cima (volume alto por mais de 380 ms) e o Totti cala na hora.
-  const calarRef = useRef<(() => void) | undefined>(undefined);
-  calarRef.current = entrevista.silenciar;
-  const timerBarge = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const interrompendo = entrevista.agenteFalando && midia.microfoneLigado && midia.volume > 0.2;
-    if (interrompendo) {
-      if (!timerBarge.current) {
-        timerBarge.current = setTimeout(() => {
-          timerBarge.current = null;
-          // Fica no console: se o Totti for cortado no fim da fala, dá para ver se foi o microfone ouvindo a caixa de som.
-          console.info("[voz] barge-in: o microfone ouviu voz alta por cima do Totti e ele calou");
-          calarRef.current?.();
-        }, 380);
-      }
-    } else if (timerBarge.current) {
-      clearTimeout(timerBarge.current);
-      timerBarge.current = null;
-    }
-  }, [entrevista.agenteFalando, midia.microfoneLigado, midia.volume]);
-  useEffect(() => () => { if (timerBarge.current) clearTimeout(timerBarge.current); }, []);
+  // Sem barge-in: ninguém fala por cima de ninguém. O Totti termina a frase dele e só toma a vez numa pausa do
+  // candidato (lib/conversa/turnos.ts); o botão "Interromper voz" continua para quem quiser calar de propósito.
   const escuta = useTranscricao({
     stream: midia.stream,
     ativo: midia.microfoneLigado && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,

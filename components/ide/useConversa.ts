@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FilaFalas } from "@/lib/audio/filaFalas";
+import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import type { Blip, ChatMessage, ChatResponse, EditorCommand } from "@/lib/contracts";
 import { postChat } from "./api";
 import type { EventInput } from "./useSession";
@@ -24,7 +25,7 @@ const MAX_FALAS_LIVRES = 12;
 /** Fora de uma pergunta, frases com menos palavras que isso não entram na linha do tempo (o Totti ainda ouve). */
 const MIN_PALAVRAS_FALA = 2;
 /** Falhou duas vezes ao mandar a fala: o Totti pede para repetir em vez de ficar calado. */
-const PEDIDOS_DE_REPETICAO = ["Desculpa, me perdi aqui. Pode repetir?", "Opa, não peguei essa. Fala de novo?"];
+const PEDIDOS_DE_REPETICAO = FALAS_DE_REPETICAO;
 
 export interface ConversaDeps {
   sessionId: string | null;
@@ -46,7 +47,29 @@ export interface ConversaDeps {
   onSemVoz?: (texto: string) => void;
 }
 
+/** Sem resposta à pergunta do Totti por tanto tempo (depois de ele terminar de perguntar): o assunto fecha. */
+const FIO_SEM_RESPOSTA_MS = 25_000;
+/** Sem resposta ao pedido de licença: ele está concentrado, a pergunta fica para depois. */
+const LICENCA_SEM_RESPOSTA_MS = 10_000;
+/** Pedidos de licença, variados para não soar como gravação. */
+const PEDIDOS_DE_LICENCA = [
+  "Ei, posso te perguntar uma coisa sobre o seu código?",
+  "Tenho uma dúvida sobre o que você escreveu. Posso perguntar agora?",
+  "Posso te interromper rapidinho com uma pergunta?",
+];
+/** "Espera", "agora não", "só um minuto": a pergunta fica para depois. */
+const ESPERA = /\b(espera|espere|pera|peraí|perai|agora n[ãa]o|n[ãa]o agora|ainda n[ãa]o|s[óo] um (minuto|minutinho|segundo|segundinho|pouco|pouquinho|instante)|um (minuto|minutinho|segundo|instante)|daqui a pouco|depois|calma|aguenta)\b/i;
+/** Liberou de forma explícita ("pode falar", "manda"): vale mesmo que a frase tenha um "depois" no meio. */
+const PODE = /\b(pode (falar|perguntar|mandar)|manda|claro|sim|fala a[íi]|pode sim)\b/i;
+
+/** A resposta ao pedido de licença: true pode perguntar, false é para esperar. */
+export function liberouAPergunta(fala: string): boolean {
+  if (PODE.test(fala)) return true;
+  return !ESPERA.test(fala) && !/^\s*n[ãa]o\b/i.test(fala);
+}
+
 type Fio = { blip: Blip; falas: Fala[] };
+type Licenca = { blip: Blip; desde: number };
 type Pendente = { versao: number; lista: Fala[]; fala: Fala };
 
 const palavras = (texto: string) => texto.split(/\s+/).filter(Boolean).length;
@@ -72,6 +95,11 @@ export function useConversa(deps: ConversaDeps) {
   const ultimaFalaDoAgenteEmRef = useRef(0);
   const pedidosEmVooRef = useRef(0);
   const repeticoesRef = useRef(0);
+  /** O Totti pediu licença para perguntar e espera o "pode" ou o "espera". */
+  const licencaRef = useRef<Licenca | null>(null);
+  const licencasRef = useRef(0);
+  /** A pergunta do fio já foi feita e ele ainda não respondeu: desde quando. */
+  const semRespostaDesdeRef = useRef<number | null>(null);
 
   const listaAtual = () => fioRef.current?.falas ?? livresRef.current;
   const aparar = () => {
@@ -90,6 +118,7 @@ export function useConversa(deps: ConversaDeps) {
     const atual = fioRef.current;
     if (!atual) return;
     fioRef.current = null;
+    semRespostaDesdeRef.current = null;
     setFio(null);
     void depsRef.current.sendEvent({ type: "blip_closed", blipId: atual.blip.id, reason });
     depsRef.current.applyCommands([{ type: "clear_highlights" }]);
@@ -114,6 +143,8 @@ export function useConversa(deps: ConversaDeps) {
     ultimaFalaDoAgenteEmRef.current = Date.now();
     void d.sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: blip?.id });
     if (!tocou) d.onSemVoz?.(res.reply);
+    // Pergunta feita dentro de um assunto: se ele não responder, o assunto fecha sozinho (ver FIO_SEM_RESPOSTA_MS).
+    if (!res.end && blip && fioRef.current?.blip.id === blip.id) semRespostaDesdeRef.current = Date.now();
     if (!res.end) return;
     if (blip && fioRef.current?.blip.id === blip.id) fecharFio("agent");
     else d.applyCommands([{ type: "clear_highlights" }]);
@@ -124,6 +155,7 @@ export function useConversa(deps: ConversaDeps) {
     const d = depsRef.current;
     if (d.sessionId === null) return;
     if (aberturaRef.current) await aberturaRef.current;
+    semRespostaDesdeRef.current = null;
     const lista = listaAtual();
     if (substitui) tirarUltimaDoCandidato(lista);
     const fala: Fala = { role: "candidate", text: texto, at: Date.now() };
@@ -204,8 +236,55 @@ export function useConversa(deps: ConversaDeps) {
     depsRef.current.parar();
   }, []);
 
-  /** Fala do candidato: vai para a pergunta em andamento, ou é uma fala livre. */
-  const ouvir = useCallback((texto: string) => filaRef.current?.adicionar(texto), []);
+  /** Fala do candidato: responde ao pedido de licença, vai para a pergunta em andamento, ou é uma fala livre. */
+  const ouvir = useCallback((texto: string) => {
+    const licenca = licencaRef.current;
+    if (licenca) {
+      licencaRef.current = null;
+      if (liberouAPergunta(texto)) void abrirFioRef.current(licenca.blip);
+      else adiarRef.current(licenca.blip, true);
+      return;
+    }
+    filaRef.current?.adicionar(texto);
+  }, []);
+
+  /** A pergunta fica para depois (o servidor a devolve à fila por um tempo). `avisar`: ele pediu, o Totti confirma. */
+  const adiar = useCallback((blip: Blip, avisar: boolean) => {
+    void depsRef.current.sendEvent({ type: "blip_snoozed", blipId: blip.id });
+    if (avisar) void dizerRef.current("Beleza, eu volto daqui a pouco.");
+  }, []);
+  const adiarRef = useRef(adiar);
+  adiarRef.current = adiar;
+
+  /**
+   * Antes de interromper quem está no meio do código, o Totti pede licença. "Pode" abre a pergunta; "espera"
+   * (ou o silêncio) a deixa para depois.
+   */
+  const pedirLicenca = useCallback(async (blip: Blip): Promise<void> => {
+    if (depsRef.current.sessionId === null || fioRef.current || licencaRef.current) return;
+    const pedido = PEDIDOS_DE_LICENCA[licencasRef.current++ % PEDIDOS_DE_LICENCA.length];
+    licencaRef.current = { blip, desde: Number.POSITIVE_INFINITY };
+    await dizerRef.current(pedido);
+    if (licencaRef.current?.blip.id === blip.id) licencaRef.current = { blip, desde: Date.now() };
+  }, []);
+
+  // Relógio da conversa: licença sem resposta e pergunta sem resposta não ficam penduradas para sempre.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const agora = Date.now();
+      const licenca = licencaRef.current;
+      if (licenca && agora - licenca.desde >= LICENCA_SEM_RESPOSTA_MS) {
+        licencaRef.current = null;
+        adiarRef.current(licenca.blip, false);
+      }
+      const desde = semRespostaDesdeRef.current;
+      if (desde !== null && agora - desde >= FIO_SEM_RESPOSTA_MS && pedidosEmVooRef.current === 0 && !filaRef.current?.emAndamento) {
+        semRespostaDesdeRef.current = null;
+        fecharFio("agent");
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [fecharFio]);
 
   /** O Totti faz uma pergunta sua (da análise, uma mudança no problema, o encerramento): abre o assunto e fala. */
   const abrirFio = useCallback(async (blip: Blip): Promise<void> => {
@@ -243,9 +322,12 @@ export function useConversa(deps: ConversaDeps) {
     }
   }, [fecharFio, responder]);
 
-  /** Há algo em andamento na conversa: fala esperando, pedido em voo ou resposta ainda não ouvida. */
+  const abrirFioRef = useRef(abrirFio);
+  abrirFioRef.current = abrirFio;
+
+  /** Há algo em andamento na conversa: fala esperando, pedido em voo, resposta não ouvida ou licença pedida. */
   const ocupada = useCallback(
-    () => pedidosEmVooRef.current > 0 || !!filaRef.current?.emAndamento || pendenteRef.current !== null || aberturaRef.current !== null,
+    () => pedidosEmVooRef.current > 0 || !!filaRef.current?.emAndamento || pendenteRef.current !== null || aberturaRef.current !== null || licencaRef.current !== null,
     [],
   );
 
@@ -254,7 +336,9 @@ export function useConversa(deps: ConversaDeps) {
     filaRef.current?.limpar();
     versaoRef.current++;
     pendenteRef.current = null;
+    licencaRef.current = null;
+    semRespostaDesdeRef.current = null;
   }, []);
 
-  return { fio, pensando, ouvir, abrirFio, fecharFio, dizer, ocupada, parar, ultimaFalaDoAgenteEmRef, fioRef };
+  return { fio, pensando, ouvir, abrirFio, pedirLicenca, fecharFio, dizer, ocupada, parar, ultimaFalaDoAgenteEmRef, fioRef };
 }

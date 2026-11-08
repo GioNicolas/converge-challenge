@@ -21,6 +21,11 @@ export const config = {
     "/report",
     "/report/:path*",
     "/api/report",
+    "/api/report/:path*",
+    // Estado interno da sessão (notas do analista, fila de perguntas) e o contexto de uma pergunta: só o
+    // painel e as telas de desenvolvimento. O candidato tem o próprio sessionId no navegador.
+    "/api/state",
+    "/api/blip/:id/context",
     "/api/decisao",
     "/api/pre-entrevista/:path*",
     "/api/config",

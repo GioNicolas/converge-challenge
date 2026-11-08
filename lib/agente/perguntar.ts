@@ -24,15 +24,18 @@ export type DepsPerguntar = {
   modelo?: string;
   maxTokens?: number;
   log?: LogMeta;
-  /** Versão do Totti no quadro; sem valor, a de TOTTI_QUADRO (padrão v1). */
+  /** Versão do Totti no quadro; sem valor, a de TOTTI_QUADRO (padrão v2). */
   versao?: VersaoTottiQuadro;
 };
 
 export type VersaoTottiQuadro = "v1" | "v2";
 
-/** Qual Totti responde no quadro: v1 (regras) ou v2 (objetivos, docs/totti-v2-conversa.md). */
+/**
+ * Qual Totti responde no quadro: v2 (objetivos, docs/totti-v2-conversa.md), o padrão desde que foi aprovado na voz,
+ * ou v1 (regras), só com TOTTI_QUADRO=v1.
+ */
 export function versaoTottiQuadro(): VersaoTottiQuadro {
-  return process.env.TOTTI_QUADRO === "v2" ? "v2" : "v1";
+  return process.env.TOTTI_QUADRO === "v1" ? "v1" : "v2";
 }
 
 export type EntradaPerguntar = {

@@ -55,8 +55,10 @@ export async function checkQuestion(
   context: { code: string; candidateSaid: string[] } = { code: "", candidateSaid: [] },
 ): Promise<{ safe: boolean; reason: string; costUsd: number }> {
   try {
+    // Papel "filtro" (o mesmo da fala ao vivo): no OpenRouter fica abaixo de 1 s. O gemma da Featherless
+    // (papel "fast") chegava a 10 s e segurava a pergunta do momento-chave.
     const result = await completeJson({
-      role: "fast",
+      role: "filtro",
       system: SYSTEM,
       user: `CÓDIGO DO CANDIDATO:\n${context.code || "(vazio)"}\n\nO QUE O CANDIDATO JÁ DISSE:\n${context.candidateSaid.length ? context.candidateSaid.join("\n") : "(nada)"}\n\nPERGUNTA: ${question}\nTIPO: ${kind}\nTEMA para aprofundar depois: ${followUpTopic}`,
       schema: FilterVerdict,

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Flag, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
-import type { EditorCommand, EmpecilhoPublico, InterviewConfig } from "@/lib/contracts";
+import type { Blip, EditorCommand, EmpecilhoPublico, InterviewConfig } from "@/lib/contracts";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
@@ -37,16 +37,14 @@ const TOPO_RECOLHIDO = 104;
 const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 /** Teto da espera acima: ruído constante no microfone não segura a fala para sempre. */
 const FALA_ESPERA_MAX_MS = 12_000;
-/**
- * Barge-in: o candidato fala por cima do Totti, alto e sem parar, e o Totti cala para ouvir. Volume e tempo
- * altos de propósito: um "hum", o teclado ou um barulho da sala não podem cortar a frase dele no meio.
- */
-const VOLUME_BARGE_IN = 0.3;
-const TEMPO_BARGE_IN_MS = 700;
-/** Digitou há menos que isso: o som é do teclado, não é alguém querendo falar. */
-const DIGITANDO_MS = 1200;
 /** Depois de uma fala do Totti, ele espera isso antes de puxar outro assunto (o candidato precisa de vez). */
-const PAUSA_ENTRE_FALAS_MS = 4000;
+const PAUSA_ENTRE_FALAS_MS = 8000;
+/** Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. */
+const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 12_000;
+/** Teto da espera da apresentação por uma fala do candidato em andamento. */
+const APRESENTACAO_ESPERA_MAX_MS = 8000;
+/** Digitou há menos que isso: ele está no meio do código, então o Totti pede licença antes de perguntar. */
+const LICENCA_SE_DIGITOU_MS = 12_000;
 
 /**
  * A IDE não tem inteligência: mostra, captura e obedece (docs/contexto-pessoa-a-ide.md).
@@ -167,7 +165,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   }, []);
 
   const encerrarPelaVozRef = useRef<() => void>(() => {});
-  const fioFechadoRef = useRef<() => void>(() => {});
+  const fioFechadoRef = useRef<(blip: Blip) => void>(() => {});
   const conversa = useConversa({
     sessionId: session.sessionId,
     sendEvent: session.sendEvent,
@@ -177,7 +175,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     vozTocando: () => vozEstadoRef.current === "falando",
     getLiveCode: capture.getLiveCode,
     onFinishRequest: () => encerrarPelaVozRef.current(),
-    onFioFechado: () => fioFechadoRef.current(),
+    onFioFechado: (blip) => fioFechadoRef.current(blip),
     onSemVoz: (texto) => setLegendaSemVoz({ quem: "agente", texto, ate: texto.length }),
   });
 
@@ -217,19 +215,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   }, []);
   useEffect(() => () => clearTimeout(bufferTimerRef.current), []);
 
-  // Barge-in: o candidato fala por cima do Totti (volume alto e contínuo): o Totti cala e ouve.
-  const vozParar = voz.parar;
-  const volumeRef = useRef(0);
-  volumeRef.current = midia.volume;
-  const passouDoLimite = midia.microfoneLigado && midia.volume > VOLUME_BARGE_IN;
-  useEffect(() => {
-    if (voz.estado !== "falando" || !passouDoLimite) return;
-    const id = setTimeout(() => {
-      const digitando = Date.now() - ultimaDigitacaoEmRef.current < DIGITANDO_MS;
-      if (volumeRef.current > VOLUME_BARGE_IN && !digitando) vozParar();
-    }, TEMPO_BARGE_IN_MS);
-    return () => clearTimeout(id);
-  }, [voz.estado, passouDoLimite, vozParar]);
+  // Sem barge-in: ninguém fala por cima de ninguém. O Totti termina a frase dele (a escuta pausa enquanto ele
+  // fala) e só toma a vez numa pausa do candidato (lib/conversa/turnos.ts).
   const escuta = useTranscricao({
     stream: midia.stream,
     // A escuta só para enquanto a voz do agente toca (preparando, ela ainda ouve: o candidato pode continuar falando).
@@ -244,8 +231,11 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   estadoTurnoRef.current = { agenteFalando: voz.ativa, aguardandoResposta: conversa.pensando };
 
   // Logo no começo o Totti se apresenta: quem é, quanto tempo dura, como funciona e que ele acompanha o código
-  // o tempo todo (lib/conversa/instrucoes.ts). Espera a tela carregar e uma pausa de quem já estiver falando.
+  // o tempo todo (lib/conversa/instrucoes.ts). Só uma fala do candidato em andamento a segura (som ambiente não),
+  // e nenhuma pergunta sai antes de ela terminar.
   const saudacaoFeitaRef = useRef(false);
+  /** Quando a apresentação terminou (0: ainda não). A primeira pergunta espera a leitura depois disso. */
+  const saudacaoTerminadaEmRef = useRef(0);
   const dizer = conversa.dizer;
   const duracaoMin = vaga.durationMin;
   const cargo = vaga.roleTitle;
@@ -255,10 +245,10 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     const id = setInterval(() => {
       const agora = Date.now();
       if (saudacaoFeitaRef.current || agora - desde < ATRASO_SAUDACAO_MS) return;
-      if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...estadoTurnoRef.current })) return;
+      if (falaParcialRef.current && agora - desde < APRESENTACAO_ESPERA_MAX_MS) return;
       saudacaoFeitaRef.current = true;
       clearInterval(id);
-      void dizer(comoFuncionaLiveCoding(duracaoMin, cargo));
+      void dizer(comoFuncionaLiveCoding(duracaoMin, cargo)).finally(() => { saudacaoTerminadaEmRef.current = Date.now(); });
     }, 200);
     return () => clearInterval(id);
   }, [session.sessionId, session.ended, dizer, duracaoMin, cargo]);
@@ -278,9 +268,15 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
 
   // Um assunto fechou: o foco volta para o código, ou, se era a conversa do encerramento, a sessão acaba.
   const encerrar = session.endSession;
-  fioFechadoRef.current = () => {
-    if (finalizandoRef.current) encerrar("button");
-    else editorRef.current?.focus();
+  /** O assunto do encerramento (os pontos pendentes): quando ele fecha, o Totti se despede e a sessão acaba. */
+  const fioDoEncerramentoRef = useRef<string | null>(null);
+  fioFechadoRef.current = (blip) => {
+    if (blip.id !== fioDoEncerramentoRef.current) {
+      editorRef.current?.focus();
+      return;
+    }
+    fioDoEncerramentoRef.current = null;
+    void conversa.dizer(DESPEDIDA_LIVE_CODING).catch(() => false).finally(() => encerrar("button"));
   };
 
   // As perguntas do Totti (lib/agents/policy.ts decide o quê e quando pode) são faladas numa pausa natural:
@@ -289,6 +285,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const balao = session.incomingBlip;
   const tirarBalao = session.setIncomingBlip;
   const abrirFio = conversa.abrirFio;
+  const pedirLicenca = conversa.pedirLicenca;
   const ocupada = conversa.ocupada;
   const fioRef = conversa.fioRef;
   const ultimaFalaDoAgenteEmRef = conversa.ultimaFalaDoAgenteEmRef;
@@ -296,7 +293,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     if (!balao || finalizando || session.ended) return;
     const id = setInterval(() => {
       const agora = Date.now();
-      if (!saudacaoFeitaRef.current || fioRef.current || ocupada() || vozEstadoRef.current !== "inativa" || bufferFalaRef.current) return;
+      if (!saudacaoTerminadaEmRef.current || fioRef.current || ocupada() || vozEstadoRef.current !== "inativa" || bufferFalaRef.current) return;
+      if (agora - saudacaoTerminadaEmRef.current < LEITURA_DEPOIS_DA_APRESENTACAO_MS) return;
       if (agora - ultimaFalaDoAgenteEmRef.current < PAUSA_ENTRE_FALAS_MS) return;
       if (!balao.empecilho && agora - ultimaDigitacaoEmRef.current < PAUSA_DIGITACAO_MS) return;
       if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...estadoTurnoRef.current })) return;
@@ -306,10 +304,13 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         setMudanca(balao.empecilho);
         setProblemaAberto(true);
       }
-      void abrirFio(balao);
+      // No meio do código, o Totti pede licença antes; parado (pensando, depois de rodar), pergunta direto.
+      // A mudança no problema não pede licença: é parte da entrevista, não uma dúvida dele.
+      if (!balao.empecilho && agora - ultimaDigitacaoEmRef.current < LICENCA_SE_DIGITOU_MS) void pedirLicenca(balao);
+      else void abrirFio(balao);
     }, 150);
     return () => clearInterval(id);
-  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, ocupada, fioRef, ultimaFalaDoAgenteEmRef]);
+  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, pedirLicenca, ocupada, fioRef, ultimaFalaDoAgenteEmRef]);
 
   /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
   async function forcarEmpecilho() {
@@ -350,9 +351,10 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       await capture.flushSnapshot().catch(() => {});
       const res = await postEncerramento(session.sessionId);
       if (res.blip) {
-        // Os pontos que ficaram pendentes viram a última conversa; a sessão acaba quando ela fechar.
+        // Os pontos que ficaram pendentes viram a última conversa; a sessão acaba quando ELA fechar (fechar o
+        // assunto que estava aberto antes não encerra nada).
         if (conversa.fioRef.current) conversa.fecharFio("button");
-        finalizandoRef.current = true;
+        fioDoEncerramentoRef.current = res.blip.id;
         void conversa.abrirFio(res.blip);
         return;
       }
@@ -541,15 +543,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         <FakeCursor ref={cursorRef} />
 
         <JanelaChamada
-          pergunta={null}
           oculta={false}
           encerrada={session.ended}
           iniciadaEm={session.startedAtRef.current || null}
           midia={midia}
           agenteFalando={voz.estado === "falando"}
           agentePensando={conversa.pensando || voz.estado === "preparando"}
-          onClicarPlin={() => {}}
-          onAdiar={() => {}}
         />
 
         <Legenda fala={voz.fala ?? legendaSemVoz} />

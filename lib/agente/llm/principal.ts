@@ -23,7 +23,7 @@ const PAPEL: Record<string, LlmRole> = {
   [NOME_SCHEMA_PLANEJADOR]: "analyst", // conversa de plano com a recrutadora
   // Fala com o candidato, ao vivo: modelo sem raciocínio. O GLM fica para a análise e o relatório.
   [NOME_SCHEMA_PERGUNTAR]: "conversa",
-  [NOME_SCHEMA_PERGUNTAR_V2]: "conversa_quadro", // Totti 2 no quadro (TOTTI_QUADRO=v2)
+  [NOME_SCHEMA_PERGUNTAR_V2]: "conversa_quadro", // Totti 2 no quadro (padrão; TOTTI_QUADRO=v1 volta ao v1)
   [NOME_SCHEMA_ABERTURA]: "conversa", // apresentação e despedida
   [NOME_SCHEMA_SCORECARD]: "evaluator", // relatório final
   [NOME_SCHEMA_KIT]: "evaluator", // geração do kit a partir da vaga
