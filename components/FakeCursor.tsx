@@ -49,7 +49,7 @@ function tween(seg: number, fn: (t: number) => void) {
  * e a seleção acompanha o ponteiro como num arrasto de verdade.
  */
 const FakeCursor = forwardRef<FakeCursorHandle, { label?: string }>(function FakeCursor(
-  { label = "Entrevistador" },
+  { label = "Totti" },
   ref,
 ) {
   const rootRef = useRef<HTMLDivElement>(null);

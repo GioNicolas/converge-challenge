@@ -403,7 +403,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
                   <button
                     onClick={comecar}
                     disabled={!pronto}
-                    className="mt-2 rounded-full bg-marca px-5 py-2.5 font-medium text-white transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
+                    className="mt-2 rounded-full bg-marca px-5 py-2.5 font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
                   >
                     Começar
                   </button>

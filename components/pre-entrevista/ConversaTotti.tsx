@@ -8,10 +8,10 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUp, FileText, Paperclip } from "lucide-react";
-import OndaDeVoz from "@/components/agente/OndaDeVoz";
+import Perola, { BarrasDeVoz, type EstadoPerola } from "@/components/totti/Perola";
 import type { Turno } from "@/lib/pre-entrevista/rascunho";
 import { ACEITOS, lerDocumento, type Documento } from "@/lib/pre-entrevista/tela/documentos";
-import { curvaSuave } from "@/lib/design/motion";
+import { curvaSaida } from "@/lib/design/motion";
 import ListaDocumentos from "./ListaDocumentos";
 import { useTranscricao } from "@/lib/transcricao/useTranscricao";
 import { acrescentarFala } from "@/lib/transcricao/tipos";
@@ -108,33 +108,41 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
   // Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
   const aoTeclar = useEnterDoDitado(ditado, enviar);
 
+  // O palco: a pérola do Totti no centro, no estado do momento (pensando, falando, ouvindo você).
+  const estadoPerola: EstadoPerola =
+    digitando || voz.estado === "preparando" ? "pensando" : voz.estado === "falando" ? "falando" : ditado.ativa ? "ouvindo" : "ocioso";
+  const legendaEstado =
+    estadoPerola === "pensando" ? "Pensando…" : estadoPerola === "falando" ? "Totti está falando" : estadoPerola === "ouvindo" ? "Ouvindo você…" : "Conversa por voz ou texto";
+
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-padrao bg-superficie">
-      <header className="flex items-center gap-3 border-b border-borda px-5 py-3">
-        <OndaDeVoz estado={digitando || voz.estado === "preparando" ? "pensando" : voz.estado === "falando" ? "falando" : "ouvindo"} tamanho={34} fundo="claro" />
-        <div className="flex flex-1 items-baseline justify-between gap-3">
-          <span className="text-[15px] text-texto">Totti</span>
-          <span className="rotulo text-texto-suave">{pensando ? "Escrevendo…" : voz.estado === "falando" ? "Falando…" : "Conversa"}</span>
-        </div>
-      </header>
-      <div className="border-b border-borda px-3 py-1 text-texto-suave">
+    <section className="tema-noite flex min-h-0 flex-col overflow-hidden rounded-[28px] bg-fundo text-texto">
+      <header className="flex items-center justify-end px-4 pt-3">
         <ControleVoz voz={voz} texto={ultima?.role === "agente" ? ultima.text : undefined} disabled={pensando || bloqueada} />
+      </header>
+
+      <div className="flex shrink-0 flex-col items-center gap-2 px-6 pt-4 pb-2">
+        <Perola estado={estadoPerola} tamanho={120} brilho />
+        <BarrasDeVoz ativo={estadoPerola === "falando" || estadoPerola === "ouvindo"} n={7} altura={18} largura={3} className="mt-4" />
+        <span role="status" className="text-[13px] text-texto-suave">
+          {legendaEstado}
+        </span>
       </div>
 
-      <div ref={lista} className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
+      <div ref={lista} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
         <AnimatePresence initial={false}>
           {transcricao.map((t, i) => {
             if (t.role === "agente") {
               return (
                 <motion.div
                   key={i}
-                  initial={{ opacity: 0, y: 6 }}
+                  initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.32, ease: curvaSuave }}
-                  className="flex max-w-[92%] flex-col gap-1"
+                  transition={{ duration: 0.48, ease: curvaSaida }}
+                  className="flex max-w-[92%] flex-col gap-0.5 transition-opacity duration-[480ms]"
+                  style={{ opacity: i >= transcricao.length - 2 ? 1 : 0.35 }}
                 >
-                  <span className="rotulo text-texto-suave">Totti</span>
-                  <p className="text-[15px] leading-relaxed whitespace-pre-wrap text-texto">{t.text}</p>
+                  <span className="text-[12.5px] font-semibold text-texto">Totti</span>
+                  <p className="text-[16px] leading-[1.5] whitespace-pre-wrap text-texto">{t.text}</p>
                 </motion.div>
               );
             }
@@ -142,61 +150,60 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
             return (
               <motion.div
                 key={i}
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.26, ease: curvaSuave }}
-                className="ml-auto flex max-w-[85%] flex-col items-end gap-1"
+                transition={{ duration: 0.48, ease: curvaSaida }}
+                className="flex max-w-[92%] flex-col gap-0.5 transition-opacity duration-[480ms]"
+                style={{ opacity: i >= transcricao.length - 2 ? 1 : 0.35 }}
               >
-                <span className="rotulo text-texto-suave">Você</span>
-                <div className="flex flex-col gap-2 rounded-padrao bg-fundo px-3.5 py-2.5">
-                  <p className="text-[15px] leading-relaxed whitespace-pre-wrap text-texto">{fala}</p>
-                  {documentos.map((nome) => (
-                    <span
-                      key={nome}
-                      className="flex items-center gap-2 rounded-controle bg-superficie px-2.5 py-1.5 text-[13.5px] text-texto"
-                    >
-                      <FileText size={14} strokeWidth={1.5} className="text-texto-suave" />
-                      {nome}
-                    </span>
-                  ))}
-                </div>
+                <span className="text-[12.5px] font-semibold text-texto">Você</span>
+                <p className="text-[16px] leading-[1.5] whitespace-pre-wrap text-[#d9d1c4]">{fala}</p>
+                {documentos.map((nome) => (
+                  <span
+                    key={nome}
+                    className="mt-1 flex w-fit items-center gap-2 rounded-pequeno bg-superficie-2 px-2.5 py-1.5 text-[13.5px] text-texto"
+                  >
+                    <FileText size={14} strokeWidth={1.5} className="text-texto-suave" />
+                    {nome}
+                  </span>
+                ))}
               </motion.div>
             );
           })}
           {digitando && (
             <motion.div
               key="digitando"
-              initial={{ opacity: 0, y: 6 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, transition: { duration: 0.12 } }}
-              transition={{ duration: 0.24, ease: curvaSuave }}
+              transition={{ duration: 0.24, ease: curvaSaida }}
               className="flex flex-col gap-1"
               aria-live="polite"
             >
-              <span className="rotulo text-texto-suave">Totti</span>
+              <span className="text-[12.5px] font-semibold text-texto">Totti</span>
               <Digitando />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {erro && <p className="mx-5 mb-2 text-[13.5px] text-perigo">{erro}</p>}
+      {erro && <p className="mx-6 mb-2 text-[13.5px] text-alerta-texto">{erro}</p>}
 
-      <div className="flex flex-col gap-2 border-t border-borda p-3">
+      <div className="flex flex-col gap-2 p-4">
         {anexos.length > 0 && (
           <ListaDocumentos documentos={anexos} onRemover={(id) => setAnexos((l) => l.filter((d) => d.id !== id))} compacto />
         )}
-        {erroAnexo && <p className="text-[13px] text-perigo">{erroAnexo}</p>}
+        {erroAnexo && <p className="text-[13px] text-alerta-texto">{erroAnexo}</p>}
         <EstadoDitado transcricao={ditado} dica={DICA_DITADO_ENTER} />
-        <div className="flex items-end gap-1.5 rounded-controle border border-borda bg-superficie-2 p-1.5 transition-colors duration-150 focus-within:border-texto/40 focus-within:bg-superficie">
+        <div className="flex items-end gap-1.5 rounded-[24px] bg-superficie p-1.5 shadow-[inset_0_0_0_1px_rgb(245_240_232/0.1)] transition-shadow duration-[240ms] focus-within:shadow-[inset_0_0_0_1.5px_rgb(245_240_232/0.45)]">
           <button
             type="button"
             onClick={() => seletor.current?.click()}
             aria-label="Anexar documento"
             title="Anexar documento (PDF, TXT, Markdown)"
-            className="flex size-8 shrink-0 items-center justify-center rounded-[3px] text-texto-suave transition-colors hover:bg-fundo hover:text-texto"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
           >
-            <Paperclip size={16} strokeWidth={1.6} />
+            <Paperclip size={17} strokeWidth={1.6} />
           </button>
           <input
             ref={seletor}
@@ -218,16 +225,16 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
             rows={1}
             placeholder={lendo ? "Lendo o documento…" : "Escreva para o Totti…"}
             aria-label="Mensagem para o Totti"
-            className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
+            className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
           <BotaoDitado transcricao={ditado} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} />
           <button
             onClick={enviar}
             disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo || bloqueada || ditado.ativa}
             aria-label="Enviar"
-            className="flex size-8 shrink-0 items-center justify-center rounded-[3px] bg-texto text-superficie transition-[opacity,transform] duration-150 active:scale-90 disabled:opacity-25"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-marca text-sobre-marca transition-[opacity,transform] duration-[120ms] active:scale-90 disabled:opacity-25"
           >
-            <ArrowUp size={16} strokeWidth={2} />
+            <ArrowUp size={17} strokeWidth={2} />
           </button>
         </div>
       </div>
@@ -238,11 +245,11 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
 /** Os três pontinhos de quem está digitando. */
 function Digitando() {
   return (
-    <span className="flex h-9 w-fit items-center gap-1 rounded-full bg-fundo px-3.5" aria-label="Totti está digitando">
+    <span className="flex h-9 w-fit items-center gap-1 rounded-full bg-superficie-2 px-3.5" aria-label="Totti está digitando">
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
-          className="size-1.5 rounded-full bg-texto/60"
+          className="size-1.5 rounded-full bg-texto/70"
           animate={{ y: [0, -3.5, 0], opacity: [0.45, 1, 0.45] }}
           transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
         />

@@ -183,7 +183,7 @@ export default function PainelConversa({
                     type="submit"
                     aria-label="Enviar resposta"
                     disabled={!podeResponder || !rascunho.trim()}
-                    className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-marca text-texto-claro transition-opacity duration-150 disabled:opacity-40"
+                    className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-marca text-sobre-marca transition-opacity duration-150 disabled:opacity-40"
                   >
                     <SendHorizontal size={16} strokeWidth={1.75} />
                   </button>
@@ -211,7 +211,7 @@ function Mensagem({ fala }: { fala: Fala }) {
     <article className={doAgente ? "pr-6" : "flex flex-col items-end pl-8"}>
       <p
         className={`rounded-[16px] px-3.5 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap ${
-          doAgente ? "rounded-tl-[6px] bg-superficie text-texto" : "rounded-tr-[6px] bg-marca text-texto-claro"
+          doAgente ? "rounded-tl-[6px] bg-superficie text-texto" : "rounded-tr-[6px] bg-marca text-sobre-marca"
         }`}
       >
         {fala.text}

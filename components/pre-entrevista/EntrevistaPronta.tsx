@@ -41,7 +41,7 @@ export default function EntrevistaPronta({ config, onNova, rotuloNova = "Nova en
         <div className="flex flex-col gap-3">
           <h1 className="titulo-display text-[48px] text-texto">Pronto. É só mandar o link.</h1>
           <p className="text-[16px] leading-relaxed text-texto-suave">
-            {config.roleTitle} já está na sua lista de vagas. O entrevistador sabe o que avaliar e como conduzir.
+            {config.roleTitle} já está na sua lista.
           </p>
         </div>
       </div>

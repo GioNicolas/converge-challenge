@@ -49,7 +49,7 @@ export default function LeituraDaVaga({ cargo, estado, onPronto }: Props) {
       className="mx-auto flex w-full max-w-lg flex-col gap-8"
     >
       <div className="flex items-center gap-4">
-        <OndaDeVoz estado={terminou ? "falando" : "pensando"} tamanho={72} fundo="claro" />
+        <OndaDeVoz estado={terminou ? "falando" : "pensando"} tamanho="lg" fundo="claro" />
         <div className="flex flex-col gap-1">
           <span className="rotulo text-texto-suave">Totti · lendo a vaga</span>
           <h1 className="text-[28px] leading-tight font-normal tracking-[-0.02em] text-texto">{cargo}</h1>

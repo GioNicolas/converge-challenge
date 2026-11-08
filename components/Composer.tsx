@@ -40,7 +40,7 @@ export default function Composer({
         type="submit"
         aria-label="Enviar"
         disabled={busy || disabled || !draft.trim()}
-        className="grid h-9 w-9 place-items-center rounded-full bg-marca text-texto-claro disabled:opacity-40"
+        className="grid h-9 w-9 place-items-center rounded-full bg-marca text-sobre-marca disabled:opacity-40"
       >
         <SendHorizontal size={16} strokeWidth={1.75} />
       </button>

@@ -64,7 +64,7 @@ export default function ConfirmarEncerrar({ aberto, onCancelar, onConfirmar }: P
               </button>
               <button
                 onClick={onConfirmar}
-                className="flex-1 rounded-full bg-perigo px-4 py-2.5 text-sm font-medium text-white transition-[opacity,transform] duration-150 ease-suave outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-perigo/50 active:scale-[0.98]"
+                className="flex-1 rounded-full bg-perigo px-4 py-2.5 text-sm font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-perigo/50 active:scale-[0.98]"
               >
                 Encerrar
               </button>

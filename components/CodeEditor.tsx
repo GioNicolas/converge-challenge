@@ -28,26 +28,26 @@ export default function CodeEditor({ value, language, readOnly, onChange, onPast
       beforeMount={(monaco) => {
         const css = getComputedStyle(document.documentElement);
         const superficie = css.getPropertyValue("--superficie").trim();
-        // Contraste: código claro, comentários verdes legíveis, números das linhas visíveis.
+        // Duas tintas, zero cor: o código é pérola em pesos diferentes; a sintaxe se diz por tom, não por matiz.
         monaco.editor.defineTheme("converge-dark", {
           base: "vs-dark",
           inherit: true,
           rules: [
-            { token: "", foreground: "F5F5F7" },
-            { token: "comment", foreground: "8FD694", fontStyle: "italic" },
-            { token: "keyword", foreground: "5EB0FF" },
-            { token: "string", foreground: "FFB27A" },
-            { token: "number", foreground: "C4E88A" },
-            { token: "type", foreground: "7DE0E6" },
-            { token: "delimiter", foreground: "C7C7CC" },
+            { token: "", foreground: "C9C2B6" },
+            { token: "comment", foreground: "F5F0E866", fontStyle: "italic" },
+            { token: "keyword", foreground: "F5F0E8" },
+            { token: "string", foreground: "D9D1C4" },
+            { token: "number", foreground: "E9E2D6" },
+            { token: "type", foreground: "EDE8E0" },
+            { token: "delimiter", foreground: "F5F0E88C" },
           ],
           colors: {
             "editor.background": superficie,
-            "editor.foreground": "#F5F5F7",
+            "editor.foreground": "#C9C2B6",
             "editorGutter.background": superficie,
             "editor.lineHighlightBackground": superficie,
-            "editorLineNumber.foreground": "#9A9AA0",
-            "editorLineNumber.activeForeground": "#F5F5F7",
+            "editorLineNumber.foreground": "#F5F0E84D",
+            "editorLineNumber.activeForeground": "#F5F0E8",
           },
         });
       }}

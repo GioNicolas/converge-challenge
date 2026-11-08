@@ -11,6 +11,9 @@ import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-
 import type { ConcordanciaVaga, EfeitoRegra, MotivoIgnorado, OrigemRegra, RegraSquad } from "@/lib/squad-memory/tipos";
 import type { VisaoMemoria } from "@/lib/squad-memory/visao";
 import { curvaSuave } from "@/lib/design/motion";
+import Perola from "@/components/totti/Perola";
+import TituloRevelado from "@/components/totti/TituloRevelado";
+import { useRastro, Cursor } from "@/components/totti/Rastro";
 import Casca from "./Casca";
 
 const MODO_DEV = process.env.NODE_ENV !== "production";
@@ -34,6 +37,22 @@ function textoDaOrigem(o: OrigemRegra, vagas: Record<string, string>): string {
     case "resultado_90_dias":
       return `De ${o.candidato} aos 90 dias (${o.deuCerto ? "deu certo" : "não deu certo"})${onde}`;
   }
+}
+
+/** A voz da máquina: o que o Totti está fazendo com a memória do time agora. */
+function RastroDaMemoria({ ativas, carregando }: { ativas: number; carregando: boolean }) {
+  const { atual } = useRastro(
+    carregando
+      ? ["lendo as decisões do time"]
+      : [`${ativas} regra${ativas === 1 ? "" : "s"} ativa${ativas === 1 ? "" : "s"} nas próximas entrevistas`, "memória da squad"],
+    { pausa: 40 },
+  );
+  return (
+    <>
+      › {atual}
+      <Cursor />
+    </>
+  );
 }
 
 export default function Aprendizado() {
@@ -72,12 +91,16 @@ export default function Aprendizado() {
         className="mx-auto flex max-w-[1120px] flex-col gap-10"
       >
         <header className="flex flex-col gap-2">
-          <span className="rotulo text-texto-suave">Memória da squad</span>
-          <h1 className="titulo-display text-[34px] text-texto sm:text-[40px]">O que o Totti aprendeu</h1>
-          <p className="max-w-[640px] text-[15px] leading-relaxed text-texto-suave">
-            Cada vez que o Tech Lead aprova ou reprova alguém, o Totti aprende um critério técnico deste time e usa na
-            próxima entrevista. Nada fica escondido: edite, desligue ou apague o que quiser.
-          </p>
+          <span className="flex items-center gap-3">
+            <Perola estado={memoria ? "ocioso" : "pensando"} tamanho={28} />
+            <span className="font-mono text-[12.5px] text-texto-suave">
+              <RastroDaMemoria ativas={ativas} carregando={!memoria && !erro} />
+            </span>
+          </span>
+          <h1 className="titulo-display text-[36px] text-texto sm:text-[44px]">
+            <TituloRevelado texto="O que o Totti aprendeu" />
+          </h1>
+          <p className="text-[15px] text-texto-suave">Cada decisão do time vira regra. Edite ou apague à vontade.</p>
         </header>
 
         {erro && !memoria && (
@@ -107,7 +130,7 @@ export default function Aprendizado() {
             <Secao
               titulo="Critérios aprendidos"
               detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
-              apoio="Os ligados entram no plano e na avaliação da próxima entrevista, marcados como critério aprendido com o time."
+              apoio=""
             >
               {memoria.regras.length === 0 ? (
                 <div className="cartao p-6 text-[14px] text-texto-suave">
@@ -136,7 +159,7 @@ export default function Aprendizado() {
             <Secao
               titulo="O que o Totti ignorou"
               detalhe={memoria.ignorados.length ? String(memoria.ignorados.length) : undefined}
-              apoio="Motivo que não é técnico nunca vira regra. Fica registrado aqui para o time ver o que foi descartado e por quê."
+              apoio="Motivo não técnico nunca vira regra."
             >
               {memoria.ignorados.length === 0 ? (
                 <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado até agora.</div>
@@ -159,11 +182,11 @@ function Secao({ titulo, detalhe, apoio, children }: { titulo: string; detalhe?:
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1 px-1">
-        <h2 className="flex items-baseline gap-2 text-[20px] font-semibold tracking-[-0.025em] text-texto">
+        <h2 className="flex items-baseline gap-2 font-display text-[22px] font-semibold tracking-[-0.02em] text-texto">
           {titulo}
           {detalhe && <span className="numero text-[14px] font-normal tracking-normal text-texto-suave">{detalhe}</span>}
         </h2>
-        <p className="max-w-[640px] text-[13.5px] text-texto-suave">{apoio}</p>
+        {apoio && <p className="max-w-[560px] text-[13.5px] text-texto-suave">{apoio}</p>}
       </div>
       {children}
     </section>

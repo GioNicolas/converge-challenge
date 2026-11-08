@@ -1,4 +1,5 @@
 "use client";
+import TituloRevelado from "@/components/totti/TituloRevelado";
 
 // Nova vaga: uma lista única, de cima para baixo — 01 Cargo, 02 Descrição (texto ou documento), 03 Contexto.
 // O documento (PDF, TXT, Markdown) é lido no navegador: o primeiro preenche a descrição, os outros viram contexto.
@@ -137,11 +138,10 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
         {voltar}
         <Passos atual={1} />
         <div className="flex flex-col gap-2">
-          <h1 className="titulo-display text-[44px] text-texto">Nova vaga</h1>
-          <p className="max-w-xl text-[15px] leading-relaxed text-texto-suave">
-            Cole a descrição e o Totti assume: lê a vaga, sugere o formato e monta o plano da entrevista com você, aqui mesmo.
-            A vaga só aparece na sua lista depois que o plano estiver confirmado.
-          </p>
+          <h1 className="titulo-display text-[48px] text-texto">
+            <TituloRevelado texto="Nova vaga" />
+          </h1>
+          <p className="text-[16px] text-texto-suave">Cole a descrição. O Totti cuida do resto.</p>
         </div>
       </div>
 
@@ -252,7 +252,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
               type="submit"
               disabled={!pronto}
               title={falta ?? undefined}
-              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-texto-claro transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-sobre-marca transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Começar com o Totti
               <ArrowRight size={15} strokeWidth={1.75} />

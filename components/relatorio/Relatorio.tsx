@@ -5,18 +5,32 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Icone from "@/components/quadro/Icone";
+import { useContar } from "@/components/totti/useContar";
+import Perola from "@/components/totti/Perola";
+import TituloRevelado from "@/components/totti/TituloRevelado";
 import VoltarLink from "@/components/VoltarLink";
 import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 import type { AdaptacaoVista, CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
 import type { Recomendacao } from "@/lib/agente/scorecard";
 
 const CURVA = [0.32, 0.72, 0, 1] as const;
+const CURVA_SAIDA = [0.16, 1, 0.3, 1] as const;
 
-const RECOMENDACAO: Record<Recomendacao, { rotulo: string; classe: string }> = {
-  avancar: { rotulo: "Avançar", classe: "bg-sucesso/12 text-sucesso-texto" },
-  avancar_com_ressalvas: { rotulo: "Avançar com ressalvas", classe: "bg-alerta/14 text-alerta-texto" },
-  nao_avancar: { rotulo: "Não avançar", classe: "bg-perigo/10 text-perigo-texto" },
-  evidencia_insuficiente: { rotulo: "Evidência insuficiente", classe: "bg-superficie-2 text-texto-suave" },
+// Sem verde nem vermelho: cada recomendação tem forma própria (cheio, contorno, areia, tracejado)
+// e o texto sempre diz o que é.
+const RECOMENDACAO: Record<Recomendacao, { rotulo: string; classe: string; ponto: string }> = {
+  avancar: { rotulo: "Totti recomenda avançar", classe: "bg-texto text-texto-claro", ponto: "bg-texto-claro" },
+  avancar_com_ressalvas: {
+    rotulo: "Avançar com ressalvas",
+    classe: "bg-superficie text-texto shadow-[inset_0_0_0_1.5px_var(--pedra)]",
+    ponto: "bg-texto",
+  },
+  nao_avancar: { rotulo: "Não avançar", classe: "bg-[#e4ddd1] text-texto-suave", ponto: "bg-texto-suave" },
+  evidencia_insuficiente: {
+    rotulo: "Evidência insuficiente",
+    classe: "bg-superficie text-texto-suave shadow-[inset_0_0_0_1.5px_rgb(28_24_18/0.22)]",
+    ponto: "border-[1.5px] border-dashed border-texto-suave box-border",
+  },
 };
 
 const nota1 = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -33,6 +47,41 @@ function Surgir({ ordem = 0, children, className }: { ordem?: number; children: 
     >
       {children}
     </motion.div>
+  );
+}
+
+/** A nota geral num anel que se fecha e conta do zero (1,4s e 900ms: "chegar"). */
+function AnelDeNota({ nota, fraca }: { nota: number | null; fraca: boolean }) {
+  const reduzir = useReducedMotion();
+  const contada = useContar(nota ?? 0, 1200);
+  const volta = 452.4;
+  const alvo = nota === null ? volta : volta * (1 - nota / 4);
+  return (
+    <div className="relative size-[168px] shrink-0" role="img" aria-label={nota === null ? "Sem nota geral" : `Nota geral ${nota1(nota)} de 4`}>
+      <svg width="168" height="168" viewBox="0 0 168 168" aria-hidden>
+        <circle cx="84" cy="84" r="72" fill="none" stroke="var(--superficie-2)" strokeWidth="12" />
+        <motion.circle
+          cx="84"
+          cy="84"
+          r="72"
+          fill="none"
+          stroke={fraca ? "var(--pedra)" : "var(--texto)"}
+          strokeWidth="12"
+          strokeLinecap="round"
+          strokeDasharray={volta}
+          initial={{ strokeDashoffset: reduzir ? alvo : volta }}
+          animate={{ strokeDashoffset: alvo }}
+          transition={{ duration: 1.4, ease: CURVA_SAIDA }}
+          transform="rotate(-90 84 84)"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={`titulo-display text-[52px] leading-none tracking-[-0.04em] ${fraca ? "text-texto-suave" : ""}`}>
+          {nota === null ? "—" : nota1(contada)}
+        </span>
+        <span className="text-[13px] text-texto-suave">de 4</span>
+      </div>
+    </div>
   );
 }
 
@@ -67,7 +116,7 @@ function Escala({ nota, grande = false }: { nota: number | null; grande?: boolea
 
 function Momento({ momento }: { momento: string | null }) {
   if (!momento) return null;
-  return <span className="shrink-0 text-xs text-texto-suave tabular-nums">aos {momento}</span>;
+  return <span className="shrink-0 font-mono text-xs text-texto-suave tabular-nums">min {momento}</span>;
 }
 
 function Prova({ prova, aoAbrirImagem }: { prova: ProvaVista; aoAbrirImagem: (url: string) => void }) {
@@ -77,7 +126,7 @@ function Prova({ prova, aoAbrirImagem }: { prova: ProvaVista; aoAbrirImagem: (ur
         <span className="mt-0.5 text-texto-suave">
           <Icone nome="fala" tamanho={15} />
         </span>
-        <p className="flex-1 leading-relaxed text-texto">“{prova.texto}”</p>
+        <p className="flex-1 leading-relaxed text-texto">“<span className="marca-texto">{prova.texto}</span>”</p>
         <Momento momento={prova.momento} />
       </li>
     );
@@ -123,10 +172,10 @@ function Prova({ prova, aoAbrirImagem }: { prova: ProvaVista; aoAbrirImagem: (ur
 function Criterio({ c, ordem, aoAbrirImagem }: { c: CriterioVisto; ordem: number; aoAbrirImagem: (url: string) => void }) {
   return (
     <Surgir ordem={ordem}>
-      <article className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao">
+      <article className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao transition-[transform,box-shadow] duration-[240ms] ease-saida hover:-translate-y-0.5 hover:shadow-flutuante">
         <header className="flex items-start justify-between gap-6">
           <div className="flex flex-col gap-1">
-            <h3 className="text-lg font-semibold tracking-tight">{c.nome}</h3>
+            <h3 className="font-display text-[20px] font-semibold tracking-[-0.02em]">{c.nome}</h3>
             {c.significado && <p className="text-sm text-texto-suave">{c.significado}</p>}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1">
@@ -275,7 +324,10 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
           <div className="flex items-center gap-4 print:hidden">
             <VoltarLink texto="Voltar aos resultados" />
           </div>
-          <span className="text-sm font-semibold tracking-tight">Totti</span>
+          <span className="flex items-center gap-2" aria-hidden>
+            <Perola tamanho={18} />
+            <span className="font-display text-[18px] leading-none font-bold tracking-[-0.02em]">totti</span>
+          </span>
           <div className="flex items-center gap-2">
             {r.demonstracao && (
               <span className="rounded-full bg-superficie-2 px-2.5 py-1 text-xs text-texto-suave">
@@ -293,12 +345,12 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
         </Surgir>
 
         <Surgir ordem={1} className="flex flex-col gap-3">
-          <p className="text-xs font-medium tracking-wide text-texto-suave uppercase">
-            Relatório da entrevista de {r.area}
-          </p>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance">{r.problema}</h1>
+          <p className="font-mono text-[12.5px] text-texto-suave">relatório da entrevista de {r.area}</p>
+          <h1 className="titulo-display text-[44px] text-balance">
+            <TituloRevelado texto={r.problema} />
+          </h1>
           <p className="flex flex-wrap gap-x-2 text-texto-suave">
-            <span>Candidato {r.candidatoId}</span>
+            <span className="text-texto">{r.candidatoId}</span>
             <span aria-hidden>·</span>
             <span>{r.realizadaEm}</span>
             {r.duracao && (
@@ -307,38 +359,30 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
                 <span>{r.duracao}</span>
               </>
             )}
-            <span aria-hidden>·</span>
-            <span>
-              {r.perguntas === 1 ? "1 pergunta do entrevistador" : `${r.perguntas} perguntas do entrevistador`}
-            </span>
           </p>
         </Surgir>
 
         <Surgir ordem={2}>
-          <section className="grid gap-8 rounded-padrao bg-superficie p-8 shadow-padrao sm:grid-cols-[auto_1fr]">
-            <div className="flex flex-col gap-4 sm:border-r sm:border-borda sm:pr-8">
-              <p className="text-sm font-medium text-texto-suave">Nota geral</p>
-              <p className="flex items-baseline gap-1.5 tabular-nums">
-                <span className={`text-6xl font-semibold tracking-tight ${fraca ? "text-texto-suave" : ""}`}>
-                  {r.notaGeral === null ? "—" : nota1(r.notaGeral)}
-                </span>
-                <span className="text-xl text-texto-suave">/ 4</span>
-              </p>
-              <Escala nota={r.notaGeral} grande />
-              <p className={`text-xs ${fraca ? "font-medium text-alerta-texto" : "text-texto-suave"}`}>
+          <section className="grid gap-8 rounded-[28px] bg-superficie p-8 shadow-padrao sm:grid-cols-[auto_1fr] sm:items-center">
+            <div className="flex flex-col items-center gap-3 sm:items-start">
+              <AnelDeNota nota={r.notaGeral} fraca={fraca} />
+              <p className={`text-[13px] ${fraca ? "font-medium text-alerta-texto" : "text-texto-suave"}`}>
                 {fraca ? "Só " : ""}
                 {comNota} de {r.criterios.length} critérios com prova
               </p>
             </div>
             <div className="flex flex-col gap-4">
               <div className="flex flex-col items-start gap-2">
-                <span className={`rounded-full px-3 py-1 text-sm font-medium ${rec.classe}`}>{rec.rotulo}</span>
-                <p className="text-xs text-texto-suave">Sugestão do entrevistador. Quem decide é você.</p>
+                <span className={`inline-flex h-[30px] items-center gap-1.5 rounded-full px-3 text-[13.5px] font-semibold ${rec.classe}`}>
+                  <span aria-hidden className={`size-[7px] rounded-full ${rec.ponto}`} />
+                  {rec.rotulo}
+                </span>
               </div>
+              <Escala nota={r.notaGeral} grande />
               {r.briefing && (
                 <div className="flex flex-col gap-1.5">
-                  <p className="text-sm font-medium text-texto-suave">Para a próxima conversa</p>
-                  <p className="leading-relaxed text-pretty">{r.briefing}</p>
+                  <p className="font-mono text-[12.5px] text-texto-suave">para a próxima conversa</p>
+                  <p className="text-[17px] leading-[1.6] text-pretty">{r.briefing}</p>
                 </div>
               )}
             </div>
@@ -367,7 +411,7 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
 
         <section className="flex flex-col gap-4">
           <Surgir ordem={4}>
-            <h2 className="text-2xl font-semibold tracking-tight">Por critério</h2>
+            <h2 className="font-display text-[24px] font-semibold tracking-[-0.02em]">Por critério</h2>
           </Surgir>
           {avaliados.map((c, i) => (
             <Criterio key={c.id} c={c} ordem={5 + i} aoAbrirImagem={setImagem} />
@@ -375,15 +419,7 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
           {semProva.length > 0 && (
             <Surgir ordem={5 + avaliados.length}>
               <article className="flex flex-col gap-3 rounded-padrao border border-dashed border-borda p-6">
-                <div className="flex flex-col gap-1">
-                  <h3 className="font-semibold tracking-tight">
-                    {semProva.length === 1 ? "Sem prova nesta entrevista" : `${semProva.length} critérios sem prova nesta entrevista`}
-                  </h3>
-                  <p className="text-sm leading-relaxed text-texto-suave">
-                    Não apareceu fala nem desenho que permitisse avaliar. Ficam sem nota, em vez de um chute, e
-                    viram pauta para a próxima conversa.
-                  </p>
-                </div>
+                <h3 className="font-display text-[18px] font-semibold">Sem prova: ficam para a próxima conversa</h3>
                 <ul className="flex flex-wrap gap-1.5">
                   {semProva.map((c) => (
                     <li key={c.id} className="rounded-full bg-superficie-2 px-3 py-1 text-sm text-texto-suave">
@@ -409,21 +445,16 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
         </Surgir>
 
         <Surgir ordem={7 + r.criterios.length}>
-          <footer className="flex flex-col gap-3 rounded-padrao border border-borda p-6 text-sm text-texto-suave">
-            <p className="flex items-center gap-2 font-medium text-texto">
-              <span className="text-sucesso">
-                <Icone nome="escudo" tamanho={16} />
+          <footer className="flex flex-col gap-2 text-sm text-texto-suave">
+            <p className="flex items-center gap-2">
+              <Icone nome="escudo" tamanho={15} />
+              <span className="font-mono text-[12.5px]">
+                {r.provasConferidas === 1 ? "1 prova conferida" : `${r.provasConferidas} provas conferidas`} na gravação
               </span>
-              Como estas notas foram conferidas
-            </p>
-            <p className="leading-relaxed">
-              {r.provasConferidas === 1 ? "1 prova conferida" : `${r.provasConferidas} provas conferidas`} na
-              gravação da sessão. Toda nota aponta para uma fala real do candidato ou para algo que ele desenhou;
-              critério sem prova fica sem nota, em vez de receber um chute.
             </p>
             {r.ajustes.length > 0 && (
               <details className="group">
-                <summary className="w-fit cursor-pointer list-none text-marca outline-none focus-visible:underline">
+                <summary className="w-fit cursor-pointer list-none text-texto underline decoration-transparent underline-offset-4 outline-none transition-[text-decoration-color] hover:decoration-texto focus-visible:underline">
                   {r.ajustes.length === 1 ? "1 ajuste automático" : `${r.ajustes.length} ajustes automáticos`}
                 </summary>
                 <ul className="mt-2 flex list-disc flex-col gap-1 pl-5">

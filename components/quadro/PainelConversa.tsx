@@ -247,7 +247,7 @@ export default function PainelConversa({
                 <button
                   type="submit"
                   disabled={!onEnviar || enviando || !limparTextoDigitado(rascunho)}
-                  className="rounded-full bg-marca px-4 py-2 text-sm font-medium text-white transition-[opacity,transform] duration-150 ease-suave outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-marca focus-visible:ring-offset-2 active:scale-95 disabled:opacity-40"
+                  className="rounded-full bg-marca px-4 py-2 text-sm font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-marca focus-visible:ring-offset-2 active:scale-95 disabled:opacity-40"
                 >
                   {enviando ? "Enviando…" : "Enviar"}
                 </button>

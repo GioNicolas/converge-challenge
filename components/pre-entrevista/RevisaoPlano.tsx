@@ -199,10 +199,7 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
               aria-label="Cargo"
               className="titulo-display -mx-2 rounded-xl bg-transparent px-2 py-1 text-[34px] text-texto outline-none transition-colors hover:bg-superficie-2/50 focus:bg-superficie"
             />
-            <p className="max-w-xl text-[15px] leading-relaxed text-texto-suave">
-              O Totti montou este plano a partir da conversa. Confira e ajuste o que quiser aqui mesmo; quando estiver
-              certo, é só publicar.
-            </p>
+            <p className="text-[15px] text-texto-suave">Confira, ajuste e publique.</p>
           </motion.div>
 
           <Cartao titulo="Como vai ser">

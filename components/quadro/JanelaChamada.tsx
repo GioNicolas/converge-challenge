@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/quadro/Icone";
-import OndaDeVoz from "@/components/quadro/OndaDeVoz";
+import OndaDeVoz from "@/components/agente/OndaDeVoz";
 import type { EstadoAgente } from "@/lib/presenca/energia";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 
@@ -71,7 +71,8 @@ export default function JanelaChamada({
   onTerminarResposta,
   onEncerrar,
 }: Props) {
-  const [minimizada, setMinimizada] = useState(false);
+  // Minimizada por padrão: a janela grande só abre quando o Totti tem uma pergunta (plim) e o candidato clica.
+  const [minimizada, setMinimizada] = useState(true);
   const ativa = iniciadaEm !== null && !encerrada;
   const segundos = useCronometro(iniciadaEm, ativa);
   const temDuvida = duvidaPendente;
@@ -83,6 +84,11 @@ export default function JanelaChamada({
       : agentePensando
         ? "pensando"
         : "ouvindo";
+
+  // Respondida a pergunta, a janela volta a ser só a pílula.
+  useEffect(() => {
+    if (!temDuvida && !respondendo) setMinimizada(true);
+  }, [temDuvida, respondendo]);
 
   // --- Arrastar e encaixar no canto ---
   const caixa = useRef<HTMLDivElement>(null);
@@ -185,27 +191,39 @@ export default function JanelaChamada({
           {minimizada ? (
             <motion.div
               key="pilula"
-              role="button"
-              tabIndex={0}
-              aria-label="Abrir a janela da chamada"
-              onTap={() => {
-                setMinimizada(false);
-                if (temDuvida) onClicarPlin();
-              }}
               initial={{ opacity: 0, filter: "blur(6px)" }}
               animate={{ opacity: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0, filter: "blur(6px)" }}
               transition={{ duration: 0.18 }}
-              className="flex h-11 cursor-pointer items-center gap-2.5 pr-4 pl-2 text-sm"
+              className="flex h-12 items-center gap-1 pr-1.5 pl-1 text-sm"
             >
-              {/* O agente continua "vivo" na pílula: o mesmo anel, pequeno */}
-              <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={32} />
-              <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
-              {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
-              {estadoAgente === "pensando" && <span className="text-texto-claro/60">Pensando…</span>}
-              <span className={midia.microfoneLigado ? "text-texto-claro/70" : "text-perigo"}>
-                <Icone nome={midia.microfoneLigado ? "microfone" : "microfoneDesligado"} tamanho={15} />
-              </span>
+              {/* O Totti continua "vivo" na pílula. Com plim, a pílula vira o botão que abre a janela. */}
+              <button
+                type="button"
+                disabled={!temDuvida}
+                onClick={() => {
+                  setMinimizada(false);
+                  onClicarPlin();
+                }}
+                aria-label={temDuvida ? "Ouvir a pergunta do Totti" : "Chamada com o Totti"}
+                className={`flex items-center gap-2 rounded-full pr-3 ${temDuvida ? "cursor-pointer hover:bg-texto-claro/8" : "cursor-grab"}`}
+              >
+                <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
+                <span className="font-mono font-medium tabular-nums">{formatarTempo(segundos)}</span>
+                {temDuvida && <span className="font-medium">Tenho uma pergunta</span>}
+              </button>
+              <BotaoRedondo
+                rotulo={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
+                desligado={!midia.microfoneLigado}
+                onClick={midia.alternarMicrofone}
+              >
+                <Icone nome={midia.microfoneLigado ? "microfone" : "microfoneDesligado"} tamanho={16} />
+              </BotaoRedondo>
+              {ativa && (
+                <BotaoRedondo rotulo="Encerrar entrevista" onClick={onEncerrar}>
+                  <Icone nome="desligar" tamanho={16} />
+                </BotaoRedondo>
+              )}
             </motion.div>
           ) : (
             <motion.div
@@ -236,7 +254,7 @@ export default function JanelaChamada({
                     temDuvida ? "cursor-pointer" : "cursor-default"
                   }`}
                 >
-                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={124} />
+                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="xl" />
                 </button>
 
                 <AnimatePresence>
@@ -262,7 +280,7 @@ export default function JanelaChamada({
                     </div>
                   )}
                   {!midia.microfoneLigado && midia.stream && (
-                    <span className="absolute top-1 right-1 rounded-full bg-perigo p-0.5 text-white">
+                    <span className="absolute top-1 right-1 rounded-full bg-perigo p-0.5 text-sobre-marca">
                       <Icone nome="microfoneDesligado" tamanho={10} />
                     </span>
                   )}
@@ -303,7 +321,7 @@ export default function JanelaChamada({
                   <button
                     onClick={onEncerrar}
                     aria-label="Encerrar entrevista"
-                    className="ml-auto flex h-9 items-center gap-1.5 rounded-full bg-perigo px-4 text-sm font-medium text-white transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-95"
+                    className="ml-auto flex h-9 items-center gap-1.5 rounded-full bg-perigo px-4 text-sm font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-95"
                   >
                     <Icone nome="desligar" tamanho={16} />
                     Encerrar
@@ -388,7 +406,7 @@ function BotaoRedondo({
       aria-label={rotulo}
       title={rotulo}
       className={`flex size-9 items-center justify-center rounded-full transition-[background-color,transform] duration-150 ease-suave active:scale-90 ${
-        desligado ? "bg-perigo text-white hover:bg-perigo/90" : "bg-texto-claro/12 hover:bg-texto-claro/20"
+        desligado ? "bg-perigo text-sobre-marca hover:bg-perigo/90" : "bg-texto-claro/12 hover:bg-texto-claro/20"
       }`}
     >
       {children}
