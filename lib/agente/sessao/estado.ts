@@ -98,7 +98,7 @@ export type EstadoSessao = {
   perguntaFinalFeita: boolean;
   /** O convite único de REQUISITOS (silêncio inicial) já foi feito? Ele não conta na cota de perguntas. */
   conviteFeito: boolean;
-  /** Quando o candidato clicou na última pergunta (o intervalo de 60s conta daqui). */
+  /** Quando o candidato clicou na última pergunta (o intervalo entre perguntas conta do mais recente entre isto e `ultimaRespostaEm`). */
   ultimaPerguntaEm: number | null;
   /** Quando o candidato terminou de responder a última pergunta. */
   ultimaRespostaEm: number | null;

@@ -1,7 +1,13 @@
 // Política do "portão de entrada": funções puras que decidem SE a análise pode rodar e SE uma
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
-import { SILENCIO_INICIAL_S, SILENCIO_S } from "../../contracts";
+import {
+  INTERVALO_ENTRE_PERGUNTAS_S,
+  inicioDoIntervaloEntrePerguntas,
+  MAX_PERGUNTAS,
+  SILENCIO_INICIAL_S,
+  SILENCIO_S,
+} from "../../contracts";
 import { mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
 import type { Fase, RespostaAnalise, StatusAnalise } from "./tipos";
@@ -26,8 +32,8 @@ export const LIMITE_SILENCIO_S = SILENCIO_S;
 export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: 25_000,
-  maxPerguntas: 5,
+  intervaloEntrePerguntasMs: INTERVALO_ENTRE_PERGUNTAS_S * 1000,
+  maxPerguntas: MAX_PERGUNTAS,
   maxCaracteresNota: 40,
 };
 
@@ -122,10 +128,9 @@ export function motivoBloqueioPlin(
   } else if (estado.perguntasFeitas >= regras.maxPerguntas) {
     return "LIMITE_DE_PERGUNTAS";
   }
-  if (
-    estado.ultimaPerguntaEm !== null &&
-    agora - estado.ultimaPerguntaEm < regras.intervaloEntrePerguntasMs
-  ) {
+  // O respiro conta do mais recente entre o início da última pergunta e o fim da última resposta (igual ao quadro).
+  const inicioIntervalo = inicioDoIntervaloEntrePerguntas(estado.ultimaPerguntaEm, estado.ultimaRespostaEm);
+  if (inicioIntervalo !== null && agora - inicioIntervalo < regras.intervaloEntrePerguntasMs) {
     return "INTERVALO_ENTRE_PERGUNTAS";
   }
   // A bola está com o candidato: depois de qualquer fala solta do agente (resposta, comentário, continuação) ele
