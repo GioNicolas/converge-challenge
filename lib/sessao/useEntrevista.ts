@@ -164,14 +164,21 @@ export function useEntrevista(
     void (atual.tarefa ?? Promise.resolve()).then(() => atual.quadro.agente.apagarGrupo(atual.grupo));
   }, []);
 
+  /** O que o agente estava dizendo (ou ia dizer) na última fala: para saber o que uma fala nova cortou. */
+  const textoDaUltimaFala = useRef("");
   const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
+    // Uma fala nova corta a que está tocando (falarComMarcas chama calar()). Registra o que foi cortado, para a
+    // linha do tempo da sessão mostrar quando o Totti fala por cima de si mesmo.
+    const cortou = agenteFalandoRef.current ? textoDaUltimaFala.current : "";
+    if (cortou) console.warn("[fala] uma fala nova cortou a que estava tocando", { cortada: cortou, nova: texto });
+    textoDaUltimaFala.current = texto;
     const versao = ++versaoDaFala.current;
     ultimaFalaDoAgenteEm.current = Date.now();
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(false);
     agenteFalandoRef.current = false;
-    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
+    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto, ...(cortou ? { cortouFala: cortou } : {}) });
     if (!vozHabilitadaRef.current) {
       setPreparandoVoz(false);
       preparandoVozRef.current = false;
