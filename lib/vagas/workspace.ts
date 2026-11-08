@@ -430,13 +430,17 @@ function senioridadeProvavel(cargo: string, config: InterviewConfig): Senioridad
  * O plano foi confirmado: a vaga nasce (com o resumo do que foi combinado) e o rascunho sai.
  * Se o rascunho não existir mais, a vaga é criada a partir do próprio config. Devolve o id da vaga.
  */
-export function publicarVaga(rascunhoId: string | null, config: InterviewConfig): string {
+/** Inscritos (de demonstração) que uma vaga recém-publicada já traz, para o envio automático de convites ter quem chamar. */
+const INSCRITOS_NOVA_VAGA = 6;
+
+/** Publica o rascunho como vaga e devolve a vaga criada (o estúdio dispara os convites logo em seguida). */
+export function publicarVaga(rascunhoId: string | null, config: InterviewConfig): VagaEmpresa {
   const s = ler();
   const r = rascunhoId ? s.rascunhos.find((x) => x.id === rascunhoId) : undefined;
   const cargo = config.roleTitle || r?.cargo || "Vaga";
   const descricao = r?.descricao ?? "";
   const id = idPara(cargo);
-  s.novas.unshift({
+  const vaga: VagaEmpresa = {
     id,
     cargo,
     area: areaProvavel(`${cargo}\n${descricao}`),
@@ -454,12 +458,13 @@ export function publicarVaga(rascunhoId: string | null, config: InterviewConfig)
       foco: config.focus.map((f) => ({ area: f.area, peso: f.weight })),
       criterios: config.criteria.length,
     },
-    funil: FUNIL_VAZIO,
+    funil: { ...FUNIL_VAZIO, inscritos: INSCRITOS_NOVA_VAGA },
     responsavel: "Você",
-  });
+  };
+  s.novas.unshift(vaga);
   s.rascunhos = s.rascunhos.filter((x) => x.id !== rascunhoId);
   gravar(s);
-  return id;
+  return vaga;
 }
 
 // ---------------------------------------------------------------------------

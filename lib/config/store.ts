@@ -13,13 +13,14 @@ import { kvRemoto } from "@/lib/storage/kv";
 import { selecionarProblema, sortearProblema } from "@/lib/problems/selecao";
 import { problems } from "@/lib/problems";
 import { hasProblem } from "@/problems";
+import { pastaDados } from "@/lib/dados";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
 
 const globalForConfigs = globalThis as typeof globalThis & { __convergeConfigs?: Map<string, InterviewConfig> };
 const configs = (globalForConfigs.__convergeConfigs ??= new Map<string, InterviewConfig>());
 
-const pasta = () => join(process.cwd(), "data", "configs");
+const pasta = () => pastaDados("configs");
 
 /**
  * Config com questão que o agente não pode usar: id desconhecido, formato sem IDE (system design) ou

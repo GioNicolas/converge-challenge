@@ -147,6 +147,28 @@ export function useConvitesFeitos() {
   return convites;
 }
 
+/** Testes primeiro (como inscritos comuns, sem marca), depois os demonstrativos, com os convites já feitos aplicados. */
+function montarLista(vagaId: string, funil: Funil, testes: CandidatoTeste[]): CandidatoVaga[] {
+  const deTeste: CandidatoVaga[] = testes.map((t, k) => ({
+    i: INDICE_TESTE + k,
+    nome: t.nome,
+    email: t.email,
+    cidade: CIDADES[k % CIDADES.length],
+    situacao: "inscrito",
+    haDias: 0,
+    novo: false,
+  }));
+  const todos = [...deTeste, ...gerar(vagaId, funil)];
+  const convidados = new Set(lerConvites()[vagaId] ?? []);
+  if (convidados.size === 0) return todos;
+  return todos.map((c) => (c.situacao === "inscrito" && convidados.has(c.i) ? { ...c, situacao: "convidado", haDias: 0 } : c));
+}
+
+/** Quem ainda espera convite numa vaga: é a lista que o envio automático, ao publicar, percorre. */
+export async function aguardandoConvite(vagaId: string, funil: Funil): Promise<CandidatoVaga[]> {
+  return montarLista(vagaId, funil, await buscarTestes()).filter((c) => c.situacao === "inscrito");
+}
+
 /** Os candidatos de uma vaga com os convites aplicados, e o funil recontado. `null` antes de montar. */
 export function useCandidatos(vagaId: string, funil: Funil) {
   const [lista, setLista] = useState<CandidatoVaga[] | null>(null);
@@ -166,24 +188,7 @@ export function useCandidatos(vagaId: string, funil: Funil) {
   const { inscritos, convidados: nConvidados, emAndamento, concluiram, novos } = funil;
   const montar = useCallback(() => {
     if (testes === null) return;
-    const base = gerar(vagaId, { inscritos, convidados: nConvidados, emAndamento, concluiram, novos });
-    // Os de teste entram como inscritos comuns (sem marca), antes dos demonstrativos.
-    const deTeste: CandidatoVaga[] = testes.map((t, k) => ({
-      i: INDICE_TESTE + k,
-      nome: t.nome,
-      email: t.email,
-      cidade: CIDADES[k % CIDADES.length],
-      situacao: "inscrito",
-      haDias: 0,
-      novo: false,
-    }));
-    const todos = [...deTeste, ...base];
-    const convidados = new Set(lerConvites()[vagaId] ?? []);
-    setLista(
-      convidados.size === 0
-        ? todos
-        : todos.map((c) => (c.situacao === "inscrito" && convidados.has(c.i) ? { ...c, situacao: "convidado", haDias: 0 } : c)),
-    );
+    setLista(montarLista(vagaId, { inscritos, convidados: nConvidados, emAndamento, concluiram, novos }, testes));
   }, [testes, vagaId, inscritos, nConvidados, emAndamento, concluiram, novos]);
 
   useEffect(() => {

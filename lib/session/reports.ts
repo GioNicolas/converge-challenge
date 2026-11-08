@@ -9,6 +9,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Report } from "@/lib/contracts";
 import { kvRemoto } from "@/lib/storage/kv";
+import { pastaDados } from "@/lib/dados";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -18,7 +19,7 @@ export interface ReportSalvo {
   report: Report;
 }
 
-const pasta = () => join(process.cwd(), "data", "reports");
+const pasta = () => pastaDados("reports");
 
 export async function saveReport(startedAt: number, report: Report): Promise<void> {
   if (!ID_VALIDO.test(report.sessionId)) throw new Error(`id de sessão inválido: ${report.sessionId}`);

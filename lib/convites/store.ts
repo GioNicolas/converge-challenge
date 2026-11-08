@@ -9,6 +9,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { kvRemoto } from "@/lib/storage/kv";
+import { pastaDados } from "@/lib/dados";
 
 export const CONVITE_VALIDADE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -47,7 +48,7 @@ type NovoConvite = Omit<Convite, "token" | "criadoEm" | "status" | "agendadoPara
 const globalForConvites = globalThis as typeof globalThis & { __convergeConvites?: Map<string, Convite> };
 const convites = (globalForConvites.__convergeConvites ??= new Map<string, Convite>());
 
-const pasta = () => join(process.cwd(), "data", "convites");
+const pasta = () => pastaDados("convites");
 
 const expirado = (c: Convite, agora = Date.now()) => agora - c.criadoEm > CONVITE_VALIDADE_MS;
 
