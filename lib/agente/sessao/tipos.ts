@@ -24,6 +24,18 @@ export const EsquemaFalaRecente = z.object({
 });
 export type FalaRecente = z.infer<typeof EsquemaFalaRecente>;
 
+/** Teto da foto do quadro (data URL). */
+export const MAX_IMAGEM_BASE64 = 500_000;
+/**
+ * Foto do quadro opcional: grande demais vira null em vez de derrubar o pedido com 400. A foto é um extra; a
+ * análise e a fala seguem só com o texto do desenho.
+ */
+export const EsquemaImagemOpcional = z
+  .string()
+  .nullable()
+  .transform((v) => (typeof v === "string" && v.length <= MAX_IMAGEM_BASE64 ? v : null))
+  .optional();
+
 export const EsquemaPedidoAnalise = z.object({
   sessao_id: z.string(),
   fase: EsquemaFase,
@@ -34,6 +46,8 @@ export const EsquemaPedidoAnalise = z.object({
   conversa_recente: z.array(EsquemaFalaRecente),
   perguntas_feitas: z.number().int().min(0),
   imagem_url: z.string().nullable(),
+  /** Foto leve do quadro (data URL JPEG), para o modelo ver o desenho além do grafo. Ausente = só o grafo. */
+  imagem_base64: EsquemaImagemOpcional,
   /** Segundos desde a última atividade do candidato (mexer no desenho ou falar). Ausente = desconhecido. */
   parado_ha_s: z.number().min(0).max(86_400).optional(),
   /** Requisitos já combinados e escritos no quadro. */

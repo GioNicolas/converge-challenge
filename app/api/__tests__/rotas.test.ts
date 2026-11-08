@@ -77,7 +77,7 @@ describe("POST /api/sessoes", () => {
     assert.ok((corpo.tempos as Record<string, number>).REQUISITOS > 0);
     assert.equal((await repo.obter(sessao_id))?.estado.fase, "APRESENTACAO");
   });
-  it("a abertura (apresentação e despedida) vem do modelo; sem LLM ou com erro vem null", async () => {
+  it("a abertura (apresentação e despedida) vem do modelo; sem LLM vem null; com erro vem a de reserva", async () => {
     const { corpo } = await novaSessao();
     assert.equal(typeof corpo.apresentacao, "string");
     assert.equal(typeof corpo.despedida, "string");
@@ -91,9 +91,10 @@ describe("POST /api/sessoes", () => {
     const quebrado = criarClienteFalso([new Error("fora do ar")]);
     definirContextoParaTestes({ repositorio: repo, llm: quebrado, agora: () => relogio });
     const comErro = (await novaSessao()).corpo;
-    assert.equal(comErro.apresentacao, null);
-    assert.equal(comErro.despedida, null);
-    assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura");
+    // O Totti não pode ir direto ao desafio sem se apresentar: com o modelo fora do ar, vale a fala de reserva.
+    assert.match(String(comErro.apresentacao), /Totti/);
+    assert.equal(typeof comErro.despedida, "string");
+    assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura do modelo");
   });
   it("a abertura é guardada por kit+problema: a 2ª sessão não chama o modelo de novo", async () => {
     const llm = criarClienteFalso([{ apresentacao: "Olá, tudo bem? Vamos começar.", despedida: "Obrigado. Daremos retorno." }]);
@@ -252,6 +253,32 @@ describe("POST /api/sessoes/[id]/perguntar", () => {
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /Postgres/);
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /Como funciona a leitura/);
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /100 leituras/);
+  });
+  it("aceita o que o cliente do quadro envia: foto, mudanças e conversa do quadro chegam ao modelo", async () => {
+    const { sessao_id } = await novaSessao();
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei.", requisito: null }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const foto = "data:image/jpeg;base64," + "A".repeat(200_000);
+    const conversa = Array.from({ length: 20 }, (_, i) => ({ quem: i % 2 ? "agente" : "candidato", texto: `fala ${i}` }));
+    const r = await perguntarPost(post("/x", {
+      sessao_id, fase: "ALTO_NIVEL", texto: "Olha isso", grafo: GRAFO,
+      imagem_base64: foto, mudancas: "+ adicionou [r9] Fila " + "x".repeat(9000), conversa_do_quadro: conversa,
+    }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.equal(llm.chamadas[0].imagem, foto);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /adicionou \[r9\] Fila/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /fala 19/);
+  });
+  it("foto grande demais é descartada, não derruba a fala nem a análise", async () => {
+    const { sessao_id } = await novaSessao();
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei.", requisito: null }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const enorme = "data:image/jpeg;base64," + "A".repeat(600_000);
+    const r = await perguntarPost(post("/x", { sessao_id, fase: "ALTO_NIVEL", texto: "Olha isso", imagem_base64: enorme }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.equal(llm.chamadas[0].imagem ?? null, null);
+    const a = await analisarPost(post("/x", pedido(sessao_id, { imagem_base64: enorme })), params(sessao_id));
+    assert.equal(a.status, 200);
   });
   it("falha do modelo devolve erro recuperável em vez de silêncio deliberado", async () => {
     const { sessao_id } = await novaSessao();

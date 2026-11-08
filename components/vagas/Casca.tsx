@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { Brain, LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
+import { LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { useVagas, type EtapaVaga } from "@/lib/vagas/workspace";
 import { curvaSuave } from "@/lib/design/motion";
 import { RastroDoTotti } from "@/components/totti/Rastro";
@@ -123,15 +123,6 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
           onClick={() => setGaveta(false)}
         >
           Todas as vagas
-        </ItemMenu>
-        <ItemMenu
-          href="/vagas/aprendizado"
-          icone={<Brain size={16} strokeWidth={1.75} />}
-          atual={naMemoria}
-          compacto={compacto}
-          onClick={() => setGaveta(false)}
-        >
-          O que o Totti aprendeu
         </ItemMenu>
       </nav>
 

@@ -176,7 +176,7 @@ export function CartaoEnxuto({ e, cartao }: { e: EntrevistaReal; cartao: CartaoD
           {detalhes ? "Esconder detalhes" : "Ver detalhes das notas"}
         </button>
         <Link href={e.href} className="inline-flex items-center gap-1 text-texto-suave underline decoration-texto/25 underline-offset-4 hover:text-texto">
-          Ver a entrevista (código e conversa) <ArrowRight size={13} />
+          Ver a entrevista ({e.formato === "system_design" ? "quadro e conversa" : "código e conversa"}) <ArrowRight size={13} />
         </Link>
       </div>
     </div>

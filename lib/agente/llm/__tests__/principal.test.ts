@@ -67,8 +67,22 @@ describe("criarClientePrincipal (cérebro do quadro sobre o lib/llm)", () => {
 
   it("sem bloco dinâmico, o sistema é só o estático", async () => {
     const { chamadas, cliente } = falso({ n: 1 });
-    await cliente.completarJson(base(NOME_SCHEMA_KIT, { sistema: { estatico: "SO ESTATICO" } }));
+    await cliente.completarJson(base(NOME_SCHEMA_PERGUNTAR, { sistema: { estatico: "SO ESTATICO" } }));
     assert.equal(chamadas[0].system, "SO ESTATICO");
+  });
+
+  it("relatório, kit e plano levam o JSON Schema no sistema; as falas ao vivo não", async () => {
+    const { chamadas, cliente } = falso({ n: 1 });
+    for (const nome of [NOME_SCHEMA_SCORECARD, NOME_SCHEMA_KIT, NOME_SCHEMA_PLANEJADOR]) {
+      await cliente.completarJson(base(nome, { sistema: { estatico: "ESTATICO" } }));
+    }
+    for (const nome of [NOME_SCHEMA_PERGUNTAR, NOME_SCHEMA_ABERTURA, NOME_SCHEMA_ANALISE]) {
+      await cliente.completarJson(base(nome, { sistema: { estatico: "ESTATICO" } }));
+    }
+    const comFormato = chamadas.map((c) => c.system.includes("FORMATO DA RESPOSTA"));
+    assert.deepEqual(comFormato, [true, true, true, false, false, false]);
+    assert.ok(chamadas[0].system.startsWith("ESTATICO\n\n"));
+    assert.ok(chamadas[0].system.includes('"properties":{"n":{"type":"number"}}'));
   });
 
   it("várias mensagens viram um texto só, com o autor de cada uma", async () => {

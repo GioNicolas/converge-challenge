@@ -6,17 +6,21 @@
 import { z } from "zod";
 import { findConfig } from "@/lib/config/store";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
+import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
 import type { Kit, Problema } from "../kits/tipos";
-import type { Abertura } from "../prompts/abertura";
+import { apresentacaoReserva, DESPEDIDA_RESERVA, type Abertura, type ContextoAbertura } from "../prompts/abertura";
+import { etapasEmTexto } from "../prompts/contexto";
 import { avaliacaoDoPlano, escalarTempos, planoDaConfig } from "../plano";
 import { perguntar } from "../perguntar";
-import { transicionar, estadoInicial, TEMPOS_PADRAO, type EstadoSessao, type EventoSessao } from "../sessao/estado";
+import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
+  EsquemaFalaRecente,
+  EsquemaImagemOpcional,
   EsquemaFase,
   EsquemaPedidoAnalise,
   type PedidoAnalise,
@@ -32,7 +36,8 @@ import { criarLimitador, erro, ipDe, json, lerJsonValidado, type ParamsId } from
 export const PRAZO_ANALISE_MS = 8000;
 export const MAX_ANALISES_POR_SESSAO = 200;
 export const MAX_CORPO_JSON = 64 * 1024;
-export const MAX_CORPO_ANALISE = 160 * 1024;
+/** Cabe a foto do quadro (até 500 mil caracteres) além do grafo e da conversa. */
+export const MAX_CORPO_ANALISE = 700_000;
 export const MAX_CORPO_EVENTOS = 256 * 1024;
 export const MAX_IMAGEM = 4 * 1024 * 1024;
 
@@ -65,7 +70,9 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   // O plano da vaga (se vier) escolhe o kit e calibra a entrevista; config desconhecida cai na entrevista padrão.
   const encontrada = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
   // Regras ativas da vaga no começo da sessão (só as aprendidas nesta vaga): o entrevistador e o scorecard
-  // usam (ver `lib/squad-memory/config.ts`).
+  // usam (ver `lib/squad-memory/config.ts`). Na Vercel cada lambda tem o próprio Map: hidrata do banco antes,
+  // senão a sessão pode nascer sem as regras salvas em outra instância (a função não lança e tem cache curto).
+  if (encontrada) await hidratarSquadMemory();
   const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
   const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;
@@ -107,7 +114,14 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   }
   // Apresentação e despedida escritas pelo modelo (1 chamada, guardada por kit+problema: só a primeira sessão paga a espera).
   // Sem LLM ou em erro: null, e o quadro não fala.
-  const abertura = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema) : null;
+  // A abertura diz quanto tempo dura e quais as etapas: o tempo do plano, ou a soma das fases.
+  const contextoAbertura = {
+    duracaoMin: tempoDaEntrevista(sessao.estado, ctx.agora()).totalMin || undefined,
+    etapas: etapasEmTexto(sessao.estado),
+  };
+  const gerada = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema, contextoAbertura) : null;
+  // Sem o modelo, uma apresentação fixa: o Totti nunca começa sem se apresentar.
+  const abertura = gerada ?? (ctx.llm ? { apresentacao: apresentacaoReserva(kit, contextoAbertura), despedida: DESPEDIDA_RESERVA } : null);
   console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id, plano: plano !== null, abertura: abertura !== null });
   return json({
     sessao_id: sessao.id,
@@ -132,6 +146,7 @@ const EsquemaPedidoLimitado = EsquemaPedidoAnalise.extend({
     .max(40),
   perguntas_feitas: z.number().int().min(0).max(1000),
   imagem_url: z.string().max(2048).nullable(),
+  imagem_base64: EsquemaImagemOpcional,
 });
 
 /** Leva o estado do servidor até a fase que o quadro informou (só avança), por evento da máquina. */
@@ -143,14 +158,14 @@ function sincronizarFase(estado: EstadoSessao, fase: EstadoSessao["fase"], agora
 const cacheAbertura = new WeakMap<object, Map<string, Abertura>>();
 const MAX_ABERTURAS_EM_CACHE = 200;
 
-async function aberturaDaSessao(llm: LlmCliente, kit: Kit, problema: Problema): Promise<Abertura | null> {
-  const chave = `${kit.id}:${problema.id}:${problema.titulo}:${problema.enunciado}`;
+async function aberturaDaSessao(llm: LlmCliente, kit: Kit, problema: Problema, contexto: ContextoAbertura): Promise<Abertura | null> {
+  const chave = `${kit.id}:${problema.id}:${problema.titulo}:${problema.enunciado}:${contexto.duracaoMin ?? ""}:${contexto.etapas ?? ""}`;
   let doLlm = cacheAbertura.get(llm);
   if (!doLlm) cacheAbertura.set(llm, (doLlm = new Map()));
   const guardada = doLlm.get(chave);
   if (guardada) return guardada;
   const nova = await comPrazo(
-    gerarAbertura({ llm, kit, problema }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
+    gerarAbertura({ llm, kit, problema, ...contexto }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
     PRAZO_ABERTURA_MS,
     null,
   );
@@ -231,8 +246,11 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     pergunta: resposta.pergunta,
     nota: resposta.nota,
     elementos: resposta.elementos,
+    // Sem estes dois, os gestos do modelo nunca chegavam ao quadro e a fase não avançava sozinha.
+    ...(resposta.visual !== undefined ? { visual: resposta.visual } : {}),
     degrau: resposta.degrau,
     observacoes: resposta.observacoes,
+    ...(resposta.avancar_fase ? { avancar_fase: true } : {}),
   } satisfies RespostaAnalise);
 }
 
@@ -248,11 +266,32 @@ const EsquemaPerguntar = z.object({
   pergunta_ativa: z.string().max(2000).optional(),
   requisitos: z.array(z.string().max(200)).max(30).optional(),
   gestos_recentes: z.array(z.string().max(250)).max(6).optional(),
+  /** Foto leve do quadro (data URL JPEG). */
+  imagem_base64: EsquemaImagemOpcional,
+  /** O que acabou de mudar no desenho. */
+  // Texto longo é cortado, não recusado: perder a fala do candidato por causa do contexto seria pior.
+  mudancas: z.string().transform((v) => v.slice(0, 8000)).optional(),
+  /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
+  conversa_do_quadro: z
+    .array(EsquemaFalaRecente.extend({ texto: z.string().transform((v) => v.slice(0, 4000)) }))
+    .transform((v) => v.slice(-30))
+    .optional(),
 });
+
+/** Corpo do /perguntar: a foto do quadro não cabe no limite padrão. */
+const MAX_CORPO_PERGUNTAR = 700_000;
+
+/** A pergunta do agente que esta fala responde: a ativa, ou a última com o texto que o quadro mandou. */
+function perguntaRespondida(estado: EstadoSessao, perguntaAtiva: string | undefined): number | null {
+  if (estado.perguntaAtiva) return estado.perguntaAtiva.numero;
+  const texto = perguntaAtiva?.trim();
+  if (!texto) return null;
+  return estado.perguntas.findLast((p) => p.pergunta.trim() === texto)?.numero ?? null;
+}
 
 export async function perguntarHandler(req: Request, { params }: ParamsId): Promise<Response> {
   const { id } = await params;
-  const corpo = await lerJsonValidado(req, EsquemaPerguntar, MAX_CORPO_JSON);
+  const corpo = await lerJsonValidado(req, EsquemaPerguntar, MAX_CORPO_PERGUNTAR);
   if (!corpo.ok) return corpo.resposta;
   if (!eIdPlausivel(id)) return notFound();
   if (corpo.dados.sessao_id !== id) return erro(400, "sessao_id do corpo diferente da rota");
@@ -266,6 +305,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const agora = ctx.agora();
   const { fase, texto } = corpo.dados;
   let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "visual"> = { responder: false, texto: "", requisito: null, concluiu: false };
+  let desfecho: Desfecho | null = null;
 
   if (ctx.llm) {
     const estado = sincronizarFase(sessao.estado, fase, agora);
@@ -273,7 +313,8 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       perguntar(
         { llm: ctx.llm, kit: alvo.kit, problema: alvo.problema },
         estado,
-        { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes },
+        { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes,
+          imagemBase64: corpo.dados.imagem_base64, mudancas: corpo.dados.mudancas, conversaDoQuadro: corpo.dados.conversa_do_quadro },
         agora,
         AbortSignal.timeout(PRAZO_ANALISE_MS),
       ).catch(() => null),
@@ -282,6 +323,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
     );
     if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
     resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu, ...(r.visual !== undefined ? { visual: r.visual } : {}) };
+    desfecho = r.desfecho;
   }
 
   // Reaplica as falas sobre o estado mais recente (eventos podem ter mexido nele no meio do caminho).
@@ -289,6 +331,11 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   let novo = sincronizarFase(atual, fase, agora);
   novo = transicionar(novo, { tipo: "CANDIDATO_FALOU", texto, fimDeResposta: false }, agora).estado;
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto }, agora).estado;
+  // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
+  const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
+  if (desfecho && numeroDaPergunta !== null) {
+    novo = transicionar(novo, { tipo: "DESFECHO_DA_PERGUNTA", numero: numeroDaPergunta, desfecho, resposta: texto }, agora).estado;
+  }
   await ctx.repositorio.salvarEstado(id, novo);
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder });
 
@@ -392,6 +439,21 @@ function idsDe(dados: unknown): string[] {
   return [];
 }
 
+/** Desenho mínimo para sair de REQUISITOS: um traço solto no começo não encerra as perguntas de requisito. */
+export const MIN_PECAS_PARA_SAIR_DOS_REQUISITOS = 2;
+
+/** Componentes + conexões no grafo em texto (as linhas "- [id]" dessas duas seções). */
+export function pecasDoDesenho(grafo: string): number {
+  let secao = "";
+  let n = 0;
+  for (const linha of grafo.split("\n")) {
+    const t = linha.trim();
+    if (!t.startsWith("-")) secao = t;
+    else if ((secao === "COMPONENTES" || secao === "CONEXÕES") && /^- \[/.test(t)) n++;
+  }
+  return n;
+}
+
 /** Traduz um evento da linha do tempo em eventos da máquina (tipos desconhecidos: nenhum). */
 export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
   const d = (dados ?? {}) as Record<string, unknown>;
@@ -412,7 +474,9 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       ];
     case "desenho": {
       const ids = idsDe(dados);
-      const eventos: EventoSessao[] = [{ tipo: "CANDIDATO_DESENHOU" }];
+      // Sem grafo (cliente antigo), vale o comportamento de antes: qualquer desenho sai de REQUISITOS.
+      const estruturado = typeof d.grafo !== "string" || pecasDoDesenho(d.grafo) >= MIN_PECAS_PARA_SAIR_DOS_REQUISITOS;
+      const eventos: EventoSessao[] = estruturado ? [{ tipo: "CANDIDATO_DESENHOU" }] : [];
       if (ids.length) eventos.push({ tipo: "ELEMENTOS_ALTERADOS", ids });
       return eventos;
     }

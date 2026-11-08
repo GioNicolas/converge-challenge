@@ -2,7 +2,7 @@
 //   Rascunho (com o Totti) → Vaga publicada: Plano · Entrevistas · Escores
 // Uma vaga só existe (e só aparece no menu) depois que o plano da entrevista é confirmado com o Totti.
 // Antes disso ela é um rascunho, que dá para retomar. As vagas e rascunhos de partida vêm das vagas de
-// exemplo (fixtures) mais duas fora de tecnologia; o que o recrutador faz fica salvo no navegador (localStorage).
+// exemplo (fixtures), todas de tecnologia (engenharia, dados e produto); o que o recrutador faz fica salvo no navegador (localStorage).
 import { useCallback, useEffect, useState } from "react";
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
@@ -10,7 +10,7 @@ import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { entre, escolher, semente, sorteador } from "./aleatorio";
 import { FUNIL_VAZIO, type Funil } from "./candidatos";
 
-export type Area = "engenharia" | "dados" | "produto" | "marketing";
+export type Area = "engenharia" | "dados" | "produto";
 export type Senioridade = InterviewConfig["seniority"] | "estagio";
 export type Etapa = "entrevistas" | "encerrada";
 
@@ -63,7 +63,6 @@ export const NOME_AREA_VAGA: Record<Area, string> = {
   engenharia: "Engenharia",
   dados: "Dados",
   produto: "Produto",
-  marketing: "Marketing",
 };
 
 /** Formato em palavras neutras (o quadro serve para qualquer área, não só system design). */
@@ -103,7 +102,7 @@ const RASCUNHOS_INICIAIS: RascunhoVaga[] = [
 Responsabilidades:
 - Definir e priorizar o roadmap de ativação a partir de dados de funil e entrevistas com clientes
 - Desenhar experimentos (A/B) e decidir com base nos resultados
-- Trabalhar junto com design, engenharia e marketing do problema até a entrega
+- Trabalhar junto com design, engenharia e dados do problema até a entrega
 
 Requisitos:
 - 3+ anos como PM em produto digital
@@ -117,22 +116,22 @@ Requisitos:
 /** As vagas publicadas no primeiro acesso. */
 const INICIAIS: VagaEmpresa[] = [
   {
-    id: "marketing-performance",
-    cargo: "Analista de Marketing de Performance Pleno",
-    area: "marketing",
+    id: "backend-links",
+    cargo: "Desenvolvedor(a) Backend Pleno · Links",
+    area: "engenharia",
     senioridade: "pleno",
-    time: "Aquisição",
+    time: "Links e Compartilhamento",
     local: "Híbrido · São Paulo",
-    descricao: `Procuramos alguém para planejar e otimizar nossas campanhas pagas (Google, Meta e LinkedIn).
+    descricao: `Procuramos uma pessoa desenvolvedora backend para o serviço de links curtos, usado em todo compartilhamento do app.
 
 Responsabilidades:
-- Montar o plano de mídia e o funil de aquisição de cada campanha
-- Acompanhar CAC, ROAS e conversão por canal e ajustar investimento
-- Propor testes de criativos e de público junto com o time de conteúdo`,
+- Evoluir o serviço que gera e redireciona milhões de links por dia
+- Cuidar de latência, cache e disponibilidade do redirecionamento
+- Medir cliques e acessos sem atrasar o redirecionamento`,
     abertaHaDias: 12,
     etapa: "entrevistas",
     resumo: {
-      configId: "config-marketing-performance",
+      configId: "config-backend-links",
       formato: "system_design",
       duracaoMin: 40,
       foco: [
@@ -293,9 +292,9 @@ const MODELOS: { cargo: string; area: Area; time: string }[] = [
   { cargo: "Product Manager", area: "produto", time: "Pagamentos" },
   { cargo: "Product Designer", area: "produto", time: "Restaurantes" },
   { cargo: "Product Manager", area: "produto", time: "Fidelidade" },
-  { cargo: "Analista de CRM", area: "marketing", time: "Retenção" },
-  { cargo: "Analista de Growth", area: "marketing", time: "Aquisição" },
-  { cargo: "Analista de Conteúdo", area: "marketing", time: "Marca" },
+  { cargo: "Engenheiro(a) de Analytics", area: "dados", time: "Retenção" },
+  { cargo: "Desenvolvedor(a) Fullstack", area: "engenharia", time: "Aquisição" },
+  { cargo: "Engenheiro(a) de Plataforma", area: "engenharia", time: "Developer Experience" },
   { cargo: "Engenheiro(a) de SRE", area: "engenharia", time: "Infraestrutura" },
   { cargo: "Engenheiro(a) de Segurança", area: "engenharia", time: "Segurança" },
   { cargo: "Desenvolvedor(a) Frontend", area: "engenharia", time: "Portal do Parceiro" },
@@ -452,7 +451,6 @@ export function descartarRascunho(id: string) {
 /** Palavras que indicam a área de uma vaga nova (dá para ajustar depois). */
 function areaProvavel(texto: string): Area {
   const t = texto.toLowerCase();
-  if (/marketing|campanha|mídia|midia|seo|conteúdo|brand/.test(t)) return "marketing";
   if (/product manager|\bpm\b|produto|product owner|roadmap/.test(t)) return "produto";
   if (/dados|data|analytics|bi\b|etl/.test(t)) return "dados";
   return "engenharia";
@@ -542,13 +540,14 @@ export function useRecentes(): string[] {
 // Leitura para a tela: as etapas de uma vaga publicada e frases curtas sobre ela.
 // ---------------------------------------------------------------------------
 
-export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "contratacoes"] as const;
+export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "aprendizado", "contratacoes"] as const;
 export type EtapaVaga = (typeof ETAPAS_VAGA)[number];
 
 export const NOME_ETAPA: Record<EtapaVaga, string> = {
   plano: "Plano combinado",
   entrevistas: "Candidatos",
   escores: "Escores",
+  aprendizado: "O que o Totti aprendeu",
   contratacoes: "Contratações",
 };
 
@@ -632,4 +631,127 @@ export function estagioDa(v: VagaEmpresa): Exclude<Estagio, "escopo"> | "encerra
   if (f.convidados === 0) return "aguardando";
   if (f.emAndamento === 0 && f.concluiram >= f.convidados) return "resultados";
   return "aguardando";
+}
+
+// ---------------------------------------------------------------------------
+// Painel executivo da tela inicial: os grandes números somados das vagas abertas,
+// os recortes rápidos da lista (com contagem) e a ordenação.
+// ---------------------------------------------------------------------------
+
+/** Quanto de entrevista humana cada triagem feita pelo Totti poupa (estimativa do painel). */
+export const MINUTOS_POR_TRIAGEM = 30;
+/** A partir de quantos inscritos a vaga conta como de alto volume. */
+export const ALTO_VOLUME = 1_000;
+
+/** Nome curto do formato, para etiquetas e filtros (o produto é de tecnologia). */
+export const NOME_FORMATO_CURTO: Record<InterviewConfig["mode"], string> = {
+  system_design: "System design",
+  live_coding: "Live coding",
+};
+
+export type Totais = {
+  /** Vagas abertas (encerradas ficam fora da soma). */
+  vagas: number;
+  inscritos: number;
+  convidados: number;
+  /** Entrevistas concluídas com o Totti. */
+  entrevistados: number;
+  emAndamento: number;
+  /** Relatórios prontos esperando o parecer da recrutadora. */
+  pendentes: number;
+  vagasComPendentes: number;
+  horasPoupadas: number;
+};
+
+/** Soma o funil das vagas abertas. */
+export function totaisDas(vagas: VagaEmpresa[]): Totais {
+  const abertas = vagas.filter((v) => v.etapa !== "encerrada");
+  const soma = (f: (v: VagaEmpresa) => number) => abertas.reduce((t, v) => t + f(v), 0);
+  const entrevistados = soma((v) => v.funil.concluiram);
+  return {
+    vagas: abertas.length,
+    inscritos: soma((v) => v.funil.inscritos),
+    convidados: soma((v) => v.funil.convidados),
+    entrevistados,
+    emAndamento: soma((v) => v.funil.emAndamento),
+    pendentes: soma(novosDa),
+    vagasComPendentes: abertas.filter((v) => novosDa(v) > 0).length,
+    horasPoupadas: Math.round((entrevistados * MINUTOS_POR_TRIAGEM) / 60),
+  };
+}
+
+/** Porcentagem para ler de relance: uma casa abaixo de 10% ("0,4%"), inteira acima ("31%"). */
+export function porcento(parte: number, todo: number): string {
+  if (!todo || !parte) return "0%";
+  const p = (parte / todo) * 100;
+  if (p < 0.1) return "<0,1%";
+  return `${p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 1 : 0 })}%`;
+}
+
+/** Os atalhos da lista, na ordem dos chips. */
+export const RECORTES_RAPIDOS = ["todas", "pendentes", "em_entrevista", "alto_volume", "live_coding", "system_design", "escopo"] as const;
+/** Além dos chips: "com_relatorios" vem do funil e "encerradas" do link no fim da lista. */
+export type Recorte = (typeof RECORTES_RAPIDOS)[number] | "com_relatorios" | "encerradas";
+
+export const NOME_RECORTE: Record<Recorte, string> = {
+  todas: "Todas",
+  pendentes: "Com decisão pendente",
+  em_entrevista: "Em entrevista",
+  alto_volume: `Alto volume (+${numero(ALTO_VOLUME)})`,
+  live_coding: NOME_FORMATO_CURTO.live_coding,
+  system_design: NOME_FORMATO_CURTO.system_design,
+  escopo: "Com o Totti",
+  com_relatorios: "Com entrevistas feitas",
+  encerradas: "Encerradas",
+};
+
+/** Se a vaga entra no recorte. Escopos (rascunhos) não são vagas: o recorte "escopo" é tratado pela tela. */
+export function noRecorte(v: VagaEmpresa, r: Recorte): boolean {
+  if (r === "encerradas") return v.etapa === "encerrada";
+  if (v.etapa === "encerrada") return false;
+  switch (r) {
+    case "todas":
+      return true;
+    case "pendentes":
+      return novosDa(v) > 0;
+    case "em_entrevista":
+      return estagioDa(v) === "aguardando";
+    case "com_relatorios":
+      return v.funil.concluiram > 0;
+    case "alto_volume":
+      return v.funil.inscritos >= ALTO_VOLUME;
+    case "live_coding":
+    case "system_design":
+      return v.resumo?.formato === r;
+    case "escopo":
+      return false;
+  }
+}
+
+/** O estágio antigo da URL (?estagio=...) vira o recorte equivalente. */
+export function recorteDaUrl(valor: string | null): Recorte {
+  const antigos: Record<string, Recorte> = { escopo: "escopo", aguardando: "em_entrevista", resultados: "pendentes" };
+  if (!valor) return "todas";
+  if (valor in antigos) return antigos[valor];
+  return valor in NOME_RECORTE ? (valor as Recorte) : "todas";
+}
+
+export const ORDENS = ["inscritos", "pendentes", "recentes", "az"] as const;
+export type OrdemVagas = (typeof ORDENS)[number];
+
+export const NOME_ORDEM: Record<OrdemVagas, string> = {
+  inscritos: "Maior volume de inscritos",
+  pendentes: "Mais decisões pendentes",
+  recentes: "Mais recentes",
+  az: "Ordem alfabética (A–Z)",
+};
+
+/** Comparador da lista; o empate cai no volume de inscritos e depois no nome. */
+export function compararVagas(ordem: OrdemVagas): (a: VagaEmpresa, b: VagaEmpresa) => number {
+  const porNome = (a: VagaEmpresa, b: VagaEmpresa) => a.cargo.localeCompare(b.cargo, "pt-BR");
+  const porVolume = (a: VagaEmpresa, b: VagaEmpresa) => b.funil.inscritos - a.funil.inscritos || porNome(a, b);
+  if (ordem === "az") return porNome;
+  if (ordem === "recentes") return (a, b) => a.abertaHaDias - b.abertaHaDias || porVolume(a, b);
+  if (ordem === "pendentes") return (a, b) => novosDa(b) - novosDa(a) || porVolume(a, b);
+  return porVolume;
 }

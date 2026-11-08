@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Report } from "@/lib/contracts";
 import { aprenderComDecisao } from "@/lib/squad-memory/aprender";
-import { empresaAtual } from "@/lib/squad-memory/store";
+import { empresaAtual, gravacoesPendentesSquadMemory, hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { visaoDaMemoria } from "@/lib/squad-memory/visao";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +43,7 @@ const REPORT: Report = {
 
 export async function POST(req: Request) {
   if (process.env.NODE_ENV === "production") return new Response("não disponível", { status: 404 });
+  await hidratarSquadMemory();
   const parsed = Pedido.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "pedido inválido" }, { status: 400 });
   const { decisao, motivo, candidato, recomendacao } = parsed.data;
@@ -59,5 +60,6 @@ export async function POST(req: Request) {
     motivo: motivo?.trim() || undefined,
     report,
   });
+  await gravacoesPendentesSquadMemory();
   return NextResponse.json({ aprendizado, memoria: visaoDaMemoria() });
 }

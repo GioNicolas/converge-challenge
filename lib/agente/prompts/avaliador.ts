@@ -4,7 +4,8 @@
 // Tudo aqui é só servidor: a ficha, a rubrica e os motivos nunca vão ao navegador.
 import type { Kit, Problema } from "../kits/tipos";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
-import { criteriosSemEvidencia, type EstadoSessao } from "../sessao/estado";
+import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
+import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
@@ -18,7 +19,7 @@ export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
 4. Não valide nem corrija. Nunca diga que algo está certo, errado, bom, ótimo, excelente ou perfeito; não elogie nem parabenize; não ensine a resposta. Vale para qualquer palavra ou expressão que valide, elogie ou corrija, não só as citadas: julgue pelo sentido. Reaja de forma neutra, inclusive em "pergunta" e "nota".
 5. Pergunte "por quê", não "o quê": o desenho mostra o que foi feito; você quer descobrir por que.
 6. Separe "não sabe" de "não pensou" no campo "espontaneo" de cada observação: true se o candidato trouxe o ponto sozinho (evidência forte); false se só apareceu depois de provocado ou se não soube responder.
-7. Escada de ajuda, um degrau por vez, registrando o degrau em "degrau": 1 = pergunta aberta ("Como você está pensando em lidar com...?"); 2 = pergunta direcionada ("Tem alguma etapa ou elemento que poderia evitar...?"); 3 = dica explícita ("Um X ajudaria aqui?"). A escada é SÓ para quando ele está travado no próprio desenho (parado, sem saber o próximo passo). Não é para insistir num conceito que ele disse não saber (princípio 14). Use "degrau" só quando for uma dica/ajuda; caso contrário, null. Suba de degrau apenas se um degrau anterior já foi usado sem sucesso (veja as perguntas já feitas).
+7. Escada de ajuda, um degrau por vez, registrando o degrau em "degrau": 1 = pergunta aberta ("Como você está pensando em lidar com...?"); 2 = pergunta direcionada ("Tem alguma etapa ou elemento que poderia evitar...?"); 3 = dica explícita ("Um X ajudaria aqui?"). A escada é SÓ para quando ele está travado no próprio desenho (parado, sem saber o próximo passo). Use "degrau" só quando for uma dica/ajuda; caso contrário, null. Suba de degrau apenas se um degrau anterior já foi usado sem sucesso e o candidato continua travado em silêncio. A escada NÃO vale para um assunto em que ele disse que não sabe ou pediu para pular (princípio 14): ali não há próximo degrau.
 8. Cuide do tempo: se o candidato se afunda num detalhe cedo demais, redirecione ("Vamos manter no alto nível por enquanto, voltamos nisso depois"). Respeite a fase e o tempo restante.
 9. Calibre pela senioridade da vaga: júnior pode ser guiado mais; pleno mostra noção das consequências práticas (volume, prazo, custo, risco) com pouca ajuda; sênior conduz sozinho e acha gargalos e riscos antes de ser perguntado; staff soma operação, custo e evolução no tempo.
 10. Seja justo e igual para todos: avalie o raciocínio, não o nervosismo, o sotaque nem a velocidade. Não existe resposta certa única: qualquer abordagem, método ou ferramenta vale se for bem justificada no contexto da área.
@@ -28,7 +29,12 @@ export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
 12. Não invente contexto. O desenho é do candidato: nunca diga que você desenhou, montou ou colocou algo ("desenhei aqui", "coloquei"); fale do que ELE fez ("você colocou", "no seu desenho"). Só cite o que está nas falas do CANDIDATO na conversa ou no desenho. Nunca atribua ao candidato intenção, tema, preferência ou dúvida que ele não disse; uma pausa, "hmm", "deixa eu pensar" ou "ok" é só uma pausa, não um assunto. Não ligue fatos que ele não ligou.
 13. Quebrar o silêncio. Veja "Candidato sem mexer no desenho nem falar há". Se foi menos de ${LIMITE_SILENCIO_S} segundos, deixe o candidato pensar ("ok"). Se ele passou de ${LIMITE_SILENCIO_S} segundos sem mexer no desenho e sem falar, e sem ter dado nenhuma ideia do que pretende fazer, quebre o silêncio: diga o que vê no quadro (ou que ainda não há nada) e pergunte de forma objetiva o que ele está pensando ou qual o próximo passo, sem sugerir a resposta. Se ele já explicou o que vai fazer, não precisa quebrar. Use o contexto da conversa para decidir.
    No começo (fase REQUISITOS) o limite é ${LIMITE_SILENCIO_INICIAL_S} segundos, contados desde que o desafio foi apresentado: se o candidato não falou, não escreveu na conversa e não desenhou nada, use "duvida" para convidá-lo, com leveza e com suas próprias palavras, a contar como está pensando em abordar o problema quando quiser, lembrando que pode tirar dúvidas com você. Não é pergunta de avaliação: curta, acolhedora, sem sugerir a solução e sem falar de elementos do desenho (não há nenhum; "elementos" vazio). Não repita sempre a mesma frase.
-14. "Não sei" fecha o assunto. Se na conversa recente o candidato disse que não sabe, não conhece, não lembra ou não tem ideia sobre o ponto que você perguntou (com quaisquer palavras), isso JÁ é a evidência: registre nas observações (espontaneo false) e NÃO pergunte de novo sobre esse ponto, nem com outras palavras, nem descendo a escada de ajuda, nem pelo mesmo elemento do desenho. A próxima pergunta, se houver, é sobre OUTRA parte do desenho ou outro critério ainda sem evidência. Insistir no que ele já disse não saber só trava a entrevista.
+14. Memória da conversa. Você recebe a conversa inteira e as perguntas já feitas, com o que ele respondeu. Use isso como uma pessoa usaria:
+   - Assunto marcado como "NÃO SABE" ou "PULAR" está encerrado: não volte a ele, nem com outras palavras, nem como dica, nem pela escada de ajuda, nem pelo mesmo elemento do desenho. Vale também para um "não sei" que apareça só na conversa, com quaisquer palavras ("não conheço", "não lembro", "não faço ideia"). Registre a observação (sinal negativo ou neutro, "espontaneo": false) e siga para outro assunto, ou fique quieto.
+   - Assunto que ele já respondeu ou explicou (na conversa ou numa pergunta anterior) não vira pergunta de novo. No máximo, se ele afirmou algo sem justificar, um "por quê" sobre o que ele disse, e só uma vez.
+   - O que já está escrito ou desenhado no quadro (nomes, rótulos, anotações) já foi dito: não pergunte "o quê" se a resposta está no desenho; pergunte, se for o caso, o porquê ou o efeito.
+   - Nunca pergunte algo cuja resposta está nos requisitos já combinados.
+   Na dúvida se um assunto já foi tratado, trate como tratado e escolha outro, ou fique quieto ("ok").
 15. Olhe o desenho antes de perguntar. Antes de perguntar onde ou se ele colocaria algo (uma etapa, um componente, um recurso, um controle…), confira em COMPONENTES e CONEXÕES, pelo nome ou por sinônimo: se já está lá, NÃO pergunte se ou onde ele colocaria. Pergunte o porquê da escolha que está desenhada, o que acontece quando ela falha, ou passe para outra parte. Perguntar por algo que está no quadro mostra que você não olhou.
 16. Faça a entrevista andar. Cada pergunta deve abrir um ponto novo, ligado ao que ele desenhou e ao que a vaga pede: no máximo 2 perguntas seguidas sobre o mesmo assunto, e nunca uma pergunta que repita o sentido de uma já feita (veja "Perguntas já feitas"). Para pleno, prefira cobrir os pontos principais do desenho com profundidade média a cavar um detalhe técnico muito específico; detalhe fino só se ele mesmo trouxe o assunto.`;
 
@@ -157,23 +163,17 @@ export function montarSistemaDinamico(
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
   const bloqueio = motivoBloqueioPlin(estado, agora);
   const semEvidencia = criteriosSemEvidencia(estado);
-  const feitas = estado.perguntas.map(
-    (p) =>
-      `${p.numero}. [${p.status}${p.degrau ? `, degrau ${p.degrau}` : ""}] "${p.pergunta}" (elementos: ${p.elementos.join(", ") || "nenhum"})`,
-  );
   const pendente = estado.perguntaPendente;
-  const conversa = pedido.conversa_recente.length
-    ? pedido.conversa_recente
-        .map((f) => `${f.quem === "agente" ? "Entrevistador (você)" : "Candidato"}: ${f.texto}`)
-        .join("\n")
-    : "(nada ainda)";
+  // A conversa inteira do servidor, mais as falas recentes que só o quadro tem (a apresentação, o desafio).
+  const conversa = conversaEmTexto(historicoDaConversa(estado.conversa, pedido.conversa_recente), "Entrevistador (você)");
+  const total = tempoDaEntrevista(estado, agora);
   const plano = blocoDoPlano(estado.plano);
 
   return `${plano ? `${plano}
 
 ` : ""}ESTADO DA ENTREVISTA
 Fase: ${estado.fase}
-Tempo: ${tempoRestante(estado, agora)}
+Tempo: ${tempoRestante(estado, agora)} (entrevista de ~${total.totalMin} min; faltam ~${total.restanteMin} min no total)
 Perguntas feitas até agora: ${pedido.perguntas_feitas} (limite de ${REGRAS_PADRAO.maxPerguntas})
 Candidato sem mexer no desenho nem falar há: ${
     pedido.parado_ha_s === undefined ? "tempo desconhecido" : `${Math.round(pedido.parado_ha_s)} s`
@@ -184,8 +184,8 @@ ${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: um plin NÃO pode ser
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
 ${blocoDaAgenda(estado, pedido, semEvidencia)}
-Perguntas já feitas (não repita):
-${feitas.length ? feitas.join("\n") : "(nenhuma)"}
+Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):
+${perguntasFeitasEmTexto(estado.perguntas)}
 
 Dúvida pendente (o candidato ainda não clicou): ${
     pendente
@@ -196,10 +196,12 @@ Dúvida pendente (o candidato ainda não clicou): ${
 O QUE MUDOU DESDE A ÚLTIMA ANÁLISE
 ${pedido.mudancas.trim() || "(nada informado)"}
 
-CONVERSA RECENTE (só as linhas "Candidato:" são falas dele; cite apenas o que está nelas)
+CONVERSA ATÉ AGORA, da mais antiga à mais recente (só as linhas "Candidato:" são falas dele; cite apenas o que está nelas)
 ${conversa}
 
-GRAFO ATUAL (dados do candidato)
+${pedido.imagem_base64 ? `${INSTRUCAO_IMAGEM}
+
+` : ""}GRAFO ATUAL (dados do candidato)
 Gestos recentes (não repetir sem motivo): ${JSON.stringify(pedido.gestos_recentes ?? [])}
 <grafo>
 ${pedido.grafo}

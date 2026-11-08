@@ -37,6 +37,17 @@ export interface ChatRequest<T> {
   temperature?: number;
   /** Cancela a chamada: para de esperar, aborta o fetch em voo e não faz retry. */
   signal?: AbortSignal;
+  /**
+   * Imagem que acompanha a mensagem do usuário (data URL "data:image/jpeg;base64,..."). Só o OpenRouter
+   * recebe; a Featherless (modelos só de texto) recebe só o texto. Se o modelo recusar a imagem (4xx), a
+   * chamada se repete só com o texto.
+   */
+  imageDataUrl?: string | null;
+}
+
+/** Data URL de imagem aceita para mandar ao modelo (jpeg, png ou webp em base64). */
+export function eImagemDataUrl(v: unknown): v is string {
+  return typeof v === "string" && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
 }
 
 export type Prioridade = "fala" | "fundo";
@@ -83,9 +94,17 @@ const TIMEOUT_MS = 90_000;
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [1_000, 3_000];
 
+type ParteDaMensagem = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ParteDaMensagem[];
+}
+
+/** Erro 4xx que não é de chave, permissão nem limite: o modelo recusou o pedido (ex.: não aceita imagem). */
+function eRecusaDoModelo(err: unknown): boolean {
+  const m = err instanceof Error ? err.message.match(/HTTP (4\d\d)/) : null;
+  return !!m && !["401", "403", "429"].includes(m[1]);
 }
 
 interface Completion {
@@ -386,10 +405,17 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
 
   const started = Date.now();
   const totals: Totals = { cost: 0, prompt: 0, completion: 0 };
-  const messages: ChatMessage[] = [
+  const soTexto: ChatMessage[] = [
     { role: "system", content: req.system },
     { role: "user", content: req.user },
   ];
+  const imagem = provider.name === "openrouter" && eImagemDataUrl(req.imageDataUrl) ? req.imageDataUrl : null;
+  let messages: ChatMessage[] = imagem
+    ? [
+        soTexto[0],
+        { role: "user", content: [{ type: "text", text: req.user }, { type: "image_url", image_url: { url: imagem } }] },
+      ]
+    : soTexto;
 
   let upstream: string | undefined;
   const call = async (msgs: ChatMessage[]): Promise<Completion> => {
@@ -402,7 +428,16 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
   };
 
   try {
-    const first = await call(messages);
+    let first: Completion;
+    try {
+      first = await call(messages);
+    } catch (err) {
+      // Modelo sem visão (ou imagem recusada): a mesma chamada só com o texto, se ainda couber no prazo.
+      if (!imagem || !eRecusaDoModelo(err) || restante(req.prazoAte) < MIN_PARA_NOVA_TENTATIVA_MS) throw err;
+      console.warn(`[${provider.name}] ${req.model} recusou a imagem; repetindo só com o texto`);
+      messages = soTexto;
+      first = await call(messages);
+    }
     let parsed = parseContent(first, req.schema);
 
     if (!parsed.ok && restante(req.prazoAte) < MIN_PARA_NOVA_TENTATIVA_MS) {

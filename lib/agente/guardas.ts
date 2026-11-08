@@ -45,14 +45,33 @@ export function eQuaseDuplicada(pergunta: string, anteriores: string[]): boolean
   return anteriores.some((p) => sobreposicao(pergunta, p) >= LIMIAR_DUPLICADA);
 }
 
+/** Abreviações comuns que terminam em ponto sem terminar a frase. */
+const ABREVIACAO_NO_FIM = /(?:^|[\s(])(?:ex|p\.ex|aprox|sr|sra|dr|dra|vs|obs|pág|pag|n[º°o])\.$/i;
+
+/**
+ * Divide em frases. Só pontuação seguida de espaço (ou do fim) termina frase: "2.5", "99.9%" e "R$ 1.000" não
+ * cortam, nem abreviações como "ex." e "aprox.".
+ */
+export function frasesDe(texto: string): string[] {
+  const t = texto.trim();
+  const frases: string[] = [];
+  const fimDeFrase = /[.!?]+(?=\s|$)/g;
+  let inicio = 0;
+  for (let m = fimDeFrase.exec(t); m; m = fimDeFrase.exec(t)) {
+    const fim = m.index + m[0].length;
+    const trecho = t.slice(inicio, fim);
+    if (m[0] === "." && ABREVIACAO_NO_FIM.test(trecho)) continue;
+    frases.push(trecho.trim());
+    inicio = fim;
+  }
+  const resto = t.slice(inicio).trim();
+  if (resto) frases.push(resto);
+  return frases;
+}
+
 /** Corta em no máximo `n` frases (para a fala curta do loop rápido). */
 export function limitarFrases(texto: string, n: number): string {
-  const frases = texto.trim().match(/[^.!?]+[.!?]*/g) ?? [];
-  return frases
-    .slice(0, n)
-    .map((f) => f.trim())
-    .join(" ")
-    .trim();
+  return frasesDe(texto).slice(0, n).join(" ").trim();
 }
 
 /**
@@ -70,4 +89,20 @@ export function trocarIdsPorNomes(texto: string, grafo: string): string {
     .replace(/\b([a-z]\d+)\b/g, (todo, id: string) => nomes.get(id) ?? todo)
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+const CONVITES = ["Pode continuar de onde parou.", "Continua daí.", "Pode seguir com o desenho."];
+
+/**
+ * Depois de um "não sei" ou de um "pula", a fala não termina em pergunta: o modelo às vezes fecha com uma
+ * pergunta de condução ("quer olhar outra parte?") e o candidato, que acabou de soltar o assunto, fica com outra
+ * cobrança. Tira a frase com interrogação do fim e, se não sobrar convite, põe um curto.
+ */
+export function semPerguntaNoFim(texto: string): string {
+  const t = texto.trim();
+  if (!t.endsWith("?")) return t;
+  const frases = frasesDe(t);
+  while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  const convite = CONVITES[t.length % CONVITES.length];
+  return [...frases, convite].join(" ");
 }

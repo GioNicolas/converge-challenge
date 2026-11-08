@@ -48,10 +48,10 @@ describe("perguntar", () => {
     assert.equal(a.nomeSchema, "resposta_entrevistador");
   });
 
-  it("limita a 2 frases e não repete requisito já no quadro", async () => {
-    const llm = criarClienteFalso([{ responder: true, texto: "Um. Dois. Três.", requisito: "Retenção: 5 anos" }]);
+  it("limita a 3 frases (sem cortar decimais) e não repete requisito já no quadro", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Um. São 2.5 mil por segundo. Três. Quatro.", requisito: "Retenção: 5 anos" }]);
     const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?", requisitosAtuais: ["Retenção: 5 anos"] }, AGORA);
-    assert.equal(r.texto, "Um. Dois.");
+    assert.equal(r.texto, "Um. São 2.5 mil por segundo. Três.");
     assert.equal(r.requisito, null);
   });
 
@@ -118,5 +118,44 @@ describe("perguntar: prompt contra quebra de personagem (sem limpeza por código
     // Sem texto fixo de recusa para copiar.
     assert.ok(!/Não posso compartilhar/i.test(p));
   });
+  });
+});
+
+describe("desfecho da pergunta ativa", () => {
+  const ativa = { ...estado, fase: "APROFUNDAMENTO" as const };
+  it("não sei: repassa o desfecho e a fala não termina em pergunta", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Sem problema, seguimos. Quer olhar outra parte?", requisito: null, concluiu: false, desfecho: "nao_sabe" }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei, nunca vi isso.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.equal(r.desfecho, "nao_sabe");
+    assert.doesNotMatch(r.texto, /\?/);
+  });
+  it("respondeu vago: o aprofundamento do fim continua valendo", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. Melhor em que sentido?", requisito: null, concluiu: false, desfecho: "respondeu", aprofundar: true }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador, fica melhor.", perguntaAtiva: "Como gera o código?" }, AGORA);
+    assert.equal(r.desfecho, "respondeu");
+    assert.equal(r.texto, "Saquei. Melhor em que sentido?");
+  });
+  it("respondeu justificado: outra pergunta no fim vira convite", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. E se o contador cair?", requisito: null, concluiu: false, desfecho: "respondeu", aprofundar: false }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador porque nunca repete.", perguntaAtiva: "Como gera o código?" }, AGORA);
+    assert.match(r.texto, /^Saquei\. /);
+    assert.doesNotMatch(r.texto, /\?/);
+  });
+  it("sem pergunta ativa não há desfecho", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, continua daí.", requisito: null, concluiu: false, desfecho: "pulou" }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Vou pular essa parte." }, AGORA);
+    assert.equal(r.desfecho, null);
+  });
+});
+
+describe("foto e mudanças do quadro no /perguntar", () => {
+  it("a foto vai ao modelo e o que mudou entra no contexto", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), { ...estado, fase: "ALTO_NIVEL" }, {
+      fase: "ALTO_NIVEL", texto: "Olha o que eu fiz aqui", imagemBase64: "data:image/jpeg;base64,/9j/", mudancas: "+ adicionou [r2] Cache",
+    }, AGORA);
+    assert.equal(llm.chamadas[0].imagem, "data:image/jpeg;base64,/9j/");
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /acabou de mudar no desenho.*adicionou \[r2\] Cache/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
   });
 });

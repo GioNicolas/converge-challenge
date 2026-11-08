@@ -634,7 +634,7 @@ function Ajuste({ c, destaque, onDesfez }: { c: ContratacaoVista; destaque: bool
               </Link>
             )}
             <Link
-              href="/vagas/aprendizado"
+              href={`/vagas/vaga?id=${encodeURIComponent(c.vagaId)}&etapa=aprendizado`}
               className="inline-flex items-center gap-1.5 text-texto-claro/70 underline-offset-4 hover:text-texto-claro hover:underline"
             >
               O que o Totti aprendeu

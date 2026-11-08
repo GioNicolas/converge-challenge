@@ -17,7 +17,26 @@ export type CandidatoVaga = {
   haDias: number;
   /** Relatório chegou nas últimas 24–48h. */
   novo: boolean;
+  /** Só de quem concluiu: a nota geral (0–4, a mesma escala do relatório) e a recomendação que sai dela. */
+  escore?: number;
+  recomendacao?: RecomendacaoDemo;
 };
+
+/** As recomendações do relatório que uma nota de demonstração pode receber. */
+export type RecomendacaoDemo = "avancar" | "avancar_com_ressalvas" | "talvez" | "nao_avancar";
+
+/**
+ * A nota de quem concluiu: sorteio próprio por candidato (não mexe no sorteio de nomes e e-mails),
+ * concentrado no meio da escala, como num funil de verdade: poucos muito bons, poucos muito fracos.
+ */
+function escoreDemo(vagaId: string, i: number): { escore: number; recomendacao: RecomendacaoDemo } {
+  const r = sorteador(semente(`${vagaId}:escore:${i}`));
+  const base = (r() + r() + r()) / 3; // forma de sino em [0, 1)
+  const escore = Math.round((1.1 + base * 2.9) * 10) / 10; // 1,1 a 4,0
+  const recomendacao: RecomendacaoDemo =
+    escore >= 3.3 ? "avancar" : escore >= 2.8 ? "avancar_com_ressalvas" : escore >= 2.2 ? "talvez" : "nao_avancar";
+  return { escore, recomendacao };
+}
 
 /** Contagens do funil. `convidados` inclui quem já está fazendo ou concluiu. */
 export type Funil = {
@@ -104,6 +123,7 @@ function gerar(vagaId: string, funil: Funil): CandidatoVaga[] {
       situacao,
       haDias,
       novo,
+      ...(situacao === "concluiu" ? escoreDemo(vagaId, i) : {}),
     };
   }
   cache.set(chave, lista);

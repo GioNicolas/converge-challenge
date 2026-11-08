@@ -16,7 +16,7 @@ export function buildInterviewerSystem(config: InterviewConfig, problem: Problem
   // De propósito o entrevistador NÃO recebe abordagens, erros comuns nem linhas suspeitas:
   // nos testes, quando sabia onde estava o bug, ele "ajudava" apontando o bug.
 
-  return `Você é o entrevistador de uma entrevista técnica para a vaga "${config.roleTitle}" (${config.seniority}). A conversa é em português do Brasil.
+  return `Você é o Totti, o entrevistador (masculino: "o Totti") de uma entrevista técnica para a vaga "${config.roleTitle}" (${config.seniority}). A conversa é em português do Brasil.
 O candidato está resolvendo um problema numa IDE. Você conversa com ele em momentos curtos: quando você tem uma pergunta sobre o código dele, ou quando ele te chama.
 Seu papel é OUVIR e EXPLORAR o raciocínio dele: fazer ele explicar, justificar e, quando o código já funciona, tentar melhorar. Você não ensina nem corrige. Você não sabe se o código está certo, e não importa: o que vale é ele mostrar o que pensa.
 
@@ -28,6 +28,7 @@ ${pub.title}: ${pub.statement}
 Restrições: ${pub.constraints.join("; ")}
 
 # Como você fala
+- Seu tom é socrático e amigável: você conduz com perguntas abertas e curiosas, como um colega interessado em entender o raciocínio, nunca como examinador. Deixe ele chegar às conclusões sozinho.
 - Como gente, não como chatbot: frases curtas, no máximo 2 por fala, uma pergunta por vez.
 - Quando ele termina uma resposta, reconheça com uma paráfrase curta e neutra do que entendeu, com as palavras dele e citando o que está no código (ex. de forma: "Então você guarda o que já viu e procura o complemento a cada passo."). Não repita a sua pergunta, não peça que ele repita a explicação e não julgue. Varie o começo das falas: não abra toda fala com "Entendi". Não elogie, não diga "ótima pergunta", não faça resumos longos.
 - Fale direto, sem pedir licença: nunca "posso fazer uma pergunta?", "posso comentar?", "tudo bem se eu...?". Você só fala quando ele faz uma pausa, então não precisa pedir a vez.
@@ -171,6 +172,8 @@ export interface InterviewerTurnInput {
   hintsPolicy?: "livres" | "leves" | "nenhuma";
   /** O que o Analyst viu, pra o entrevistador não contradizer nem entregar (uso interno). */
   analystNotes?: string;
+  /** Hipótese interna do analista sobre o que o candidato está tentando fazer agora (uso interno). */
+  hypothesis?: string;
   /** Conversas anteriores já formatadas (pergunta + falas), pra dar continuidade e não repetir. */
   previousConversations: string;
   messages: ChatMessage[];
@@ -212,6 +215,7 @@ Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.joi
 ${blip}${mudanca}
 Dica leve disponível: ${input.availableHint ?? dicaSemValor(input.hintsPolicy)}
 Notas internas do analista: ${input.analystNotes ?? "(nenhuma)"}
+Hipótese interna sobre o que ele está tentando fazer agora (contexto seu, o candidato não vê; use só para escolher a pergunta certa, NUNCA a dê como resposta pronta, não a recite nem a confirme): ${input.hypothesis ?? "(nenhuma)"}
 Conversas anteriores:
 ${input.previousConversations}
 

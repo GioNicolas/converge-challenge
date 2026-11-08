@@ -25,7 +25,7 @@ export const LIMITE_SILENCIO_S = SILENCIO_S;
 export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: 60_000,
+  intervaloEntrePerguntasMs: 25_000,
   maxPerguntas: 5,
   maxCaracteresNota: 40,
 };
@@ -72,7 +72,7 @@ export type MotivoBloqueioPlin =
 /**
  * Por que a análise não deve rodar agora (null = pode rodar).
  *
- * Só fase e candidato respondendo bloqueiam. O intervalo de 60s e o limite de perguntas NÃO
+ * Só fase e candidato respondendo bloqueiam. O intervalo entre perguntas e o limite de perguntas NÃO
  * bloqueiam a análise: o agente segue colhendo observações para o scorecard, mesmo quando não
  * pode levantar um plin (ver `motivoBloqueioPlin`). Uma dúvida pendente também não bloqueia
  * (é preciso poder substituí-la ou cancelá-la).

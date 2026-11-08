@@ -38,7 +38,17 @@ export type PerguntaFeita = {
   degrau: number | null;
   fase: Fase;
   feitaEm: number;
+  /**
+   * Como o candidato reagiu, lido pelo modelo da conversa: respondeu, disse que não sabe ou quis pular.
+   * "nao_sabe" e "pulou" encerram o assunto: a análise não volta a ele. Ausente: ainda sem resposta.
+   */
+  desfecho?: Desfecho;
+  /** O que ele respondeu (curto), para a análise não perguntar de novo o que já foi dito. */
+  resposta?: string;
 };
+
+export const DESFECHOS = ["respondeu", "nao_sabe", "pulou"] as const;
+export type Desfecho = (typeof DESFECHOS)[number];
 
 export type ObservacaoRegistrada = Observacao & {
   em: number;
@@ -68,6 +78,8 @@ export type EmpecilhoAnunciado = {
 export type EstadoSessao = {
   fase: Fase;
   faseIniciadaEm: number | null;
+  /** Quando a entrevista começou (COMECAR). Estados antigos não têm: o tempo decorrido é estimado pelas fases. */
+  iniciadaEm?: number | null;
   tempos: Tempos;
   /** Plano de entrevista da vaga (pré-entrevista). Ausente/null: entrevista padrão. */
   plano?: PlanoDaSessao | null;
@@ -117,6 +129,8 @@ export type EventoSessao =
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
   | { tipo: "AGENTE_FALOU"; texto: string }
+  /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
+  | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
   /** O entrevistador trouxe a mudança no problema (só a primeira vale). */
   | { tipo: "EMPECILHO_ANUNCIADO"; empecilho: Omit<EmpecilhoAnunciado, "anunciadoEm" | "fase"> };
 
@@ -132,6 +146,33 @@ export type Efeito =
   | { tipo: "SESSAO_ENCERRADA" };
 
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
+
+/** Quanto da resposta do candidato fica guardado junto da pergunta (vai aos prompts). */
+const MAX_CARACTERES_RESPOSTA = 300;
+
+/** Mesma fala duas vezes seguidas (o /perguntar e o evento "resposta" registram a mesma fala): fica uma. */
+export function conversaSemRepeticao(conversa: FalaRecente[]): FalaRecente[] {
+  return conversa.filter((f, i) => i === 0 || f.quem !== conversa[i - 1].quem || f.texto.trim() !== conversa[i - 1].texto.trim());
+}
+
+/**
+ * Tempo da entrevista para o agente responder "quanto tempo dura?" e "quanto falta?": duração total (o plano ou a
+ * soma das fases), decorrido desde o começo e o que falta. Sem `iniciadaEm` (estado antigo), o decorrido soma as
+ * fases já passadas pelo tempo previsto de cada uma.
+ */
+export function tempoDaEntrevista(estado: EstadoSessao, agora: number): { totalMin: number; decorridoMin: number; restanteMin: number } {
+  const somaS = Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
+  const totalMin = Math.round(estado.plano?.duracaoMin ?? somaS / 60);
+  let decorridoMs: number;
+  if (estado.iniciadaEm) decorridoMs = agora - estado.iniciadaEm;
+  else {
+    const anteriores = FASES.slice(0, Math.max(0, FASES.indexOf(estado.fase)));
+    const passadasS = anteriores.reduce((s, f) => s + (estado.tempos[f] ?? 0), 0);
+    decorridoMs = passadasS * 1000 + (estado.faseIniciadaEm ? agora - estado.faseIniciadaEm : 0);
+  }
+  const decorridoMin = Math.max(0, Math.floor(decorridoMs / 60_000));
+  return { totalMin, decorridoMin, restanteMin: Math.max(0, totalMin - decorridoMin) };
+}
 
 export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; plano?: PlanoDaSessao | null } = {}): EstadoSessao {
   return {
@@ -219,8 +260,11 @@ export function transicionar(
   if (estado.fase === "ENCERRADA") return nada;
 
   switch (evento.tipo) {
-    case "COMECAR":
-      return estado.fase === "AGUARDANDO" ? mudarFase(estado, "APRESENTACAO", agora) : nada;
+    case "COMECAR": {
+      if (estado.fase !== "AGUARDANDO") return nada;
+      const t = mudarFase(estado, "APRESENTACAO", agora);
+      return { ...t, estado: { ...t.estado, iniciadaEm: agora } };
+    }
 
     case "APRESENTACAO_TERMINOU":
       return estado.fase === "APRESENTACAO" ? mudarFase(estado, "REQUISITOS", agora) : nada;
@@ -352,6 +396,21 @@ export function transicionar(
         return { estado: fechamento.estado, efeitos: [...efeitos, ...fechamento.efeitos] };
       }
       return { estado: livre, efeitos };
+    }
+
+    case "DESFECHO_DA_PERGUNTA": {
+      const i = estado.perguntas.findIndex((p) => p.numero === evento.numero);
+      if (i < 0) return nada;
+      const resposta = evento.resposta.trim().slice(0, MAX_CARACTERES_RESPOSTA);
+      const atualizar = (p: PerguntaFeita): PerguntaFeita => ({ ...p, desfecho: evento.desfecho, resposta });
+      return {
+        estado: {
+          ...estado,
+          perguntas: estado.perguntas.map((p, j) => (j === i ? atualizar(p) : p)),
+          perguntaAtiva: estado.perguntaAtiva?.numero === evento.numero ? atualizar(estado.perguntaAtiva) : estado.perguntaAtiva,
+        },
+        efeitos: [],
+      };
     }
 
     case "EMPECILHO_ANUNCIADO":

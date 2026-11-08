@@ -95,10 +95,10 @@ describe("podeAnalisar (portão de entrada)", () => {
 });
 
 describe("motivoBloqueioPlin (intervalo e limite)", () => {
-  it("intervalo de 60s desde a última pergunta", () => {
+  it("intervalo de 25 s desde a última pergunta", () => {
     const base = { perguntasFeitas: 1 };
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 59_999 }), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - MIN }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 24_999 }), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 25_000 }), AGORA), null);
   });
 
   it("limite de 5 perguntas", () => {

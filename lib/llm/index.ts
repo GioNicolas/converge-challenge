@@ -109,8 +109,9 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     featherlessEnv: "ANALYST_MODEL",
     featherlessDefault: "zai-org/GLM-5.3-Flash",
     maxTokens: 4000,
+    // Vale para os dois: sem isso o Gemini pensa por conta própria (~400 tokens, +2,5 s) e a análise
+    // encostava no prazo de 8 s. Com "low" ele responde em ~3 s com o mesmo prompt.
     reasoningEffort: "low",
-    raciocinioSo: "featherless",
     hedgeMs: 6_000,
     temperatura: 0.4,
   },
@@ -439,6 +440,8 @@ export async function completeJson<T>(opts: {
   signal?: AbortSignal;
   /** Tempo total que quem chama vai esperar: retry e reparo de JSON só acontecem se couberem nele. */
   prazoMs?: number;
+  /** Imagem que acompanha o pedido (data URL). Só vai ao OpenRouter; sem ela, nada muda. */
+  imageDataUrl?: string | null;
 }): Promise<ChatJsonResult<T>> {
   const cfg = ROLE_CONFIG[opts.role];
   const fala = PAPEIS_DE_FALA.has(opts.role);
@@ -452,6 +455,7 @@ export async function completeJson<T>(opts: {
       priorizarLatencia: fala,
       prioridade: fala ? "fala" : "fundo",
       ...(opts.prazoMs !== undefined ? { prazoAte: Date.now() + opts.prazoMs } : {}),
+      ...(opts.imageDataUrl ? { imageDataUrl: opts.imageDataUrl } : {}),
     },
     models: {
       featherless: process.env[cfg.featherlessEnv] || cfg.featherlessDefault,
@@ -465,6 +469,9 @@ export async function completeJson<T>(opts: {
 
   // Sem chave do OpenRouter: comportamento de antes, só Featherless.
   if (!process.env.OPENROUTER_API_KEY) return callOnly(call, "featherless", opts.signal);
+  // Sem chave da Featherless: só OpenRouter. Sem isso, duas lentidões do OpenRouter abriam o disjuntor e
+  // mandavam tudo para a Featherless (que falha na hora) por minutos.
+  if (!process.env.FEATHERLESS_API_KEY) return callOnly(call, "openrouter", opts.signal);
   if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
   if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
   return callHedged(opts.role, call, cfg.hedgeMs, opts.signal);

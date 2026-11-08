@@ -6,8 +6,8 @@
  */
 
 const MINUTO_MS = 60 * 1000;
-/** A sala abre este tanto antes do horário marcado. Curto, para os horários de teste (+3 e +5 min) fazerem sentido. */
-export const ABRE_ANTES_MS = 2 * MINUTO_MS;
+/** A sala abre este tanto antes do horário marcado. Cobre os horários de teste (+3 e +5 min), que abrem a sala direto. */
+export const ABRE_ANTES_MS = 10 * MINUTO_MS;
 /** Depois do fim previsto (horário + duração), ainda dá para entrar por este tempo. */
 export const FECHA_DEPOIS_MS = 15 * MINUTO_MS;
 

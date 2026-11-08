@@ -244,7 +244,12 @@ async function coreografar(o: OpcoesApontar) {
     conferir();
     const caixas = new Map(quadro.api.getSceneElements().filter((e) => !e.isDeleted).flatMap((e) => {
       const caixa = caixaDosElementos([e], 0);
-      return caixa ? [[e.id, caixa] as const] : [];
+      if (!caixa) return [];
+      // Setas e linhas levam a polilinha (relativa à caixa): os gestos miram o meio do traço, não a caixa.
+      const pontos = (e.type === "arrow" || e.type === "line") && "points" in e
+        ? (e.points as readonly (readonly [number, number])[]).map(([px, py]) => [e.x + px - caixa.x, e.y + py - caixa.y] as const)
+        : undefined;
+      return [[e.id, pontos ? { ...caixa, pontos } : caixa] as const];
     }));
     for (const gesto of comporGestos(acao, caixas, areaLivre(vistaDe(quadro)), o.semente + indice)) {
       conferir();

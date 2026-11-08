@@ -14,6 +14,7 @@ import { NOME_SCHEMA_KIT } from "../prompts/gerador-kit";
 import { NOME_SCHEMA_PLANEJADOR } from "../prompts/planejador";
 import { NOME_SCHEMA_SCORECARD } from "../prompts/scorecard";
 import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "./cliente";
+import { paraJsonSchema } from "./jsonschema";
 
 /** Papel do `lib/llm` de cada chamada do cérebro. */
 const PAPEL: Record<string, LlmRole> = {
@@ -26,6 +27,23 @@ const PAPEL: Record<string, LlmRole> = {
   [NOME_SCHEMA_KIT]: "evaluator", // geração do kit a partir da vaga
 };
 const PAPEL_PADRAO: LlmRole = "evaluator";
+
+/**
+ * Papéis cujo formato só existia no `response_format` do cliente antigo: o `lib/llm` não manda o schema, e o
+ * GLM sozinho inventava o formato (campos faltando, texto no lugar de lista, objeto embrulhado) e o scorecard
+ * falhava mesmo depois do reparo. Para eles o JSON Schema vai no fim do sistema. Os papéis ao vivo já
+ * descrevem o formato no próprio prompt e ficam como estão.
+ */
+const PAPEIS_COM_SCHEMA_NO_PROMPT: ReadonlySet<LlmRole> = new Set(["analyst", "evaluator"]);
+
+/** O formato da resposta, para o modelo que não recebe `response_format`. */
+export function blocoDoFormato(schema: LlmArgs<unknown>["schema"]): string {
+  return [
+    "FORMATO DA RESPOSTA: um único objeto JSON que valide neste JSON Schema. Todos os campos são obrigatórios,",
+    "com os nomes exatos; sem valor, use null ou []. Não embrulhe o objeto em outra chave.",
+    JSON.stringify(paraJsonSchema(schema)),
+  ].join("\n");
+}
 
 /** Prazo padrão de uma chamada ao vivo, o mesmo do quadro (o handler também corta em 8 s). */
 const PRAZO_PADRAO_MS = 8000;
@@ -101,19 +119,22 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
         }
         return r.data;
       });
-      const sistema = [args.sistema.estatico, args.sistema.dinamico].filter(Boolean).join("\n\n");
+      const papel = PAPEL[args.nomeSchema] ?? PAPEL_PADRAO;
+      const formato = PAPEIS_COM_SCHEMA_NO_PROMPT.has(papel) ? blocoDoFormato(args.schema) : undefined;
+      const sistema = [args.sistema.estatico, args.sistema.dinamico, formato].filter(Boolean).join("\n\n");
       const prazoMs = args.timeoutMs ?? PRAZO_PADRAO_MS;
       const cancelar = new AbortController();
       try {
         const r = await comLimite(
           completar<T>({
-            role: PAPEL[args.nomeSchema] ?? PAPEL_PADRAO,
+            role: papel,
             system: sistema,
             user: juntarMensagens(args.mensagens),
             schema: espiao,
             maxTokens: args.maxTokens !== undefined && args.maxTokens >= MIN_TOKENS_RESPEITADOS ? args.maxTokens : undefined,
             signal: cancelar.signal,
             prazoMs,
+            ...(args.imagem ? { imageDataUrl: args.imagem } : {}),
           }),
           prazoMs,
           cancelar,

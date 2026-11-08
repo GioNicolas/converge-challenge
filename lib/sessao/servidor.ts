@@ -115,7 +115,7 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   }
 }
 
-export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[] } = {}): Promise<{ responder: boolean; texto: string; requisito: string | null; concluiu?: boolean; visual?: AcaoVisual[] }> {
+export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[] } = {}): Promise<{ responder: boolean; texto: string; requisito: string | null; concluiu?: boolean; visual?: AcaoVisual[] }> {
   const rota = rotaDaSessao(sessaoId, "perguntar");
   const dados = await lerJson(rota, jsonPost({ sessao_id: sessaoId, fase, texto, ...contexto }));
   return validar(rota, dados, EsquemaPergunta);

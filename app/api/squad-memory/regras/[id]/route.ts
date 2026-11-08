@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { criterioValido } from "@/lib/squad-memory/criterios";
 import { motivoNaoTecnico } from "@/lib/squad-memory/guarda";
-import { alternarRegra, apagarRegra, editarRegra, obterRegra } from "@/lib/squad-memory/store";
+import { alternarRegra, apagarRegra, editarRegra, gravacoesPendentesSquadMemory, hidratarSquadMemory, obterRegra } from "@/lib/squad-memory/store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,6 +19,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, { params }: Ctx) {
   const { id } = await params;
+  await hidratarSquadMemory();
   if (!obterRegra(id)) return NextResponse.json({ error: "regra não encontrada" }, { status: 404 });
   const parsed = Mudanca.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "mudança inválida" }, { status: 400 });
@@ -31,11 +32,14 @@ export async function PATCH(req: Request, { params }: Ctx) {
   if (porque) return NextResponse.json({ error: `O Totti só guarda critério técnico: ${porque}.` }, { status: 422 });
   if (Object.keys(edicao).length) editarRegra(id, edicao);
   const regra = ativa === undefined ? obterRegra(id) : alternarRegra(id, ativa);
+  await gravacoesPendentesSquadMemory();
   return NextResponse.json(regra);
 }
 
 export async function DELETE(_req: Request, { params }: Ctx) {
   const { id } = await params;
+  await hidratarSquadMemory();
   if (!apagarRegra(id)) return NextResponse.json({ error: "regra não encontrada" }, { status: 404 });
+  await gravacoesPendentesSquadMemory();
   return new Response(null, { status: 204 });
 }

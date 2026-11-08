@@ -230,7 +230,7 @@ export default function AgendarPagina() {
                             {horaDe(h)}
                             {ehTeste && (
                               <span className={`text-[11px] font-normal leading-none ${ativo ? "text-texto-claro/70" : "text-texto-suave"}`}>
-                                teste
+                                disponível agora
                               </span>
                             )}
                           </button>

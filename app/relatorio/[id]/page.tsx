@@ -19,6 +19,8 @@ export const metadata: Metadata = { title: "Relatório da entrevista", robots: {
 
 function podeVer(chave: string | undefined): boolean {
   if (devHabilitado()) return true;
+  // Painel aberto por design (sem senha nem chave configuradas, como na demo): o relatório abre direto.
+  if (!process.env.PAINEL_SENHA && !process.env.AGENTE_RELATORIO_CHAVE) return true;
   const segredo = process.env.AVALIACOES_API_SECRET;
   if (!segredo || !chave) return false;
   const a = Buffer.from(segredo);

@@ -1,11 +1,11 @@
 "use client";
 
 // Controles do workspace pensados para escala: busca (atalho "/"), abas com contagem, seletores de
-// filtro, paginação e seção recolhível. Superfícies arredondadas, sem traços de divisão.
+// filtro, chips de recorte com contagem, etiquetas de filtro, popover, paginação e seção recolhível. Superfícies arredondadas, sem traços de divisão.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronDown, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { curvaSuave } from "@/lib/design/motion";
 import { numero } from "@/lib/vagas/workspace";
 
@@ -230,5 +230,126 @@ export function Voltar({ href, children }: { href: string; children: ReactNode }
       <ChevronLeft size={15} className="transition-transform group-hover:-translate-x-0.5" />
       {children}
     </Link>
+  );
+}
+
+/** Chip de acesso rápido com contagem (ex.: "Com decisão pendente 14"). O ativo vira pílula preta; `destaque` põe um ponto. */
+export function Chip({
+  ativo,
+  n,
+  destaque = false,
+  onClick,
+  children,
+}: {
+  ativo: boolean;
+  n?: number;
+  destaque?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={ativo}
+      className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-texto/30 ${
+        ativo ? "bg-texto text-texto-claro" : "bg-superficie-2/70 text-texto hover:bg-superficie-2"
+      }`}
+    >
+      {destaque && !ativo && !!n && <span aria-hidden className="size-1.5 rounded-full bg-texto" />}
+      {children}
+      {n !== undefined && (
+        <span className={`numero text-[12px] ${ativo ? "text-texto-claro/70" : "text-texto-suave"}`}>{numero(n)}</span>
+      )}
+    </button>
+  );
+}
+
+/** Um filtro aplicado, com o X para tirar só ele. */
+export function Etiqueta({ rotulo, valor, onTirar }: { rotulo: string; valor: string; onTirar: () => void }) {
+  return (
+    <span className="flex h-7 items-center gap-1 rounded-full bg-superficie py-0 pr-1 pl-3 text-[12.5px] text-texto shadow-[0_0_0_1px_rgb(28_24_18/0.08)]">
+      <span className="text-texto-suave">{rotulo}:</span>
+      <span className="max-w-[180px] truncate font-medium">{valor}</span>
+      <button
+        onClick={onTirar}
+        aria-label={`Tirar o filtro ${rotulo}: ${valor}`}
+        className="flex size-5 items-center justify-center rounded-full text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
+      >
+        <X size={11} />
+      </button>
+    </span>
+  );
+}
+
+/** Pílula de escolha dentro de um painel de filtros. */
+export function Pilula({ ativa, onClick, children }: { ativa: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={ativa}
+      className={`flex h-7 items-center gap-1 rounded-full px-3 text-[12.5px] transition-colors ${
+        ativa ? "bg-texto text-texto-claro" : "bg-superficie-2/70 text-texto hover:bg-superficie-2"
+      }`}
+    >
+      {ativa && <Check size={12} />}
+      {children}
+    </button>
+  );
+}
+
+/** Um grupo de pílulas com título (ex.: "Senioridade"). */
+export function Grupo({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="rotulo text-texto-suave">{titulo}</span>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+/** Popover ancorado no botão: fecha com clique fora ou Esc. */
+export function Popover({
+  aberto,
+  onFechar,
+  gatilho,
+  children,
+  largura = 400,
+}: {
+  aberto: boolean;
+  onFechar: () => void;
+  gatilho: ReactNode;
+  children: ReactNode;
+  largura?: number;
+}) {
+  const caixa = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!aberto) return;
+    const fora = (e: MouseEvent) => !caixa.current?.contains(e.target as Node) && onFechar();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onFechar();
+    document.addEventListener("mousedown", fora);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", fora);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [aberto, onFechar]);
+  return (
+    <div ref={caixa} className="relative">
+      {gatilho}
+      <AnimatePresence>
+        {aberto && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.16, ease: curvaSuave }}
+            style={{ width: `min(92vw, ${largura}px)` }}
+            className="absolute top-11 right-0 z-30 flex max-h-[72vh] origin-top-right flex-col gap-4 overflow-y-auto rounded-[18px] bg-superficie p-4 shadow-flutuante"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

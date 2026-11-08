@@ -36,7 +36,7 @@ export function useMidiaLocal() {
     } catch {
       // Sem câmera (ou negada): segue só com o microfone.
       try {
-        s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
         setErro("camera");
       } catch {
         setErro("microfone");

@@ -67,28 +67,45 @@ function redutor(estado: EstadoEntrevista, acao: Acao) {
   return transicionar(estado, acao.evento, acao.agora);
 }
 
-/** Aguarda a prova por até 300 ms; a tarefa original continua para registrar a URL tardia. */
+/** Elementos do candidato que contam como desenho de verdade (formas, setas, textos com conteúdo). */
+function elementosSignificativos(elementos: readonly { type: string; isDeleted?: boolean; customData?: Record<string, unknown>; width: number; height: number }[]): number {
+  return elementos.filter((e) => !e.isDeleted && e.customData?.autor !== "agente" && e.type !== "selection"
+    && (e.width > 8 || e.height > 8)).length;
+}
+
+/** Aguarda a prova por até 1,8 s (e a miniatura em data URL por até 600 ms); a tarefa original continua para registrar a URL tardia.
+ * Com miniatura, o Totti já enxerga o quadro por ela: a URL (só para o registro) espera no máximo 300 ms. */
 export async function pedidoComImagem(
   pedido: PedidoAnalise,
   imagem: Promise<string | null>,
   sinal: AbortSignal,
+  dataUrl?: Promise<string | null>,
 ): Promise<PedidoAnalise> {
   sinal.throwIfAborted();
   let prazo: ReturnType<typeof setTimeout> | undefined;
+  let prazoMiniatura: ReturnType<typeof setTimeout> | undefined;
   let cancelar: (() => void) | undefined;
   try {
+    // A miniatura em data URL tem prazo próprio: se atrasar, a análise segue sem ela.
+    const miniatura = dataUrl
+      ? Promise.race([dataUrl.catch(() => null), new Promise<null>((resolver) => { prazoMiniatura = setTimeout(() => resolver(null), 600); })])
+      : Promise.resolve(null);
     const url = await Promise.race([
       imagem.catch(() => null),
-      new Promise<null>((resolver) => { prazo = setTimeout(() => resolver(null), 300); }),
+      new Promise<null>((resolver) => { prazo = setTimeout(() => resolver(null), dataUrl ? 300 : 1800); }),
       new Promise<never>((_, rejeitar) => {
         cancelar = () => rejeitar(sinal.reason);
         sinal.addEventListener("abort", cancelar, { once: true });
       }),
     ]);
     sinal.throwIfAborted();
-    return url ? { ...pedido, imagem_url: url } : pedido;
+    const base64 = await miniatura;
+    sinal.throwIfAborted();
+    if (!url && !base64) return pedido;
+    return { ...pedido, ...(url ? { imagem_url: url } : {}), ...(base64 ? { imagem_base64: base64 } : {}) };
   } finally {
     if (prazo !== undefined) clearTimeout(prazo);
+    if (prazoMiniatura !== undefined) clearTimeout(prazoMiniatura);
     if (cancelar) sinal.removeEventListener("abort", cancelar);
   }
 }
@@ -293,6 +310,7 @@ export function useEntrevista(
     if (!quadro || !sessao) return;
     let ativo = true;
     const imagens = new WeakMap<PedidoAnalise, Promise<string | null>>();
+    const miniaturas = new WeakMap<PedidoAnalise, Promise<string | null>>();
     let falaAoAnalisar = 0;
     let conversaAoAnalisar = 0;
     const g = criarGatilho({
@@ -354,12 +372,23 @@ export function useEntrevista(
             return null;
           });
           imagens.set(pedido, imagem);
+          if (usarServidor()) {
+            miniaturas.set(pedido, (async () => {
+              const { quadroDataUrl } = await import("@/lib/excalidraw/imagem");
+              return quadroDataUrl({
+                ...quadro.api,
+                getSceneElements: () => elementos,
+                getAppState: () => quadro.api.getAppState(),
+                getFiles: () => quadro.api.getFiles(),
+              });
+            })().catch(() => null));
+          }
         }
         return pedido;
       },
       analisar: async (pedido, sinal) => {
         const imagem = imagens.get(pedido);
-        const comImagem = usarServidor() && imagem ? await pedidoComImagem(pedido, imagem, sinal) : pedido;
+        const comImagem = usarServidor() && imagem ? await pedidoComImagem(pedido, imagem, sinal, miniaturas.get(pedido)) : pedido;
         return analisar(comImagem, sinal);
       },
       aoResultado: (bruta) => {
@@ -397,10 +426,10 @@ export function useEntrevista(
       const { titulo, enunciado } = sessao.problema;
       // O que se ESCREVE no quadro é o enunciado; o que se FALA é a fala natural do desafio (ver falaDoDesafio.ts).
       const falaDoDesafio = `${montarFalaDoDesafio(sessao.problema)} Quando terminar uma etapa ou quiser um comentário sobre o desenho, é só me avisar.`;
-      // O agente se apresenta antes de passar o desafio (a fala vem do cérebro; sem ela, vai direto ao desafio).
-      // Logo depois do cumprimento: quanto tempo dura, como funciona e que "não sei" é uma resposta aceita.
-      const comoFunciona = comoFuncionaQuadro(sessao.tempos);
-      const abertura = sessao.apresentacao ? `${sessao.apresentacao} ${comoFunciona}` : comoFunciona;
+      // Antes do desafio, o Totti se apresenta e diz quanto tempo dura, como funciona e que "não sei" é aceito.
+      // A apresentação do cérebro já diz tudo isso (lib/agente/prompts/abertura.ts); o texto fixo só entra sem ela,
+      // para ele não explicar duas vezes.
+      const abertura = sessao.apresentacao || comoFuncionaQuadro(sessao.tempos);
       conversa.current.push({ quem: "agente", texto: abertura });
       await dizer(abertura);
       if (cancelado) return;
@@ -611,7 +640,10 @@ export function useEntrevista(
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
     ultimaAtividade.current = Date.now();
-    enviar({ tipo: "CANDIDATO_DESENHOU" });
+    // Um risco solto não encerra os requisitos: precisa de pelo menos 2 elementos significativos.
+    if (estadoAtual.current.fase !== "REQUISITOS" || (quadro && elementosSignificativos(quadro.api.getSceneElements()) >= 2)) {
+      enviar({ tipo: "CANDIDATO_DESENHOU" });
+    }
     gatilho.current?.mudou();
     if (salvar.current) clearTimeout(salvar.current);
     salvar.current = setTimeout(() => {
@@ -713,9 +745,25 @@ export function useEntrevista(
       pedidosEmAndamento.current++;
       setAguardandoResposta(true);
       try {
-        const grafo = quadro ? conversor.current.converter(quadro.api.getSceneElements()).texto.slice(0, 24000) : undefined;
+        const convertido = quadro ? conversor.current.converter(quadro.api.getSceneElements()) : undefined;
+        const grafo = convertido?.texto.slice(0, 24000);
+        const mudancas = convertido ? descreverMudancas(ultimoInstantaneo.current, convertido.instantaneo) : undefined;
+        let imagem_base64: string | undefined;
+        if (quadro && usarServidor()) {
+          try {
+            const { quadroDataUrl } = await import("@/lib/excalidraw/imagem");
+            imagem_base64 = (await Promise.race([
+              quadroDataUrl(quadro.api),
+              new Promise<null>((resolver) => setTimeout(() => resolver(null), 600)),
+            ])) ?? undefined;
+          } catch {
+            imagem_base64 = undefined;
+          }
+        }
         r = await perguntar(sessao.sessao_id, atual.fase, texto, {
-          grafo, pergunta_ativa: atual.perguntaAtiva?.pergunta ?? undefined,
+          grafo, ...(mudancas ? { mudancas } : {}), ...(imagem_base64 ? { imagem_base64 } : {}),
+          conversa_do_quadro: conversa.current.slice(-20),
+          pergunta_ativa: atual.perguntaAtiva?.pergunta ?? undefined,
           requisitos: requisitosCombinados.current.slice(-30),
           gestos_recentes: resumirGestosRecentes(memoriaVisual.current),
         });
@@ -760,6 +808,10 @@ export function useEntrevista(
         else if (atual.fase === "APROFUNDAMENTO" || atual.fase === "FECHAMENTO") {
           setTimeout(() => gatilho.current?.dispararAgora(), 0);
         }
+      }
+      // Resposta sem pergunta de volta: o Totti analisa o desenho logo depois, para seguir com a socrática.
+      if (r.responder && r.texto && !r.texto.includes("?") && !r.concluiu) {
+        setTimeout(() => gatilho.current?.dispararAgora(), 0);
       }
       return { requisito: r.responder ? r.requisito : null };
     },

@@ -83,6 +83,7 @@ export async function analisar(
       modelo: deps.modelo,
       maxTokens: deps.maxTokens,
       sinal,
+      imagem: pedido.imagem_base64 ?? null,
     });
     bruta = EsquemaRespostaAnalise.parse(r.dados);
     ms = r.ms;

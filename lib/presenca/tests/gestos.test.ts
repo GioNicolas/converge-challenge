@@ -48,3 +48,16 @@ test("anotação procura espaço visível sem cobrir os elementos", () => {
   assert.ok(lugar.x >= 0 && lugar.y >= 0 && lugar.x + lugar.largura <= area.largura && lugar.y + lugar.altura <= area.altura);
   for (const c of caixas.values()) assert.ok(lugar.x >= c.x + c.largura || lugar.x + lugar.largura <= c.x || lugar.y >= c.y + c.altura || lugar.y + lugar.altura <= c.y);
 });
+
+test("em seta diagonal longa, apontar e circular miram o meio do traço, não a caixa inteira", () => {
+  // Seta de (0,0) a (600,400): a caixa cobre o quadro quase todo; o meio do traço é (300,200).
+  const seta = { x: 0, y: 0, largura: 600, altura: 400, pontos: [[0, 0], [600, 400]] as const };
+  const comSeta = new Map([["s1", seta]]);
+  const [apontar] = comporGestos({ tipo: "apontar", alvo: "s1" }, comSeta, area, 1);
+  assert.deepEqual(apontar, { tipo: "apontar", ponto: { x: 300, y: 200 } });
+  const [circulo] = comporGestos({ tipo: "circular", alvo: "s1" }, comSeta, area, 1);
+  assert.equal(circulo.tipo, "traco");
+  if (circulo.tipo !== "traco") return;
+  const xs = circulo.traco.pontos.map(([x]) => circulo.traco.origem.x + x);
+  assert.ok(Math.max(...xs) - Math.min(...xs) < 200, "o círculo fica pequeno, em volta do meio da seta");
+});

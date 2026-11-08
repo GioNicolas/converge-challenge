@@ -4,8 +4,9 @@
 // Feita para escala (uma vaga de júnior pode ter 70 mil inscritos): nada de lista solta.
 //   Candidatos → o funil (Inscritos · Convidados · Fazendo agora · Relatório pronto) é o filtro principal;
 //                embaixo, busca por nome ou e-mail, filtros, ordenação, páginas e convite em lote.
-//   Escores    → só quem concluiu, com o lugar do escore reservado (o escore ainda vai ser construído).
+//   Escores    → só quem concluiu, com a nota e a recomendação de cada um (dá para ordenar pelo escore).
 //   Plano      → o que foi combinado com o Totti, o que ele aprendeu com o time e o link de convite.
+//   O que o Totti aprendeu → a memória da squad (regras, o que ele ignorou e a concordância com o Tech Lead).
 //   Contratações → (só em vaga que contratou) o ciclo dos 90 dias: como foi cada contratação.
 // Em Candidatos e Escores, as entrevistas feitas de verdade pelo link vêm antes, com o relatório.
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -49,6 +50,7 @@ import { curvaSuave } from "@/lib/design/motion";
 import { useContar } from "@/components/totti/useContar";
 import TituloRevelado from "@/components/totti/TituloRevelado";
 import AprendidoNoPlano from "./AprendidoNoPlano";
+import { MemoriaDaSquad } from "./Aprendizado";
 import Casca from "./Casca";
 import Contratacoes from "./Contratacoes";
 import { Abas, Busca, Paginacao, Seletor, Voltar } from "./controles";
@@ -140,6 +142,7 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
       {etapa === "escores" && reais.length > 0 && <ResultadosDaVaga reais={reais} />}
       {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} temReais={reais.length > 0} />}
       {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} temReais={reais.length > 0} />}
+      {etapa === "aprendizado" && <MemoriaDaSquad embutido />}
       {etapa === "contratacoes" && <Contratacoes vaga={vaga} />}
     </motion.div>
   );
@@ -180,7 +183,8 @@ function Candidatos({
   const termo = useDeferredValue(buscaNormalizada(busca.trim()));
   const [cidade, setCidade] = useState("");
   const [periodo, setPeriodo] = useState<"" | "1" | "7" | "30">("");
-  const [ordem, setOrdem] = useState<Ordem>("recentes");
+  // Escores é o placar: começa da maior nota para a menor.
+  const [ordem, setOrdem] = useState<Ordem>(escores ? "escore" : "recentes");
   const [pagina, setPagina] = useState(0);
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
   const [enviando, setEnviando] = useState(false);
@@ -212,6 +216,7 @@ function Candidatos({
         (!termo || buscaNormalizada(`${c.nome} ${c.email}`).includes(termo)),
     );
     if (ordem === "az") return l.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    if (ordem === "escore") return l.sort((a, b) => (b.escore ?? -1) - (a.escore ?? -1) || a.haDias - b.haDias || a.i - b.i);
     if (ordem === "antigos") return l.sort((a, b) => b.haDias - a.haDias || a.i - b.i);
     return l.sort((a, b) => a.haDias - b.haDias || a.i - b.i);
   }, [lista, etapa, soNovos, cidade, periodo, termo, ordem]);
@@ -434,7 +439,7 @@ function Candidatos({
                 { valor: "recentes", nome: "Mais recentes" },
                 { valor: "antigos", nome: "Mais antigos" },
                 { valor: "az", nome: "Nome (A–Z)" },
-                { valor: "escore", nome: "Escore (em breve)", desativado: true },
+                { valor: "escore", nome: "Maior escore" },
               ]}
             />
           </div>
@@ -557,7 +562,7 @@ function Candidatos({
               className="size-3.5 accent-[var(--texto)]"
             />
           )}
-          {["Candidato", "Cidade", "Situação", escores ? "Concluiu" : "Última mudança", escores ? "Escore" : ""].map((t, i) => (
+          {["Candidato", "Cidade", escores ? "Recomendação" : "Situação", escores ? "Concluiu" : "Última mudança", escores ? "Escore" : ""].map((t, i) => (
             <span key={i} className={`rotulo text-texto-suave ${i >= 3 ? "text-right" : ""}`}>
               {t}
             </span>
@@ -596,20 +601,38 @@ function Candidatos({
                   <span className="truncate text-[12.5px] text-texto-suave">{c.email}</span>
                 </div>
                 <span className="hidden truncate text-[13px] text-texto-suave md:block">{c.cidade}</span>
-                <Selo s={c.situacao} href={c.situacao === "concluiu" ? RELATORIO_DEMO : undefined} />
+                {escores && c.recomendacao ? (
+                  <Link
+                    href={RELATORIO_DEMO}
+                    className={`justify-self-end text-[13px] underline decoration-transparent underline-offset-4 transition-[text-decoration-color] duration-[240ms] hover:decoration-texto md:justify-self-start ${
+                      c.recomendacao === "nao_avancar" ? "text-texto-suave" : "text-texto"
+                    }`}
+                  >
+                    {NOME_RECOMENDACAO[c.recomendacao]}
+                  </Link>
+                ) : (
+                  <Selo s={c.situacao} href={c.situacao === "concluiu" ? RELATORIO_DEMO : undefined} />
+                )}
                 <span className="numero hidden text-right text-[13px] text-texto-suave md:block">{quandoFoi(c.haDias)}</span>
                 <span className="hidden text-right md:block">
                   {escores ? (
-                    <span className="text-[15px] text-texto-suave/40" aria-label="Escore ainda não disponível">
-                      —
-                    </span>
+                    c.escore !== undefined ? (
+                      <span className="inline-flex items-baseline gap-1" aria-label={`Escore ${nota1(c.escore)} de 4`}>
+                        <span className="titulo-display text-[20px] text-texto">{nota1(c.escore)}</span>
+                        <span className="numero text-[11.5px] text-texto-suave">/4</span>
+                      </span>
+                    ) : (
+                      <span className="text-[15px] text-texto-suave/40" aria-label="Escore ainda não disponível">
+                        —
+                      </span>
+                    )
                   ) : (
                     c.situacao === "concluiu" && (
                       <Link
                         href={href("escores")}
                         className="inline-flex items-center gap-1 text-[13px] text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto"
                       >
-                        Escore <ArrowRight size={13} />
+                        {c.escore !== undefined ? <span className="numero">{nota1(c.escore)}</span> : "Escore"} <ArrowRight size={13} />
                       </Link>
                     )
                   )}
@@ -692,6 +715,9 @@ function EntrevistasReais({ reais }: { reais: EntrevistaReal[] }) {
   );
 }
 
+/** Nota com vírgula, como no relatório (3,4). */
+const nota1 = (n: number) => n.toFixed(1).replace(".", ",");
+
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "0%");
 
 /** Os candidatos desta lista são de demonstração: o relatório pronto abre o relatório de exemplo. */
@@ -764,7 +790,9 @@ function Plano({ vaga }: { vaga: VagaEmpresa }) {
         ))}
       </section>
 
-      {vaga.etapa !== "encerrada" && <AprendidoNoPlano formato={r.formato} />}
+      {vaga.etapa !== "encerrada" && (
+        <AprendidoNoPlano formato={r.formato} verTudo={`/vagas/vaga?id=${encodeURIComponent(vaga.id)}&etapa=aprendizado`} />
+      )}
 
       {vaga.etapa !== "encerrada" && (
         <section className="cartao flex flex-col gap-3 p-5">

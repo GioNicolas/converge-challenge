@@ -19,7 +19,7 @@ describe("abertura", () => {
   it("corta falas longas por número de frases (sem lista de palavras)", async () => {
     const llm = criarClienteFalso([{ apresentacao: "Um. Dois. Três. Quatro. Cinco.", despedida: "A. B. C. D." }]);
     const r = await gerarAbertura(deps(llm));
-    assert.equal(r?.apresentacao, "Um. Dois. Três.");
+    assert.equal(r?.apresentacao, "Um. Dois. Três. Quatro.");
     assert.equal(r?.despedida, "A. B. C.");
   });
 
@@ -35,10 +35,18 @@ describe("abertura", () => {
     for (const f of problema.ficha) assert.ok(!tudo.includes(f.resposta));
     for (const c of kitDemo.criterios) for (const n of [1, 2, 3, 4] as const) assert.ok(!tudo.includes(c.niveis[n]));
     assert.ok(p.estatico.includes("Não valide nem elogie"));
-    // A apresentação só cumprimenta e inicia a entrevista da área: o prompt proíbe se apresentar com cargo.
-    assert.ok(p.estatico.includes("NÃO se apresente"));
+    // O Totti se apresenta pelo nome e explica como vai ser, sem falar do próprio cargo.
+    assert.ok(p.estatico.includes("se apresente pelo nome"));
+    assert.ok(p.estatico.includes("Não fale da sua experiência nem do seu cargo"));
     assert.ok(p.dinamico.includes(kitDemo.area));
     assert.ok(p.estatico.includes("não dê nota"));
     assert.ok(p.dinamico.includes(problema.titulo));
+  });
+
+  it("a duração e as etapas vão ao contexto; sem duração, o prompt pede para não citar número", () => {
+    const com = montarPromptAbertura(kitDemo, problema, { duracaoMin: 35, etapas: "entender o problema (~5 min)" });
+    assert.ok(com.dinamico.includes("cerca de 35 minutos"));
+    assert.ok(com.dinamico.includes("entender o problema (~5 min)"));
+    assert.ok(montarPromptAbertura(kitDemo, problema).dinamico.includes("não cite um número"));
   });
 });
