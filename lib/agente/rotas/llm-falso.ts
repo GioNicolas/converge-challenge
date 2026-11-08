@@ -9,6 +9,7 @@ import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "../ll
 import { NOME_SCHEMA_ABERTURA } from "../prompts/abertura";
 import { NOME_SCHEMA_ANALISE } from "../prompts/avaliador";
 import { NOME_SCHEMA_PERGUNTAR } from "../prompts/entrevistador";
+import { NOME_SCHEMA_PERGUNTAR_V2 } from "../prompts/entrevistador-v2";
 import { respostaFalsaDeKit } from "../kits/falso";
 import { respostaFalsaDePlanejador } from "../planejamento/falso";
 
@@ -44,7 +45,7 @@ export function criarLlmFalsoDeterministico(): LlmCliente {
           apresentacao: "Olá, tudo bem? Vamos já iniciar a sua entrevista.",
           despedida: "Obrigado pela conversa. A pessoa responsável vai analisar o que você fez e dar retorno.",
         };
-      } else if (args.nomeSchema === NOME_SCHEMA_PERGUNTAR) {
+      } else if (args.nomeSchema === NOME_SCHEMA_PERGUNTAR || args.nomeSchema === NOME_SCHEMA_PERGUNTAR_V2) {
         const fala = args.mensagens[args.mensagens.length - 1]?.content ?? "";
         saida = fala.includes("?")
           ? { responder: true, texto: "Considere uns 4 mil acessos por segundo.", requisito: "Leitura: ~4 mil/s" }

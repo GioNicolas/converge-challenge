@@ -40,6 +40,7 @@
     "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
     "test:ide": "tsx --test lib/agents/__tests__/*.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts",
+    "placar:quadro": "tsx --env-file-if-exists=.env.local scripts/placar-quadro/index.ts",
     "test:llm": "tsx --test lib/llm/*.test.ts",
     "test:conversa": "tsx --test lib/conversa/__tests__/*.test.ts lib/audio/filaFalas.test.ts lib/llm/*.test.ts"
   },

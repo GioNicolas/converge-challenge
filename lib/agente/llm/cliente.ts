@@ -34,6 +34,8 @@ export type LlmResultado<T> = {
   ms: number;
   /** Modelo que de fato respondeu, quando o cliente sabe (o `lib/llm` escolhe por papel). */
   modelo?: string;
+  /** Provedor que respondeu (o primário ou a reserva), quando o cliente sabe. */
+  provedor?: string;
 };
 
 export interface LlmCliente {

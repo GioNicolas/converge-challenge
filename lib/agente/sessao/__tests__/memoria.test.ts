@@ -45,6 +45,39 @@ describe("memória da conversa", () => {
     const quadro = [{ quem: "agente" as const, texto: "Anotado." }, { quem: "candidato" as const, texto: "E agora o cache." }];
     assert.deepEqual(historicoDaConversa(servidor, quadro).map((f) => f.texto), ["São 7 caracteres.", "Anotado.", "E agora o cache."]);
   });
+  const falas = (n: number, de = 1) =>
+    Array.from({ length: n }, (_, k) => ({ quem: ((de + k) % 2 ? "candidato" : "agente") as "agente" | "candidato", texto: `fala ${de + k}` }));
+  it("com 30 falas e a janela de 20 do quadro, mantém a ordem (as velhas não vão para o fim)", () => {
+    const servidor = falas(30);
+    const quadro = [...falas(20, 11), { quem: "candidato" as const, texto: "fala nova" }];
+    const h = historicoDaConversa(servidor, quadro).map((f) => f.texto);
+    assert.deepEqual(h, [...falas(30).map((f) => f.texto), "fala nova"]);
+  });
+  it("encaixa a apresentação e o desafio (só o quadro tem) antes da primeira fala em comum", () => {
+    const servidor = [{ quem: "candidato" as const, texto: "Oi, tudo bem?" }, { quem: "agente" as const, texto: "Tudo, pode começar." }];
+    const quadro = [
+      { quem: "agente" as const, texto: "Olá, eu sou o Totti." },
+      { quem: "agente" as const, texto: "O desafio é um encurtador." },
+      ...servidor,
+      { quem: "candidato" as const, texto: "Vou usar Postgres." },
+    ];
+    assert.deepEqual(historicoDaConversa(servidor, quadro).map((f) => f.texto), [
+      "Olá, eu sou o Totti.", "O desafio é um encurtador.", "Oi, tudo bem?", "Tudo, pode começar.", "Vou usar Postgres.",
+    ]);
+  });
+  it("falas curtas repetidas (\"sim\") não desalinham nem duplicam", () => {
+    const servidor = [
+      { quem: "agente" as const, texto: "Usa cache?" }, { quem: "candidato" as const, texto: "sim" },
+      { quem: "agente" as const, texto: "E fila?" }, { quem: "candidato" as const, texto: "sim" },
+      { quem: "agente" as const, texto: "E réplica?" },
+    ];
+    const quadro = [...servidor.slice(2), { quem: "candidato" as const, texto: "sim" }];
+    assert.deepEqual(historicoDaConversa(servidor, quadro).map((f) => f.texto), ["Usa cache?", "sim", "E fila?", "sim", "E réplica?", "sim"]);
+  });
+  it("o quadro com a conversa inteira não muda nada", () => {
+    const servidor = falas(30);
+    assert.deepEqual(historicoDaConversa(servidor, falas(30)).map((f) => f.texto), servidor.map((f) => f.texto));
+  });
   it("respeita o limite de falas, ficando com as mais recentes", () => {
     const servidor = Array.from({ length: 50 }, (_, i) => ({ quem: (i % 2 ? "agente" : "candidato") as "agente" | "candidato", texto: `fala ${i}` }));
     const h = historicoDaConversa(servidor, [], 40);
