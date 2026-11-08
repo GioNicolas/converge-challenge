@@ -13,7 +13,7 @@ Quem abrir o painel vê a janela de usuário e senha do navegador. O **usuário 
 Só o lado da recrutadora, em `middleware.ts`:
 
 - páginas: `/vagas`, `/pre-entrevista`, `/report`, `/relatorio/<id>`
-- rotas: `/api/report`, `/api/pre-entrevista/*`, `/api/config`, `/api/configs/*` e a criação de convites (`POST /api/convites`)
+- rotas: `/api/report`, `/api/pre-entrevista/*`, `/api/config`, `/api/configs/*` e a criação de convites (`POST /api/convites`) e `POST /api/decisao`
 
 ## O que NUNCA é trancado (candidato)
 

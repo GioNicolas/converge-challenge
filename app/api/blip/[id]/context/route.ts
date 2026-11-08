@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import type { BlipContext } from "@/lib/contracts";
-import { getSession, latestCode, numberCode, sessionNow } from "@/lib/session/store";
+import { latestCode, numberCode, sessionNow } from "@/lib/session/store";
+import { sessaoViva } from "@/lib/session/persistencia";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sessionId = request.nextUrl.searchParams.get("sessionId") ?? "";
-  const session = getSession(sessionId);
+  const session = await sessaoViva(sessionId);
   if (!session) {
     return NextResponse.json({ error: "sessão não encontrada" }, { status: 404 });
   }

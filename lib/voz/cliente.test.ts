@@ -203,3 +203,30 @@ test("autoplay bloqueado espera o próximo gesto e toca o mesmo áudio", async (
   assert.equal(tocadas, 1);
   assert.equal(ouvintes.size, 0);
 });
+
+test("antesDeTocar espera a vez com o áudio já sintetizado e pode desistir da fala", async () => {
+  const ordem: string[] = [];
+  const falar = criarVoz({
+    fetch: async () => { ordem.push("sintetizou"); return Response.json(dadosVoz); },
+    tocar: async () => { ordem.push("tocou"); },
+  });
+  await falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("vez"); return true; });
+  assert.deepEqual(ordem, ["sintetizou", "vez", "tocou"]);
+
+  ordem.length = 0;
+  await falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("desistiu"); return false; });
+  assert.deepEqual(ordem, ["sintetizou", "desistiu"]);
+});
+
+test("sem a voz do ElevenLabs, antesDeTocar não é chamado e a fala fica no texto", async () => {
+  const ordem: string[] = [];
+  const falar = criarVoz({
+    fetch: async () => new Response(null, { status: 501 }),
+    tocar: async () => { assert.fail("sem áudio remoto"); },
+  });
+  await assert.rejects(
+    falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("vez"); return true; }),
+    { message: MENSAGEM_VOZ_INDISPONIVEL },
+  );
+  assert.deepEqual(ordem, []);
+});

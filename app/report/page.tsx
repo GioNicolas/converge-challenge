@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import VoltarLink from "@/components/VoltarLink";
 import { useSearchParams } from "next/navigation";
 import { CONCEITOS_EMPECILHO, Gravacao, Report } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
@@ -132,6 +133,7 @@ function SessionReport({ id }: { id: string }) {
   if (error) {
     return (
       <main className="mx-auto max-w-3xl space-y-3 p-8">
+        <VoltarLink />
         <p className="text-perigo">{error}</p>
         <button type="button" onClick={retry} className="vidro rounded-full px-4 py-2 font-medium shadow-cartao">
           Tentar de novo
@@ -169,6 +171,7 @@ function SessionReport({ id }: { id: string }) {
 
   return (
     <main className="mx-auto max-w-5xl space-y-8 px-4 py-8 sm:px-8">
+      <VoltarLink texto="Voltar aos resultados" />
       <header className="space-y-3">
         <p className="label-pequena">{report.roleTitle}</p>
         <h1 className="titulo-display text-4xl">

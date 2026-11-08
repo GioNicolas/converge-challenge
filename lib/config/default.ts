@@ -6,6 +6,9 @@ import { InterviewConfig } from "@/lib/contracts";
 
 export const DEFAULT_CONFIG: InterviewConfig = InterviewConfig.parse({
   id: "default-backend-pleno",
+  // A vaga Backend Pleno da demo (card do Slack em `/api/slack/demo`, semente da memória da squad): as regras
+  // que o Tech Lead ensina nela valem nas entrevistas com esta config.
+  vagaId: "demo-backend-pleno",
   roleTitle: "Desenvolvedor(a) Backend Pleno",
   seniority: "pleno",
   focus: [

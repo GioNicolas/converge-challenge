@@ -37,10 +37,18 @@ export function dividirFala(texto: string): { texto: string; inicio: number; fim
 /**
  * Serviço compartilhado que usa o contrato e o player de áudio da Sofia. O agente fala só com a voz do ElevenLabs
  * (Fernando - Casual): se ela não vier, a fala fica no texto, sem trocar para uma voz do navegador.
+ * `antesDeTocar` (opcional) é chamado uma vez, com o áudio já pronto, logo antes de começar a tocar: quem chama
+ * espera ali a vez de falar (a pessoa fazer uma pausa). Devolver false desiste da fala sem erro.
  */
 export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarComAlinhamento }) {
   let servidorDisponivel = true;
-  return async (texto: string, sinal: AbortSignal, eventos: EventosVoz): Promise<void> => {
+  return async (texto: string, sinal: AbortSignal, eventos: EventosVoz, antesDeTocar?: () => Promise<boolean>): Promise<void> => {
+    let liberada = !antesDeTocar;
+    const aguardarVez = async () => {
+      if (!liberada) liberada = await antesDeTocar!();
+      sinal.throwIfAborted();
+      return liberada;
+    };
     for (const parte of dividirFala(texto)) {
       sinal.throwIfAborted();
       if (!servidorDisponivel) throw new Error(MENSAGEM_VOZ_INDISPONIVEL);
@@ -60,6 +68,7 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           const dados = RespostaVoz.parse(await resposta.json());
           sinal.throwIfAborted();
           const bytes = Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0));
+          if (!(await aguardarVez())) return;
           await dependencias.tocar(new Blob([bytes], { type: "audio/mpeg" }), dados.alinhamento as Alinhamento, {
             sinal,
             aoAguardarGesto: eventos.aoAguardarGesto,

@@ -6,11 +6,11 @@ Branch: `henrique-giorgio/voz-integrada`, baseada em `origin/sofia/coding-transc
 | --- | --- | --- |
 | Criação da vaga | Descrição e contexto; revisar antes de enviar | Não lê os campos da pessoa |
 | Conversa com Totti | Ditado revisável, junto dos anexos/texto existentes | Últimas falas novas; polling não repete áudio |
-| Entrevista de código | Contínua: na conversa envia respostas; fora dela registra o raciocínio | Respostas e despedida com legenda; a barra espera o áudio terminar |
+| Entrevista de código | Contínua: na conversa envia respostas; fora dela vai ao entrevistador, que decide se responde | Saudação, respostas e despedida com legenda; a barra espera o áudio terminar |
 | Entrevista no quadro | Contínua, encaminhada à conversa da sessão | Mantém voz, legenda e movimentos; permite silenciar/interromper |
 | Páginas de desenvolvimento | Mesmos componentes de entrada | Mesma saída de voz |
 
-Na IDE a captura pausa enquanto o agente prepara/reproduz a voz. No quadro, a síntese prepara o áudio com a escuta ativa e confere o turno novamente antes de reproduzir; a captura pausa durante a reprodução. Nos formulários, iniciar o microfone interrompe a reprodução. Ocultar a aba pausa a escuta; desmontar/encerrar cancela filas e invalida respostas atrasadas. No quadro, falhas de envio conservam a fala e as seguintes para tentar novamente em ordem.
+Na IDE e no quadro, a síntese prepara o áudio com a escuta ativa e confere o turno novamente antes de reproduzir; a captura pausa durante a reprodução. Nos formulários, iniciar o microfone interrompe a reprodução. Ocultar a aba pausa a escuta; desmontar/encerrar cancela filas e invalida respostas atrasadas. No quadro, falhas de envio conservam a fala e as seguintes para tentar novamente em ordem.
 
 ## Conversa no quadro
 
@@ -19,6 +19,14 @@ A abertura explica que o candidato pode avisar quando concluir uma etapa ou pedi
 Uma pergunta escolhida pela análise pode ser falada numa pausa de pelo menos 900 ms, sem clique obrigatório. Transcrição parcial, som de fala, resposta em andamento e áudio sendo preparado/reproduzido adiam a intervenção. A análise que ficou desatualizada por uma nova fala não inicia uma pergunta. O botão de demonstração continua manual. O Scribe finaliza os trechos após 0,9 s de silêncio, em vez de 1,5 s, conforme o parâmetro [VAD da ElevenLabs](https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/transcripts-and-commit-strategies). Esse valor controla a detecção de pausa; não garante o tempo total de resposta do LLM e TTS.
 
 O teste adicional `npx tsx --env-file-if-exists=.env.local scripts/validar-conversa.ts` usa o LLM real com seis situações sintéticas. Usa créditos, imprime somente respostas e tempos e verifica intenção de resposta/conclusão da etapa. O teste de navegador cobre intervenção automática, contexto da pergunta ativa e uma continuação parcial que impede a reprodução da resposta pronta.
+
+## Conversa na IDE
+
+A IDE usa as mesmas regras de turno do quadro (`lib/sessao/turnos.ts`). Logo no começo o Totti se apresenta e avisa que o candidato pode pedir um feedback quando terminar uma etapa; sem voz (desligada ou bloqueada pelo navegador), a saudação fica na legenda. Uma pergunta pendente abre a conversa sozinha na primeira pausa de pelo menos 900 ms, sem clique; transcrição parcial, som de fala, digitação recente, resposta em andamento e voz do agente adiam a abertura, e o balão continua clicável. Cada resposta é sintetizada com a escuta ligada e só toca numa pausa (teto de 4 s para som e de 12 s para fala transcrita).
+
+Fora de uma conversa, a fala do candidato vai ao entrevistador (`/api/chat` sem `blipId`), que decide pela intenção: pensando em voz alta, ele só ouve (`listening`) e nada abre; dúvida, pedido de feedback ou etapa concluída abrem a barra com a resposta. Dentro de uma conversa vale o mesmo: quem ainda está pensando não recebe resposta, e quem terminou de responder recebe uma paráfrase neutra, sem a pergunta repetida. Etapa concluída (`concluded`) faz a próxima análise tratar o momento como chave, para a pergunta seguinte já ser sobre o que vem depois. O feedback comenta algo observável no código, sem validar nem corrigir, e grifa o trecho comentado. As recusas e as falas de reserva variam de uma vez para outra. O botão "Chamar entrevistador" abre a conversa para quem prefere escrever.
+
+O teste de navegador da IDE cobre a saudação, a pergunta segurada por uma fala parcial e aberta sozinha na pausa, a fala que só é ouvida, a paráfrase ao fim da resposta e o pedido de feedback fora do balão.
 
 ## Mão e desenhos do agente
 
