@@ -265,6 +265,10 @@ export const ChatResponse = z.object({
   commands: z.array(EditorCommand),
   /** true quando o agente encerra a conversa ("Beleza, pode seguir!"). */
   end: z.boolean(),
+  /** O agente só está ouvindo (o candidato pensa em voz alta ou continua explicando): reply vem "" e nada é falado. */
+  listening: z.boolean().optional(),
+  /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
+  concluded: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 
