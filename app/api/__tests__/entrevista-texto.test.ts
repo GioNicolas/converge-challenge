@@ -105,6 +105,26 @@ async function analisar(id: string, fase: string, grafo: string, mudancas: strin
 
 const estado = async (id: string) => (await ler(await estadoGet(get(`/api/dev/sessoes/${id}/estado`), params(id)))).corpo;
 
+describe("pergunta nova logo depois de uma fala solta do agente", () => {
+  it("o /perguntar responde e a análise seguinte não solta pergunta até passar o intervalo", async () => {
+    definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const p = await ler(await perguntarPost(post(`/api/sessoes/${id}/perguntar`, { sessao_id: id, fase: "REQUISITOS", texto: "Qual a escala de acessos?" }), params(id)));
+    assert.equal(p.corpo.responder, true);
+
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    const logo = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0);
+    assert.equal(logo.status, "ok", "dentro do intervalo a pergunta é rebaixada");
+    assert.equal((await estado(id)).plinPendente, false);
+
+    relogio += 20_000;
+    const depois = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0);
+    assert.equal(depois.status, "duvida", "passado o intervalo a pergunta pode sair");
+  });
+});
+
 describe("entrevista completa por texto (handlers + LLM falso)", () => {
   it("percorre todas as fases, respeita os limites do plin, não vaza segredos e gera o scorecard", async () => {
     definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
@@ -121,6 +141,8 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     assert.ok(p.corpo.requisito);
 
     // Primeiro desenho: sai de REQUISITOS. Em ALTO_NIVEL a dúvida vale (o modelo decide quando falar).
+    // Ele desenha por um tempo depois da resposta do agente: uma pergunta nova não sai logo atrás de uma fala solta.
+    relogio += 20_000;
     const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
     await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
     const alto = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0);
