@@ -6,6 +6,7 @@ import { resolveConfig } from "@/lib/config/store";
 import { prewarmPyodide } from "@/lib/execution/pyodide-node";
 import { EventsResponse, SessionEvent, type InterviewConfig } from "@/lib/contracts";
 import { problems } from "@/lib/problems";
+import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hasProblem } from "@/problems";
@@ -36,6 +37,8 @@ export async function POST(request: Request) {
 
   // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started.
   const config = event.type === "session_started" ? comRegrasDaSquad(withProblem(await resolveConfig(event.configId), event.problemId)) : undefined;
+  // Outra inst�ncia pode ter a sess�o (Vercel): restaura antes de criar uma nova por cima.
+  if (event.type !== "session_started") await sessaoViva(event.sessionId);
   const session = getOrCreateSession(event.sessionId, config);
   appendEvent(session, event);
   if (event.type === "session_started") {
@@ -46,8 +49,9 @@ export async function POST(request: Request) {
   // A avaliação leva de 15 s a 1 min: começa já, em segundo plano, e o GET /api/report busca o resultado.
   if (event.type === "session_ended") {
     startEvaluation(session);
+    await guardarSessao(session);
     // Na Vercel, o que roda depois da resposta é interrompido a menos que a plataforma saiba que ainda há trabalho.
-    after(() => waitForEvaluation(session).then(() => undefined));
+    after(() => waitForEvaluation(session).then(() => guardarSessao(session)));
   }
   if (ANALYZED_TRIGGERS.has(event.type)) {
     try {
@@ -59,6 +63,7 @@ export async function POST(request: Request) {
   }
 
   const { blip, dismissBlipId } = decideBlip(session, event.t);
+  await guardarSessao(session);
   const response: EventsResponse = { blip, dismissBlipId };
   return NextResponse.json(response);
 }

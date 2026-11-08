@@ -2,12 +2,13 @@
 // aqui sÃ³ se consulta o resultado.
 import { NextRequest, NextResponse } from "next/server";
 import { candidatosPorSessao } from "@/lib/convites/store";
-import { startEvaluation } from "@/lib/agents/evaluator";
+import { avaliacaoLocal, startEvaluation } from "@/lib/agents/evaluator";
 import { listarDoIndice } from "@/lib/agente/resultados";
 import { exemploHabilitado, relatorioExemplo } from "@/lib/session/relatorio-exemplo";
 import { findReport, listReports } from "@/lib/session/reports";
 import { cartaoDoRelatorio } from "@/lib/session/cartao";
-import { getSession, listSessions } from "@/lib/session/store";
+import { AVALIACAO_PERDIDA_MS, guardarSessao, sessaoViva } from "@/lib/session/persistencia";
+import { listSessions } from "@/lib/session/store";
 import { kvPadrao } from "@/lib/storage/kv";
 import type { CartaoDoResultado, FormatoDaEntrevista, RecomendacaoDoResultado } from "@/lib/vagas/cartao";
 
@@ -100,7 +101,9 @@ export async function GET(request: NextRequest) {
   // Exemplo de dev (`/report?sessionId=exemplo`): abre o relatÃ³rio sem fazer uma entrevista.
   if (exemploHabilitado(sessionId)) return NextResponse.json(relatorioExemplo());
 
-  const session = getSession(sessionId);
+  const salvoAntes = await findReport(sessionId);
+  if (salvoAntes) return NextResponse.json(salvoAntes.report);
+  const session = await sessaoViva(sessionId);
   if (!session) {
     const salvo = await findReport(sessionId);
     if (salvo) return NextResponse.json(salvo.report);
@@ -110,7 +113,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "a entrevista ainda estÃ¡ em andamento" }, { status: 409 });
   }
 
+  // Avaliação começada por outra instância (a cópia restaurada diz "gerando"): espera, a menos que tenha se perdido.
+  if (session.report?.state === "running" && !avaliacaoLocal(session)) {
+    if (Date.now() - session.report.startedAt < AVALIACAO_PERDIDA_MS) return NextResponse.json({ status: "gerando" }, { status: 202 });
+    session.report = undefined;
+  }
   const status = startEvaluation(session, { retry: params.get("retry") === "1" });
+  await guardarSessao(session);
   if (status.state === "running") return NextResponse.json({ status: "gerando" }, { status: 202 });
   if (status.state === "error") return NextResponse.json({ error: status.error }, { status: 500 });
   return NextResponse.json(status.report);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import { findBlipQuestion } from "@/lib/agents/policy";
 import { ChatRequest } from "@/lib/contracts";
-import { getSession } from "@/lib/session/store";
+import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   }
   const { sessionId, blipId, messages } = parsed.data;
 
-  const session = getSession(sessionId);
+  const session = await sessaoViva(sessionId);
   if (!session) {
     return NextResponse.json({ error: "sessão não encontrada" }, { status: 404 });
   }
@@ -24,5 +24,6 @@ export async function POST(request: Request) {
   }
 
   const response = await runInterviewerTurn(session, { blipId, messages });
+  await guardarSessao(session);
   return NextResponse.json(response);
 }

@@ -6,19 +6,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decideBlip } from "@/lib/agents/policy";
 import type { EventsResponse } from "@/lib/contracts";
-import { getSession, sessionNow } from "@/lib/session/store";
+import { sessionNow } from "@/lib/session/store";
+import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get("sessionId") ?? "";
-  const session = getSession(sessionId);
+  const session = await sessaoViva(sessionId);
   if (!session) {
     return NextResponse.json({ error: "sessão não encontrada" }, { status: 404 });
   }
 
   const t = sessionNow(session);
   const { blip, dismissBlipId } = decideBlip(session, t);
+  if (blip || dismissBlipId) await guardarSessao(session);
   const response: EventsResponse = { blip, dismissBlipId };
   return NextResponse.json(response);
 }

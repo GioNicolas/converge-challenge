@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { criarLimitador, ipDe } from "@/lib/agente/rotas/http";
-import { getSession } from "@/lib/session/store";
+import { sessaoViva } from "@/lib/session/persistencia";
 import { contexto as contextoAgente } from "@/lib/agente/rotas/contexto";
 
 export const runtime = "nodejs";
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   // Só sai token para sessão real e em andamento.
   const sessao = contexto === "quadro"
     ? await contextoAgente().repositorio.obter(sessaoId)
-    : getSession(sessaoId);
+    : await sessaoViva(sessaoId);
   if (!sessao) return erro(404, "sessão não encontrada");
   if (("ended" in sessao && sessao.ended) || ("estado" in sessao && sessao.estado.fase === "ENCERRADA")) return erro(409, "sessão encerrada");
   const chaveSessao = `${contexto}:${sessaoId}`;

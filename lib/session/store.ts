@@ -18,6 +18,18 @@ export function getSession(sessionId: string): SessionState | undefined {
   return sessions.get(sessionId);
 }
 
+/** Troca o conteúdo de uma sessão pela cópia restaurada (mantém o objeto, que as outras partes já seguram). */
+export function substituirSessao(restaurada: SessionState, destino?: SessionState): void {
+  if (!destino) {
+    sessions.set(restaurada.sessionId, restaurada);
+    return;
+  }
+  const clock = destino.clock;
+  for (const k of Object.keys(destino)) delete (destino as unknown as Record<string, unknown>)[k];
+  Object.assign(destino, restaurada);
+  if (clock) destino.clock = clock;
+}
+
 /** Sessões em memória, da mais recente para a mais antiga. */
 export function listSessions(): SessionState[] {
   return [...sessions.values()].sort((a, b) => b.startedAt - a.startedAt);
