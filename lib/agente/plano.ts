@@ -36,8 +36,9 @@ export function planoDaConfig(config: InterviewConfig): PlanoDaSessao {
  */
 const AVALIACAO_POR_PROBLEMA: Record<string, string> = {
   "encurtador-de-url": "demo",
-  // Sem kit próprio ainda: o mais próximo (conversa em tempo real).
-  "chatbot-atendimento-ia": "demo-chat",
+  "chat-tempo-real": "demo-chat",
+  "pagamentos-instantaneos": "demo-pagamentos",
+  "chatbot-atendimento-ia": "demo-chatbot-ia",
 };
 
 export function avaliacaoDoPlano(config: InterviewConfig): string | undefined {

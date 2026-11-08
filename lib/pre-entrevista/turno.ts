@@ -3,13 +3,13 @@
  *
  *   1. registra a fala da recrutadora;
  *   2. mede a cobertura e os sinais no momento (Jev, ~0,3 s) e aplica no rascunho;
- *   3. se o Totti acabou de oferecer a troca de formato, aplica a escolha dela;
+ *   3. se o Totti acabou de oferecer a troca de formato, aplica a escolha dela; se ela pediu system design, troca;
  *   4. o planejador escolhe o próximo passo;
  *   5. o Totti escreve a fala desse passo e ela é registrada.
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
-import { modoAtivo, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
+import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
 import { acumularEnfase, declararCentral } from "./enfase";
 import { aberturaDoAgente, responder, tradeoffDaAbertura } from "./conversa";
@@ -22,6 +22,7 @@ import {
   nivelEmAberto,
   ofertaEmCurso,
   proximoPasso,
+  trocaPedida,
   type EstadoPlanejamento,
   type Passo,
   type PlanoEstado,
@@ -50,7 +51,6 @@ function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
     mode: sessao.rascunho.mode,
     nivelEmAberto: aberto,
     areasFaladas,
-    formatoIndisponivelPedido: !modoAtivo("system_design"),
   };
 }
 
@@ -133,6 +133,22 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
       dados: { etapa: "cobertura_sincrona", mensagem, stack: err instanceof Error ? err.stack : undefined },
     });
   }
+}
+
+/**
+ * Ela pediu system design e o plano está em live coding: troca o formato como uma troca escolhida na oferta. O formato
+ * escolhido prevalece sobre o extrator, e a próxima pergunta de aprofundamento confirma a troca (ver `trocaPendente`).
+ */
+function resolverPedidoDeFormato(sessao: Sessao): void {
+  const modo = trocaPedida(sessao.plano.sinais, sessao.rascunho.mode);
+  if (!modo) return;
+  sessao.plano = { ...sessao.plano, modoEscolhido: modo, trocaPendente: modo };
+  sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, sessao.plano.decisoesTradeoff, modo);
+  registrarEvento(sessao, {
+    tipo: "plano",
+    resumo: `pedido de formato: troca para ${modo}`,
+    dados: { modoEscolhido: modo, sinais: { pediu_system_design: sessao.plano.sinais.pediu_system_design } },
+  });
 }
 
 /**
@@ -221,6 +237,7 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
   if (linguagens) sessao.preferencias = { ...sessao.preferencias, linguagens };
   await atualizarCobertura(sessao);
   resolverTradeoff(sessao);
+  resolverPedidoDeFormato(sessao);
   atualizarNaoAvaliado(sessao);
   // O foco e as notas saem da ênfase, das falas e das decisões de agora, antes de o planejador escolher o passo.
   aplicarPesosNaSessao(sessao, "turno");

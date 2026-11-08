@@ -1,8 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { SYSTEM_DESIGN_ATIVO, modoAlternativoQueMede, modoAtivo } from "@/lib/pre-entrevista/catalogo";
+import { CATALOGO, SYSTEM_DESIGN_ATIVO, criteriosIniciais, modoAlternativoQueMede, modoAtivo } from "@/lib/pre-entrevista/catalogo";
 import { cortarNaPrimeiraPergunta, falaFormatoIndisponivel, limparFala } from "@/lib/pre-entrevista/conversa";
-import { aplicarPasso, MAX_APROFUNDAMENTOS, planoInicial, proximoPasso, type EstadoPlanejamento } from "@/lib/pre-entrevista/planejador";
+import {
+  aplicarPasso,
+  MAX_APROFUNDAMENTOS,
+  planoInicial,
+  proximoPasso,
+  trocaPedida,
+  type EstadoPlanejamento,
+} from "@/lib/pre-entrevista/planejador";
+import { aplicarDecisoesTradeoff, mudarModo, paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
 
 /** Estado em que o início já foi confirmado: a próxima decisão é de aprofundamento. */
 function estado(extra: Partial<EstadoPlanejamento>): EstadoPlanejamento {
@@ -107,16 +115,72 @@ describe("system design disponível", () => {
     assert.equal(modoAlternativoQueMede("live_coding", "uso_ia"), "system_design");
   });
 
-  it("pedido de system design com o formato disponível não recebe aviso de indisponível", () => {
+  it("pedido de system design com o formato disponível não recebe aviso de indisponível (trava real)", () => {
+    // Sem `formatoIndisponivelPedido`: o planejador lê a trava de verdade.
     const passo = proximoPasso(
       estado({
         focus: [{ area: "tecnico", weight: 1 }],
         mode: "live_coding",
-        formatoIndisponivelPedido: false,
         sinais: { pediu_system_design: 1 },
       }),
     );
     assert.notEqual(passo.tipo, "informar_formato_indisponivel");
+  });
+
+  it("pedido de system design em live coding vira troca; já em system design ou sem pedido, nada", () => {
+    assert.equal(trocaPedida({ pediu_system_design: 1 }, "live_coding"), "system_design");
+    assert.equal(trocaPedida({ pediu_system_design: 1 }, "system_design"), undefined);
+    assert.equal(trocaPedida({ pediu_system_design: 0.2 }, "live_coding"), undefined);
+    assert.equal(trocaPedida({}, "live_coding"), undefined);
+  });
+
+  it("depois da troca, a próxima pergunta de aprofundamento confirma o formato", () => {
+    const passo = proximoPasso(
+      estado({
+        focus: [{ area: "escala_produto", weight: 1 }],
+        mode: "system_design",
+        modoEscolhido: "system_design",
+        trocaPendente: "system_design",
+      }),
+    );
+    assert.deepEqual(passo, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial", confirmaTroca: "system_design" });
+  });
+});
+
+describe("troca para system design: do rascunho ao plano do quadro", () => {
+  const rascunho = (extra: Partial<Rascunho> = {}): Rascunho =>
+    Rascunho.parse({
+      mode: "live_coding",
+      roleTitle: "Engenheiro(a) de Software Sênior — Backend",
+      seniority: "senior",
+      focus: [
+        { area: "tecnico", weight: 0.5 },
+        { area: "uso_ia", weight: 0.5 },
+      ],
+      criteria: criteriosIniciais("live_coding", ["tecnico"]),
+      confirmado: { mode: false, seniority: true, focus: false },
+      pendencias: [],
+      ...extra,
+    });
+
+  it("troca escolhida para medir uso de IA: plano em system design com o chatbot de IA", () => {
+    const r = aplicarDecisoesTradeoff(rascunho(), { uso_ia: "trocou" }, "system_design");
+    assert.equal(r.mode, "system_design");
+    assert.ok(r.criteria.every((c) => CATALOGO.system_design.some((x) => x.id === c.id)), "critérios do catálogo de system design");
+    const final = paraInterviewConfig(r);
+    assert.ok(final.ok, final.ok ? "" : final.erros.join("; "));
+    assert.equal(final.config.mode, "system_design");
+    assert.equal(final.config.problemId, "chatbot-atendimento-ia");
+  });
+
+  it("sem IA no foco, o problema segue o domínio da vaga", () => {
+    const r = mudarModo(
+      rascunho({ focus: [{ area: "escala_produto", weight: 1 }], jobDescription: "Time de pagamentos: Pix e transferências." }),
+      "system_design",
+    );
+    const final = paraInterviewConfig(r);
+    assert.ok(final.ok, final.ok ? "" : final.erros.join("; "));
+    assert.equal(final.config.problemId, "pagamentos-instantaneos");
   });
 });
 

@@ -6,7 +6,8 @@
  *  - cada área recebe no máximo uma pergunta de aprofundamento, e não se pergunta de novo por resposta curta;
  *  - área que ela já tratou na fala (respondeu ou declarou central) não é perguntada de novo;
  *  - no máximo `MAX_APROFUNDAMENTOS` perguntas de aprofundamento por conversa, depois segue para o resumo;
- *  - pedido de system design, enquanto o formato não está disponível: aviso uma vez, e a conversa segue;
+ *  - pedido de system design: com o formato disponível, vira a troca escolhida (ver `trocaPedida`); com a trava
+ *    desligada (`SYSTEM_DESIGN_ATIVO = false`), aviso uma vez, e a conversa segue;
  *  - cada mudança de foco (e cada área ainda sem definição depois de uma mudança) é perguntada uma vez;
  *  - área que o formato atual não mede e que está em jogo: a Totti oferece a troca de formato, uma vez por área
  *    (só quando há outro formato disponível);
@@ -16,7 +17,7 @@
  *  - encerra só depois do resumo aprovado e sem pedido de mudança.
  */
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
-import { mede, modoAlternativoQueMede } from "./catalogo";
+import { mede, modoAlternativoQueMede, modoAtivo } from "./catalogo";
 import { areasEmJogo, LIMIAR } from "./cobertura";
 import type { DecisaoTradeoff, DecisoesTradeoff, Foco } from "./rascunho";
 
@@ -73,7 +74,7 @@ export type Passo =
       /** Próximo aprofundamento, emendado na mesma fala quando não há dúvida pendente. */
       proximo?: AprofundarPasso;
     }
-  /** Ela pediu system design e o formato não está disponível: a Totti avisa, uma vez, e segue em live coding. */
+  /** Ela pediu system design e o formato não está disponível (trava desligada): a Totti avisa, uma vez, e segue em live coding. */
   | { tipo: "informar_formato_indisponivel" }
   | { tipo: "resumo_final"; revisao?: boolean }
   | ResponderDuvidaPasso
@@ -113,7 +114,10 @@ export interface EstadoPlanejamento extends PlanoEstado {
   nivelEmAberto?: boolean;
   /** Áreas que ela já tratou na fala (respondeu ou declarou central): não ganham pergunta de aprofundamento. */
   areasFaladas?: FocusArea[];
-  /** O formato que ela pode pedir não está disponível nesta versão (ver `SYSTEM_DESIGN_ATIVO`). */
+  /**
+   * O formato que ela pode pedir não está disponível nesta versão. Sem ele, vale a trava de verdade
+   * (`!modoAtivo("system_design")`, ver `SYSTEM_DESIGN_ATIVO`); os testes passam o valor para simular a trava desligada.
+   */
   formatoIndisponivelPedido?: boolean;
   /**
    * Formato atual. Sem ele (testes antigos), nenhuma área é tratada como não medida e não há oferta de troca.
@@ -187,6 +191,16 @@ export function decidirTradeoff(sinais: Record<string, number>): DecisaoTradeoff
   return probabilidade >= LIMIAR ? melhor : "proxima_etapa";
 }
 
+/**
+ * Ela pediu system design na última fala, o formato está disponível e o plano ainda não está nele: devolve o formato
+ * para a troca (como uma troca escolhida na oferta). Sem pedido, com o formato travado ou já nele: undefined. Função pura.
+ */
+export function trocaPedida(sinais: Record<string, number>, modoAtual: InterviewMode): InterviewMode | undefined {
+  if ((sinais.pediu_system_design ?? 0) < LIMIAR) return undefined;
+  if (modoAtual === "system_design" || !modoAtivo("system_design")) return undefined;
+  return "system_design";
+}
+
 /** A oferta de troca que está em curso (a última, ou a que a dúvida retomou), se houver. */
 export function ofertaEmCurso(plano: PlanoEstado): OferecerTradeoffPasso | undefined {
   const passo = plano.ultimoPasso?.tipo === "responder_duvida" ? plano.ultimoPasso.retomar : plano.ultimoPasso;
@@ -235,7 +249,9 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   if (oferta) return oferta;
 
   // 1c. Pediu system design e o formato não está disponível: avisa uma vez, antes do resumo.
-  if (e.resumos === 0 && e.formatoIndisponivelPedido && sinal("pediu_system_design") >= LIMIAR && perguntas("formato_indisponivel") === 0) {
+  // Com o formato disponível, o pedido já virou troca antes do planejador (ver `trocaPedida`).
+  const indisponivel = e.formatoIndisponivelPedido ?? !modoAtivo("system_design");
+  if (e.resumos === 0 && indisponivel && sinal("pediu_system_design") >= LIMIAR && perguntas("formato_indisponivel") === 0) {
     return { tipo: "informar_formato_indisponivel" };
   }
 

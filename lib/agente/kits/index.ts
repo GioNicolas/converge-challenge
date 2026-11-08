@@ -22,6 +22,7 @@ const AVALIACOES: Record<string, { kitId: string; problemaId: string }> = {
   demo: { kitId: "system_design", problemaId: "encurtador_url" },
   "demo-chat": { kitId: "system_design", problemaId: "chat_tempo_real" },
   "demo-pagamentos": { kitId: "system_design", problemaId: "pagamentos_instantaneos" },
+  "demo-chatbot-ia": { kitId: "system_design", problemaId: "chatbot_atendimento_ia" },
   "demo-produto": { kitId: "design_produto", problemaId: "onboarding_60_mais" },
 };
 

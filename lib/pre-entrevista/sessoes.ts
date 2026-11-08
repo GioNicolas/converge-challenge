@@ -135,7 +135,7 @@ export function liberar(id: string): void {
  */
 export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number, competencias: ResultadoCompetencias): Sessao {
   // Com cobertura vazia, todos os tópicos obrigatórios das áreas do foco entram em `pendencias`.
-  // O formato que não está disponível vira live coding; a classificação original segue no log (ver `classificacaoDoFormatoAtivo`).
+  // Com a trava desligada, formato indisponível vira live coding; a classificação original segue no log (ver `classificacaoDoFormatoAtivo`).
   const classificacaoUsada = classificacaoDoFormatoAtivo(classificacao);
   const rascunho = aplicarCobertura(criarRascunho(vaga, classificacaoUsada), {});
   const sessao: Sessao = {
@@ -322,7 +322,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     }
 
     etapa = "cobertura";
-    // O formato que não está disponível nesta versão nunca entra no rascunho, nem pelo extrator.
+    // Com a trava de system design desligada (`SYSTEM_DESIGN_ATIVO = false`), o formato nunca entra no rascunho, nem pelo extrator.
     const extraido = rascunhoNoFormatoAtivo(ext.rascunho);
     const cob = await avaliarCobertura(extraido, transcricao, { ultimaFalaAgente: ultimaFalaDoAgente(transcricao) });
     const faltando = cob.faltando.map((t) => t.id);

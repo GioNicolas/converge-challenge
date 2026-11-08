@@ -163,7 +163,7 @@ export function mudarModo(r: Rascunho, modo: InterviewMode): Rascunho {
   return { ...r, mode: modo, criteria, problemId: undefined };
 }
 
-/** Formato que não está disponível nesta versão (ver `SYSTEM_DESIGN_ATIVO`) volta para live coding. Função pura. */
+/** Formato desligado pela trava (`SYSTEM_DESIGN_ATIVO = false`) volta para live coding; com ela ligada, não muda nada. Função pura. */
 export function rascunhoNoFormatoAtivo(r: Rascunho): Rascunho {
   return modoAtivo(r.mode) ? r : mudarModo(r, "live_coding");
 }
@@ -253,7 +253,8 @@ function gerarId(): string {
  */
 function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil" | "medio" } {
   if (r.mode !== "live_coding") {
-    return { problemId: r.problemId ?? problemaPadrao(r.mode, r.focus.map((f) => f.area)) };
+    const textoDaVaga = `${r.roleTitle}\n${r.jobDescription ?? ""}`;
+    return { problemId: r.problemId ?? problemaPadrao(r.mode, r.focus.map((f) => f.area), textoDaVaga) };
   }
   if (r.problemId) return { problemId: r.problemId, difficulty: problems[r.problemId]?.difficulty };
   const escolhida = selecionarProblema({ seniority: r.seniority, focus: r.focus, semente: r.roleTitle });

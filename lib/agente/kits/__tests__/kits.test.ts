@@ -45,7 +45,7 @@ test("fichas, sinais, armadilhas e perguntas não são vazios", () => {
 test("modos de leitura e problemas por kit", () => {
   assert.equal(obterKit("system_design")!.modoLeitura, "grafo");
   assert.equal(obterKit("design_produto")!.modoLeitura, "visual");
-  assert.equal(obterKit("system_design")!.problemas.length, 3);
+  assert.equal(obterKit("system_design")!.problemas.length, 4);
   assert.equal(obterKit("inexistente"), undefined);
   assert.equal(obterKit("__proto__"), undefined);
   assert.equal(obterProblema("system_design", "chat_tempo_real")?.titulo, "Chat em tempo real");
@@ -57,6 +57,7 @@ test("resolverAvaliacao", async () => {
     demo: ["system_design", "encurtador_url"],
     "demo-chat": ["system_design", "chat_tempo_real"],
     "demo-pagamentos": ["system_design", "pagamentos_instantaneos"],
+    "demo-chatbot-ia": ["system_design", "chatbot_atendimento_ia"],
     "demo-produto": ["design_produto", "onboarding_60_mais"],
   };
   for (const [id, [kitId, problemaId]] of Object.entries(casos)) {

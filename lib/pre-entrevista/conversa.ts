@@ -637,7 +637,7 @@ export function contarFrases(texto: string): number {
   return texto.split(/[.!?]+/).filter((s) => s.trim()).length;
 }
 
-/** Aviso de que system design não está disponível: fala fixa, sem modelo (ver `SYSTEM_DESIGN_ATIVO`). */
+/** Aviso de que system design não está disponível: fala fixa, sem modelo. Só com a trava desligada (ver `SYSTEM_DESIGN_ATIVO`). */
 export function falaFormatoIndisponivel(modo: Rascunho["mode"]): string {
   return `System design ainda não está disponível nesta versão, então a entrevista segue em ${FORMATO_CURTO[modo]}. Prefere seguir assim ou mudar alguma coisa?`;
 }
