@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import "../tema-recrutador.css";
+import TemaRecrutador from "@/components/TemaRecrutador";
 
 export const metadata: Metadata = {
   title: "Como funciona · Converge",
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  return <div className="tema-recrutador min-h-dvh">{children}</div>;
+  return <TemaRecrutador>{children}</TemaRecrutador>;
 }

@@ -3,15 +3,18 @@
 // Onboarding do recrutador: a primeira tela antes do painel de vagas. Explica, em uma página só, o
 // caminho de uma vaga com o Totti e deixa claro quanto fica com o recrutador (pouco) e quanto fica com
 // o Totti (o resto). Mesmo tema do workspace: papel e tinta, cartões, pílula preta para a ação.
+// Ao abrir, grava um cookie: a partir daí a raiz do site vai direto para /vagas (ver app/page.tsx).
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
-import { motion } from "motion/react";
-import { ArrowRight, CalendarCheck, FileText, MessageSquare, Mic, ScrollText, Send } from "lucide-react";
-import type { ReactNode } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { ArrowRight, CalendarCheck, ClipboardCheck, FileText, FileSearch, MessageSquare, Mic, ScrollText, Send } from "lucide-react";
 import { curvaSuave } from "@/lib/design/motion";
+import { COOKIE_ONBOARDING } from "@/lib/vagas/onboarding";
 import Marca from "./Marca";
 
 type Quem = "voce" | "totti";
-type Passo = { quem: Quem; titulo: string; texto: string; icone: ReactNode };
+/** `resumo` é a frase curta que entra no cartão "Fica com você" / "Fica com o Totti". */
+type Passo = { quem: Quem; titulo: string; texto: string; resumo: string; icone: ReactNode };
 
 const ICONE = { size: 17, strokeWidth: 1.75 } as const;
 
@@ -20,48 +23,77 @@ const PASSOS: Passo[] = [
     quem: "voce",
     titulo: "Cole a descrição da vaga",
     texto: "Texto ou documento (PDF, TXT, Markdown). Não precisa formatar nada.",
+    resumo: "Dizer o que a vaga precisa",
     icone: <FileText {...ICONE} />,
   },
   {
     quem: "totti",
     titulo: "O Totti lê e sugere o formato",
     texto: "Entende o cargo e a senioridade e propõe a entrevista certa: código na IDE ou system design no quadro.",
+    resumo: "Ler a vaga e sugerir o formato",
     icone: <ScrollText {...ICONE} />,
   },
   {
     quem: "voce",
     titulo: "Uma conversa rápida com o Totti",
     texto: "Ele pergunta o que importa para o time e vocês combinam o foco e os critérios de avaliação.",
+    resumo: "Combinar o foco e os critérios",
     icone: <MessageSquare {...ICONE} />,
   },
   {
     quem: "voce",
     titulo: "Confira o plano e publique",
-    texto: "O plano chega pronto. Ajuste o que quiser e publique: os convites saem sozinhos para os inscritos.",
+    texto: "O plano chega pronto. Ajuste o que quiser e publique com um clique.",
+    resumo: "Aprovar o plano da entrevista",
     icone: <Send {...ICONE} />,
   },
   {
     quem: "totti",
+    titulo: "Os convites saem sozinhos",
+    texto: "Cada inscrito recebe o convite por e-mail e escolhe o próprio horário. Você não monta agenda.",
+    resumo: "Enviar convites e cuidar da agenda",
+    icone: <CalendarCheck {...ICONE} />,
+  },
+  {
+    quem: "totti",
     titulo: "O Totti conduz as entrevistas",
-    texto: "Cada candidato agenda o próprio horário e faz a entrevista por voz, com o Totti acompanhando o código ou o quadro.",
+    texto: "Conversa com cada candidato por voz e acompanha o código ou o quadro enquanto ele resolve o problema.",
+    resumo: "Conduzir cada entrevista técnica",
     icone: <Mic {...ICONE} />,
   },
   {
+    quem: "totti",
+    titulo: "O Totti escreve o relatório",
+    texto: "Cada entrevista vira um relatório com o que o candidato fez, como raciocinou e as evidências.",
+    resumo: "Escrever o relatório de cada entrevista",
+    icone: <FileSearch {...ICONE} />,
+  },
+  {
     quem: "voce",
-    titulo: "Leia os escores e decida",
-    texto: "Cada entrevista vira um relatório com escore e evidências. Você só compara e escolhe quem segue.",
-    icone: <CalendarCheck {...ICONE} />,
+    titulo: "Leia os relatórios e decida",
+    texto: "Você compara os candidatos e escolhe quem segue no processo.",
+    resumo: "Escolher quem segue no processo",
+    icone: <ClipboardCheck {...ICONE} />,
   },
 ];
 
-const entrar = (atraso: number) => ({
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.42, delay: atraso, ease: curvaSuave },
-});
+const DOS = (quem: Quem) => PASSOS.filter((p) => p.quem === quem);
 
 export default function Onboarding() {
-  const seus = PASSOS.filter((p) => p.quem === "voce").length;
+  const reduzir = useReducedMotion() ?? false;
+  // Com "reduzir movimento", os blocos só aparecem, sem deslizar nem entrar em sequência.
+  const entrar = (atraso: number) =>
+    reduzir
+      ? {}
+      : {
+          initial: { opacity: 0, y: 10 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: 0.42, delay: atraso, ease: curvaSuave },
+        };
+
+  useEffect(() => {
+    document.cookie = `${COOKIE_ONBOARDING}=1; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+  }, []);
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -75,7 +107,9 @@ export default function Onboarding() {
       <main className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-14 px-5 pt-8 pb-20 md:px-10 md:pt-14">
         {/* Abertura */}
         <motion.section {...entrar(0)} className="flex flex-col gap-5">
-          <span className="rotulo-neutro !self-start">Como funciona</span>
+          <div>
+            <span className="rotulo-neutro">Como funciona</span>
+          </div>
           <h1 className="titulo-display text-[40px] text-texto md:text-[52px]">
             Você descreve a vaga.
             <br />
@@ -83,7 +117,7 @@ export default function Onboarding() {
           </h1>
           <p className="max-w-[560px] text-[16px] leading-[1.55] text-texto-suave">
             O Totti é o entrevistador técnico da Converge. Ele monta o plano com você, conversa com cada candidato
-            por voz e entrega um relatório pronto para decidir. Do seu lado, são só {seus} passos curtos.
+            por voz e entrega um relatório pronto para decidir. Do seu lado, são só {DOS("voce").length} passos curtos.
           </p>
         </motion.section>
 
@@ -93,34 +127,29 @@ export default function Onboarding() {
             <h2 id="passos" className="text-[15px] font-semibold tracking-[-0.015em] text-texto">
               O caminho de uma vaga
             </h2>
-            <Legenda />
+            <span className="flex items-center gap-3 text-[12.5px] text-texto-suave">
+              <span className="flex items-center gap-1.5">
+                <Ponto quem="voce" /> Você
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Ponto quem="totti" /> Totti
+              </span>
+            </span>
           </motion.div>
 
           <ol className="cartao flex flex-col">
             {PASSOS.map((p, i) => (
-              <motion.li key={p.titulo} {...entrar(0.12 + i * 0.05)} className="linha-lista">
+              <motion.li key={p.titulo} {...entrar(0.12 + i * 0.04)} className="linha-lista">
                 <PassoLinha passo={p} n={i + 1} />
               </motion.li>
             ))}
           </ol>
         </section>
 
-        {/* Quem faz o quê */}
+        {/* Quem faz o quê: sai da mesma lista de passos, para nunca divergir dela */}
         <motion.section {...entrar(0.5)} className="grid gap-4 md:grid-cols-2">
-          <Coluna
-            titulo="Fica com você"
-            itens={["Dizer o que a vaga precisa", "Aprovar o plano da entrevista", "Escolher quem segue no processo"]}
-            destaque
-          />
-          <Coluna
-            titulo="Fica com o Totti"
-            itens={[
-              "Montar o plano e os critérios",
-              "Enviar convites e cuidar da agenda",
-              "Conduzir cada entrevista técnica",
-              "Escrever o relatório com escore",
-            ]}
-          />
+          <Coluna quem="voce" titulo="Fica com você" />
+          <Coluna quem="totti" titulo="Fica com o Totti" />
         </motion.section>
 
         {/* Ação */}
@@ -177,30 +206,27 @@ function PassoLinha({ passo, n }: { passo: Passo; n: number }) {
   );
 }
 
-function Legenda() {
+/** A marca de quem faz: preto cheio para você, cinza com traço para o Totti. */
+function Ponto({ quem }: { quem: Quem }) {
   return (
-    <span className="flex items-center gap-3 text-[12.5px] text-texto-suave">
-      <span className="flex items-center gap-1.5">
-        <span className="size-2 rounded-full bg-texto" aria-hidden /> Você
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="size-2 rounded-full bg-superficie-2 ring-1 ring-texto/15" aria-hidden /> Totti
-      </span>
-    </span>
+    <span
+      className={`size-2 rounded-full ${quem === "voce" ? "bg-texto" : "bg-superficie-2 ring-1 ring-texto/15"}`}
+      aria-hidden
+    />
   );
 }
 
-function Coluna({ titulo, itens, destaque }: { titulo: string; itens: string[]; destaque?: boolean }) {
+function Coluna({ quem, titulo }: { quem: Quem; titulo: string }) {
   return (
     <div className="cartao flex flex-col gap-3 px-6 py-5">
       <span className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.015em] text-texto">
-        <span className={`size-2 rounded-full ${destaque ? "bg-texto" : "bg-superficie-2 ring-1 ring-texto/15"}`} aria-hidden />
+        <Ponto quem={quem} />
         {titulo}
       </span>
       <ul className="flex flex-col gap-2">
-        {itens.map((t) => (
-          <li key={t} className="text-[14px] leading-[1.45] text-texto-suave">
-            {t}
+        {DOS(quem).map((p) => (
+          <li key={p.titulo} className="text-[14px] leading-[1.45] text-texto-suave">
+            {p.resumo}
           </li>
         ))}
       </ul>
