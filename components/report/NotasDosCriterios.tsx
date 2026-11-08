@@ -2,6 +2,7 @@
 
 // As notas dos critérios em barras de 4 partes: dá para comparar de relance. Clicar abre as provas daquele critério.
 import { ChevronRight } from "lucide-react";
+import AprendidoComOTime, { type RegraNoCriterio } from "@/components/squad/AprendidoComOTime";
 
 export interface NotaCriterio {
   id: string;
@@ -10,6 +11,8 @@ export interface NotaCriterio {
   nota: number | null;
   /** Índices das provas no painel de momentos, em ordem de tempo. */
   provas: number[];
+  /** Regras da squad que pesaram neste critério: aparecem embaixo da linha ("critério aprendido com o time"). */
+  regras?: RegraNoCriterio[];
 }
 
 type Props = {
@@ -71,6 +74,12 @@ export default function NotasDosCriterios({ titulo, subtitulo, notas, onAbrir }:
                 </button>
               ) : (
                 <div className={grade}>{conteudo}</div>
+              )}
+              {n.regras && n.regras.length > 0 && (
+                // No desktop, alinhado com a barra (15rem do nome + 1.25rem de espaço).
+                <div className="pb-3 sm:pl-[16.25rem]">
+                  <AprendidoComOTime regras={n.regras} />
+                </div>
               )}
             </li>
           );
