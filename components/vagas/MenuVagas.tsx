@@ -9,7 +9,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronRight } from "lucide-react";
 import {
-  ETAPAS_VAGA,
+  etapasDa,
   NOME_ETAPA,
   contagemDa,
   novosDa,
@@ -110,7 +110,7 @@ function ItemVaga({
             transition={{ duration: 0.24, ease: curvaSuave }}
             className="ml-[15px] overflow-hidden border-l border-borda"
           >
-            {ETAPAS_VAGA.map((etapa) => {
+            {etapasDa(vaga).map((etapa) => {
               const ativo = etapa === etapaAtual;
               const n = contagemDa(vaga, etapa);
               return (
