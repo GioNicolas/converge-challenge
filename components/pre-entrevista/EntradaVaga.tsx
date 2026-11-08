@@ -3,6 +3,7 @@ import TituloRevelado from "@/components/totti/TituloRevelado";
 
 // Nova vaga: uma lista única, de cima para baixo — 01 Cargo, 02 Descrição (texto ou documento), 03 Contexto.
 // O documento (PDF, TXT, Markdown) é lido no navegador: o primeiro preenche a descrição, os outros viram contexto.
+// Abaixo do título, exemplos clicáveis preenchem os três campos; clicar em outro troca o exemplo.
 import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, Lock, Paperclip } from "lucide-react";
@@ -25,6 +26,17 @@ type Props = {
   /** Link de volta, mostrado acima do título. */
   voltar?: ReactNode;
 };
+
+/** Nome curto de cada vaga de exemplo, na ordem em que aparecem os botões. */
+const EXEMPLOS: { id: string; nome: string }[] = [
+  { id: "backend-senior-pagamentos", nome: "Backend sênior · Pagamentos" },
+  { id: "frontend-junior", nome: "Frontend júnior" },
+  { id: "fullstack-startup", nome: "Full stack · Startup" },
+  { id: "ia-pleno", nome: "IA pleno" },
+  { id: "tech-lead-mobile", nome: "Tech lead mobile" },
+  { id: "staff-plataforma", nome: "Staff · Plataforma" },
+  { id: "estagio-dados", nome: "Estágio em dados" },
+];
 
 const moldura =
   "rounded-controle border border-borda bg-fundo transition-[border-color,box-shadow] duration-150 hover:border-texto/25 focus-within:border-texto focus-within:shadow-[0_0_0_3px_rgb(17_17_17/0.06)]";
@@ -104,10 +116,11 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
     if (e.dataTransfer.files.length) void adicionar(e.dataTransfer.files);
   }
 
-  function usarExemplo() {
+  function usarExemplo(id: string) {
+    const exemplo = VAGAS.find((v) => v.id === id);
+    if (!exemplo) return;
     ditadoDescricao.cancelar();
     ditadoContexto.cancelar();
-    const exemplo = VAGAS.find((v) => v.id === "backend-senior-pagamentos") ?? VAGAS[0];
     setCargo(exemplo.roleTitle);
     setDescricao(exemplo.jobDescription);
     setContexto(exemplo.context ?? "");
@@ -122,6 +135,9 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
     if (!cargo.trim() || !descricao.trim() || ditando) return;
     onEnviar({ roleTitle: cargo.trim(), jobDescription: descricao.trim(), context: contextoFinal || undefined });
   }
+
+  // O exemplo em uso é o que bate com os campos; editar qualquer um deles o desmarca.
+  const exemploAtual = VAGAS.find((v) => v.roleTitle === cargo && v.jobDescription === descricao && (v.context ?? "") === contexto)?.id;
 
   const pronto = cargo.trim() && descricao.trim() && lendo === 0 && !ditando;
   const falta = !cargo.trim() ? "Falta o cargo" : !descricao.trim() ? "Falta a descrição" : lendo > 0 ? "Lendo o documento…" : null;
@@ -142,6 +158,29 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
             <TituloRevelado texto="Nova vaga" />
           </h1>
           <p className="text-[16px] text-texto-suave">Cole a descrição. O Totti cuida do resto.</p>
+        </div>
+        <div className="flex flex-col gap-2.5">
+          <span className="text-[13px] text-texto-suave">Ou comece de um exemplo e troque quando quiser:</span>
+          <div className="flex flex-wrap gap-2">
+            {EXEMPLOS.map((e) => {
+              const ativo = exemploAtual === e.id;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => usarExemplo(e.id)}
+                  aria-pressed={ativo}
+                  className={`rounded-full border px-3 py-1.5 text-[13px] transition-colors duration-150 ${
+                    ativo
+                      ? "border-texto bg-texto text-fundo"
+                      : "border-borda bg-superficie text-texto-suave hover:border-texto/30 hover:text-texto"
+                  }`}
+                >
+                  {e.nome}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -240,24 +279,15 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
             <Lock size={12} strokeWidth={1.75} />
             Nada é publicado antes da sua revisão.
           </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={usarExemplo}
-              className="rounded-controle px-3.5 py-2 text-[14px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
-            >
-              Usar um exemplo
-            </button>
-            <button
-              type="submit"
-              disabled={!pronto}
-              title={falta ?? undefined}
-              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-sobre-marca transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Começar com o Totti
-              <ArrowRight size={15} strokeWidth={1.75} />
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={!pronto}
+            title={falta ?? undefined}
+            className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-sobre-marca transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Começar com o Totti
+            <ArrowRight size={15} strokeWidth={1.75} />
+          </button>
         </div>
       </div>
 
