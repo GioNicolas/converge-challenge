@@ -1,12 +1,13 @@
 "use client";
 
 // O plano da entrevista ao lado da conversa, quando o Totti a encerra. É o único lugar da tela que diz o que
-// está acontecendo: enquanto a extração em segundo plano junta o que foi combinado, o status diz "montando" e
-// o que ainda não foi confirmado aparece como esqueleto; quando termina, o mesmo cartão traz "Revisar o plano"
-// (o botão do cabeçalho voa até aqui, mesmo `layoutId`). Sem porcentagem: o Totti pode encerrar sem cobrir
-// todo tópico, e um "50%" parado parecia travado. A ordem das seções é a da revisão (RevisaoPlano).
+// está acontecendo, então o carregamento tem de ser óbvio: enquanto a extração em segundo plano junta o que foi
+// combinado, uma barra corre no topo, o título diz "Montando o plano…" com a lista do que falta (cada item gira
+// até virar ✓) e o botão do rodapé já aparece, girando, no lugar onde vai estar "Revisar e publicar".
+// Sem porcentagem: o Totti pode encerrar sem cobrir todo tópico, e um "50%" parado parecia travado.
+// A ordem das seções é a da revisão (RevisaoPlano).
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import type { FocusArea } from "@/lib/contracts";
 import { duracaoDoRascunho, type Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { curvaSuave } from "@/lib/design/motion";
@@ -38,6 +39,12 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
     { rotulo: "Nível", valor: NOME_SENIORIDADE[rascunho.seniority], ok: rascunho.confirmado.seniority },
     { rotulo: "Duração", valor: `${duracaoDoRascunho(rascunho)} min`, ok: true },
   ];
+  // O que o Totti ainda está juntando, na ordem das seções abaixo.
+  const etapas = [
+    { rotulo: "Formato e nível", feito: rascunho.confirmado.mode && rascunho.confirmado.seniority },
+    { rotulo: "O que mais pesa", feito: foco.length > 0 },
+    { rotulo: "Critérios de avaliação", feito: criterios.length > 0 },
+  ];
 
   return (
     <aside
@@ -45,9 +52,36 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
       aria-busy={!pronto}
       className="flex min-h-0 flex-col overflow-hidden rounded-[28px] bg-superficie shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_50px_-30px_rgb(28_24_18/0.35)]"
     >
-      <header className="flex flex-col gap-2 px-6 pt-6 pb-5">
+      {/* A barra que corre enquanto monta: o sinal mais claro de que algo está acontecendo. */}
+      <div aria-hidden className={`h-1 shrink-0 overflow-hidden transition-opacity duration-500 ${pronto ? "opacity-0" : "bg-texto/8"}`}>
+        {!pronto && <div className="h-full w-1/3 rounded-full bg-texto" style={{ animation: "carregar 1.4s var(--curva-suave) infinite" }} />}
+      </div>
+
+      <header className="flex flex-col gap-3 px-6 pt-5 pb-5">
         <Status pronto={pronto} />
-        <h2 className="titulo-display text-[28px] leading-tight">Plano da entrevista</h2>
+        <h2 className="titulo-display text-[28px] leading-tight">{pronto ? "Plano da entrevista" : "Montando o plano…"}</h2>
+        {!pronto && (
+          <>
+            <p className="text-[14px] leading-relaxed text-texto-suave">
+              O Totti está organizando o que vocês combinaram. Leva alguns segundos; depois é só revisar.
+            </p>
+            <ul className="flex flex-col gap-1.5 rounded-2xl bg-fundo px-4 py-3">
+              {etapas.map((e) => (
+                <li key={e.rotulo} className={`flex items-center gap-2.5 text-[14px] ${e.feito ? "text-texto" : "text-texto-suave"}`}>
+                  {e.feito ? (
+                    <span className="anim-surgir flex size-4 shrink-0 items-center justify-center rounded-full bg-texto text-texto-claro" aria-hidden>
+                      <Check />
+                    </span>
+                  ) : (
+                    <Loader2 size={16} className="shrink-0 animate-spin" aria-hidden />
+                  )}
+                  {e.rotulo}
+                  <span className="sr-only">{e.feito ? "(pronto)" : "(em andamento)"}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6">
@@ -150,14 +184,16 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
               </motion.span>
             </motion.button>
           ) : (
-            <motion.p
+            <motion.div
               key="montando"
+              role="status"
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2, ease: curvaSuave }}
-              className="w-full rounded-full bg-fundo px-5 py-3 text-center text-[14px] text-texto-suave"
+              className="flex w-full cursor-wait items-center justify-center gap-2 rounded-full bg-texto/75 px-5 py-3 text-[15px] font-medium text-texto-claro"
             >
-              O Totti está juntando formato, foco e critérios…
-            </motion.p>
+              <Loader2 size={16} className="animate-spin" aria-hidden />
+              Montando o plano…
+            </motion.div>
           )}
         </AnimatePresence>
         <button onClick={onContinuar} className="text-[13px] text-texto-suave underline-offset-4 hover:text-texto hover:underline">
@@ -168,15 +204,26 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
   );
 }
 
-/** Uma linha só: um ponto pulsando enquanto monta, um check quando fica pronto. */
+function Check() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 16 16">
+      <path d="M3.5 8.4 L6.6 11.3 L12.5 4.9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A etiqueta do topo: "Em andamento" com o ponto pulsando enquanto monta; "Pronto para revisar" com o check. */
 function Status({ pronto }: { pronto: boolean }) {
   return (
-    <span className="flex items-center gap-2 text-[13px] text-texto-suave" aria-live="polite">
+    <span
+      className={`inline-flex items-center gap-2 self-start rounded-full px-3 py-1 text-[13px] font-medium transition-colors duration-500 ${
+        pronto ? "bg-texto text-texto-claro" : "bg-fundo text-texto"
+      }`}
+      aria-live="polite"
+    >
       {pronto ? (
-        <span className="flex size-4 items-center justify-center rounded-full bg-texto text-texto-claro" aria-hidden>
-          <svg width="10" height="10" viewBox="0 0 16 16">
-            <path d="M3.5 8.4 L6.6 11.3 L12.5 4.9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+        <span className="anim-surgir flex size-4 items-center justify-center rounded-full bg-texto-claro text-texto" aria-hidden>
+          <Check />
         </span>
       ) : (
         <span className="relative flex size-4 items-center justify-center" aria-hidden>
@@ -184,7 +231,7 @@ function Status({ pronto }: { pronto: boolean }) {
           <span className="size-2 rounded-full bg-texto" />
         </span>
       )}
-      {pronto ? "Pronto para revisar" : "Montando o plano"}
+      {pronto ? "Pronto para revisar" : "Em andamento"}
     </span>
   );
 }
