@@ -542,13 +542,14 @@ export function useRecentes(): string[] {
 // Leitura para a tela: as etapas de uma vaga publicada e frases curtas sobre ela.
 // ---------------------------------------------------------------------------
 
-export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "contratacoes"] as const;
+export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "aprendizado", "contratacoes"] as const;
 export type EtapaVaga = (typeof ETAPAS_VAGA)[number];
 
 export const NOME_ETAPA: Record<EtapaVaga, string> = {
   plano: "Plano combinado",
   entrevistas: "Candidatos",
   escores: "Escores",
+  aprendizado: "O que o Totti aprendeu",
   contratacoes: "Contratações",
 };
 

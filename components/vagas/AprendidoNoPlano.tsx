@@ -26,7 +26,7 @@ function oQueMuda(r: RegraSquad): string {
   return frase.charAt(0).toUpperCase() + frase.slice(1);
 }
 
-export default function AprendidoNoPlano({ formato }: { formato: InterviewMode }) {
+export default function AprendidoNoPlano({ formato, verTudo = "/vagas/aprendizado" }: { formato: InterviewMode; verTudo?: string }) {
   const [memoria, setMemoria] = useState<VisaoMemoria | null>(null);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export default function AprendidoNoPlano({ formato }: { formato: InterviewMode }
           Aprendido com o time
           <span className="numero text-[13px] font-normal text-texto-suave">{regras.length}</span>
         </h2>
-        <Link href="/vagas/aprendizado" className="inline-flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto">
+        <Link href={verTudo} className="inline-flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto">
           Ver tudo
           <ArrowRight size={13} />
         </Link>

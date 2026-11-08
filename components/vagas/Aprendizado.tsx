@@ -55,7 +55,20 @@ function RastroDaMemoria({ ativas, carregando }: { ativas: number; carregando: b
   );
 }
 
+/** A página solta (/vagas/aprendizado), para os links que vêm do relatório. */
 export default function Aprendizado() {
+  return (
+    <Casca>
+      <MemoriaDaSquad />
+    </Casca>
+  );
+}
+
+/**
+ * A memória da squad. `embutido`: dentro da aba de uma vaga, que já tem o próprio título e as abas,
+ * então some o título grande e fica só a voz do Totti com a frase de apoio.
+ */
+export function MemoriaDaSquad({ embutido = false }: { embutido?: boolean }) {
   const [memoria, setMemoria] = useState<VisaoMemoria | null>(null);
   const [erro, setErro] = useState(false);
   /** Regras que acabaram de chegar pela simulação: ganham destaque na lista. */
@@ -83,98 +96,100 @@ export default function Aprendizado() {
   const ativas = memoria?.regras.filter((r) => r.ativa).length ?? 0;
 
   return (
-    <Casca>
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: curvaSuave }}
-        className="mx-auto flex max-w-[1120px] flex-col gap-10"
-      >
-        <header className="flex flex-col gap-2">
-          <span className="flex items-center gap-3">
-            <Perola estado={memoria ? "ocioso" : "pensando"} tamanho={28} />
-            <span className="font-mono text-[12.5px] text-texto-suave">
-              <RastroDaMemoria ativas={ativas} carregando={!memoria && !erro} />
-            </span>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: curvaSuave }}
+      className={`flex flex-col gap-10 ${embutido ? "" : "mx-auto max-w-[1120px]"}`}
+    >
+      <header className="flex flex-col gap-2">
+        <span className="flex items-center gap-3">
+          <Perola estado={memoria ? "ocioso" : "pensando"} tamanho={28} />
+          <span className="font-mono text-[12.5px] text-texto-suave">
+            <RastroDaMemoria ativas={ativas} carregando={!memoria && !erro} />
           </span>
+        </span>
+        {!embutido && (
           <h1 className="titulo-display text-[36px] text-texto sm:text-[44px]">
             <TituloRevelado texto="O que o Totti aprendeu" />
           </h1>
-          <p className="text-[15px] text-texto-suave">Cada decisão do time vira regra. Edite ou apague à vontade.</p>
-        </header>
-
-        {erro && !memoria && (
-          <div className="cartao flex items-center justify-between gap-4 p-5 text-[14px] text-texto">
-            Não consegui carregar a memória do time.
-            <button onClick={() => void carregar()} className="rounded-full bg-texto px-4 py-1.5 text-[13px] text-texto-claro">
-              Tentar de novo
-            </button>
-          </div>
         )}
+        <p className="text-[15px] text-texto-suave">
+          Cada decisão do time vira regra{embutido ? " e vale para todas as vagas da squad" : ""}. Edite ou apague à vontade.
+        </p>
+      </header>
 
-        {!memoria && !erro && <Esqueleto />}
+      {erro && !memoria && (
+        <div className="cartao flex items-center justify-between gap-4 p-5 text-[14px] text-texto">
+          Não consegui carregar a memória do time.
+          <button onClick={() => void carregar()} className="rounded-full bg-texto px-4 py-1.5 text-[13px] text-texto-claro">
+            Tentar de novo
+          </button>
+        </div>
+      )}
 
-        {memoria && (
-          <>
-            <Concordancia porVaga={memoria.concordancia.porVaga} />
+      {!memoria && !erro && <Esqueleto />}
 
-            {MODO_DEV && (
-              <Simulador
-                onAprendeu={(nova, ids) => {
-                  setMemoria(nova);
-                  setNovas(new Set(ids));
-                }}
-              />
-            )}
+      {memoria && (
+        <>
+          <Concordancia porVaga={memoria.concordancia.porVaga} />
 
-            <Secao
-              titulo="Critérios aprendidos"
-              detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
-              apoio=""
-            >
-              {memoria.regras.length === 0 ? (
-                <div className="cartao p-6 text-[14px] text-texto-suave">
-                  Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão, o Totti guarda aqui o critério
-                  técnico.
-                </div>
-              ) : (
-                <ul className="cartao overflow-hidden py-1">
-                  <AnimatePresence initial={false}>
-                    {memoria.regras.map((r) => (
-                      <LinhaRegra
-                        key={r.id}
-                        regra={r}
-                        nova={novas.has(r.id)}
-                        criterios={memoria.criterios}
-                        vagas={memoria.vagas}
-                        onMudou={trocarRegra}
-                        onApagou={tirarRegra}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </ul>
-              )}
-            </Secao>
+          {MODO_DEV && (
+            <Simulador
+              onAprendeu={(nova, ids) => {
+                setMemoria(nova);
+                setNovas(new Set(ids));
+              }}
+            />
+          )}
 
-            <Secao
-              titulo="O que o Totti ignorou"
-              detalhe={memoria.ignorados.length ? String(memoria.ignorados.length) : undefined}
-              apoio="Motivo não técnico nunca vira regra."
-            >
-              {memoria.ignorados.length === 0 ? (
-                <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado até agora.</div>
-              ) : (
-                <ul className="cartao overflow-hidden py-1">
-                  {memoria.ignorados.map((m) => (
-                    <LinhaIgnorado key={m.id} item={m} vagas={memoria.vagas} />
+          <Secao
+            titulo="Critérios aprendidos"
+            detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
+            apoio=""
+          >
+            {memoria.regras.length === 0 ? (
+              <div className="cartao p-6 text-[14px] text-texto-suave">
+                Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão, o Totti guarda aqui o critério
+                técnico.
+              </div>
+            ) : (
+              <ul className="cartao overflow-hidden py-1">
+                <AnimatePresence initial={false}>
+                  {memoria.regras.map((r) => (
+                    <LinhaRegra
+                      key={r.id}
+                      regra={r}
+                      nova={novas.has(r.id)}
+                      criterios={memoria.criterios}
+                      vagas={memoria.vagas}
+                      onMudou={trocarRegra}
+                      onApagou={tirarRegra}
+                    />
                   ))}
-                </ul>
-              )}
-            </Secao>
-          </>
-        )}
-      </motion.div>
-    </Casca>
+                </AnimatePresence>
+              </ul>
+            )}
+          </Secao>
+
+          <Secao
+            titulo="O que o Totti ignorou"
+            detalhe={memoria.ignorados.length ? String(memoria.ignorados.length) : undefined}
+            apoio="Motivo não técnico nunca vira regra."
+          >
+            {memoria.ignorados.length === 0 ? (
+              <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado até agora.</div>
+            ) : (
+              <ul className="cartao overflow-hidden py-1">
+                {memoria.ignorados.map((m) => (
+                  <LinhaIgnorado key={m.id} item={m} vagas={memoria.vagas} />
+                ))}
+              </ul>
+            )}
+          </Secao>
+        </>
+      )}
+    </motion.div>
   );
 }
 
