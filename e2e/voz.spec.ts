@@ -346,3 +346,42 @@ test("mão compõe gestos e traços livres, pode só falar e preserva o desenho 
   await page.getByRole("button", { name: "Abrir conversa" }).click();
   await expect(page.getByRole("button", { name: /^Ver no quadro:/ })).toHaveCount(2);
 });
+
+test("abrir o microfone enquanto o Totti prepara a voz cancela a fala, que não toca depois do ditado", async ({ page }) => {
+  await preparar(page);
+  let estado = estadoInicialDemo(VAGAS[0]);
+  await page.route("**/api/pre-entrevista/sessoes**", async (rota) => {
+    if (rota.request().method() === "POST" && rota.request().url().endsWith("/mensagem")) {
+      estado = responderDemo(estado, rota.request().postDataJSON().text);
+    }
+    await rota.fulfill({ json: estado });
+  });
+  // A síntese da primeira resposta fica presa até o teste soltar: o Totti fica "preparando" a voz.
+  let soltarSintese!: () => void;
+  const sintese = new Promise<void>((r) => { soltarSintese = r; });
+  let sinteses = 0;
+  await page.route("**/api/falar", async (rota) => {
+    sinteses++;
+    await sintese;
+    await rota.fallback();
+  });
+  await page.goto("/pre-entrevista/nova");
+  await page.getByRole("button", { name: "Usar um exemplo" }).click();
+  await page.getByRole("button", { name: "Começar com o Totti" }).click();
+  await expect.poll(() => sinteses, { timeout: 25000 }).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: "Interromper resposta falada" })).toBeVisible();
+
+  // O candidato fala por cima: o microfone assume o áudio e a fala em preparo é descartada.
+  await page.getByRole("button", { name: "Ditar por voz" }).click();
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await expect(page.getByRole("button", { name: "Interromper resposta falada" })).toBeHidden();
+  soltarSintese();
+  await page.waitForTimeout(2500);
+  expect(await falas(page)).toEqual([]);
+
+  // Terminou o ditado: a resposta velha não pode tocar agora.
+  await page.getByRole("button", { name: "Parar ditado" }).click();
+  await expect.poll(() => ouvindo(page)).toBe(false);
+  await page.waitForTimeout(2500);
+  expect(await falas(page)).toEqual([]);
+});
