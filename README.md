@@ -14,6 +14,7 @@ npm run dev
 - `lib/contracts.ts` — contratos compartilhados por todos os times. Mudou? Avisa todo mundo.
 - `lib/config/default.ts` — configuração padrão até a pré-entrevista ficar pronta.
 - `docs/` — contexto do projeto.
+- [Integração de voz](docs/voz-integracao.md) — cobertura, configuração de STT/TTS, validação e instruções para o merge.
 
 ## Branches
 

@@ -13,6 +13,11 @@ import type { Turno } from "@/lib/pre-entrevista/rascunho";
 import { ACEITOS, lerDocumento, type Documento } from "@/lib/pre-entrevista/tela/documentos";
 import { curvaSuave } from "@/lib/design/motion";
 import ListaDocumentos from "./ListaDocumentos";
+import { useTranscricao } from "@/lib/transcricao/useTranscricao";
+import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
+import { useVozAgente } from "@/lib/voz/useVozAgente";
+import ControleVoz from "@/components/voz/ControleVoz";
 
 /** Marca que separa a fala dos documentos anexados (ver `montarMensagem`). */
 const MARCA = "\n\n[Documento anexado: ";
@@ -33,27 +38,30 @@ function separar(mensagem: string) {
 type Props = {
   transcricao: Turno[];
   pensando: boolean;
+  bloqueada?: boolean;
+  pausarEntrada?: boolean;
   erro: string | null;
   onEnviar: (mensagem: string) => void;
 };
 
-export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }: Props) {
+export default function ConversaTotti({ transcricao, pensando, bloqueada = false, pausarEntrada = false, erro, onEnviar }: Props) {
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<Documento[]>([]);
   const [erroAnexo, setErroAnexo] = useState<string | null>(null);
   const [lendo, setLendo] = useState(false);
+  const ditado = useTranscricao({
+    bloqueada: pensando || lendo || bloqueada || pausarEntrada,
+    aoTexto: (fala) => setTexto((atual) => acrescentarFala(atual, fala)),
+  });
   const lista = useRef<HTMLDivElement>(null);
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletor = useRef<HTMLInputElement>(null);
 
-  const falasDaTotti = transcricao.filter((t) => t.role === "agente").length;
-  const [falando, setFalando] = useState(false);
-  useEffect(() => {
-    if (falasDaTotti === 0) return;
-    setFalando(true);
-    const t = setTimeout(() => setFalando(false), 2200);
-    return () => clearTimeout(t);
-  }, [falasDaTotti]);
+  const ultima = transcricao.at(-1);
+  const voz = useVozAgente({
+    ultimaFala: ultima?.role === "agente" ? { id: String(transcricao.length - 1), texto: ultima.text } : null,
+    bloqueada: pensando || bloqueada,
+  });
 
   const [digitando, setDigitando] = useState(false);
   useEffect(() => {
@@ -89,7 +97,8 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
 
   function enviar() {
     const t = texto.trim() || (anexos.length ? "Segue o documento." : "");
-    if (!t || pensando || lendo) return;
+    if (!t || pensando || lendo || bloqueada || pausarEntrada || ditado.ativa) return;
+    voz.parar();
     onEnviar(montarMensagem(t, anexos));
     setTexto("");
     setAnexos([]);
@@ -105,12 +114,15 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-padrao bg-superficie">
       <header className="flex items-center gap-3 border-b border-borda px-5 py-3">
-        <OndaDeVoz estado={digitando ? "pensando" : falando ? "falando" : "ouvindo"} tamanho={34} fundo="claro" />
+        <OndaDeVoz estado={digitando || voz.estado === "preparando" ? "pensando" : voz.estado === "falando" ? "falando" : "ouvindo"} tamanho={34} fundo="claro" />
         <div className="flex flex-1 items-baseline justify-between gap-3">
           <span className="text-[15px] text-texto">Totti</span>
-          <span className="rotulo text-texto-suave">{digitando ? "Digitando…" : "Conversa"}</span>
+          <span className="rotulo text-texto-suave">{pensando ? "Escrevendo…" : voz.estado === "falando" ? "Falando…" : "Conversa"}</span>
         </div>
       </header>
+      <div className="border-b border-borda px-3 py-1 text-texto-suave">
+        <ControleVoz voz={voz} texto={ultima?.role === "agente" ? ultima.text : undefined} disabled={pensando || bloqueada} />
+      </div>
 
       <div ref={lista} className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-6">
         <AnimatePresence initial={false}>
@@ -178,6 +190,7 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
           <ListaDocumentos documentos={anexos} onRemover={(id) => setAnexos((l) => l.filter((d) => d.id !== id))} compacto />
         )}
         {erroAnexo && <p className="text-[13px] text-perigo">{erroAnexo}</p>}
+        <EstadoDitado transcricao={ditado} />
         <div className="flex items-end gap-1.5 rounded-controle border border-borda bg-superficie-2 p-1.5 transition-colors duration-150 focus-within:border-texto/40 focus-within:bg-superficie">
           <button
             type="button"
@@ -202,6 +215,7 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
           <textarea
             ref={campo}
             value={texto}
+            readOnly={ditado.ativa}
             onChange={(e) => setTexto(e.target.value)}
             onKeyDown={aoTeclar}
             rows={1}
@@ -209,9 +223,10 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
             aria-label="Mensagem para o Totti"
             className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
+          <BotaoDitado transcricao={ditado} disabled={pensando || lendo || bloqueada || pausarEntrada} />
           <button
             onClick={enviar}
-            disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo}
+            disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo || bloqueada || ditado.ativa}
             aria-label="Enviar"
             className="flex size-8 shrink-0 items-center justify-center rounded-[3px] bg-texto text-superficie transition-[opacity,transform] duration-150 active:scale-90 disabled:opacity-25"
           >

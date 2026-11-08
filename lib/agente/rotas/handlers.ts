@@ -221,6 +221,10 @@ const EsquemaPerguntar = z.object({
   sessao_id: z.string().min(1).max(80),
   fase: EsquemaFase,
   texto: z.string().min(1).max(2000),
+  grafo: z.string().max(24000).optional(),
+  pergunta_ativa: z.string().max(2000).optional(),
+  requisitos: z.array(z.string().max(200)).max(30).optional(),
+  gestos_recentes: z.array(z.string().max(250)).max(6).optional(),
 });
 
 export async function perguntarHandler(req: Request, { params }: ParamsId): Promise<Response> {
@@ -238,7 +242,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
 
   const agora = ctx.agora();
   const { fase, texto } = corpo.dados;
-  let resposta = { responder: false, texto: "", requisito: null as string | null, concluiu: false };
+  let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "visual"> = { responder: false, texto: "", requisito: null, concluiu: false };
 
   if (ctx.llm) {
     const estado = sincronizarFase(sessao.estado, fase, agora);
@@ -246,14 +250,15 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       perguntar(
         { llm: ctx.llm, kit: alvo.kit, problema: alvo.problema },
         estado,
-        { fase, texto, sessao_id: id },
+        { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes },
         agora,
         AbortSignal.timeout(PRAZO_ANALISE_MS),
       ).catch(() => null),
       PRAZO_ANALISE_MS,
       null,
     );
-    if (r) resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu };
+    if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
+    resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu, ...(r.visual !== undefined ? { visual: r.visual } : {}) };
   }
 
   // Reaplica as falas sobre o estado mais recente (eventos podem ter mexido nele no meio do caminho).
@@ -264,7 +269,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   await ctx.repositorio.salvarEstado(id, novo);
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder });
 
-  return json({ responder: resposta.responder, texto: resposta.texto, requisito: resposta.requisito, concluiu: resposta.concluiu });
+  return json(resposta);
 }
 
 // ---------------------------------------------------------------------------------------------

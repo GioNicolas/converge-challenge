@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { criarEscutaTranscricao, type EstadoEscuta } from "../useTranscricao";
+import { ErroTokenTranscricao } from "../tokenTranscricao";
 import type { TrechoTranscrito } from "../transcricao";
-import { ErroHttp } from "../../sessao/servidor";
 
 const andar = () => new Promise<void>((resolver) => setImmediate(resolver));
 
@@ -141,22 +141,44 @@ test("Scribe só inicia quando ativo e envia PCM mono em blocos de 200 ms", asyn
   assert.equal(m.contextos[0].ganho.gain.value, 0);
 });
 
+test("ocultar a aba suspende envio de voz e retomar não duplica finais", async (t) => {
+  const pagina = { hidden: false };
+  globalFalso(t, "document", pagina);
+  const m = montar(t);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  pagina.hidden = true;
+  t.mock.timers.tick(200);
+  ws.mensagem({ message_type: "committed_transcript", text: "não gravar" });
+  assert.equal(m.estado()?.escutando, false);
+  assert.equal(m.trechos.some((t) => t.final), false);
+  pagina.hidden = false;
+  t.mock.timers.tick(200);
+  m.processar();
+  ws.mensagem({ message_type: "committed_transcript", text: "retomou" });
+  assert.equal(m.trechos.at(-1)?.texto, "retomou");
+});
+
 test("pausa mantém socket e contexto, envia silêncio e ignora transcrições atrasadas", async (t) => {
   const m = montar(t);
   m.controle.ativar(true);
   await andar();
   const ws = m.sockets[0];
   ws.iniciar();
+  m.processar();
   ws.mensagem({ message_type: "partial_transcript", text: "escala" });
   m.controle.ativar(false);
   assert.equal(m.estado()?.escutando, false);
   m.processar(1);
-  const audio = JSON.parse(ws.enviados[0]) as { audio_base_64: string };
+  const audio = JSON.parse(ws.enviados.at(-1)!) as { audio_base_64: string };
   assert.ok([...atob(audio.audio_base_64)].every((c) => c.charCodeAt(0) === 0));
   const antes = m.trechos.length;
   ws.mensagem({ message_type: "committed_transcript", text: "não deve sair" });
   assert.equal(m.trechos.length, antes);
   m.controle.ativar(true);
+  m.processar();
   ws.mensagem({ message_type: "partial_transcript", text: "qual a" });
   ws.mensagem({ message_type: "partial_transcript", text: "qual a escala" });
   ws.mensagem({ message_type: "committed_transcript", text: "Qual a escala?" });
@@ -242,6 +264,7 @@ test("limpeza fecha recursos próprios sem parar o stream compartilhado", async 
   m.controle.ativar(true);
   await andar();
   m.sockets[0].iniciar();
+  m.processar();
   m.sockets[0].mensagem({ message_type: "partial_transcript", text: "parcial" });
   const antes = m.trechos.length;
   m.controle.parar();
@@ -443,13 +466,12 @@ test("hipótese parcial retirada pelo navegador limpa a legenda sem criar final"
   assert.equal(m.trechos.filter((t) => t.final).length, 0);
 });
 
-test("recusa definitiva do servidor ao pedir token cai direto no navegador", async (t) => {
+test("erro permanente do token cai direto no navegador, sem retentativas", async (t) => {
   let chamadas = 0;
-  const m = montar(t, { obterToken: async () => { chamadas++; throw new ErroHttp("sem chave", 503); } });
+  const m = montar(t, { obterToken: async () => { chamadas++; throw new ErroTokenTranscricao("sem chave", true); } });
   m.controle.ativar(true);
   await andar();
   assert.equal(chamadas, 1);
-  assert.equal(m.sockets.length, 0);
   assert.equal(m.estado()?.motor, "navegador");
 });
 
@@ -470,4 +492,24 @@ test("pausa longa fecha o socket e retomar pede token novo", async (t) => {
   m.controle.ativar(true);
   await andar();
   assert.equal(m.tokens(), 2);
+});
+
+test("frases que o Scribe inventa no silêncio são descartadas; fala de verdade passa", async (t) => {
+  const m = montar(t);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  m.processar(0.002, 6); // ruído de fundo, abaixo do limiar de voz
+  ws.mensagem({ message_type: "partial_transcript", text: "Redução?" });
+  ws.mensagem({ message_type: "committed_transcript", text: "Eu esqueci o que vocês vão perguntar. Redução?" });
+  assert.equal(m.trechos.some((t) => t.texto.includes("Redução")), false);
+  m.processar(0.002, 6);
+  m.processar(0.2, 3); // ~250 ms de voz
+  ws.mensagem({ message_type: "committed_transcript", text: "Quantos acessos por dia?" });
+  assert.equal(m.trechos.at(-1)?.texto, "Quantos acessos por dia?");
+  assert.equal(m.trechos.at(-1)?.final, true);
+  // A voz conta por trecho: o próximo começa do zero.
+  ws.mensagem({ message_type: "committed_transcript", text: "Obrigado." });
+  assert.equal(m.trechos.at(-1)?.texto, "Quantos acessos por dia?");
 });

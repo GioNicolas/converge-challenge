@@ -4,6 +4,7 @@
 // O quadro valida o que recebe, então qualquer mudança aqui precisa ser combinada com o Giorgio
 // e refletida nos dois lados. Não altere o contrato por conta própria.
 import { z } from "zod";
+import { EsquemaVisualOpcional } from "../../presenca/acoesVisuais";
 
 export const FASES = [
   "AGUARDANDO",
@@ -37,6 +38,7 @@ export const EsquemaPedidoAnalise = z.object({
   parado_ha_s: z.number().min(0).max(86_400).optional(),
   /** Requisitos já combinados e escritos no quadro. */
   requisitos: z.array(z.string().max(200)).max(30).optional(),
+  gestos_recentes: z.array(z.string().max(250)).max(6).optional(),
 });
 export type PedidoAnalise = z.infer<typeof EsquemaPedidoAnalise>;
 
@@ -60,6 +62,7 @@ export const EsquemaRespostaAnalise = z.object({
   nota: z.string().nullable().default(null),
   /** IDs curtos do grafo que o agente circula. */
   elementos: z.array(z.string()).default([]),
+  visual: EsquemaVisualOpcional,
   degrau: z.number().nullable().default(null),
   observacoes: z.array(EsquemaObservacao).default([]),
   /**

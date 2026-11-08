@@ -1,8 +1,8 @@
 "use client";
 
 // Chamada em andamento, sempre minimizada numa pílula (estilo Meet): o agente "vivo" como uma onda de voz,
-// o tempo e o microfone. Por enquanto a conversa é só por texto: o microfone só mexe a onda (nada é
-// transcrito nem analisado). Quando o agente tem uma pergunta, a pílula mostra o balão; clicar abre a
+// o tempo e o microfone. A fala é transcrita para a conversa e para a linha do tempo.
+// Quando o agente tem uma pergunta, a pílula mostra o balão; clicar abre a
 // conversa na barra lateral.
 // Arrasta e encaixa no canto mais próximo, com mola.
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -34,6 +34,20 @@ function resposta(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
 const GRAFO = "COMPONENTES\n- [r1] Cliente (retângulo)\n- [e1] Postgres (elipse)\nCONEXÕES\n- [s1] Cliente → Postgres";
 const IDS = extrairIdsDoGrafo(GRAFO);
 
+describe("gestos da análise", () => {
+  it("preserva gestos válidos e retira uma comparação com alvo inexistente", () => {
+    const r = filtrarResposta(estadoEm("APROFUNDAMENTO"), resposta({ visual: [
+      { tipo: "percorrer", alvos: ["r1", "s1", "e1"] }, { tipo: "comparar", alvos: ["r1", "inventado"] },
+    ] }), IDS, AGORA);
+    assert.deepEqual(r.visual, [{ tipo: "percorrer", alvos: ["r1", "s1", "e1"] }]);
+  });
+  it("política que adia a intervenção também silencia seus desenhos", () => {
+    const r = filtrarResposta(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), resposta({ visual: [{ tipo: "circular", alvo: "e1" }] }), IDS, AGORA);
+    assert.equal(r.status, "ok");
+    assert.deepEqual(r.visual, []);
+  });
+});
+
 describe("statusPermitido: matriz fase x status", () => {
   const esperado: Record<Fase, Record<string, boolean>> = {
     AGUARDANDO: { ok: true, duvida: false, redirecionar: false, dica: false },

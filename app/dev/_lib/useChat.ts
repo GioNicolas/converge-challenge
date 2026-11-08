@@ -7,6 +7,8 @@ interface ChatDeps {
   sessionId: string | null;
   sendEvent: (input: EventInput) => Promise<void>;
   applyCommands: (commands: EditorCommand[]) => void;
+  onAgentReply?: (texto: string) => Promise<void>;
+  onCancelReply?: () => void;
 }
 
 /** Quanto tempo a última fala do entrevistador fica na tela antes do painel fechar. */
@@ -19,7 +21,7 @@ function errorText(err: unknown): string {
 /**
  * Painel de conversa por texto. `epochRef` invalida respostas que chegam depois de fechar o chat.
  */
-export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
+export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onCancelReply }: ChatDeps) {
   const [open, setOpen] = useState(false);
   const [blipId, setBlipId] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -32,12 +34,16 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
   const activeBlipRef = useRef<string | undefined>(undefined);
   const epochRef = useRef(0);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const turnoRef = useRef(0);
+  const vozRef = useRef({ onAgentReply, onCancelReply });
+  vozRef.current = { onAgentReply, onCancelReply };
 
-  useEffect(() => () => clearTimeout(endTimerRef.current), []);
+  useEffect(() => () => { epochRef.current++; clearTimeout(endTimerRef.current); vozRef.current.onCancelReply?.(); }, []);
 
   const closeChat = useCallback(
     (reason: "agent" | "button") => {
       epochRef.current += 1;
+      vozRef.current.onCancelReply?.();
       clearTimeout(endTimerRef.current);
       endTimerRef.current = undefined;
       const id = activeBlipRef.current;
@@ -63,23 +69,30 @@ export function useChat({ sessionId, sendEvent, applyCommands }: ChatDeps) {
     async (history: ChatMessage[], forBlipId: string | undefined): Promise<void> => {
       if (sessionId === null) return;
       const epoch = epochRef.current;
+      const turno = ++turnoRef.current;
+      const vigente = () => epoch === epochRef.current && turno === turnoRef.current;
+      vozRef.current.onCancelReply?.();
       setBusy(true);
       setError(null);
       try {
         const res = await postChat({ sessionId, blipId: forBlipId, messages: history });
-        if (epoch !== epochRef.current) return;
+        if (!vigente()) return;
         // Ao encerrar, o grifo sai só quando o painel fecha, não junto com a última fala.
         applyCommands(res.end ? res.commands.filter((c) => c.type !== "clear_highlights") : res.commands);
         setMessages([...history, { role: "agent", text: res.reply }]);
         void sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: forBlipId });
         if (res.end) {
           setEnded(true);
+        }
+        setBusy(false);
+        await vozRef.current.onAgentReply?.(res.reply);
+        if (vigente() && res.end) {
           endTimerRef.current = setTimeout(() => closeChat("agent"), END_DELAY_MS);
         }
       } catch (err) {
-        if (epoch === epochRef.current) setError(errorText(err));
+        if (vigente()) setError(errorText(err));
       } finally {
-        if (epoch === epochRef.current) setBusy(false);
+        if (vigente()) setBusy(false);
       }
     },
     [sessionId, applyCommands, sendEvent, closeChat],

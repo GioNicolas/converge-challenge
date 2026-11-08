@@ -193,13 +193,16 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
 
     tracar(o) {
       // O Excalidraw precisa de pelo menos dois pontos num traço.
-      const pontos = o.pontos.length >= 2 ? o.pontos : [[0, 0] as [number, number], [0.1, 0] as [number, number]];
+      const brutos = o.pontos.length >= 2 ? o.pontos : [[0, 0] as [number, number], [0.1, 0] as [number, number]];
+      // O Excalidraw mede e recorta a linha a partir do primeiro ponto: ele precisa ser [0, 0].
+      const [x0, y0] = brutos[0];
+      const pontos = brutos.map(([x, y]) => [x - x0, y - y0] as [number, number]);
       const xs = pontos.map((p) => p[0]);
       const ys = pontos.map((p) => p[1]);
       const comum = {
         id: o.id,
-        x: o.origem.x + desloc(o.grupo).dx,
-        y: o.origem.y + desloc(o.grupo).dy,
+        x: o.origem.x + x0 + desloc(o.grupo).dx,
+        y: o.origem.y + y0 + desloc(o.grupo).dy,
         // Largura e altura pelos pontos (o conversor do Excalidraw não calcula sozinho).
         width: Math.max(...xs) - Math.min(...xs),
         height: Math.max(...ys) - Math.min(...ys),

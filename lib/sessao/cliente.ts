@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EsquemaVisualOpcional, type AcaoVisual } from "../presenca/acoesVisuais";
 import type { MarcaDeFala } from "../presenca/vozSincronizada";
 
 // Único ponto de acesso do quadro ao servidor.
@@ -51,6 +52,7 @@ export type PedidoAnalise = {
   parado_ha_s?: number;
   /** Requisitos já combinados no quadro. */
   requisitos?: string[];
+  gestos_recentes?: string[];
 };
 
 export type Observacao = {
@@ -68,6 +70,7 @@ export type RespostaAnalise = {
   nota: string | null;
   /** IDs (curtos, do conversor) que o agente circula. */
   elementos: string[];
+  visual?: AcaoVisual[];
   degrau: number | null;
   observacoes: Observacao[];
   /** O cérebro acha que o candidato já mostrou o suficiente do alto nível: segue para o aprofundamento. */
@@ -80,6 +83,7 @@ const EsquemaResposta = z.object({
   pergunta: z.string().nullable().default(null),
   nota: z.string().nullable().default(null),
   elementos: z.array(z.string()).default([]),
+  visual: EsquemaVisualOpcional,
   degrau: z.number().nullable().default(null),
   observacoes: z
     .array(
@@ -253,14 +257,22 @@ let controleDaVoz: AbortController | null = null;
 let vozDoServidorDisponivel = true;
 
 /** A assinatura usada pelo quadro permanece a mesma nos dois modos. */
-export function falar(texto: string, aoProgresso?: (caracteres: number) => void): Promise<void> {
-  return falarComMarcas(texto, [], aoProgresso);
+export function falar(texto: string, aoProgresso?: (caracteres: number) => void, antesDeTocar?: () => Promise<boolean>): Promise<void> {
+  return falarComMarcas(texto, [], aoProgresso, antesDeTocar);
 }
 
-export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoProgresso?: (caracteres: number) => void): Promise<void> {
+export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoProgresso?: (caracteres: number) => void, antesDeTocar?: () => Promise<boolean>): Promise<void> {
   calar();
   const controle = new AbortController();
   controleDaVoz = controle;
+  let iniciou = false;
+  const iniciar = async () => {
+    if (controle.signal.aborted) return false;
+    if (!iniciou && antesDeTocar && !await antesDeTocar()) return false;
+    if (controle.signal.aborted) return false;
+    iniciou = true;
+    return true;
+  };
   const disparadas = new Set<number>();
   const marcasUnicas = marcas.map((m, indice) => ({ ...m, aoChegar: () => {
     if (controle.signal.aborted || disparadas.has(indice)) return;
@@ -275,7 +287,7 @@ export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoPro
       const servidor = await import("./servidor");
       try {
         const voz = await servidor.sintetizarFala(texto, controle.signal);
-        if (controle.signal.aborted) return;
+        if (!await iniciar()) return;
         const { tocarComAlinhamento } = await import("../presenca/vozSincronizada");
         await tocarComAlinhamento(voz.audio, voz.alinhamento, { aoProgresso: progresso, marcas: marcasUnicas, sinal: controle.signal });
         progresso(texto.length);
@@ -286,7 +298,7 @@ export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoPro
         console.warn("[voz] usando síntese do navegador:", erro);
       }
     }
-    if (!controle.signal.aborted) {
+    if (!controle.signal.aborted && (!antesDeTocar || await iniciar())) {
       marcasUnicas.forEach((m) => m.aoChegar());
       await falarNoNavegador(texto, progresso, controle.signal);
     }

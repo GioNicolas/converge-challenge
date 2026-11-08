@@ -11,6 +11,16 @@ const estado = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm
 const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {} });
 
 describe("perguntar", () => {
+  it("resposta e feedback recebem o desenho e a pergunta ativa no loop rápido", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Você separou as leituras da escrita.", requisito: null, concluiu: false }]);
+    const r = await perguntar(deps(llm), { ...estado, fase: "ALTO_NIVEL" }, {
+      fase: "ALTO_NIVEL", texto: "Pode comentar meu desenho?", grafo: "- [e1] API de leitura", perguntaAtiva: "Como você separou os fluxos?",
+    }, AGORA);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /API de leitura/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /Como você separou os fluxos/);
+    assert.equal(r.concluiu, false);
+    assert.equal(r.requisito, null);
+  });
   it("falas curtas vão ao modelo (sem lista de palavras) e a fala é registrada", async () => {
     const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
     const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "hmm, deixa eu ver" }, AGORA);
