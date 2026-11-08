@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analisar, type DepsAnalisar } from "../analisar";
+import { analisar, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
@@ -191,5 +191,50 @@ describe("foto do quadro", () => {
     await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
     assert.equal(llm.chamadas[0].imagem ?? null, null);
     assert.doesNotMatch(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
+  });
+});
+
+describe("refiltrarComEstadoAtual", () => {
+  const falou = (base: EstadoSessao, em: number) => transicionar(base, { tipo: "AGENTE_FALOU", texto: "São 20 mil por dia." }, em).estado;
+  const ped = (parado?: number): PedidoAnalise => ({ ...pedido(), ...(parado !== undefined ? { parado_ha_s: parado } : {}) });
+
+  it("fala do agente gravada durante a análise: a bola está com o candidato e a pergunta é silenciada", () => {
+    const fresco = falou(estadoEm("APROFUNDAMENTO"), AGORA + 1000);
+    const r = refiltrarComEstadoAtual(fresco, duvida(), ped(30), AGORA, AGORA + 2000);
+    assert.equal(r.status, "ok");
+    assert.equal(r.pergunta, null);
+    assert.deepEqual(r.elementos, []);
+    assert.equal(r.observacoes.length, 1, "as observações são preservadas");
+  });
+
+  it("o tempo decorrido soma-se ao parado_ha_s (conservador: não assume ação durante a análise)", () => {
+    const fresco = falou(estadoEm("APROFUNDAMENTO"), AGORA + 1000);
+    // 1 s parado + 2 s de análise = 3 s: a fala foi há 1 s do fim, ele continua sem agir depois dela.
+    assert.equal(refiltrarComEstadoAtual(fresco, duvida(), ped(1), AGORA, AGORA + 2000).status, "ok");
+  });
+
+  it("candidato que agiu depois da fala (parado há pouco) mantém a pergunta", () => {
+    const fresco = falou(estadoEm("APROFUNDAMENTO"), AGORA - 5000);
+    const r = refiltrarComEstadoAtual(fresco, duvida(), ped(1), AGORA, AGORA + 500);
+    assert.equal(r.status, "duvida");
+    assert.deepEqual(r.elementos, ["e1"]);
+  });
+
+  it("silêncio longo depois da fala mantém a pergunta", () => {
+    const fresco = falou(estadoEm("APROFUNDAMENTO"), AGORA - 60_000);
+    assert.equal(refiltrarComEstadoAtual(fresco, duvida(), ped(40), AGORA, AGORA + 500).status, "duvida");
+  });
+
+  it("sem parado_ha_s a regra não se aplica", () => {
+    const fresco = falou(estadoEm("APROFUNDAMENTO"), AGORA + 1000);
+    assert.equal(refiltrarComEstadoAtual(fresco, duvida(), ped(), AGORA, AGORA + 2000).status, "duvida");
+  });
+
+  it("é idempotente para resposta já silenciada e para resposta já filtrada", () => {
+    const livre = estadoEm("APROFUNDAMENTO");
+    const silenciada = refiltrarComEstadoAtual(falou(livre, AGORA + 1000), duvida(), ped(30), AGORA, AGORA + 2000);
+    assert.deepEqual(refiltrarComEstadoAtual(livre, silenciada, ped(30), AGORA, AGORA + 2000), silenciada);
+    const filtrada = refiltrarComEstadoAtual(livre, duvida(), ped(), AGORA, AGORA + 2000);
+    assert.deepEqual(refiltrarComEstadoAtual(livre, filtrada, ped(), AGORA, AGORA + 2000), filtrada);
   });
 });
