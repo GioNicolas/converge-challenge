@@ -1,12 +1,14 @@
 /**
  * Semente da demo: o que a empresa da demo já tem na memória antes da primeira decisão ao vivo.
  * Duas vagas anteriores já decididas e a atual em andamento, para a concordância Totti × Tech Lead
- * aparecer subindo (60% → 75% → 92%; a reprovação ao vivo da demo leva a atual para 85%).
+ * aparecer subindo (60% → 75% → 92%; a reprovação ao vivo da demo leva a atual para 85%). Uma regra já veio
+ * do resultado aos 90 dias (F5): Otávio Reis, que o Totti não recomendava, deu certo.
  * O `empresaId` de cada item é trocado pelo da empresa na hora de semear (ver `estadoDa` em `store.ts`).
  */
 import type { DecisaoRegistrada, DecisaoTechLead, MotivoIgnorado, RecomendacaoTotti, RegraSquad } from "./tipos";
 
-const VAGA_A = { vagaId: "backend-pagamentos-ago", vagaTitulo: "Backend Pleno · Pagamentos" };
+/** A vaga de Pagamentos do workspace (`lib/vagas/workspace.ts`): encerrada, com as contratações de 90 dias atrás (F5). */
+const VAGA_A = { vagaId: "backend-pagamentos", vagaTitulo: "Backend Pleno · Pagamentos" };
 const VAGA_B = { vagaId: "dados-pleno-set", vagaTitulo: "Engenharia de Dados Pleno" };
 /** A vaga do card de demo do Slack (`/api/slack/demo`). */
 const VAGA_C = { vagaId: "demo-backend-pleno", vagaTitulo: "Backend Pleno" };
@@ -35,7 +37,7 @@ export const SEMENTE: { regras: RegraSquad[]; decisoes: DecisaoRegistrada[]; ign
       criterio: "gargalos_falhas",
       origem: { tipo: "aprovacao", candidato: "Marina Lopes", ...VAGA_A },
       ativa: true,
-      criadaEm: "2026-08-14T15:00:00.000Z",
+      criadaEm: "2026-07-08T15:00:00.000Z",
     },
     {
       id: "semente-regra-bordas",
@@ -45,7 +47,7 @@ export const SEMENTE: { regras: RegraSquad[]; decisoes: DecisaoRegistrada[]; ign
       criterio: "bordas",
       origem: { tipo: "reprovacao", candidato: "Caio Ferreira", ...VAGA_A },
       ativa: false,
-      criadaEm: "2026-08-19T15:00:00.000Z",
+      criadaEm: "2026-07-14T15:00:00.000Z",
     },
     {
       id: "semente-regra-modelagem",
@@ -67,15 +69,25 @@ export const SEMENTE: { regras: RegraSquad[]; decisoes: DecisaoRegistrada[]; ign
       ativa: true,
       criadaEm: "2026-10-03T15:00:00.000Z",
     },
+    {
+      id: "semente-regra-90-dias-otavio",
+      empresaId: "",
+      texto: "Valoriza quem melhora a solução depois de uma dica: Otávio Reis tirou 2 em Complexidade e deu certo aos 90 dias",
+      efeito: "valoriza",
+      criterio: "complexidade",
+      origem: { tipo: "resultado_90_dias", candidato: "Otávio Reis", ...VAGA_A, deuCerto: true },
+      ativa: true,
+      criadaEm: "2026-10-24T15:00:00.000Z",
+    },
   ],
   decisoes: [
     // Vaga A: o Totti ainda não conhecia o time. 3 de 5.
     ...decisoes(VAGA_A, [
-      ["Marina Lopes", "avancar", "aprovado", "2026-08-14"],
-      ["Caio Ferreira", "avancar", "reprovado", "2026-08-19"],
-      ["Lívia Prado", "nao_avancar", "reprovado", "2026-08-20"],
-      ["Otávio Reis", "nao_avancar", "aprovado", "2026-08-22"],
-      ["Bianca Nunes", "avancar", "aprovado", "2026-08-25"],
+      ["Marina Lopes", "avancar", "aprovado", "2026-07-08"],
+      ["Caio Ferreira", "avancar", "reprovado", "2026-07-14"],
+      ["Lívia Prado", "nao_avancar", "reprovado", "2026-07-16"],
+      ["Otávio Reis", "nao_avancar", "aprovado", "2026-07-22"],
+      ["Bianca Nunes", "avancar", "aprovado", "2026-08-04"],
     ]),
     // Vaga B: com as primeiras regras. 6 de 8 (um "talvez" fica de fora da conta).
     ...decisoes(VAGA_B, [
