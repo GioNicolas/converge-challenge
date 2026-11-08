@@ -275,6 +275,8 @@ export const ChatResponse = z.object({
   listening: z.boolean().optional(),
   /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
   concluded: z.boolean().optional(),
+  /** O candidato pediu para encerrar a entrevista: a IDE se despede e encerra a sessão. */
+  finish: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 
@@ -436,3 +438,21 @@ export const SILENCIO_S = 8;
 export const SILENCIO_INICIAL_S = 15;
 /** Se o silêncio continua depois de uma análise, o quadro volta a perguntar ao modelo a cada tanto. */
 export const SILENCIO_REPETIR_S = 30;
+
+// ---------------------------------------------------------------------------
+// Ritmo das perguntas do agente (servidor e quadro leem daqui: um número só, nos dois lados).
+// ---------------------------------------------------------------------------
+
+/** Respiro mínimo entre uma pergunta e a próxima, contado do mais recente entre o início da última pergunta e o fim da última resposta. */
+export const INTERVALO_ENTRE_PERGUNTAS_S = 25;
+/** Quantas perguntas o agente faz no aprofundamento (o convite de REQUISITOS e a pergunta final ficam fora). */
+export const MAX_PERGUNTAS = 5;
+
+/** O instante de onde conta o intervalo entre perguntas: o mais recente entre o início da última pergunta e o fim da última resposta. */
+export function inicioDoIntervaloEntrePerguntas(
+  ultimaPerguntaEm: number | null | undefined,
+  ultimaRespostaEm: number | null | undefined,
+): number | null {
+  const marcos = [ultimaPerguntaEm, ultimaRespostaEm].filter((m): m is number => typeof m === "number");
+  return marcos.length === 0 ? null : Math.max(...marcos);
+}

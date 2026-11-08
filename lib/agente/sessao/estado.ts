@@ -45,7 +45,12 @@ export type PerguntaFeita = {
   desfecho?: Desfecho;
   /** O que ele respondeu (curto), para a análise não perguntar de novo o que já foi dito. */
   resposta?: string;
+  /** Perguntas de continuação que o Totti emendou no mesmo fio, na conversa (no máximo MAX_SEGUIMENTOS). */
+  seguimentos?: string[];
 };
+
+/** Quantas perguntas de continuação um fio aceita antes de a conversa mudar de assunto. */
+export const MAX_SEGUIMENTOS = 2;
 
 export const DESFECHOS = ["respondeu", "nao_sabe", "pulou"] as const;
 export type Desfecho = (typeof DESFECHOS)[number];
@@ -93,10 +98,15 @@ export type EstadoSessao = {
   perguntaFinalFeita: boolean;
   /** O convite único de REQUISITOS (silêncio inicial) já foi feito? Ele não conta na cota de perguntas. */
   conviteFeito: boolean;
-  /** Quando o candidato clicou na última pergunta (o intervalo de 60s conta daqui). */
+  /** Quando o candidato clicou na última pergunta (o intervalo entre perguntas conta do mais recente entre isto e `ultimaRespostaEm`). */
   ultimaPerguntaEm: number | null;
   /** Quando o candidato terminou de responder a última pergunta. */
   ultimaRespostaEm: number | null;
+  /**
+   * Quando o agente disse a última fala solta (resposta a uma dúvida, comentário, continuação). Uma pergunta nova
+   * não sai logo depois dela. Ausente em estados guardados antes desse campo.
+   */
+  ultimaFalaDoAgenteEm?: number | null;
 
   /** Todas as perguntas feitas, com os elementos citados. */
   perguntas: PerguntaFeita[];
@@ -132,6 +142,8 @@ export type EventoSessao =
   | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
   /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
   | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
+  /** O Totti emendou uma pergunta de continuação na resposta: o fio segue ativo. */
+  | { tipo: "SEGUIMENTO_FEITO"; numero: number; pergunta: string }
   /** O entrevistador trouxe a mudança no problema (só a primeira vale). */
   | { tipo: "EMPECILHO_ANUNCIADO"; empecilho: Omit<EmpecilhoAnunciado, "anunciadoEm" | "fase"> };
 
@@ -419,6 +431,20 @@ export function transicionar(
       };
     }
 
+    case "SEGUIMENTO_FEITO": {
+      const i = estado.perguntas.findIndex((p) => p.numero === evento.numero);
+      if (i < 0) return nada;
+      const atualizar = (p: PerguntaFeita): PerguntaFeita => ({ ...p, seguimentos: [...(p.seguimentos ?? []), evento.pergunta] });
+      return {
+        estado: {
+          ...estado,
+          perguntas: estado.perguntas.map((p, j) => (j === i ? atualizar(p) : p)),
+          perguntaAtiva: estado.perguntaAtiva?.numero === evento.numero ? atualizar(estado.perguntaAtiva) : estado.perguntaAtiva,
+        },
+        efeitos: [],
+      };
+    }
+
     case "EMPECILHO_ANUNCIADO":
       if (estado.empecilho) return nada;
       return {
@@ -434,6 +460,7 @@ export function transicionar(
       return {
         estado: {
           ...estado,
+          ultimaFalaDoAgenteEm: agora,
           conversa: [...estado.conversa, { quem: "agente", texto: evento.texto, em: agora }],
           ...(evento.perguntou ? { ultimaPerguntaEm: agora } : {}),
         },

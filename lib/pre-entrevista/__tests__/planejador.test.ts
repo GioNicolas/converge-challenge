@@ -474,3 +474,17 @@ describe("duração não sai de porcentagem nem de 'se o tempo acabar'", () => {
     assert.equal(lerDuracao("uns 45", { perguntouTempo: true }), 45);
   });
 });
+
+describe("semDispensaContrariada", () => {
+  it("ignora a dispensa da área de que ela falou bem e mantém a dispensa declarada", async () => {
+    const { semDispensaContrariada } = await import("@/lib/pre-entrevista/turno");
+    const { acumularEnfase, estadoInicialEnfase } = await import("@/lib/pre-entrevista/enfase");
+    const fala = "Quero menos algoritmo complicado e mais problema do dia a dia, tipo modelar uma API.";
+    const respondeu = acumularEnfase(estadoInicialEnfase(), { tecnico: "respondeu" }, fala);
+    const sinais = { dispensa_tecnico: 0.67, quer_pressao: 0.99 };
+    assert.deepEqual(semDispensaContrariada(sinais, respondeu), { dispensa_tecnico: 0, quer_pressao: 0.99 });
+
+    const dispensou = acumularEnfase(respondeu, { tecnico: "dispensou" }, "Pode tirar a parte técnica.");
+    assert.equal(semDispensaContrariada(sinais, dispensou), sinais);
+  });
+});

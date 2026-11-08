@@ -1,5 +1,5 @@
 /**
- * Interviewer: fala com o candidato por texto, numa conversa de blip ou quando ele chama.
+ * Interviewer: fala com o candidato por voz, numa pergunta do Totti (blip) ou numa fala livre dele.
  * Um turno por chamada. Erro do LLM nunca vira erro de API: volta uma fala de reserva.
  */
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
@@ -22,11 +22,11 @@ const FALLBACK_REPLIES = [
   "Perdi o fio aqui, pode repetir pra mim?",
 ];
 /** Fala barrada duas vezes pelo filtro: uma pergunta aberta que não entrega nada (e sem repetir a mesma frase).
- * Não fecha a conversa: a barra não some na cara do candidato. */
+ * Não fecha o assunto: o candidato ainda tem a vez. Sem validar e sem pedir para ele bolar testes. */
 const SAFE_CLOSE_REPLIES = [
-  "Entendi. Me conta como você pensou nessa parte?",
-  "Certo. E qual seria o seu próximo passo aí?",
-  "Faz sentido. Que caso você testaria primeiro?",
+  "Certo. O que você quer que esse trecho faça?",
+  "Entendi. Qual é o seu próximo passo agora?",
+  "Saquei. Por que você escolheu esse caminho?",
 ];
 
 /** Orçamento de um turno: o candidato está esperando a voz. Passou disso, sai a fala de reserva. */
@@ -129,6 +129,11 @@ export async function runInterviewerTurn(
   const sobra = () => prazo - Date.now();
   try {
     output = await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra()));
+    // Pediu para encerrar a entrevista: quem se despede e fecha é a IDE (como no botão Finalizar).
+    if (!opening && output.finish === true) {
+      registrarEvidencia(session, output);
+      return { reply: "", commands: [], end: true, finish: true };
+    }
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
     if (!opening && (output.respond === false || output.reply.trim() === "")) {

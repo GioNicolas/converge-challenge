@@ -4,14 +4,13 @@
 // No desktop o menu recolhe para um trilho só com ícones (botão no topo ou ⌘B / Ctrl+B) e lembra a
 // escolha. A largura anima e o conteúdo acompanha; os textos somem antes de o trilho fechar, para não
 // aparecerem cortados. No celular o menu vira uma gaveta, aberta pelo botão do topo.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { useVagas, type EtapaVaga } from "@/lib/vagas/workspace";
 import { curvaSuave } from "@/lib/design/motion";
-import { RastroDoTotti } from "@/components/totti/Rastro";
 import Marca from "./Marca";
 import MenuVagas from "./MenuVagas";
 
@@ -58,18 +57,6 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
   const { recolhido, animar, alternar } = useRecolhido();
 
   const totalVagas = vagas && rascunhos ? vagas.filter((v) => v.etapa !== "encerrada").length + rascunhos.length : undefined;
-
-  // O rastro do Totti: o que ele está fazendo, lido do que existe de verdade no painel.
-  const linhasRastro = useMemo(() => {
-    const curto = (s: string) => (s.length > 34 ? `${s.slice(0, 33)}…` : s);
-    const abertas = (vagas ?? []).filter((v) => v.etapa !== "encerrada");
-    const linhas = [
-      ...abertas.filter((v) => v.funil.emAndamento > 0).map((v) => `${v.funil.emAndamento} entrevista(s) em andamento · ${curto(v.cargo)}`),
-      ...abertas.filter((v) => v.funil.novos > 0).map((v) => `${v.funil.novos} relatório(s) novo(s) · ${curto(v.cargo)}`),
-      ...(rascunhos ?? []).map((r) => `plano de ${curto(r.cargo)} esperando você`),
-    ].slice(0, 5);
-    return linhas.length ? linhas : ["acompanhando as vagas abertas", "pronto para ler uma nova vaga"];
-  }, [vagas, rascunhos]);
 
   const lateral = (compacto: boolean, noCelular = false) => (
     <div className="flex h-full flex-col gap-6 overflow-hidden px-3 py-5">
@@ -141,16 +128,6 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
             onNavegar={() => setGaveta(false)}
           />
         )}
-      </motion.div>
-
-      {/* Recolhido, o rastro some (não há espaço para ler); aberto, ele digita a linha do momento. */}
-      <motion.div
-        animate={{ opacity: compacto ? 0 : 1, height: compacto ? 0 : "auto" }}
-        transition={{ duration: compacto ? 0.12 : 0.24, delay: compacto ? 0 : 0.14 }}
-        className="w-[240px] shrink-0 overflow-hidden"
-        aria-hidden={compacto}
-      >
-        <RastroDoTotti linhas={linhasRastro} />
       </motion.div>
     </div>
   );

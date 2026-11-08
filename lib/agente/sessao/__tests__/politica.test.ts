@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { estadoInicial, type EstadoSessao } from "../estado";
+import { INTERVALO_ENTRE_PERGUNTAS_S, MAX_PERGUNTAS } from "../../../contracts";
+import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
   extrairIdsDoGrafo,
   filtrarResposta,
@@ -8,6 +9,7 @@ import {
   motivoBloqueioPlin,
   podeAnalisar,
   podeLevantarPlin,
+  REGRAS_PADRAO,
   statusPermitido,
 } from "../politica";
 import { FASES, STATUS_ANALISE, type Fase, type RespostaAnalise } from "../tipos";
@@ -217,5 +219,90 @@ describe("extrairIdsDoGrafo", () => {
   it("pega os ids de todas as seções", () => {
     const grafo = `${GRAFO}\nANOTAÇÕES SOLTAS\n- [t1] "algo"\nORDEM NA TELA (esquerda → direita)\n- Cliente, Postgres`;
     assert.deepEqual([...extrairIdsDoGrafo(grafo)].sort(), ["e1", "r1", "s1", "t1"]);
+  });
+});
+
+describe("a bola está com o candidato depois de uma fala solta do agente", () => {
+  const base = { plin: "LIVRE" as const };
+  const falou = () => transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "São 20 mil por dia. Pode seguir com o desenho." }, AGORA).estado;
+  const regras = REGRAS_PADRAO;
+
+  it("a fala do agente registra a hora", () => {
+    assert.equal(falou().ultimaFalaDoAgenteEm, AGORA);
+  });
+
+  it("sem o candidato agir depois da fala, a pergunta nova espera", () => {
+    // Ele não faz nada há 30 s (a última ação é anterior à fala) e o agente falou há 3 s.
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + 3_000, regras, { paradoHaS: 30 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(podeLevantarPlin(falou(), "duvida", AGORA + 3_000, regras, { paradoHaS: 30 }), false);
+  });
+
+  it("se o candidato agiu depois da fala, a pergunta pode sair na hora", () => {
+    // Agente falou em AGORA; ele mexeu no desenho 1 s depois (parado há 2 s quando se pergunta em AGORA + 3 s).
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + 3_000, regras, { paradoHaS: 2 }), null);
+  });
+
+  it("sem ação dele, um silêncio de verdade (o limite que já quebra o silêncio) libera a pergunta", () => {
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + 8_000 - 1, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + 8_000, regras, { paradoHaS: 60 }), null);
+  });
+
+  it("em REQUISITOS o silêncio que libera é o inicial, mais longo", () => {
+    const req = transicionar(estadoEm("REQUISITOS", base), { tipo: "AGENTE_FALOU", texto: "Uns 4 mil por segundo." }, AGORA).estado;
+    assert.equal(motivoBloqueioPlin(req, AGORA + 10_000, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(req, AGORA + 15_000, regras, { paradoHaS: 60 }), null);
+  });
+
+  it("sem saber há quanto tempo ele está parado, a regra não se aplica", () => {
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + 1_000), null);
+  });
+
+  it("estado guardado antes do campo não bloqueia nada", () => {
+    assert.equal(estadoEm("APROFUNDAMENTO", base).ultimaFalaDoAgenteEm, undefined);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", base), AGORA, regras, { paradoHaS: 60 }), null);
+  });
+
+  it("filtrarResposta rebaixa a pergunta enquanto a bola está com ele", () => {
+    const ids = new Set(["e1"]);
+    const r = resposta({ elementos: ["e1"] });
+    assert.equal(filtrarResposta(falou(), r, ids, AGORA + 3_000, regras, { paradoHaS: 30 }).status, "ok");
+    assert.equal(filtrarResposta(falou(), r, ids, AGORA + 3_000, regras, { paradoHaS: 2 }).status, "duvida");
+  });
+
+  it("o intervalo entre perguntas continua valendo por conta própria", () => {
+    assert.equal(
+      motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 10_000 }), AGORA),
+      "INTERVALO_ENTRE_PERGUNTAS",
+    );
+  });
+});
+
+describe("intervalo entre perguntas: referência de tempo", () => {
+  const base = { perguntasFeitas: 1 };
+  const motivo = (extra: Partial<EstadoSessao>, agora: number) =>
+    motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ...extra }), agora);
+
+  it("usa os valores únicos de contracts", () => {
+    assert.equal(REGRAS_PADRAO.intervaloEntrePerguntasMs, INTERVALO_ENTRE_PERGUNTAS_S * 1000);
+    assert.equal(REGRAS_PADRAO.maxPerguntas, MAX_PERGUNTAS);
+  });
+
+  it("conta do fim da resposta quando ele é mais recente que o início da pergunta", () => {
+    const e = { ultimaPerguntaEm: AGORA - 60_000, ultimaRespostaEm: AGORA - 10_000 };
+    assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivo(e, AGORA + 15_000), null);
+  });
+
+  it("conta do início da pergunta quando ela é mais recente que a resposta anterior", () => {
+    const e = { ultimaPerguntaEm: AGORA - 10_000, ultimaRespostaEm: AGORA - 60_000 };
+    assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivo(e, AGORA + 15_000), null);
+  });
+
+  it("estado antigo sem ultimaRespostaEm continua funcionando", () => {
+    const antigo = estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 10_000 });
+    delete (antigo as { ultimaRespostaEm?: number | null }).ultimaRespostaEm;
+    assert.equal(motivoBloqueioPlin(antigo, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(antigo, AGORA + 15_000), null);
   });
 });

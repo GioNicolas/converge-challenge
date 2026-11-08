@@ -39,8 +39,6 @@ function useCronometro(iniciadaEm: number | null, ativo: boolean) {
 type Props = {
   /** Nome da fase já pronto para exibir (ex.: "Aprofundamento"). */
   fase: string;
-  /** O agente tem uma pergunta esperando o clique (mostra a bolha e deixa o agente azul). */
-  duvidaPendente: boolean;
   /** O candidato está respondendo uma pergunta (mostra "Terminei de responder"). */
   respondendo: boolean;
   /** A entrevista acabou (para o tempo e some o botão de encerrar). */
@@ -52,14 +50,12 @@ type Props = {
   agenteFalando: boolean;
   /** Uma resposta está sendo preparada (pedido em voo ou voz sendo sintetizada): o orbe mostra que pensa. */
   agentePensando?: boolean;
-  onClicarPlin: () => void;
   onTerminarResposta: () => void;
   onEncerrar: () => void;
 };
 
 export default function JanelaChamada({
   fase,
-  duvidaPendente,
   respondendo,
   encerrada,
   marcadores,
@@ -67,28 +63,14 @@ export default function JanelaChamada({
   midia,
   agenteFalando,
   agentePensando = false,
-  onClicarPlin,
   onTerminarResposta,
   onEncerrar,
 }: Props) {
-  // Minimizada por padrão: a janela grande só abre quando o Totti tem uma pergunta (plim) e o candidato clica.
+  // Minimizada por padrão: a pílula basta. O candidato clica nela para abrir a janela, com a câmera.
   const [minimizada, setMinimizada] = useState(true);
   const ativa = iniciadaEm !== null && !encerrada;
   const segundos = useCronometro(iniciadaEm, ativa);
-  const temDuvida = duvidaPendente;
-
-  const estadoAgente: EstadoAgente = temDuvida
-    ? "duvida"
-    : agenteFalando
-      ? "falando"
-      : agentePensando
-        ? "pensando"
-        : "ouvindo";
-
-  // Respondida a pergunta, a janela volta a ser só a pílula.
-  useEffect(() => {
-    if (!temDuvida && !respondendo) setMinimizada(true);
-  }, [temDuvida, respondendo]);
+  const estadoAgente: EstadoAgente = agenteFalando ? "falando" : agentePensando ? "pensando" : "ouvindo";
 
   // --- Arrastar e encaixar no canto ---
   const caixa = useRef<HTMLDivElement>(null);
@@ -96,7 +78,6 @@ export default function JanelaChamada({
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const canto = useRef<Canto>("inferior-direito");
-  const [emCima, setEmCima] = useState(false);
 
   const encaixar = useCallback(
     (alvo: Canto, comMola = true) => {
@@ -113,7 +94,6 @@ export default function JanelaChamada({
       const nx = x.get() + (esquerda - r.left);
       const ny = y.get() + (topo - r.top);
       canto.current = alvo;
-      setEmCima(alvo.startsWith("superior"));
       if (comMola) {
         animate(x, nx, MOLA);
         animate(y, ny, MOLA);
@@ -180,7 +160,6 @@ export default function JanelaChamada({
       style={{ x, y }}
       className="pointer-events-auto fixed right-4 bottom-16 z-10 touch-none select-none"
     >
-      <BolhaDaPergunta visivel={temDuvida} emCima={emCima} onClicar={onClicarPlin} />
       <motion.div
         layout
         transition={MOLA}
@@ -197,21 +176,25 @@ export default function JanelaChamada({
               transition={{ duration: 0.18 }}
               className="flex h-12 items-center gap-1 pr-1.5 pl-1 text-sm"
             >
-              {/* O Totti continua "vivo" na pílula. Com plim, a pílula vira o botão que abre a janela. */}
+              {/* O Totti continua "vivo" na pílula; clicar nela abre a janela com a câmera. */}
               <button
                 type="button"
-                disabled={!temDuvida}
-                onClick={() => {
-                  setMinimizada(false);
-                  onClicarPlin();
-                }}
-                aria-label={temDuvida ? "Ouvir a pergunta do Totti" : "Chamada com o Totti"}
-                className={`flex items-center gap-2 rounded-full pr-3 ${temDuvida ? "cursor-pointer hover:bg-texto-claro/8" : "cursor-grab"}`}
+                onClick={() => setMinimizada(false)}
+                aria-label="Abrir a janela da chamada"
+                className="flex cursor-pointer items-center gap-2 rounded-full pr-3 hover:bg-texto-claro/8"
               >
                 <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
                 <span className="font-mono font-medium tabular-nums">{formatarTempo(segundos)}</span>
-                {temDuvida && <span className="font-medium">Tenho uma pergunta</span>}
               </button>
+              {respondendo && (
+                <button
+                  type="button"
+                  onClick={onTerminarResposta}
+                  className="rounded-full bg-texto-claro/12 px-3 py-1.5 text-xs font-medium transition-colors duration-150 ease-suave hover:bg-texto-claro/20"
+                >
+                  Terminei de responder
+                </button>
+              )}
               <BotaoRedondo
                 rotulo={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
                 desligado={!midia.microfoneLigado}
@@ -243,32 +226,12 @@ export default function JanelaChamada({
                   <span className="text-texto-claro/75">{fase}</span>
                 </div>
 
-                {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato.
-                    Na dúvida, a área inteira vira o botão da pergunta. */}
-                <button
-                  type="button"
-                  disabled={!temDuvida}
-                  onClick={temDuvida ? onClicarPlin : undefined}
-                  aria-label={temDuvida ? "Ouvir a pergunta do entrevistador" : "Entrevistador"}
-                  className={`absolute inset-0 flex items-center justify-center ${
-                    temDuvida ? "cursor-pointer" : "cursor-default"
-                  }`}
-                >
+                {/* O agente fica na parte livre do quadro, sem passar por baixo da câmera do candidato. */}
+                <div role="img" aria-label="Entrevistador" className="absolute inset-0 flex items-center justify-center">
                   <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="xl" />
-                </button>
+                </div>
 
-                <AnimatePresence>
-                  {!temDuvida && (
-                    <motion.span
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute bottom-2.5 left-3 text-[11px] font-medium text-texto-claro/70"
-                    >
-                      Entrevistador
-                    </motion.span>
-                  )}
-                </AnimatePresence>
+                <span className="absolute bottom-2.5 left-3 text-[11px] font-medium text-texto-claro/70">Entrevistador</span>
 
                 {/* Câmera do candidato: só local */}
                 <div className="absolute right-2 bottom-2 h-[72px] w-[96px] overflow-hidden rounded-[10px] bg-black/40 ring-1 ring-white/10">
@@ -333,59 +296,6 @@ export default function JanelaChamada({
         </AnimatePresence>
       </motion.div>
     </motion.div>
-  );
-}
-
-/**
- * O convite do plin: uma pílula no mesmo vidro escuro da janela.
- * Fica acima da janela (ou abaixo, se a janela estiver num canto de cima) e flutua de leve.
- */
-function BolhaDaPergunta({ visivel, emCima, onClicar }: { visivel: boolean; emCima: boolean; onClicar: () => void }) {
-  return (
-    <div
-      className={`pointer-events-none absolute inset-x-0 flex justify-center ${
-        emCima ? "top-full pt-3" : "bottom-full pb-3"
-      }`}
-    >
-      <AnimatePresence>
-        {visivel && (
-          <motion.button
-            type="button"
-            onClick={onClicar}
-            aria-label="Ouvir a pergunta do entrevistador"
-            initial={{ opacity: 0, y: emCima ? -8 : 8, scale: 0.9, filter: "blur(6px)" }}
-            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: emCima ? -6 : 6, scale: 0.94, filter: "blur(4px)" }}
-            transition={{ type: "spring", stiffness: 420, damping: 30 }}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            style={{ transformOrigin: emCima ? "top center" : "bottom center" }}
-            className="pointer-events-auto relative cursor-pointer"
-          >
-            {/* Flutua de leve, como quem espera a vez de falar */}
-            <motion.span
-              animate={{ y: [0, -3, 0] }}
-              transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
-              className="relative flex items-center gap-3 rounded-[18px] bg-vidro-escuro py-2.5 pr-4 pl-3 text-left text-texto-claro shadow-flutuante ring-1 ring-white/10 backdrop-blur-xl"
-            >
-              <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-agente/20">
-                <motion.span
-                  aria-hidden
-                  className="absolute inset-0 rounded-full border border-agente"
-                  animate={{ scale: [1, 1.6], opacity: [0.7, 0] }}
-                  transition={{ duration: 1.6, repeat: Infinity, ease: [0.22, 1, 0.36, 1] }}
-                />
-                <span className="size-2.5 rounded-full bg-agente" />
-              </span>
-              <span className="flex flex-col leading-tight">
-                <span className="text-[13px] font-medium whitespace-nowrap">Tenho uma pergunta</span>
-                <span className="text-[11px] whitespace-nowrap text-texto-claro/55">Clique quando quiser ouvir</span>
-              </span>
-            </motion.span>
-          </motion.button>
-        )}
-      </AnimatePresence>
-    </div>
   );
 }
 

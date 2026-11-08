@@ -3,9 +3,10 @@ import TituloRevelado from "@/components/totti/TituloRevelado";
 
 // Nova vaga: uma lista única, de cima para baixo — 01 Cargo, 02 Descrição (texto ou documento), 03 Contexto.
 // O documento (PDF, TXT, Markdown) é lido no navegador: o primeiro preenche a descrição, os outros viram contexto.
+// Abaixo do título, cartões de exemplo preenchem os três campos; clicar em outro troca, clicar no marcado limpa.
 import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, Lock, Paperclip } from "lucide-react";
+import { ArrowRight, Check, Lock, Paperclip } from "lucide-react";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
 import { ACEITOS, lerDocumento, type Documento } from "@/lib/pre-entrevista/tela/documentos";
@@ -25,6 +26,16 @@ type Props = {
   /** Link de volta, mostrado acima do título. */
   voltar?: ReactNode;
 };
+
+/** Cartões de exemplo (vagas de `fixtures/pre-entrevista/vagas.ts`): nível e nome curto. Seis fecham a grade (uma linha no desktop, 3×2 ou 2×3 em telas menores). */
+const EXEMPLOS: { id: string; nivel: string; nome: string }[] = [
+  { id: "backend-senior-pagamentos", nivel: "Sênior", nome: "Backend" },
+  { id: "frontend-junior", nivel: "Júnior", nome: "Frontend" },
+  { id: "fullstack-startup", nivel: "Pleno", nome: "Full stack" },
+  { id: "ia-pleno", nivel: "Pleno", nome: "IA" },
+  { id: "tech-lead-mobile", nivel: "Tech lead", nome: "Mobile" },
+  { id: "estagio-dados", nivel: "Estágio", nome: "Dados" },
+];
 
 const moldura =
   "rounded-controle border border-borda bg-fundo transition-[border-color,box-shadow] duration-150 hover:border-texto/25 focus-within:border-texto focus-within:shadow-[0_0_0_3px_rgb(17_17_17/0.06)]";
@@ -104,10 +115,18 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
     if (e.dataTransfer.files.length) void adicionar(e.dataTransfer.files);
   }
 
-  function usarExemplo() {
+  function usarExemplo(id: string) {
+    const exemplo = VAGAS.find((v) => v.id === id);
+    if (!exemplo) return;
     ditadoDescricao.cancelar();
     ditadoContexto.cancelar();
-    const exemplo = VAGAS.find((v) => v.id === "backend-senior-pagamentos") ?? VAGAS[0];
+    // Clicar no exemplo já marcado desfaz: os campos voltam vazios.
+    if (exemploAtual === id) {
+      setCargo("");
+      setDescricao("");
+      setContexto("");
+      return;
+    }
     setCargo(exemplo.roleTitle);
     setDescricao(exemplo.jobDescription);
     setContexto(exemplo.context ?? "");
@@ -122,6 +141,9 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
     if (!cargo.trim() || !descricao.trim() || ditando) return;
     onEnviar({ roleTitle: cargo.trim(), jobDescription: descricao.trim(), context: contextoFinal || undefined });
   }
+
+  // O exemplo em uso é o que bate com os campos; editar qualquer um deles o desmarca.
+  const exemploAtual = VAGAS.find((v) => v.roleTitle === cargo && v.jobDescription === descricao && (v.context ?? "") === contexto)?.id;
 
   const pronto = cargo.trim() && descricao.trim() && lendo === 0 && !ditando;
   const falta = !cargo.trim() ? "Falta o cargo" : !descricao.trim() ? "Falta a descrição" : lendo > 0 ? "Lendo o documento…" : null;
@@ -142,6 +164,38 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
             <TituloRevelado texto="Nova vaga" />
           </h1>
           <p className="text-[16px] text-texto-suave">Cole a descrição. O Totti cuida do resto.</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] text-texto-suave">Comece de um exemplo ou escreva do zero abaixo</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+            {EXEMPLOS.map((e) => {
+              const ativo = exemploAtual === e.id;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => usarExemplo(e.id)}
+                  aria-pressed={ativo}
+                  className={`relative flex flex-col rounded-controle border py-2 pl-3 pr-7 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 active:scale-[0.98] ${
+                    ativo
+                      ? "border-texto bg-superficie shadow-[0_0_0_3px_rgb(17_17_17/0.08)]"
+                      : "border-borda bg-superficie hover:-translate-y-px hover:border-texto/30 hover:shadow-[0_2px_8px_rgb(17_17_17/0.05)]"
+                  }`}
+                >
+                  <span className="text-[11.5px] leading-tight text-texto-suave/80">{e.nivel}</span>
+                  <span className="truncate text-[13.5px] font-medium leading-snug text-texto">{e.nome}</span>
+                  <span
+                    aria-hidden
+                    className={`absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-texto text-fundo transition-[opacity,scale] duration-150 ${
+                      ativo ? "scale-100 opacity-100" : "scale-75 opacity-0"
+                    }`}
+                  >
+                    <Check size={10} strokeWidth={2.75} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -240,24 +294,15 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
             <Lock size={12} strokeWidth={1.75} />
             Nada é publicado antes da sua revisão.
           </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={usarExemplo}
-              className="rounded-controle px-3.5 py-2 text-[14px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
-            >
-              Usar um exemplo
-            </button>
-            <button
-              type="submit"
-              disabled={!pronto}
-              title={falta ?? undefined}
-              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-sobre-marca transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Começar com o Totti
-              <ArrowRight size={15} strokeWidth={1.75} />
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={!pronto}
+            title={falta ?? undefined}
+            className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-sobre-marca transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Começar com o Totti
+            <ArrowRight size={15} strokeWidth={1.75} />
+          </button>
         </div>
       </div>
 

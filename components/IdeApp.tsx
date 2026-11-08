@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Flag, Play, Mic, MicOff, MessageCircle } from "lucide-react";
+import { Flag, Play } from "lucide-react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import type { EditorCommand, EmpecilhoPublico, InterviewConfig } from "@/lib/contracts";
 import { createExecutor, type CommandExecutor } from "@/lib/editorCommands";
@@ -14,18 +14,16 @@ import FakeCursor, { measureLines, type FakeCursorHandle } from "./FakeCursor";
 import CodeEditor from "./CodeEditor";
 import ConfirmarEncerrar from "./ConfirmarEncerrar";
 import JanelaChamada from "./JanelaChamada";
-import PainelConversa, { LARGURA_PAINEL } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
-import { comoFuncionaLiveCoding } from "@/lib/conversa/instrucoes";
-import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
+import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
+import { deveAguardarParaFalar, PAUSA_FIM_DA_FALA_MS, podeTomarTurno } from "@/lib/conversa/turnos";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
-import ControleVoz from "./voz/ControleVoz";
 import Legenda from "./Legenda";
 import { postEncerramento, postForcarEmpecilho } from "./ide/api";
-import { ASSUNTO_LIVRE, useChat } from "./ide/useChat";
+import { useConversa } from "./ide/useConversa";
 import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
 
@@ -36,23 +34,28 @@ const MARGEM_RECOLHIDO = 12;
 /** Espaço em cima do editor com o painel recolhido: pílula e botões numa fileira só. */
 const TOPO_RECOLHIDO = 104;
 /** Silêncio real depois da última frase final antes de a fala ir para o Totti (evita cortar no meio da frase). */
-const FALA_SILENCIO_MS = 750;
+const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 /** Teto da espera acima: ruído constante no microfone não segura a fala para sempre. */
-const FALA_ESPERA_MAX_MS = 4000;
-/** Barge-in: volume do microfone e tempo contínuo acima dele para o Totti calar e ouvir o candidato. */
-const VOLUME_BARGE_IN = 0.2;
-const TEMPO_BARGE_IN_MS = 380;
+const FALA_ESPERA_MAX_MS = 12_000;
+/**
+ * Barge-in: o candidato fala por cima do Totti, alto e sem parar, e o Totti cala para ouvir. Volume e tempo
+ * altos de propósito: um "hum", o teclado ou um barulho da sala não podem cortar a frase dele no meio.
+ */
+const VOLUME_BARGE_IN = 0.3;
+const TEMPO_BARGE_IN_MS = 700;
+/** Digitou há menos que isso: o som é do teclado, não é alguém querendo falar. */
+const DIGITANDO_MS = 1200;
+/** Depois de uma fala do Totti, ele espera isso antes de puxar outro assunto (o candidato precisa de vez). */
+const PAUSA_ENTRE_FALAS_MS = 4000;
 
 /**
  * A IDE não tem inteligência: mostra, captura e obedece (docs/contexto-pessoa-a-ide.md).
- * Eventos vão para /api/events; a conversa com o agente aparece na barra lateral, que abre quando o agente pergunta
- * (sozinho, numa pausa do candidato) ou responde a uma fala solta dele (dúvida, feedback, etapa concluída).
+ * Eventos vão para /api/events. A conversa com o Totti é uma só, por voz, a entrevista inteira
+ * (components/ide/useConversa.ts): ele se apresenta, ouve, responde e faz as perguntas dele numa pausa.
  */
 /** `vaga`: o que a IDE usa da config da vaga (padrão: DEFAULT_CONFIG). */
-export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty">;
+export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty"> & Partial<Pick<InterviewConfig, "roleTitle">>;
 
-/** Fora da conversa, frases finais com menos palavras que isso não entram na linha do tempo (o agente ainda ouve). */
-const MIN_PALAVRAS_FALA = 2;
 /** Logo no começo o agente se apresenta, diz quanto tempo dura e como funciona (lib/conversa/instrucoes.ts). */
 /** Espera depois de a sessão começar, para a saudação não atropelar o carregamento da tela. */
 const ATRASO_SAUDACAO_MS = 1500;
@@ -96,9 +99,10 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const [firstRun, setFirstRun] = useState(true);
   const [problemaAberto, setProblemaAberto] = useState(true);
   const [confirmandoFim, setConfirmandoFim] = useState(false);
-  /** Pediu para finalizar e o agente abriu a última conversa: a sessão encerra quando ela fechar. */
+  /** Pediu para finalizar: a sessão encerra quando a última conversa (os pontos pendentes) fechar. */
   const [finalizando, setFinalizando] = useState(false);
-  const encerramentoAbertoRef = useRef(false);
+  const finalizandoRef = useRef(false);
+  finalizandoRef.current = finalizando;
   /** Mudança no problema que o Totti trouxe (empecilho): entra no painel e os testes dela rodam junto. */
   const [mudanca, setMudanca] = useState<EmpecilhoPublico | null>(null);
   const problemaRodado = mudanca ? { ...problem, visibleTests: [...problem.visibleTests, ...mudanca.tests.map(({ name, args, expected }) => ({ name, args, expected }))] } : problem;
@@ -106,6 +110,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const midia = useMidiaLocal();
   const voz = useVozAgente({ bloqueada: session.ended });
   const [parcial, setParcial] = useState("");
+  const vozEstadoRef = useRef(voz.estado);
+  vozEstadoRef.current = voz.estado;
   // Atalhos de desenvolvimento só com ?debug=1 (lido no cliente, depois da hidratação).
   const [debug, setDebug] = useState(false);
   useEffect(() => {
@@ -160,57 +166,39 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     cmds.forEach((c) => executorRef.current?.(c));
   }, []);
 
-  const chat = useChat({
+  const encerrarPelaVozRef = useRef<() => void>(() => {});
+  const fioFechadoRef = useRef<() => void>(() => {});
+  const conversa = useConversa({
     sessionId: session.sessionId,
     sendEvent: session.sendEvent,
     applyCommands,
-    onAgentReply: falarNaVez,
-    onCancelReply: voz.parar,
+    falar: falarNaVez,
+    parar: voz.parar,
+    vozTocando: () => vozEstadoRef.current === "falando",
     getLiveCode: capture.getLiveCode,
+    onFinishRequest: () => encerrarPelaVozRef.current(),
+    onFioFechado: () => fioFechadoRef.current(),
+    onSemVoz: (texto) => setLegendaSemVoz({ quem: "agente", texto, ate: texto.length }),
   });
 
-  // Fala do candidato (Scribe, ou o navegador como reserva): numa conversa vira a resposta dele; fora dela vai
-  // para o entrevistador, que decide pela intenção se responde (dúvida, feedback, etapa concluída) ou só ouve.
+  // Fala do candidato (Scribe, ou o navegador como reserva): vai para a conversa, que decide pela intenção se o
+  // Totti responde (dúvida, feedback, etapa concluída, resposta à pergunta dele) ou só ouve (pensando em voz alta).
   const falaRef = useRef<(texto: string) => void>(() => {});
-  /** Fala dita enquanto o agente ainda respondia (ou a barra fechava): vai assim que o chat liberar. */
-  const falaPendenteRef = useRef<string | null>(null);
-  const ouvirSolta = (texto: string) => {
-    // Murmúrio solto ("hum", "é") não vira evento na linha do tempo, mas o agente ouve (pode ser um "terminei").
-    chat.ouvir(texto, texto.split(/\s+/).filter(Boolean).length >= MIN_PALAVRAS_FALA);
-  };
   falaRef.current = (texto) => {
     const limpo = texto.trim();
     if (!limpo || session.ended) return;
-    if (chat.emConversa && !chat.ended && !chat.busy) {
-      // Dentro da conversa qualquer resposta vale, até "sim" ou "não".
-      chat.send(limpo);
-      return;
-    }
-    if (chat.emConversa) {
-      falaPendenteRef.current = [falaPendenteRef.current, limpo].filter(Boolean).join(" ");
-      return;
-    }
-    ouvirSolta(limpo);
+    conversa.ouvir(limpo);
   };
-  useEffect(() => {
-    const pendente = falaPendenteRef.current;
-    if (!pendente || chat.busy) return;
-    if (chat.emConversa && !chat.ended) {
-      falaPendenteRef.current = null;
-      chat.send(pendente);
-    } else if (!chat.emConversa) {
-      falaPendenteRef.current = null;
-      ouvirSolta(pendente);
-    }
-  });
-  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de 750 ms de
-  // silêncio real. Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
+  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de ~3 s sem voz
+  // (PAUSA_FIM_DA_FALA_MS mais o 1 s do Scribe). Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
   const bufferFalaRef = useRef("");
   const bufferDesdeRef = useRef(0);
   const bufferTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const aoFalar = useCallback((texto: string) => {
     const limpo = texto.trim();
     if (!limpo) return;
+    // O trecho final também é fala: até ele seguir para o Totti, a vez continua com o candidato.
+    ultimaFalaEmRef.current = Date.now();
     if (!bufferFalaRef.current) bufferDesdeRef.current = Date.now();
     bufferFalaRef.current = [bufferFalaRef.current, limpo].filter(Boolean).join(" ");
     clearTimeout(bufferTimerRef.current);
@@ -237,51 +225,43 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   useEffect(() => {
     if (voz.estado !== "falando" || !passouDoLimite) return;
     const id = setTimeout(() => {
-      if (volumeRef.current > VOLUME_BARGE_IN) vozParar();
+      const digitando = Date.now() - ultimaDigitacaoEmRef.current < DIGITANDO_MS;
+      if (volumeRef.current > VOLUME_BARGE_IN && !digitando) vozParar();
     }, TEMPO_BARGE_IN_MS);
     return () => clearTimeout(id);
   }, [voz.estado, passouDoLimite, vozParar]);
   const escuta = useTranscricao({
     stream: midia.stream,
     // A escuta só para enquanto a voz do agente toca (preparando, ela ainda ouve: o candidato pode continuar falando).
-    ativo: midia.microfoneLigado && !session.ended && (!finalizando || chat.open) && voz.estado !== "falando",
+    ativo: midia.microfoneLigado && !session.ended && voz.estado !== "falando",
     sessaoId: session.sessionId,
     aoParcial: receberParcial,
     aoFinal: aoFalar,
   });
 
   // Estado do turno lido pelos intervalos abaixo (sem recriá-los a cada render).
-  const estadoTurnoRef = useRef({ agenteFalando: false, aguardandoResposta: false, emConversa: false });
-  estadoTurnoRef.current = { agenteFalando: voz.ativa, aguardandoResposta: chat.busy, emConversa: chat.emConversa };
+  const estadoTurnoRef = useRef({ agenteFalando: false, aguardandoResposta: false });
+  estadoTurnoRef.current = { agenteFalando: voz.ativa, aguardandoResposta: conversa.pensando };
 
-  // Logo no começo, o agente se apresenta e avisa que dá para pedir feedback ao fim de cada etapa.
-  // Se uma conversa já abriu antes (o agente já falou), a saudação não vem mais.
+  // Logo no começo o Totti se apresenta: quem é, quanto tempo dura, como funciona e que ele acompanha o código
+  // o tempo todo (lib/conversa/instrucoes.ts). Espera a tela carregar e uma pausa de quem já estiver falando.
   const saudacaoFeitaRef = useRef(false);
-  const lembrarFala = chat.lembrar;
-  const registrarEvento = session.sendEvent;
+  const dizer = conversa.dizer;
   const duracaoMin = vaga.durationMin;
-  useEffect(() => {
-    if (chat.open) saudacaoFeitaRef.current = true;
-  }, [chat.open]);
+  const cargo = vaga.roleTitle;
   useEffect(() => {
     if (!session.sessionId || session.ended || saudacaoFeitaRef.current) return;
     const desde = Date.now();
     const id = setInterval(() => {
       const agora = Date.now();
-      const { emConversa, ...turno } = estadoTurnoRef.current;
-      if (saudacaoFeitaRef.current || agora - desde < ATRASO_SAUDACAO_MS || emConversa) return;
-      if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...turno })) return;
+      if (saudacaoFeitaRef.current || agora - desde < ATRASO_SAUDACAO_MS) return;
+      if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...estadoTurnoRef.current })) return;
       saudacaoFeitaRef.current = true;
       clearInterval(id);
-      const saudacao = comoFuncionaLiveCoding(duracaoMin);
-      lembrarFala({ role: "agent", text: saudacao });
-      void registrarEvento({ type: "speech", role: "agent", text: saudacao }).catch(() => {});
-      void falarNaVez(saudacao).then((falou) => {
-        if (!falou) setLegendaSemVoz({ quem: "agente", texto: saudacao, ate: saudacao.length });
-      });
+      void dizer(comoFuncionaLiveCoding(duracaoMin, cargo));
     }, 200);
     return () => clearInterval(id);
-  }, [session.sessionId, session.ended, lembrarFala, registrarEvento, falarNaVez, duracaoMin]);
+  }, [session.sessionId, session.ended, dizer, duracaoMin, cargo]);
 
   useEffect(() => warmUp(), []);
   const pedirMidia = midia.pedir;
@@ -296,50 +276,40 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     return () => clearTimeout(id);
   }, [session.ended, session.sessionId, router]);
 
-  // A conversa fechou (por qualquer lado): o foco volta para o código, ou, se era a do encerramento, a sessão acaba.
-  const conversaAberta = chat.open;
+  // Um assunto fechou: o foco volta para o código, ou, se era a conversa do encerramento, a sessão acaba.
   const encerrar = session.endSession;
-  useEffect(() => {
-    if (conversaAberta) {
-      if (finalizando) encerramentoAbertoRef.current = true;
-      return;
-    }
-    if (finalizando && encerramentoAbertoRef.current) encerrar("button");
+  fioFechadoRef.current = () => {
+    if (finalizandoRef.current) encerrar("button");
     else editorRef.current?.focus();
-  }, [conversaAberta, finalizando, encerrar]);
+  };
 
-  // Empecilho: não é pergunta que dá para adiar. A conversa abre sozinha, o Totti anuncia a mudança e o painel
-  // do problema abre com ela em destaque.
+  // As perguntas do Totti (lib/agents/policy.ts decide o quê e quando pode) são faladas numa pausa natural:
+  // ninguém falando, sem transcrição parcial, sem digitar, sem outro assunto aberto e com um respiro desde a
+  // última fala dele. A mudança no problema (empecilho) espera a mesma pausa, mas não a digitação.
   const balao = session.incomingBlip;
-  const abrirBalao = chat.openBlip;
   const tirarBalao = session.setIncomingBlip;
+  const abrirFio = conversa.abrirFio;
+  const ocupada = conversa.ocupada;
+  const fioRef = conversa.fioRef;
+  const ultimaFalaDoAgenteEmRef = conversa.ultimaFalaDoAgenteEmRef;
   useEffect(() => {
-    const empecilho = balao?.empecilho;
-    if (!balao || !empecilho || conversaAberta || finalizando || session.ended) return;
-    tirarBalao(null);
-    setMudanca(empecilho);
-    setProblemaAberto(true);
-    void abrirBalao(balao);
-  }, [balao, conversaAberta, finalizando, session.ended, tirarBalao, abrirBalao]);
-
-  // O agente não espera clique para perguntar: com uma pergunta pendente, abre a conversa sozinho na primeira
-  // pausa do candidato (sem fala, sem transcrição parcial, sem digitar). O balão continua clicável enquanto isso.
-  const abrirNaPausaRef = useRef<() => void>(() => {});
-  abrirNaPausaRef.current = () => abrirConversa();
-  const perguntaNaTela = balao && !balao.empecilho ? balao : null;
-  const emConversa = chat.emConversa;
-  useEffect(() => {
-    if (!perguntaNaTela || conversaAberta || emConversa || finalizando || session.ended) return;
+    if (!balao || finalizando || session.ended) return;
     const id = setInterval(() => {
       const agora = Date.now();
-      const { emConversa: ocupado, ...turno } = estadoTurnoRef.current;
-      if (ocupado || agora - ultimaDigitacaoEmRef.current < PAUSA_DIGITACAO_MS) return;
-      if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...turno })) return;
+      if (!saudacaoFeitaRef.current || fioRef.current || ocupada() || vozEstadoRef.current !== "inativa" || bufferFalaRef.current) return;
+      if (agora - ultimaFalaDoAgenteEmRef.current < PAUSA_ENTRE_FALAS_MS) return;
+      if (!balao.empecilho && agora - ultimaDigitacaoEmRef.current < PAUSA_DIGITACAO_MS) return;
+      if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...estadoTurnoRef.current })) return;
       clearInterval(id);
-      abrirNaPausaRef.current();
+      tirarBalao(null);
+      if (balao.empecilho) {
+        setMudanca(balao.empecilho);
+        setProblemaAberto(true);
+      }
+      void abrirFio(balao);
     }, 150);
     return () => clearInterval(id);
-  }, [perguntaNaTela, conversaAberta, emConversa, finalizando, session.ended]);
+  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, ocupada, fioRef, ultimaFalaDoAgenteEmRef]);
 
   /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
   async function forcarEmpecilho() {
@@ -353,10 +323,26 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     }
   }
 
+  /** Pediu, falando, para encerrar: o Totti se despede e a sessão fecha, sem a última pergunta do botão. */
+  async function encerrarPelaVoz() {
+    if (session.sessionId === null || finalizandoRef.current || session.ended) return;
+    finalizandoRef.current = true;
+    setFinalizando(true);
+    session.setIncomingBlip(null);
+    conversa.parar();
+    await Promise.all([
+      conversa.dizer(DESPEDIDA_LIVE_CODING).catch(() => false),
+      capture.flushSnapshot().catch(() => {}),
+    ]);
+    session.endSession("button");
+  }
+  encerrarPelaVozRef.current = () => void encerrarPelaVoz();
+
   /** Confirmou que quer finalizar: se o agente ainda tem o que perguntar, abre a última conversa antes. */
   async function finalizar() {
     setConfirmandoFim(false);
-    if (session.sessionId === null || finalizando) return;
+    if (session.sessionId === null || finalizandoRef.current) return;
+    finalizandoRef.current = true;
     setFinalizando(true);
     session.setIncomingBlip(null);
     try {
@@ -364,12 +350,17 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       await capture.flushSnapshot().catch(() => {});
       const res = await postEncerramento(session.sessionId);
       if (res.blip) {
-        void chat.openBlip(res.blip);
+        // Os pontos que ficaram pendentes viram a última conversa; a sessão acaba quando ela fechar.
+        if (conversa.fioRef.current) conversa.fecharFio("button");
+        finalizandoRef.current = true;
+        void conversa.abrirFio(res.blip);
         return;
       }
     } catch (err) {
       console.error("POST /api/encerramento falhou", err);
     }
+    conversa.parar();
+    await conversa.dizer(DESPEDIDA_LIVE_CODING).catch(() => false);
     session.endSession("button");
   }
 
@@ -422,19 +413,16 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     void capture.runWithResult(result);
   }
 
-  function abrirConversa() {
-    const blip = session.incomingBlip;
-    if (!blip || chat.open) return;
-    session.setIncomingBlip(null);
-    void chat.openBlip(blip);
-  }
-
-  /** "Agora não": tira a pergunta da tela; o servidor decide quando ela volta. */
-  function adiarPergunta() {
-    const blip = session.incomingBlip;
-    if (!blip) return;
-    session.setIncomingBlip(null);
-    void session.sendEvent({ type: "blip_snoozed", blipId: blip.id });
+  /** Microfone desligado ou indisponível: o candidato ainda pode escrever para o Totti. */
+  const [digitado, setDigitado] = useState("");
+  const semMicrofone = !midia.stream || !midia.microfoneLigado || !!escuta.erro;
+  function enviarDigitado(e: React.FormEvent) {
+    e.preventDefault();
+    const texto = digitado.trim();
+    if (!texto || session.ended) return;
+    setDigitado("");
+    ultimaFalaEmRef.current = Date.now();
+    conversa.ouvir(texto);
   }
 
   const remaining = Math.max(0, DURATION_MS - session.elapsedMs);
@@ -449,7 +437,6 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
           style={{
             marginLeft: problemaAberto ? MARGEM_PROBLEMA : MARGEM_RECOLHIDO,
             paddingTop: problemaAberto ? 0 : TOPO_RECOLHIDO,
-            marginRight: chat.open ? LARGURA_PAINEL + 12 : 0,
           }}
         >
           <div className="min-h-0 flex-1">
@@ -501,21 +488,11 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             <button
               type="button"
               onClick={() => setConfirmandoFim(true)}
-              disabled={session.ended || chat.open || finalizando}
+              disabled={session.ended || finalizando}
               className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
             >
               <Flag size={16} strokeWidth={1.75} />
               Finalizar
-            </button>
-            <button
-              type="button"
-              onClick={chat.abrirLivre}
-              disabled={session.ended || chat.emConversa || finalizando}
-              title="Tirar uma dúvida ou pedir um feedback"
-              className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
-            >
-              <MessageCircle size={16} strokeWidth={1.75} />
-              Chamar o Totti
             </button>
             <button
               type="button"
@@ -552,7 +529,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               <button
                 type="button"
                 onClick={() => void forcarEmpecilho()}
-                disabled={mudanca !== null || chat.open}
+                disabled={mudanca !== null || conversa.fio !== null}
                 className="label-pequena rounded-full bg-superficie-2 px-2.5 py-1 disabled:opacity-50"
               >
                 Forçar empecilho
@@ -564,54 +541,38 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         <FakeCursor ref={cursorRef} />
 
         <JanelaChamada
-          pergunta={chat.open ? null : (session.incomingBlip?.preview ?? null)}
-          oculta={chat.open}
+          pergunta={null}
+          oculta={false}
           encerrada={session.ended}
           iniciadaEm={session.startedAtRef.current || null}
           midia={midia}
           agenteFalando={voz.estado === "falando"}
-          agentePensando={chat.busy || voz.estado === "preparando"}
-          onClicarPlin={abrirConversa}
-          onAdiar={adiarPergunta}
+          agentePensando={conversa.pensando || voz.estado === "preparando"}
+          onClicarPlin={() => {}}
+          onAdiar={() => {}}
         />
 
         <Legenda fala={voz.fala ?? legendaSemVoz} />
-        {/* Com a conversa fechada, o que o candidato está dizendo aparece numa legenda discreta */}
-        {parcial.trim() && !chat.open && !session.ended && (
+        {/* O que o candidato está dizendo aparece numa legenda discreta */}
+        {parcial.trim() && !session.ended && (
           <div className="pointer-events-none absolute right-4 bottom-[124px] left-4 z-10 flex justify-center md:left-[392px]">
             <p role="status" className="vidro max-w-[560px] truncate rounded-full px-4 py-1.5 text-[13px] italic text-texto-suave shadow-cartao">
               {parcial}
             </p>
           </div>
         )}
-        <PainelConversa
-          aberto={chat.open}
-          assunto={chat.blip?.preview ?? (chat.livre ? ASSUNTO_LIVRE : undefined)}
-          livre={chat.livre}
-          falas={chat.messages}
-          anteriores={chat.previous}
-          digitando={chat.busy}
-          encerrada={chat.ended}
-          erro={chat.error}
-          onEnviar={chat.send}
-          onTentarDeNovo={chat.retry}
-          onVoltar={chat.close}
-          rotuloVoltar={finalizando ? "Encerrar agora" : undefined}
-          rodape={
-            <div className="flex flex-col gap-1 px-4 py-2 text-texto-suave">
-              <div className="flex items-center justify-between gap-2">
-                <ControleVoz voz={voz} texto={chat.messages.at(-1)?.role === "agent" ? chat.messages.at(-1)?.text : undefined} disabled={chat.busy || chat.ended || session.ended} />
-                <button type="button" onClick={midia.alternarMicrofone} disabled={!midia.stream || session.ended}
-                  aria-label={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
-                  aria-pressed={midia.microfoneLigado} className="rounded-full p-2 disabled:opacity-40">
-                  {midia.microfoneLigado ? <Mic size={16} /> : <MicOff size={16} />}
-                </button>
-              </div>
-              {parcial && <p role="status" className="text-[13px] italic">{parcial}</p>}
-              {escuta.erro && <p role="status" className="text-[12px]">{escuta.erro}</p>}
-            </div>
-          }
-        />
+        {/* Sem microfone, a conversa continua por escrito (a fala do Totti segue na voz e na legenda) */}
+        {semMicrofone && !session.ended && (
+          <form onSubmit={enviarDigitado} className="absolute bottom-4 left-4 z-10 flex w-[min(480px,calc(100%-2rem))] gap-2 md:left-[392px]">
+            <input
+              value={digitado}
+              onChange={(e) => setDigitado(e.target.value)}
+              aria-label="Escrever para o Totti"
+              placeholder={escuta.erro ?? "Microfone desligado: escreva para o Totti e aperte Enter"}
+              className="vidro min-w-0 flex-1 rounded-full px-4 py-2 text-[14px] shadow-cartao outline-none"
+            />
+          </form>
+        )}
 
         <ConfirmarEncerrar
           aberto={confirmandoFim}

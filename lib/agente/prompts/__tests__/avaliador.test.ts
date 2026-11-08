@@ -52,9 +52,9 @@ describe("bloco estático", () => {
 
   it("traz os princípios, a tabela de ações e as regras de saída", () => {
     for (const trecho of [
-      "O candidato conduz", "Não valide nem corrija", "espontaneo", "Escada de ajuda", "degrau",
+      "você conduz a conversa", "Não valide nem corrija", "espontaneo", "Escada de ajuda", "degrau",
       "\"ok\"", "\"duvida\"", "\"redirecionar\"", "\"dica\"", "40 caracteres", "UMA pergunta concreta",
-      "1 ou 2 áreas", "justo e igual",
+      "2 ou 3 áreas", "justo e igual",
     ]) {
       assert.ok(e.toLowerCase().includes(trecho.toLowerCase()), `faltou: ${trecho}`);
     }
@@ -141,6 +141,23 @@ describe("bloco dinâmico", () => {
     };
     const dp = montarPromptAvaliador(kitDemo, problema, comPendente, pedido(), AGORA).sistema.dinamico;
     assert.ok(dp.includes('"E se o cache cair?"'));
+  });
+
+  it("traz o briefing: o que já temos do candidato e o que falta cobrir", () => {
+    const comEvidencia: EstadoSessao = {
+      ...estado,
+      cobertura: { ...estado.cobertura, escalabilidade: { positivo: 1, negativo: 0, neutro: 0 } },
+      observacoes: [{ criterio: "escalabilidade", sinal: "positivo", espontaneo: true, evidencia: "cache de leitura para o pico", em: AGORA - 30_000, fase: "APROFUNDAMENTO" }],
+    };
+    const db = montarPromptAvaliador(kitDemo, problema, comEvidencia, pedido(), AGORA).sistema.dinamico;
+    assert.ok(db.includes("BRIEFING DA ENTREVISTA"));
+    assert.ok(db.includes("cache de leitura para o pico"));
+    assert.match(db, /O que ainda falta/);
+    // Só o dinâmico muda com a evidência: o bloco estático segue igual.
+    assert.equal(
+      montarPromptAvaliador(kitDemo, problema, comEvidencia, pedido(), AGORA).sistema.estatico,
+      montarPromptAvaliador(kitDemo, problema, estado, pedido(), AGORA).sistema.estatico,
+    );
   });
 
   it("o bloco dinâmico não carrega a ficha nem a rubrica", () => {

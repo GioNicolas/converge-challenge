@@ -1,13 +1,20 @@
 // Política do "portão de entrada": funções puras que decidem SE a análise pode rodar e SE uma
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
-import { SILENCIO_INICIAL_S, SILENCIO_S } from "../../contracts";
+import {
+  INTERVALO_ENTRE_PERGUNTAS_S,
+  inicioDoIntervaloEntrePerguntas,
+  MAX_PERGUNTAS,
+  SILENCIO_INICIAL_S,
+  SILENCIO_S,
+} from "../../contracts";
 import { mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
 import type { Fase, RespostaAnalise, StatusAnalise } from "./tipos";
 
 export type Regras = {
   intervaloEntrePerguntasMs: number;
+
   maxPerguntas: number;
   /** Tamanho máximo da nota que o cursor escreve no quadro. */
   maxCaracteresNota: number;
@@ -25,8 +32,8 @@ export const LIMITE_SILENCIO_S = SILENCIO_S;
 export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: 25_000,
-  maxPerguntas: 5,
+  intervaloEntrePerguntasMs: INTERVALO_ENTRE_PERGUNTAS_S * 1000,
+  maxPerguntas: MAX_PERGUNTAS,
   maxCaracteresNota: 40,
 };
 
@@ -67,7 +74,17 @@ export type MotivoBloqueio = "FASE_NAO_ANALISA" | "CANDIDATO_RESPONDENDO";
 export type MotivoBloqueioPlin =
   | MotivoBloqueio
   | "LIMITE_DE_PERGUNTAS"
-  | "INTERVALO_ENTRE_PERGUNTAS";
+  | "INTERVALO_ENTRE_PERGUNTAS"
+  | "BOLA_COM_O_CANDIDATO";
+
+/**
+ * O que o quadro sabe do candidato no momento da análise. Sem isso a regra "a bola está com ele" não se aplica
+ * (o servidor não vê o desenho nem a voz, só o que o quadro manda).
+ */
+export type ContextoDoCandidato = {
+  /** Há quantos segundos ele não mexe no desenho nem fala (vem no pedido de análise). */
+  paradoHaS?: number;
+};
 
 /**
  * Por que a análise não deve rodar agora (null = pode rodar).
@@ -100,6 +117,7 @@ export function motivoBloqueioPlin(
   estado: EstadoSessao,
   agora: number,
   regras: Regras = REGRAS_PADRAO,
+  candidato: ContextoDoCandidato = {},
 ): MotivoBloqueioPlin | null {
   const base = motivoBloqueio(estado);
   if (base) return base;
@@ -110,11 +128,19 @@ export function motivoBloqueioPlin(
   } else if (estado.perguntasFeitas >= regras.maxPerguntas) {
     return "LIMITE_DE_PERGUNTAS";
   }
-  if (
-    estado.ultimaPerguntaEm !== null &&
-    agora - estado.ultimaPerguntaEm < regras.intervaloEntrePerguntasMs
-  ) {
+  // O respiro conta do mais recente entre o início da última pergunta e o fim da última resposta (igual ao quadro).
+  const inicioIntervalo = inicioDoIntervaloEntrePerguntas(estado.ultimaPerguntaEm, estado.ultimaRespostaEm);
+  if (inicioIntervalo !== null && agora - inicioIntervalo < regras.intervaloEntrePerguntasMs) {
     return "INTERVALO_ENTRE_PERGUNTAS";
+  }
+  // A bola está com o candidato: depois de qualquer fala solta do agente (resposta, comentário, continuação) ele
+  // não pergunta de novo até o candidato agir (falar ou mexer no desenho). Sem ação dele, só um silêncio de verdade
+  // (o mesmo limite que já quebra o silêncio) libera a pergunta.
+  const fala = estado.ultimaFalaDoAgenteEm;
+  if (fala != null && candidato.paradoHaS !== undefined) {
+    const agiuDepois = agora - candidato.paradoHaS * 1000 > fala;
+    const silencioS = estado.fase === "REQUISITOS" ? SILENCIO_INICIAL_S : SILENCIO_S;
+    if (!agiuDepois && agora - fala < silencioS * 1000) return "BOLA_COM_O_CANDIDATO";
   }
   return null;
 }
@@ -125,9 +151,10 @@ export function podeLevantarPlin(
   status: StatusAnalise,
   agora: number,
   regras: Regras = REGRAS_PADRAO,
+  candidato: ContextoDoCandidato = {},
 ): boolean {
   if (status === "ok") return false;
-  return statusPermitidoNoEstado(estado, status) && motivoBloqueioPlin(estado, agora, regras) === null;
+  return statusPermitidoNoEstado(estado, status) && motivoBloqueioPlin(estado, agora, regras, candidato) === null;
 }
 
 /** Extrai os ids curtos do grafo (linhas "- [e1] Postgres (elipse)" ou "- [s1] A → B"). */
@@ -156,8 +183,9 @@ export function filtrarResposta(
   idsDoGrafo: ReadonlySet<string>,
   agora: number,
   regras: Regras = REGRAS_PADRAO,
+  candidato: ContextoDoCandidato = {},
 ): RespostaAnalise {
-  const filtrada = filtrarPlin(estado, resposta, idsDoGrafo, agora, regras);
+  const filtrada = filtrarPlin(estado, resposta, idsDoGrafo, agora, regras, candidato);
   // O sinal de prontidão independe do plin, mas só vale em ALTO_NIVEL.
   return { ...filtrada, avancar_fase: resposta.avancar_fase === true && estado.fase === "ALTO_NIVEL" };
 }
@@ -168,10 +196,11 @@ function filtrarPlin(
   idsDoGrafo: ReadonlySet<string>,
   agora: number,
   regras: Regras,
+  candidato: ContextoDoCandidato,
 ): RespostaAnalise {
   if (resposta.status === "ok") return silenciar(resposta);
   const pergunta = resposta.pergunta?.trim();
-  if (!pergunta || !podeLevantarPlin(estado, resposta.status, agora, regras)) {
+  if (!pergunta || !podeLevantarPlin(estado, resposta.status, agora, regras, candidato)) {
     return silenciar(resposta);
   }
   const nota = cortar((resposta.nota?.trim() || pergunta).trim(), regras.maxCaracteresNota);

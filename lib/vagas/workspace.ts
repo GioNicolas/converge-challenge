@@ -540,13 +540,14 @@ export function useRecentes(): string[] {
 // Leitura para a tela: as etapas de uma vaga publicada e frases curtas sobre ela.
 // ---------------------------------------------------------------------------
 
-export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "aprendizado", "contratacoes"] as const;
+// Na ordem em que a recrutadora usa: o que decidir, quem está no processo, o plano e o resto.
+export const ETAPAS_VAGA = ["escores", "entrevistas", "plano", "aprendizado", "contratacoes"] as const;
 export type EtapaVaga = (typeof ETAPAS_VAGA)[number];
 
 export const NOME_ETAPA: Record<EtapaVaga, string> = {
-  plano: "Plano combinado",
+  plano: "Plano da entrevista",
   entrevistas: "Candidatos",
-  escores: "Escores",
+  escores: "Para decidir",
   aprendizado: "O que o Totti aprendeu",
   contratacoes: "Contratações",
 };
@@ -566,13 +567,29 @@ export const numeroCurto = (n: number) =>
 /** O número ao lado de cada etapa no menu (o plano não tem número). */
 export function contagemDa(v: VagaEmpresa, etapa: EtapaVaga): number | null {
   if (etapa === "entrevistas") return v.funil.inscritos;
-  if (etapa === "escores") return v.funil.concluiram;
+  // "Para decidir" conta quem espera decisão; numa vaga encerrada, quem concluiu.
+  if (etapa === "escores") return v.etapa === "encerrada" ? v.funil.concluiram : v.funil.novos;
   if (etapa === "contratacoes") return v.contratados ?? null;
   return null;
 }
 
 /** Relatórios que acabaram de chegar: é o que o avaliador deve olhar primeiro. */
 export const novosDa = (v: VagaEmpresa) => (v.etapa === "encerrada" ? 0 : v.funil.novos);
+
+/** A partir de que fração dos convidados entrevistados a vaga sai de "Totti cuidando" e vai para a decisão. */
+export const FRACAO_PARA_DECIDIR = 0.5;
+
+/** Quanto dos convidados já fez a entrevista (0 a 1). Sem convidados ainda, conta como nada feito. */
+export function fracaoEntrevistada(v: Pick<VagaEmpresa, "funil">): number {
+  const f = v.funil;
+  return f.convidados ? Math.min(1, f.concluiram / f.convidados) : 0;
+}
+
+/**
+ * A vaga está pronta para a recrutadora decidir: tem relatório esperando e pelo menos metade dos convidados
+ * já foi entrevistada. Antes disso, decidir é comparar poucos candidatos; a vaga segue com o Totti.
+ */
+export const prontaParaDecidir = (v: VagaEmpresa) => novosDa(v) > 0 && fracaoEntrevistada(v) >= FRACAO_PARA_DECIDIR;
 
 const dias = (n: number) => (n === 0 ? "hoje" : n === 1 ? "ontem" : `há ${n} dias`);
 
@@ -638,8 +655,6 @@ export function estagioDa(v: VagaEmpresa): Exclude<Estagio, "escopo"> | "encerra
 // os recortes rápidos da lista (com contagem) e a ordenação.
 // ---------------------------------------------------------------------------
 
-/** Quanto de entrevista humana cada triagem feita pelo Totti poupa (estimativa do painel). */
-export const MINUTOS_POR_TRIAGEM = 30;
 /** A partir de quantos inscritos a vaga conta como de alto volume. */
 export const ALTO_VOLUME = 1_000;
 
@@ -660,23 +675,20 @@ export type Totais = {
   /** Relatórios prontos esperando o parecer da recrutadora. */
   pendentes: number;
   vagasComPendentes: number;
-  horasPoupadas: number;
 };
 
 /** Soma o funil das vagas abertas. */
 export function totaisDas(vagas: VagaEmpresa[]): Totais {
   const abertas = vagas.filter((v) => v.etapa !== "encerrada");
   const soma = (f: (v: VagaEmpresa) => number) => abertas.reduce((t, v) => t + f(v), 0);
-  const entrevistados = soma((v) => v.funil.concluiram);
   return {
     vagas: abertas.length,
     inscritos: soma((v) => v.funil.inscritos),
     convidados: soma((v) => v.funil.convidados),
-    entrevistados,
+    entrevistados: soma((v) => v.funil.concluiram),
     emAndamento: soma((v) => v.funil.emAndamento),
     pendentes: soma(novosDa),
     vagasComPendentes: abertas.filter((v) => novosDa(v) > 0).length,
-    horasPoupadas: Math.round((entrevistados * MINUTOS_POR_TRIAGEM) / 60),
   };
 }
 
@@ -688,19 +700,25 @@ export function porcento(parte: number, todo: number): string {
   return `${p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 1 : 0 })}%`;
 }
 
-/** Os atalhos da lista, na ordem dos chips. */
-export const RECORTES_RAPIDOS = ["todas", "pendentes", "em_entrevista", "alto_volume", "live_coding", "system_design", "escopo"] as const;
-/** Além dos chips: "com_relatorios" vem do funil e "encerradas" do link no fim da lista. */
-export type Recorte = (typeof RECORTES_RAPIDOS)[number] | "com_relatorios" | "encerradas";
+/** As abas da lista: o estado da vaga, na ordem em que ela pede a recrutadora. */
+export const RECORTES_RAPIDOS = ["todas", "pendentes", "em_entrevista", "escopo"] as const;
+/** Fora das abas: "encerradas" vem do link no fim da lista; os outros ainda abrem por link antigo (?recorte=). */
+export type Recorte =
+  | (typeof RECORTES_RAPIDOS)[number]
+  | "com_relatorios"
+  | "encerradas"
+  | "alto_volume"
+  | "live_coding"
+  | "system_design";
 
 export const NOME_RECORTE: Record<Recorte, string> = {
   todas: "Todas",
-  pendentes: "Com decisão pendente",
+  pendentes: "Precisam de você",
   em_entrevista: "Em entrevista",
   alto_volume: `Alto volume (+${numero(ALTO_VOLUME)})`,
   live_coding: NOME_FORMATO_CURTO.live_coding,
   system_design: NOME_FORMATO_CURTO.system_design,
-  escopo: "Com o Totti",
+  escopo: "Em definição",
   com_relatorios: "Com entrevistas feitas",
   encerradas: "Encerradas",
 };

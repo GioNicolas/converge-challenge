@@ -133,46 +133,12 @@ test("recrutadora dita a vaga e conversa com Totti sem repetir voz no polling", 
   expect((await falas(page)).length).toBe(quantidade);
 });
 
-test("candidato responde por voz e despedida não fecha a barra antes do áudio", async ({ page }) => {
-  await preparar(page);
-  const blip = { id: "voz-e2e", preview: "Pergunta de teste", priority: 1, createdAt: 0 };
-  let abriu = false;
-  const pedidos: string[] = [];
-  await page.route("**/api/events", async (rota) => {
-    const e = rota.request().postDataJSON();
-    if (e.type === "blip_opened") abriu = true;
-    await rota.fulfill({ json: !abriu && e.type === "session_started" ? { blip } : {} });
-  });
-  await page.route("**/api/blip/pending?**", (rota) => rota.fulfill({ json: {} }));
-  await page.route("**/api/chat", async (rota) => {
-    const historico = rota.request().postDataJSON().messages as { role: string; text: string }[];
-    const resposta = historico.findLast((m) => m.role === "candidate")?.text;
-    if (resposta) pedidos.push(resposta);
-    await rota.fulfill({ json: { reply: resposta ? "Obrigado, pode continuar." : "Como você vai começar?", commands: [], end: !!resposta } });
-  });
-  // A pergunta abre sozinha logo na primeira pausa: a voz precisa ficar presa desde o carregamento.
-  await page.addInitScript(() => { (window as unknown as JanelaTeste).vozTeste.autoTerminar = false; });
-  await page.goto("/entrevista");
-  // Nenhum clique no balão: o entrevistador abre a conversa sozinho.
-  const painel = page.getByRole("complementary", { name: "Conversa com o entrevistador" });
-  await expect(painel).toBeVisible();
-  await expect.poll(async () => (await falas(page)).length).toBe(1);
-  await expect.poll(() => ouvindo(page)).toBe(false);
-  await page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.terminar());
-  await expect.poll(() => ouvindo(page)).toBe(true);
-  await emitir(page, "Sim, vou começar pelo caso mais simples.");
-  await expect.poll(() => pedidos).toEqual(["Sim, vou começar pelo caso mais simples."]);
-  await expect.poll(async () => (await falas(page)).length).toBe(2);
-  await page.waitForTimeout(2800);
-  await expect(painel).toBeVisible();
-  await page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.terminar());
-  await expect(painel).toBeHidden({ timeout: 6000 });
-});
+const grifos = (page: Page) => page.locator(".agent-highlight").count();
 
-test("IDE avisa do feedback, pergunta na pausa, só ouve quem pensa em voz alta e responde ao pedido de feedback", async ({ page }) => {
+test("IDE: conversa só por voz, sem barra lateral; a pergunta sai na pausa e o grifo some quando o assunto fecha", async ({ page }) => {
   await preparar(page);
   const pergunta = "O que você está montando nesse loop?";
-  const feedback = "Você guarda cada número num dicionário antes de procurar o par.";
+  const parafrase = "Então você procura o complemento a cada número.";
   const blip = { id: "pausa-e2e", preview: "Sobre o seu loop", priority: 1, createdAt: 0 };
   let liberar = false;
   let abriu = false;
@@ -190,56 +156,69 @@ test("IDE avisa do feedback, pergunta na pausa, só ouve quem pensa em voz alta 
     if (pedido.blipId) {
       if (!ultima) return rota.fulfill({ json: { reply: pergunta, commands: [{ type: "highlight_range", startLine: 1, endLine: 2 }], end: false } });
       if (/deixa eu pensar/i.test(ultima)) return rota.fulfill({ json: ouvindo });
-      return rota.fulfill({ json: { reply: "Então você procura o complemento a cada número.", commands: [], end: true } });
-    }
-    if (/feedback/i.test(ultima)) {
-      return rota.fulfill({ json: { reply: feedback, commands: [{ type: "highlight_range", startLine: 1, endLine: 2 }], end: true, concluded: true } });
+      return rota.fulfill({ json: { reply: parafrase, commands: [], end: true } });
     }
     return rota.fulfill({ json: ouvindo });
   });
-  const painel = page.getByRole("complementary", { name: "Conversa com o entrevistador" });
 
   await page.goto("/entrevista");
-  // Logo no começo: o agente se apresenta e avisa que dá para pedir feedback ao fim de uma etapa.
-  await expect.poll(async () => (await falas(page)).some((f) => f.includes("pedir um feedback"))).toBe(true);
+  // A apresentação: quem é, quanto tempo e que ele acompanha o código, tudo por voz.
+  await expect.poll(async () => (await falas(page)).some((f) => f.includes("acompanhar o seu código"))).toBe(true);
+  await expect(page.getByRole("button", { name: "Chamar o Totti" })).toHaveCount(0);
   await expect.poll(() => ouvindo(page)).toBe(true);
 
-  // Fala em andamento (transcrição parcial) segura a vez: a pergunta pendente não abre por cima.
+  // Fala em andamento (transcrição parcial) segura a vez: a pergunta pendente não sai por cima.
   await page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.emitirParcial("Estou pensando em"));
   liberar = true;
-  await expect(page.getByRole("button", { name: `Abrir a pergunta do entrevistador: ${blip.preview}` })).toBeVisible({ timeout: 8000 });
-  await page.waitForTimeout(1500);
-  await expect(painel).toBeHidden();
+  await page.waitForTimeout(4000);
+  expect(await falas(page)).not.toContain(pergunta);
 
-  // Fala solta de quem pensa em voz alta vai ao entrevistador, que só ouve; depois da pausa a pergunta abre sozinha.
+  // Quem pensa em voz alta é só ouvido; na pausa, a pergunta sai por voz, com o grifo, sem abrir nenhuma barra.
   await emitir(page, "Estou pensando em usar um dicionário aqui.");
-  await expect.poll(() => pedidos.filter((p) => !p.blipId).length).toBe(1);
-  expect(pedidos[0].messages.some((m) => m.role === "agent" && m.text.includes("pedir um feedback"))).toBe(true);
-  await expect(painel).toBeVisible({ timeout: 8000 });
-  await expect.poll(() => falas(page)).toContain(pergunta);
+  await expect.poll(() => pedidos.filter((p) => !p.blipId).length, { timeout: 8000 }).toBe(1);
+  expect(pedidos[0].messages.some((m) => m.role === "agent" && m.text.includes("acompanhar o seu código"))).toBe(true);
+  await expect.poll(() => falas(page), { timeout: 15_000 }).toContain(pergunta);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
+  await expect.poll(() => grifos(page)).toBeGreaterThan(0);
   await expect.poll(() => ouvindo(page)).toBe(true);
 
-  // Pensando em voz alta dentro da conversa: nada é dito e a conversa continua aberta.
+  // Pensando em voz alta dentro da pergunta: nada é dito e o assunto continua aberto (o grifo fica).
   const antes = (await falas(page)).length;
   await emitir(page, "Hum, deixa eu pensar um pouco.");
-  await expect.poll(() => pedidos.filter((p) => p.blipId).length).toBe(2);
+  await expect.poll(() => pedidos.filter((p) => p.blipId).length, { timeout: 8000 }).toBe(2);
   await page.waitForTimeout(1200);
   expect((await falas(page)).length).toBe(antes);
-  await expect(painel).toBeVisible();
+  expect(await grifos(page)).toBeGreaterThan(0);
 
-  // Terminou a resposta: paráfrase neutra, e a conversa fecha.
+  // Respondeu: a paráfrase sai por voz, o assunto fecha e o grifo some.
   await emitir(page, "Eu guardo cada número num dicionário e procuro o complemento.");
-  await expect.poll(() => falas(page)).toContain("Então você procura o complemento a cada número.");
-  await expect(painel).toBeHidden({ timeout: 8000 });
+  await expect.poll(() => falas(page), { timeout: 8000 }).toContain(parafrase);
+  const resposta = pedidos.filter((p) => p.blipId).at(-1)!;
+  expect(resposta.messages.map((m) => m.role)).toEqual(["agent", "candidate", "candidate"]);
+  await expect.poll(() => grifos(page), { timeout: 6000 }).toBe(0);
+});
 
-  // Pedido de feedback fora de um balão: o entrevistador responde e a barra abre com a fala dele.
+test("IDE: fala livre com pedido de feedback é respondida por voz e o grifo sai depois", async ({ page }) => {
+  await preparar(page);
+  const feedback = "Você guarda cada número num dicionário antes de procurar o par.";
+  await page.route("**/api/events", (rota) => rota.fulfill({ json: {} }));
+  await page.route("**/api/blip/pending?**", (rota) => rota.fulfill({ json: {} }));
+  await page.route("**/api/chat", async (rota) => {
+    const pedido = rota.request().postDataJSON() as { messages: { role: string; text: string }[] };
+    const ultima = pedido.messages.findLast((m) => m.role === "candidate")?.text ?? "";
+    if (/feedback/i.test(ultima)) {
+      return rota.fulfill({ json: { reply: feedback, commands: [{ type: "highlight_range", startLine: 1, endLine: 2 }], end: true, concluded: true } });
+    }
+    return rota.fulfill({ json: { reply: "", commands: [], end: false, listening: true } });
+  });
+  await page.goto("/entrevista");
+  await expect.poll(async () => (await falas(page)).some((f) => f.includes("acompanhar o seu código"))).toBe(true);
   await expect.poll(() => ouvindo(page)).toBe(true);
   await emitir(page, "Terminei a primeira versão, pode me dar um feedback?");
-  await expect(painel).toBeVisible({ timeout: 8000 });
-  await expect(painel.getByText(feedback)).toBeVisible();
-  await expect(painel.getByText("Você chamou o entrevistador")).toBeVisible();
-  await expect.poll(() => falas(page)).toContain(feedback);
-  await expect(painel).toBeHidden({ timeout: 8000 });
+  await expect.poll(() => falas(page), { timeout: 8000 }).toContain(feedback);
+  await expect(page.getByRole("complementary")).toHaveCount(0);
+  // A fala fechou o assunto: o grifo dela sai quando ela termina.
+  await expect.poll(() => grifos(page), { timeout: 6000 }).toBe(0);
 });
 
 test("quadro encaminha transcrição para a conversa da sessão", async ({ page }) => {

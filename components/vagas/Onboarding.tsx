@@ -339,19 +339,27 @@ function CenaDoPasso({ passo }: { passo: number }) {
     );
   if (passo === 2)
     return (
-      <div className="relative flex h-full flex-col justify-center gap-1.5 p-9 font-mono text-[14px] leading-[26px]">
-        {["permitir(cliente) {", "  const j = this.janelas.get(cliente);", "  if (agora - j.inicio >= this.ms) {", "    j.pedidos++;", "  }", "}"].map((l, i) => (
-          <span key={i} className="whitespace-pre text-[#c9c2b6]" style={entra(i)}>
-            {l}
-          </span>
-        ))}
-        <span
-          className="absolute inset-x-0 h-[26px] bg-[#f5f0e8]/12 shadow-[inset_3px_0_0_#f5f0e8]"
-          style={{ top: 120, animation: "subir .6s var(--curva-saida) .7s both" }}
-        />
-        <span className="absolute rounded-full bg-[#f5f0e8] px-2 py-0.5 font-sans text-[12px] font-semibold text-[#1c1812]" style={{ right: 36, top: 126, ...entra(7) }}>
-          Totti lendo a linha 3
-        </span>
+      <div className="flex h-full flex-col justify-center gap-6 py-9">
+        {/* a faixa fica na própria linha (e não num `top` fixo), então acompanha o código em qualquer altura do palco */}
+        <div className="font-mono text-[14px] leading-[26px]">
+          {["permitir(cliente) {", "  const j = this.janelas.get(cliente);", "  if (agora - j.inicio >= this.ms) {", "    j.pedidos++;", "  }", "}"].map((l, i) => {
+            const lendo = i === 2;
+            return (
+              <div
+                key={i}
+                className={`flex whitespace-pre pr-6 ${lendo ? "bg-[#f5f0e8]/12 text-[#f5f0e8] shadow-[inset_3px_0_0_#f5f0e8]" : "text-[#c9c2b6]"}`}
+                style={entra(i)}
+              >
+                <span className="w-12 shrink-0 pr-4 text-right text-[#f5f0e8]/30">{i + 1}</span>
+                {l}
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex flex-col gap-1.5 px-9" style={entra(7)}>
+          <span className="font-mono text-[12.5px] text-[#f5f0e8]/70">› Totti leu a linha 3 e pergunta:</span>
+          <span className="text-[16px] leading-[1.45]">“Por que &gt;= e não &gt;? O que acontece na virada da janela?”</span>
+        </div>
       </div>
     );
   return (
@@ -360,7 +368,15 @@ function CenaDoPasso({ passo }: { passo: number }) {
         modelagem de dados · min 12:40
       </span>
       <p className="max-w-[420px] text-[19px] leading-[1.55]" style={entra(1)}>
-        “Eu usaria janela deslizante <span className="rounded-sm bg-[#f5f0e8]/20 px-0.5" style={{ animation: "varrer 1.2s var(--curva-saida) .9s both", backgroundImage: "linear-gradient(#f5f0e826,#f5f0e826)", backgroundRepeat: "no-repeat", backgroundSize: "0% 100%", backgroundColor: "transparent" }}>porque a fixa deixa passar o dobro</span>.”
+        “Eu usaria janela deslizante{" "}
+        {/* a evidência: um traço que corre por baixo do trecho, linha a linha quando ele quebra */}
+        <span
+          className="bg-no-repeat [background-position:0_100%] [box-decoration-break:clone] [-webkit-box-decoration-break:clone]"
+          style={{ backgroundImage: "linear-gradient(#f5f0e8, #f5f0e8)", backgroundSize: "100% 2px", animation: "sublinhar 1s var(--curva-saida) .9s both" }}
+        >
+          porque a fixa deixa passar o dobro
+        </span>
+        .”
       </p>
       <div className="h-2 max-w-[360px] overflow-hidden rounded-full bg-[#f5f0e8]/15" style={entra(3)}>
         <div className="h-full rounded-full bg-[#f5f0e8]" style={{ width: "88%", transformOrigin: "left", animation: "crescer 1s var(--curva-saida) .7s both" }} />

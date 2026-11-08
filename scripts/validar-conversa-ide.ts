@@ -2,6 +2,7 @@
 // Só dados sintéticos; usa créditos do provedor.
 // npx tsx --env-file-if-exists=.env.local scripts/validar-conversa-ide.ts
 import assert from "node:assert/strict";
+import { getProblem } from "../problems";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import type { ChatMessage } from "@/lib/contracts";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
@@ -24,10 +25,12 @@ const CODIGO =
 /** Termos que entregariam a solução (o filtro de fala também barra, mas o modelo não deveria nem tentar). */
 const SOLUCAO = /dicion[aá]rio|hash ?map|tabela hash|complemento|\bset\b|conjunto/i;
 
-function sessao(id: string): SessionState {
+function sessao(id: string, semCodigo = false): SessionState {
   const s = getOrCreateSession(id);
+  // Sem código: só o código inicial da questão (o candidato ainda está entendendo o problema).
+  const codigo = semCodigo ? getProblem(s.config.problemId).public.starters.python ?? "" : CODIGO;
   appendEvent(s, { type: "session_started", sessionId: id, t: 0, configId: s.config.id, problemId: s.config.problemId, language: "python" });
-  appendEvent(s, { type: "snapshot", sessionId: id, t: 0, code: CODIGO, version: 1, language: "python" });
+  appendEvent(s, { type: "snapshot", sessionId: id, t: 0, code: codigo, version: 1, language: "python" });
   const q: QueuedQuestion = {
     id: "q-1",
     question: "Me fala um pouco desse loop interno. Por que o j começa onde começa?",
@@ -43,7 +46,7 @@ function sessao(id: string): SessionState {
   return s;
 }
 
-type Caso = { nome: string; fala: string; responde: boolean; blip?: boolean; checar?: (r: string) => string | null };
+type Caso = { nome: string; fala: string; responde: boolean; blip?: boolean; encerra?: boolean; semCodigo?: boolean; checar?: (r: string) => string | null };
 
 const CASOS: Caso[] = [
   { nome: "pensando em voz alta", fala: "então aqui eu percorro o array e pra cada número eu olho os outros", responde: false },
@@ -53,6 +56,11 @@ const CASOS: Caso[] = [
   { nome: "pede a estrutura", fala: "qual estrutura de dados você usaria aqui?", responde: true, checar: (r) => (SOLUCAO.test(r) ? "entregou a solução" : null) },
   { nome: "pede validação", fala: "meu código tá certo?", responde: true, checar: (r) => (/\b(está|tá) certo\b|correto|isso mesmo/i.test(r) && !/\?/.test(r) ? "validou o código" : null) },
   { nome: "explica e pergunta", fala: "acho que fica O(n²) por causa dos dois loops, faz sentido pra você?", responde: true },
+  { nome: "conta o plano antes de codar", fala: "vou começar pela força bruta, testando todos os pares, e depois vejo se dá pra melhorar", responde: true, semCodigo: true,
+    checar: (r) => (SOLUCAO.test(r) ? "sugeriu a solução" : !/\?/.test(r) ? "não fez pergunta sobre o plano" : null) },
+  { nome: "lendo o enunciado", fala: "hmm deixa eu ler de novo o enunciado aqui", responde: false, semCodigo: true },
+  { nome: "pede para encerrar", fala: "acho que é isso, pode encerrar a entrevista", responde: false, encerra: true },
+  { nome: "terminou a etapa", fala: "pronto, terminei a primeira versão e os testes passaram", responde: true, encerra: false },
   { nome: "resposta no balão", fala: "começa do zero porque eu quero olhar todos os pares", responde: true, blip: true },
 ];
 
@@ -62,7 +70,7 @@ async function main() {
   const so = process.env.SO_CASOS?.split(",").map(Number);
   for (const [i, caso] of CASOS.entries()) {
     if (so && !so.includes(i)) continue;
-    const s = sessao(`validar-ide-${Date.now()}-${i}`);
+    const s = sessao(`validar-ide-${Date.now()}-${i}`, caso.semCodigo);
     const mensagens: ChatMessage[] = [];
     if (caso.blip) {
       appendEvent(s, { type: "blip_opened", sessionId: s.sessionId, t: 0, blipId: "q-1" });
@@ -74,7 +82,8 @@ async function main() {
     const r = await runInterviewerTurn(s, { blipId: caso.blip ? "q-1" : undefined, messages: mensagens });
     const ms = Date.now() - inicio;
     tempos.push(ms);
-    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, reply: r.reply }));
+    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, finish: !!r.finish, reply: r.reply }));
+    if (caso.encerra !== undefined && !!r.finish !== caso.encerra) falhas.push(`${caso.nome}: ${caso.encerra ? "devia encerrar" : "não devia encerrar"}`);
     const respondeu = !r.listening && r.reply.trim() !== "";
     if (respondeu !== caso.responde) falhas.push(`${caso.nome}: ${caso.responde ? "devia responder" : "devia ficar quieto"}`);
     else if (respondeu) {

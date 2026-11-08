@@ -14,9 +14,10 @@ describe("perguntar", () => {
   it("segunda reação vazia seguida (\"Hm.\" depois de \"Hm.\") vira silêncio; a primeira passa", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Hm.", requisito: null, concluiu: false }]);
     const comHm = { ...estado, conversa: [{ quem: "agente" as const, texto: "Hm.", em: AGORA }] };
-    const segunda = await perguntar(deps(llm), comHm, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
+    const v2 = { ...deps(llm), versao: "v2" as const };
+    const segunda = await perguntar(v2, comHm, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
     assert.equal(segunda.responder, false);
-    const primeira = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
+    const primeira = await perguntar(v2, estado, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
     assert.equal(primeira.responder, true);
     assert.equal(primeira.texto, "Hm.");
   });
@@ -83,7 +84,8 @@ describe("perguntar", () => {
   it("limita a 3 frases (sem cortar decimais) e não repete requisito já no quadro", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Um. São 2.5 mil por segundo. Três. Quatro.", requisito: "Retenção: 5 anos" }]);
     const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?", requisitosAtuais: ["Retenção: 5 anos"] }, AGORA);
-    assert.equal(r.texto, "Um. São 2.5 mil por segundo. Três.");
+    // As 3 frases do modelo ficam inteiras; como nenhuma devolve a vez, entra um convite curto no fim.
+    assert.equal(r.texto, "Um. São 2.5 mil por segundo. Três. Continua daí.");
     assert.equal(r.requisito, null);
   });
 
@@ -204,14 +206,70 @@ describe("Totti 2 no quadro (versao v2)", () => {
     assert.match(c.sistema.estatico, /PARA QUE SERVE ESTA ENTREVISTA/);
     assert.match(c.sistema.dinamico ?? "", new RegExp(`Ainda sem nenhum sinal.*${kitDemo.criterios[0].nome}`));
   });
-  it("não sei: tira a pergunta do fim sem colar convite pronto quando sobra fala", async () => {
+  it("não sei: tira a pergunta do fim e, se a fala não diz o próximo passo, põe um convite", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, seguimos. Quer olhar outra parte?", requisito: null, desfecho: "nao_sabe" }]);
     const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei.", perguntaAtiva: "Como evita colisão?" }, AGORA);
-    assert.equal(r.texto, "Tranquilo, seguimos.");
+    assert.match(r.texto, /^Tranquilo, seguimos\. (Pode|Continua|Fica|Segue)/);
+    assert.doesNotMatch(r.texto, /\?/);
+  });
+  it("não sei com próximo passo concreto: fica como o modelo disse", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, deixa isso de lado. Pode seguir com a próxima parte do desenho.", requisito: null, desfecho: "nao_sabe" }]);
+    const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.equal(r.texto, "Tranquilo, deixa isso de lado. Pode seguir com a próxima parte do desenho.");
+  });
+  it("réplica solta depois de responder à pergunta do Totti ganha a direção", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tudo bem.", requisito: null, desfecho: "respondeu" }]);
+    const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador por servidor.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.match(r.texto, /^Tudo bem\. \S/);
   });
   it("sem versao explícita vale o v1", async () => {
     const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
     await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
     assert.equal(llm.chamadas[0].nomeSchema, "resposta_entrevistador");
+  });
+});
+
+describe("briefing da entrevista no /perguntar", () => {
+  const comEvidencia = {
+    ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }),
+    fase: "APROFUNDAMENTO" as const,
+    faseIniciadaEm: AGORA,
+    cobertura: { ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }).cobertura, escalabilidade: { positivo: 1, negativo: 0, neutro: 0 } },
+    observacoes: [{ criterio: "escalabilidade", sinal: "positivo" as const, espontaneo: true, evidencia: "cache de leitura para o pico", em: AGORA, fase: "APROFUNDAMENTO" as const }],
+  };
+
+  it("o briefing vai no bloco dinâmico, com as evidências e o que falta", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), comEvidencia, { fase: "APROFUNDAMENTO", texto: "então, o cache fica na frente" }, AGORA);
+    const dinamico = llm.chamadas[0].sistema.dinamico ?? "";
+    assert.match(dinamico, /BRIEFING DA ENTREVISTA/);
+    assert.match(dinamico, /cache de leitura para o pico/);
+    assert.match(dinamico, /O que ainda falta/);
+  });
+
+  it("o bloco estático não muda com a evidência (continua igual para o mesmo kit)", async () => {
+    const a = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    const b = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(a), comEvidencia, { fase: "APROFUNDAMENTO", texto: "ok" }, AGORA);
+    await perguntar(deps(b), { ...comEvidencia, observacoes: [], cobertura: estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }).cobertura }, { fase: "APROFUNDAMENTO", texto: "ok" }, AGORA);
+    assert.equal(a.chamadas[0].sistema.estatico, b.chamadas[0].sistema.estatico);
+  });
+
+  it("o prompt estático manda usar o briefing sem cobrar o que já tem evidência", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "ok" }, AGORA);
+    assert.match(llm.chamadas[0].sistema.estatico, /BRIEFING DA ENTREVISTA mostra o que você já tem/);
+  });
+});
+
+describe("convite do fim no /perguntar", () => {
+  it("não repete o convite que o Totti acabou de dizer", async () => {
+    const respostaDoModelo = { responder: true, texto: "São 20 mil por dia.", requisito: null, concluiu: false };
+    const primeira = await perguntar(deps(criarClienteFalso([respostaDoModelo])), estado, { fase: "REQUISITOS", texto: "Quantos usuários?" }, AGORA);
+    const convite1 = primeira.texto.replace("São 20 mil por dia. ", "");
+    // A segunda pergunta parte do estado em que o Totti já disse o primeiro convite.
+    const segunda = await perguntar(deps(criarClienteFalso([respostaDoModelo])), primeira.estado, { fase: "REQUISITOS", texto: "E de escrita?" }, AGORA);
+    const convite2 = segunda.texto.replace("São 20 mil por dia. ", "");
+    assert.notEqual(convite2, convite1);
   });
 });

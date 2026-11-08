@@ -22,6 +22,9 @@ export default async function Interview({ searchParams }: { searchParams: Promis
   if (found?.mode === "system_design") {
     redirect(`/entrevista/system-design?config=${encodeURIComponent(found.id)}${conviteValido ? `&convite=${conviteValido}` : ""}`);
   }
-  const vaga = comQuestaoSorteada(normalizarConfig(found ?? DEFAULT_CONFIG));
+  const daVaga = comQuestaoSorteada(normalizarConfig(found ?? DEFAULT_CONFIG));
+  // Só o que a IDE usa vai ao navegador: as notas e os critérios da recrutadora ficam no servidor.
+  const { id, durationMin, languages, problemId, difficulty, roleTitle } = daVaga;
+  const vaga = { id, durationMin, languages, problemId, difficulty, roleTitle };
   return <IdeApp problemId={problema} vaga={vaga} convite={conviteValido} />;
 }
