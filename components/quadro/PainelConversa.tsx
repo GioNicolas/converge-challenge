@@ -3,8 +3,7 @@
 // Histórico da conversa numa folha lateral à direita: perguntas do agente e falas do candidato,
 // para o candidato reler uma pergunta. Lista simples, sem balões: nome pequeno em cima, texto embaixo.
 // Fecha com Esc, clique fora ou o botão de fechar.
-import { useEffect, useId, useRef, useState } from "react";
-import { LIMITE_TEXTO_DIGITADO, limparTextoDigitado } from "@/lib/sessao/textoDigitado";
+import { useEffect, useId, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 export type MensagemConversa = {
@@ -29,12 +28,6 @@ type Props = {
   onVerNoQuadro?: (mensagem: MensagemConversa) => void;
   /** O botão só aparece quando a fala tem algo que ainda está no quadro. */
   temNoQuadro?: (mensagem: MensagemConversa) => boolean;
-  /** Envia o texto digitado; deve lançar erro se falhar. Sem ele, o campo fica desabilitado com uma dica. */
-  onEnviar?: (texto: string) => Promise<void>;
-  /** Dica mostrada quando o campo está desabilitado. */
-  dicaSemCampo?: string;
-  /** Chamado a cada tecla no campo: digitar conta como atividade (o agente não quebra o silêncio no meio da escrita). */
-  onDigitando?: () => void;
 };
 
 const CURVA = [0.32, 0.72, 0, 1] as const; // --curva-suave
@@ -50,20 +43,11 @@ export default function PainelConversa({
   mensagens,
   onVerNoQuadro,
   temNoQuadro,
-  onEnviar,
-  dicaSemCampo = "Digitar fica disponível quando a entrevista está conectada ao servidor.",
-  onDigitando,
 }: Props) {
   const reduzir = useReducedMotion() ?? false;
   const titulo = useId();
   const fechar = useRef<HTMLButtonElement>(null);
   const lista = useRef<HTMLDivElement>(null);
-  const campo = useRef<HTMLTextAreaElement>(null);
-  const [rascunho, setRascunho] = useState("");
-  const [enviando, setEnviando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-  const idCampo = useId();
-  const idErro = useId();
   const colado = useRef(true); // a lista está no fim? então acompanha as falas novas
   const aoFechar = useRef(onFechar);
   useEffect(() => {
@@ -74,7 +58,7 @@ export default function PainelConversa({
   useEffect(() => {
     if (!aberto) return;
     const anterior = document.activeElement as HTMLElement | null;
-    (campo.current ?? fechar.current)?.focus({ preventScroll: true });
+    fechar.current?.focus({ preventScroll: true });
     const aoTeclar = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -102,30 +86,6 @@ export default function PainelConversa({
     if (!el || !colado.current) return;
     el.scrollTo({ top: el.scrollHeight, behavior: reduzir ? "auto" : "smooth" });
   }, [mensagens.length, ultima?.texto, reduzir]);
-
-  async function enviar() {
-    const texto = limparTextoDigitado(rascunho);
-    if (!texto || enviando || !onEnviar) return;
-    setEnviando(true);
-    setErro(null);
-    try {
-      await onEnviar(texto);
-      setRascunho("");
-    } catch (e) {
-      console.warn("[conversa] envio falhou:", e);
-      setErro("Não foi possível enviar. Tente de novo.");
-    } finally {
-      setEnviando(false);
-      campo.current?.focus({ preventScroll: true });
-    }
-  }
-
-  function aoTeclar(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      void enviar();
-    }
-  }
 
   function aoRolar() {
     const el = lista.current;
@@ -215,53 +175,6 @@ export default function PainelConversa({
               )}
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void enviar();
-              }}
-              className="flex flex-col gap-1.5 border-t border-borda px-5 pt-3 pb-4"
-            >
-              <label htmlFor={idCampo} className="sr-only">
-                Escreva para o entrevistador
-              </label>
-              <div className="flex items-end gap-2">
-                <textarea
-                  id={idCampo}
-                  ref={campo}
-                  value={rascunho}
-                  onChange={(e) => {
-                    setRascunho(e.target.value);
-                    onDigitando?.();
-                  }}
-                  onKeyDown={aoTeclar}
-                  disabled={!onEnviar}
-                  readOnly={enviando}
-                  rows={2}
-                  maxLength={LIMITE_TEXTO_DIGITADO}
-                  placeholder="Escreva para o entrevistador"
-                  aria-invalid={erro ? true : undefined}
-                  aria-describedby={erro ? idErro : undefined}
-                  className="min-h-[52px] max-h-32 flex-1 resize-none rounded-pequeno border border-borda bg-superficie px-3 py-2 text-[15px] leading-snug text-texto outline-none placeholder:text-texto-suave/70 focus-visible:ring-2 focus-visible:ring-marca disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={!onEnviar || enviando || !limparTextoDigitado(rascunho)}
-                  className="rounded-full bg-marca px-4 py-2 text-sm font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-marca focus-visible:ring-offset-2 active:scale-95 disabled:opacity-40"
-                >
-                  {enviando ? "Enviando…" : "Enviar"}
-                </button>
-              </div>
-              {erro ? (
-                <p id={idErro} role="alert" className="text-xs text-texto">
-                  {erro}
-                </p>
-              ) : (
-                <p className="text-xs text-texto-suave">
-                  {onEnviar ? "Enter envia, Shift+Enter quebra a linha." : dicaSemCampo}
-                </p>
-              )}
-            </form>
           </motion.aside>
         </>
       )}

@@ -9,7 +9,7 @@ import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
-import { analisar, respostaSilencio } from "../analisar";
+import { analisar, refiltrarComEstadoAtual, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
 import type { Kit, Problema } from "../kits/tipos";
@@ -227,12 +227,15 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     }
   }
 
-  // Relê o estado: eventos podem ter chegado durante a análise. Reaplica só a resposta (já filtrada).
+  // Relê o estado: eventos podem ter chegado durante a análise (p. ex. uma fala do agente no /perguntar).
+  // Refiltra a resposta com o estado fresco, para a regra "a bola está com o candidato" valer também aqui.
   const atual = await ctx.repositorio.obter(id);
   let novo = sincronizarFase(atual?.estado ?? estado, pedido.fase, t0);
   if (origem === "llm") {
+    const fim = ctx.agora();
+    resposta = refiltrarComEstadoAtual(novo, resposta, pedido, t0, fim);
     const anteriores = novo.observacoes.length;
-    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, ctx.agora()).estado;
+    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, fim).estado;
     novo = {
       ...novo,
       observacoes: novo.observacoes.map((o, i) => i < anteriores ? o : {
