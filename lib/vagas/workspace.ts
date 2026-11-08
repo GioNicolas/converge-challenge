@@ -2,7 +2,7 @@
 //   Rascunho (com o Totti) → Vaga publicada: Plano · Entrevistas · Escores
 // Uma vaga só existe (e só aparece no menu) depois que o plano da entrevista é confirmado com o Totti.
 // Antes disso ela é um rascunho, que dá para retomar. As vagas e rascunhos de partida vêm das vagas de
-// exemplo (fixtures) mais duas fora de tecnologia; o que o recrutador faz fica salvo no navegador (localStorage).
+// exemplo (fixtures), todas de tecnologia (engenharia, dados e produto); o que o recrutador faz fica salvo no navegador (localStorage).
 import { useCallback, useEffect, useState } from "react";
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
@@ -10,7 +10,7 @@ import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { entre, escolher, semente, sorteador } from "./aleatorio";
 import { FUNIL_VAZIO, type Funil } from "./candidatos";
 
-export type Area = "engenharia" | "dados" | "produto" | "marketing";
+export type Area = "engenharia" | "dados" | "produto";
 export type Senioridade = InterviewConfig["seniority"] | "estagio";
 export type Etapa = "entrevistas" | "encerrada";
 
@@ -63,7 +63,6 @@ export const NOME_AREA_VAGA: Record<Area, string> = {
   engenharia: "Engenharia",
   dados: "Dados",
   produto: "Produto",
-  marketing: "Marketing",
 };
 
 /** Formato em palavras neutras (o quadro serve para qualquer área, não só system design). */
@@ -103,7 +102,7 @@ const RASCUNHOS_INICIAIS: RascunhoVaga[] = [
 Responsabilidades:
 - Definir e priorizar o roadmap de ativação a partir de dados de funil e entrevistas com clientes
 - Desenhar experimentos (A/B) e decidir com base nos resultados
-- Trabalhar junto com design, engenharia e marketing do problema até a entrega
+- Trabalhar junto com design, engenharia e dados do problema até a entrega
 
 Requisitos:
 - 3+ anos como PM em produto digital
@@ -117,22 +116,22 @@ Requisitos:
 /** As vagas publicadas no primeiro acesso. */
 const INICIAIS: VagaEmpresa[] = [
   {
-    id: "marketing-performance",
-    cargo: "Analista de Marketing de Performance Pleno",
-    area: "marketing",
+    id: "backend-links",
+    cargo: "Desenvolvedor(a) Backend Pleno · Links",
+    area: "engenharia",
     senioridade: "pleno",
-    time: "Aquisição",
+    time: "Links e Compartilhamento",
     local: "Híbrido · São Paulo",
-    descricao: `Procuramos alguém para planejar e otimizar nossas campanhas pagas (Google, Meta e LinkedIn).
+    descricao: `Procuramos uma pessoa desenvolvedora backend para o serviço de links curtos, usado em todo compartilhamento do app.
 
 Responsabilidades:
-- Montar o plano de mídia e o funil de aquisição de cada campanha
-- Acompanhar CAC, ROAS e conversão por canal e ajustar investimento
-- Propor testes de criativos e de público junto com o time de conteúdo`,
+- Evoluir o serviço que gera e redireciona milhões de links por dia
+- Cuidar de latência, cache e disponibilidade do redirecionamento
+- Medir cliques e acessos sem atrasar o redirecionamento`,
     abertaHaDias: 12,
     etapa: "entrevistas",
     resumo: {
-      configId: "config-marketing-performance",
+      configId: "config-backend-links",
       formato: "system_design",
       duracaoMin: 40,
       foco: [
@@ -293,9 +292,9 @@ const MODELOS: { cargo: string; area: Area; time: string }[] = [
   { cargo: "Product Manager", area: "produto", time: "Pagamentos" },
   { cargo: "Product Designer", area: "produto", time: "Restaurantes" },
   { cargo: "Product Manager", area: "produto", time: "Fidelidade" },
-  { cargo: "Analista de CRM", area: "marketing", time: "Retenção" },
-  { cargo: "Analista de Growth", area: "marketing", time: "Aquisição" },
-  { cargo: "Analista de Conteúdo", area: "marketing", time: "Marca" },
+  { cargo: "Engenheiro(a) de Analytics", area: "dados", time: "Retenção" },
+  { cargo: "Desenvolvedor(a) Fullstack", area: "engenharia", time: "Aquisição" },
+  { cargo: "Engenheiro(a) de Plataforma", area: "engenharia", time: "Developer Experience" },
   { cargo: "Engenheiro(a) de SRE", area: "engenharia", time: "Infraestrutura" },
   { cargo: "Engenheiro(a) de Segurança", area: "engenharia", time: "Segurança" },
   { cargo: "Desenvolvedor(a) Frontend", area: "engenharia", time: "Portal do Parceiro" },
@@ -452,7 +451,6 @@ export function descartarRascunho(id: string) {
 /** Palavras que indicam a área de uma vaga nova (dá para ajustar depois). */
 function areaProvavel(texto: string): Area {
   const t = texto.toLowerCase();
-  if (/marketing|campanha|mídia|midia|seo|conteúdo|brand/.test(t)) return "marketing";
   if (/product manager|\bpm\b|produto|product owner|roadmap/.test(t)) return "produto";
   if (/dados|data|analytics|bi\b|etl/.test(t)) return "dados";
   return "engenharia";
