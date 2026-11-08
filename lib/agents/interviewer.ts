@@ -5,6 +5,7 @@
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
+import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
 import { conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
@@ -25,10 +26,26 @@ export async function runInterviewerTurn(
   const found = req.blipId !== undefined ? findBlipQuestion(session, req.blipId) : undefined;
   if (req.blipId !== undefined && !found) throw new Error(`blip desconhecido: ${req.blipId}`);
 
+  // Empecilho: a primeira fala é o anúncio, fixo (sem LLM, não tem como falhar), e é ali que ele entra na linha do tempo.
+  if (found?.question.kind === "empecilho" && req.messages.length === 0) {
+    return { reply: anunciarEmpecilho(session, found.question.id), commands: [{ type: "clear_highlights" }], end: false };
+  }
+
   const code = latestCode(session);
   const lineCount = code.split("\n").length;
-  const hint = nextHint(session);
   const question = found?.question;
+  const checkInDoEmpecilho = question?.checkInId
+    ? session.checkIns.find((c) => c.id === question.checkInId)?.empecilhoId !== undefined
+    : false;
+  // A dica leve é do problema original: na conversa da mudança e no retorno dela não se aplica.
+  const semDica = question?.kind === "empecilho" || checkInDoEmpecilho;
+  const hint = semDica ? undefined : nextHint(session);
+  const anunciado = empecilhoAnunciado(session);
+  // O que o filtro de fala deixa passar: a dica oficial e a regra nova, que o Totti pode repetir.
+  const permitido =
+    [hint, anunciado && `regra nova do problema, já anunciada ao candidato: ${anunciado.empecilho.statement}`]
+      .filter(Boolean)
+      .join(" | ") || undefined;
   const criterion = session.config.criteria.find((c) => c.id === question?.criterionId);
   const problem = getProblem(session.config.problemId);
   const checkIn = question?.checkInId ? session.checkIns.find((c) => c.id === question.checkInId) : undefined;
@@ -46,6 +63,11 @@ export async function runInterviewerTurn(
     criterion: criterion ? `${criterion.id}: ${criterion.name} — ${criterion.description}` : undefined,
     probeGuide: criterion ? problem.private.probeGuides?.[criterion.id] : undefined,
     challengeSummary: checkIn?.challenge,
+    mudanca: mudancaParaPrompt(session, formatMmSs),
+    mudancaClarifications:
+      question?.kind === "empecilho" || checkInDoEmpecilho
+        ? anunciado?.empecilho.clarifications.map((c) => `"${c.question}" → ${c.answer}`)
+        : undefined,
     closingTopics: question?.closingTopics,
     questionHighlight: found?.question.highlight,
     availableHint: hint,
@@ -74,7 +96,7 @@ export async function runInterviewerTurn(
     const opening = found !== undefined && req.messages.length === 0;
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
     if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
-      const verdict = await checkReply(output.reply, candidateLines, hint, code);
+      const verdict = await checkReply(output.reply, candidateLines, permitido, code);
       session.analyst.costUsd += verdict.costUsd;
       if (!verdict.safe) {
         console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
@@ -83,7 +105,7 @@ export async function runInterviewerTurn(
           system,
           `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
         );
-        const second = await checkReply(output.reply, candidateLines, hint, code);
+        const second = await checkReply(output.reply, candidateLines, permitido, code);
         session.analyst.costUsd += second.costUsd;
         if (!second.safe) {
           console.info(`[interviewer] fala barrada de novo (${second.reason}): ${output.reply}`);
@@ -142,6 +164,7 @@ export async function runInterviewerTurn(
   if (
     question &&
     question.kind !== "retorno" &&
+    question.kind !== "empecilho" &&
     output.challenge?.accepted &&
     !session.checkIns.some((c) => c.challengeId === question.id)
   ) {
@@ -159,6 +182,41 @@ export async function runInterviewerTurn(
   if (output.end) session.lastConversationEndedAt = t;
 
   return { reply: output.reply, commands, end: output.end };
+}
+
+/**
+ * Anuncia o empecilho (uma vez): grava o evento na linha do tempo com o conceito que ele exige e já agenda o
+ * retorno ("como ficou com a mudança?"). Repetir a chamada (tentar de novo) só devolve o anúncio.
+ */
+function anunciarEmpecilho(session: SessionState, blipId: string): string {
+  const empecilho = empecilhoDaQuestao(session);
+  const state = session.empecilho;
+  if (!empecilho || !state || state.blipId !== blipId) return FALLBACK_REPLY;
+  if (state.announcedAt !== undefined) return empecilho.announcement;
+
+  const t = elapsedMs(session);
+  state.announcedAt = t;
+  appendEvent(session, {
+    type: "empecilho",
+    sessionId: session.sessionId,
+    t,
+    empecilhoId: empecilho.id,
+    kind: empecilho.kind,
+    concept: empecilho.concept,
+    title: empecilho.title,
+    blipId,
+    testNames: testesIde(session, empecilho.tests).map((teste) => teste.name),
+  });
+  session.checkIns.push({
+    id: `c-${session.checkIns.length + 1}`,
+    challengeId: blipId,
+    challenge: `adaptar o código à mudança (${empecilho.title})`,
+    createdAt: t,
+    versionAtStart: session.codeHistory.at(-1)?.version ?? 0,
+    status: "aguardando",
+    empecilhoId: empecilho.id,
+  });
+  return empecilho.announcement;
 }
 
 async function generate(session: SessionState, system: string, user: string): Promise<InterviewerOutput> {

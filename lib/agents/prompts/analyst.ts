@@ -119,6 +119,8 @@ export interface AnalystTurnInput {
   uncovered: string[];
   /** Já houve run com todos os testes visíveis passando: "desafio" liberado. */
   hasWorkingSolution: boolean;
+  /** Mudança no problema que o entrevistador já anunciou (empecilho), se houver. */
+  mudanca?: string;
 }
 
 export function buildAnalystUser(input: AnalystTurnInput): string {
@@ -138,7 +140,7 @@ ${keyMoment}${foco}
 Critérios ainda não explorados:
 ${input.uncovered.length ? input.uncovered.map((c) => `- ${c}`).join("\n") : "(todos já explorados)"}
 Desafio liberado: ${input.hasWorkingSolution ? "sim (já passou em todos os testes visíveis)" : "não (ainda não passou em todos os testes visíveis)"}
-
+${input.mudanca ? `MUDANÇA NO PROBLEMA: ${input.mudanca} Código e testes que ainda não refletem a mudança são o esperado logo depois dela, não erro. Cabe perguntar como ele está pensando a adaptação ("o que você precisou mudar por causa disso?"), nunca dizer onde mexer.\n` : ""}
 Código atual:
 ${input.numberedCode || "(vazio)"}
 

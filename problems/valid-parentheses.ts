@@ -4,6 +4,30 @@ import { publicFromIde } from "./_ide";
 export const VALID_PARENTHESES: Problem = {
   public: publicFromIde("valid-parentheses"),
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "outros-caracteres",
+        kind: "caso_novo",
+        concept: "normalizacao_de_entrada",
+        title: "Texto com outros caracteres",
+        statement: "Agora `s` pode ter letras, números e espaços misturados. Eles devem ser ignorados: só `()[]{}` contam.",
+        announcement:
+          "Mudança que chegou agora: essa função vai validar trechos de código de verdade, então a string pode vir com letras, números e espaços no meio. Esses caracteres são ignorados, só os parênteses, colchetes e chaves contam.",
+        tests: [
+          { name: "Letras em volta", input: { s: "a(b)c" }, expected: true },
+          { name: "Fecha errado com letra", input: { s: "(x]" }, expected: false },
+          { name: "Trecho de código", input: { s: "if (a[0] == b) { ok }" }, expected: true },
+          { name: "Só letras", input: { s: "abc" }, expected: true },
+        ],
+        clarifications: [
+          { question: "Uma string só com letras é válida?", answer: "É: não tem nada aberto sem fechar." },
+          { question: "Aspas ou sinal de menor e maior contam?", answer: "Não, só ( ) [ ] { } contam." },
+        ],
+        rubricNote:
+          "Boa adaptação: ignora o que não é abre ou fecha sem misturar com a lógica da pilha. Fraca: empilha letras ou trata qualquer caractere desconhecido como fecha.",
+      },
+    ],
     hiddenTests: [
       { name: "Só abre", input: { s: "(((" }, expected: false },
       { name: "Só fecha", input: { s: "]]" }, expected: false },
