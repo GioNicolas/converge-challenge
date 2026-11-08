@@ -94,6 +94,16 @@ export function detectKeyMoment(session: SessionState, trigger: SessionEvent): s
   return passedBefore ? "o código voltou a falhar depois de já ter passado" : undefined;
 }
 
+/**
+ * O candidato avisou na conversa que concluiu uma etapa: a próxima análise (só ela) trata isso como momento-chave,
+ * para a pergunta seguinte já ser sobre o que vem depois.
+ */
+function consumirEtapaConcluida(session: SessionState): string | undefined {
+  if (session.etapaConcluidaEm === undefined) return undefined;
+  session.etapaConcluidaEm = undefined;
+  return "o candidato acabou de avisar que concluiu uma etapa (bom momento para olhar o que ele fez como um todo e o próximo passo, na fase em que ele está agora)";
+}
+
 /** Uma análise. Nunca lança: erros viram `analyst.lastError`. */
 async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trigger: SessionEvent): Promise<void> {
   const code = latestCode(session);
@@ -102,7 +112,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     return;
   }
   // Momento-chave não pula pelo código igual nem espera a janela de 15 s: o candidato tem o que falar.
-  const keyMoment = detectKeyMoment(session, trigger);
+  const keyMoment = detectKeyMoment(session, trigger) ?? consumirEtapaConcluida(session);
   if (keyMoment === undefined && (trigger.type === "pause" || trigger.type === "paste") && code === book.lastCompletedCode) {
     session.analyst.lastOutcome = { t: trigger.t, text: "pulada: código igual à última análise" };
     return;

@@ -7,7 +7,7 @@ interface ChatDeps {
   sessionId: string | null;
   sendEvent: (input: EventInput) => Promise<void>;
   applyCommands: (commands: EditorCommand[]) => void;
-  onAgentReply?: (texto: string) => Promise<void>;
+  onAgentReply?: (texto: string) => Promise<unknown>;
   onCancelReply?: () => void;
 }
 

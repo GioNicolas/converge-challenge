@@ -12,6 +12,13 @@ export const ProbeKindSchema = z.enum([
 ]);
 
 export const InterviewerOutput = z.object({
+  /**
+   * false quando a fala do candidato não pede resposta (ele está pensando em voz alta, ainda explicando,
+   * ou só confirmou): o entrevistador continua ouvindo e reply fica "". Ausente vale true.
+   */
+  respond: z.boolean().optional(),
+  /** O candidato avisou que concluiu uma etapa do trabalho e quer avançar (pela intenção, não por palavra fixa). */
+  concluded: z.boolean().optional(),
   /** A fala, como um entrevistador humano falaria: 1–2 frases curtas. */
   reply: z.string(),
   /** Linhas pra grifar junto com a fala, ou null quando não fala de um trecho. */

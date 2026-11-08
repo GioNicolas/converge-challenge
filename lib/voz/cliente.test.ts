@@ -154,3 +154,29 @@ test("fallback do navegador também para a fala e não completa progresso cancel
   assert.equal(falou?.onend, null);
   assert.deepEqual(progresso, []);
 });
+
+test("antesDeTocar espera a vez com o áudio já sintetizado e pode desistir da fala", async () => {
+  const ordem: string[] = [];
+  const falar = criarVoz({
+    fetch: async () => { ordem.push("sintetizou"); return Response.json(dadosVoz); },
+    tocar: async () => { ordem.push("tocou"); },
+    navegador: async () => { assert.fail("não deveria usar fallback"); },
+  });
+  await falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("vez"); return true; });
+  assert.deepEqual(ordem, ["sintetizou", "vez", "tocou"]);
+
+  ordem.length = 0;
+  await falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("desistiu"); return false; });
+  assert.deepEqual(ordem, ["sintetizou", "desistiu"]);
+});
+
+test("antesDeTocar também vale para a voz do navegador", async () => {
+  const ordem: string[] = [];
+  const falar = criarVoz({
+    fetch: async () => new Response(null, { status: 501 }),
+    tocar: async () => { assert.fail("sem áudio remoto"); },
+    navegador: async () => { ordem.push("falou"); },
+  });
+  await falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("vez"); return true; });
+  assert.deepEqual(ordem, ["vez", "falou"]);
+});

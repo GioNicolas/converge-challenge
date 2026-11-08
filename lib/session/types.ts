@@ -149,6 +149,8 @@ export interface SessionState {
   evidence: EvidenceNote[];
   /** Quando a última conversa (blip ou chamada do candidato) terminou, em t da sessão. */
   lastConversationEndedAt?: number;
+  /** Quando o candidato avisou que concluiu uma etapa (t da sessão): a próxima análise trata como momento-chave. */
+  etapaConcluidaEm?: number;
   coverage: Record<string, CriterionCoverage>;
   checkIns: CheckIn[];
   empecilho?: EmpecilhoState;
