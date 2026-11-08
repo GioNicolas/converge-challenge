@@ -41,13 +41,15 @@ O Nícolas decide a ordem. Abaixo, uma sugestão de prioridade pelo impacto na d
 | # | Frente | O que já existe | O que falta |
 |---|---|---|---|
 | F1 | **Empecilhos no meio** ✅ | Pergunta `kind: "desafio"` com retorno (`lib/agents/analystSchema.ts`, `policy.ts`, prompts do Analyst e do Interviewer). Hoje é só "dá pra otimizar?" e só depois de o código funcionar. | Um tipo novo de empecilho: o requisito muda, entra um caso novo, o tempo é cortado. Que possa acontecer antes do código funcionar, apareça na tela da IDE de forma clara e o Evaluator avalie a adaptação. |
-| F2 | **Como pensa e aprende** | Dicas em níveis (`hint` em `lib/contracts.ts`, política de dicas em `policy.ts`) e `hintsUsed` no Evaluator. | Uma seção no relatório tipo "Aprendizado": precisou de qual dica, quanto tempo levou para destravar e se usou bem. Hoje isso só entra no texto do prompt. |
+| F2 | **Como pensa e aprende** ✅ | Dicas em níveis (`hint` em `lib/contracts.ts`, política de dicas em `policy.ts`) e `hintsUsed` no Evaluator. | Uma seção no relatório tipo "Aprendizado": precisou de qual dica, quanto tempo levou para destravar e se usou bem. Hoje isso só entra no texto do prompt. |
 | F3 | **Prova clicável no relatório** | `Evidence { t, text }` no `Report`; snapshots do código com tempo na sessão. | Clicar numa evidência e ver o código naquele minuto e o que foi falado. |
 | F4 | **IA que aprende com a empresa na configuração** | Totti: preferências de tom e dicas (`lib/pre-entrevista/preferencias.ts`), pesos, competências e planejador. | Memória por empresa entre vagas ("da última vez vocês pediram X, mantenho?") e mostrar isso na conversa. |
 | F5 | **Ciclo dos 90 dias** | Painel da vaga com entrevistas e relatórios (`components/vagas/PaginaVaga.tsx`). | Tela "Como foi essa contratação?" e "o que o Totti ajustou com isso". Pode ser simulada na demo. |
 | F6 | **Pitch** | Nada ainda. | Slides seguindo a seção 2 e a conta da contratação errada. |
 
 **F1 concluída** (07/11/2026): requisito muda e caso novo, um empecilho por questão com testes reais, evento `empecilho` na linha do tempo com o conceito que exige (base para a F2) e nota de adaptação no relatório. Ficou para depois: o tempo cortado.
+
+**F2 concluída** (07/11/2026): seção "Aprendizado" no relatório (`Report.learning`, fora da nota geral). Mede pelos eventos quando ele travou (execuções seguidas falhando sem avanço ou 2 min parado com o código falhando), que dica recebeu, quanto levou para destravar e a reação à mudança (tempo até adaptar, tentativas, dicas e o conceito). O LLM só julga como ele usou a ajuda.
 
 Ordem sugerida: **F1 → F3 → F2 → F5 → F4 → F6**. F1 e F3 são o que os jurados vão ver na demo; F5 conta a história do fosso.
 
