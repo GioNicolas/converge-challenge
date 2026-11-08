@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { INTERVALO_ENTRE_PERGUNTAS_S, MAX_PERGUNTAS } from "../../../contracts";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
   extrairIdsDoGrafo,
@@ -273,5 +274,35 @@ describe("a bola está com o candidato depois de uma fala solta do agente", () =
       motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 10_000 }), AGORA),
       "INTERVALO_ENTRE_PERGUNTAS",
     );
+  });
+});
+
+describe("intervalo entre perguntas: referência de tempo", () => {
+  const base = { perguntasFeitas: 1 };
+  const motivo = (extra: Partial<EstadoSessao>, agora: number) =>
+    motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ...extra }), agora);
+
+  it("usa os valores únicos de contracts", () => {
+    assert.equal(REGRAS_PADRAO.intervaloEntrePerguntasMs, INTERVALO_ENTRE_PERGUNTAS_S * 1000);
+    assert.equal(REGRAS_PADRAO.maxPerguntas, MAX_PERGUNTAS);
+  });
+
+  it("conta do fim da resposta quando ele é mais recente que o início da pergunta", () => {
+    const e = { ultimaPerguntaEm: AGORA - 60_000, ultimaRespostaEm: AGORA - 10_000 };
+    assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivo(e, AGORA + 15_000), null);
+  });
+
+  it("conta do início da pergunta quando ela é mais recente que a resposta anterior", () => {
+    const e = { ultimaPerguntaEm: AGORA - 10_000, ultimaRespostaEm: AGORA - 60_000 };
+    assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivo(e, AGORA + 15_000), null);
+  });
+
+  it("estado antigo sem ultimaRespostaEm continua funcionando", () => {
+    const antigo = estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 10_000 });
+    delete (antigo as { ultimaRespostaEm?: number | null }).ultimaRespostaEm;
+    assert.equal(motivoBloqueioPlin(antigo, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(antigo, AGORA + 15_000), null);
   });
 });

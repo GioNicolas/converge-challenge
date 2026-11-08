@@ -3,6 +3,7 @@
 //
 // Fases:  AGUARDANDO → APRESENTACAO → REQUISITOS → ALTO_NIVEL → APROFUNDAMENTO → FECHAMENTO → ENCERRADA
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu dúvida) → PERGUNTA_ATIVA (candidato clicou) → LIVRE
+import { INTERVALO_ENTRE_PERGUNTAS_S, inicioDoIntervaloEntrePerguntas, MAX_PERGUNTAS } from "@/lib/contracts";
 import type { Fase, RespostaAnalise } from "@/lib/sessao/cliente";
 
 export type CicloPlin = "LIVRE" | "PLIN_PENDENTE" | "PERGUNTA_ATIVA";
@@ -24,8 +25,10 @@ export type EstadoEntrevista = {
   perguntaFinalFeita: boolean;
   /** O convite único de REQUISITOS (silêncio inicial) já foi feito? Não conta na cota de perguntas. */
   conviteFeito: boolean;
-  /** Quando o candidato terminou a última resposta (o intervalo entre perguntas conta daqui). */
+  /** Quando o candidato terminou a última resposta (o intervalo entre perguntas conta do mais recente entre isto e `ultimaPerguntaEm`). */
   ultimaRespostaEm: number | null;
+  /** Quando o candidato clicou na última pergunta. Opcional: estados salvos antes deste campo não o têm. */
+  ultimaPerguntaEm?: number | null;
 };
 
 export type EventoEntrevista =
@@ -51,8 +54,8 @@ export type Regras = {
 };
 
 export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: 30_000,
-  maxPerguntas: 5,
+  intervaloEntrePerguntasMs: INTERVALO_ENTRE_PERGUNTAS_S * 1000,
+  maxPerguntas: MAX_PERGUNTAS,
 };
 
 /** Tempo mínimo em ALTO_NIVEL antes de aceitar o sinal de prontidão do cérebro. */
@@ -108,15 +111,13 @@ export function aceitaPlin(
   if (resposta.status === "ok" || !resposta.pergunta) return false;
   if (!PLINS_DA_FASE[estado.fase]?.includes(resposta.status)) return false;
   if (estado.plin === "PERGUNTA_ATIVA") return false;
-  // A pergunta de encerramento fica fora do limite de 5 e do intervalo de 60s, mas é uma só.
+  // A pergunta de encerramento fica fora do limite de 5 e do intervalo entre perguntas, mas é uma só.
   if (estado.fase === "FECHAMENTO") return !estado.perguntaFinalFeita;
   // REQUISITOS aceita um único convite: não gasta a cota de 5, mas não se repete.
   if (estado.fase === "REQUISITOS" && estado.conviteFeito) return false;
   if (estado.perguntasFeitas >= regras.maxPerguntas) return false;
-  if (
-    estado.ultimaRespostaEm !== null &&
-    agora - estado.ultimaRespostaEm < regras.intervaloEntrePerguntasMs
-  ) {
+  const inicioIntervalo = inicioDoIntervaloEntrePerguntas(estado.ultimaPerguntaEm, estado.ultimaRespostaEm);
+  if (inicioIntervalo !== null && agora - inicioIntervalo < regras.intervaloEntrePerguntasMs) {
     return false;
   }
   return true;
@@ -200,6 +201,7 @@ export function transicionar(
         plin: "PERGUNTA_ATIVA",
         perguntaAtiva: { ...estado.perguntaPendente, numero },
         perguntaPendente: null,
+        ultimaPerguntaEm: agora,
         // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
         perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
         perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
