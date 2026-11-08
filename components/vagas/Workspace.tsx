@@ -9,7 +9,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import {
   DICA_ESTAGIO,
@@ -134,8 +134,18 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const visiveis = itensPlanos.slice(paginaSegura * POR_PAGINA, (paginaSegura + 1) * POR_PAGINA);
 
   const escolher = (e: Filtro) => {
+    const abrindo = filtro !== e;
     setFiltro((atual) => (atual === e ? null : e));
     setPagina(0);
+    // No celular os cards empilham e a lista abre abaixo da dobra: a página desce até ela, sem pressa.
+    if (abrindo)
+      setTimeout(() => {
+        const topo = lista.current?.getBoundingClientRect().top ?? 0;
+        if (topo > window.innerHeight - 160) {
+          const suave = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          lista.current?.scrollIntoView({ behavior: suave ? "smooth" : "auto", block: "start" });
+        }
+      }, 360);
   };
   const limpar = () => {
     setArea("");
@@ -148,8 +158,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const unicos = (k: "time" | "responsavel") =>
     [...new Set(linhas.map((v) => v[k]).filter((x) => x && x !== "—"))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 
-  const tituloLista =
-    filtro === "encerradas" ? "Encerradas" : filtro ? NOME_ESTAGIO[filtro] : "Resultado da busca";
+  const tituloLista = filtro === "encerradas" ? "Encerradas" : filtro ? NOME_ESTAGIO[filtro] : "Resultado da busca";
 
   return (
     <motion.div
@@ -184,61 +193,70 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         ))}
       </nav>
 
-      <section ref={lista} className="flex scroll-mt-8 flex-col gap-4">
-        <AnimatePresence mode="wait" initial={false}>
-          {plana ? (
-            <motion.div
-              key={`${filtro}-${temFiltro}-${!!termo}`}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.22, ease: curvaSuave }}
-              className="flex flex-col gap-4"
-            >
-              <div className="flex items-center gap-3 px-1">
-                <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-texto">{tituloLista}</h2>
-                <span className="numero text-[14px] text-texto-suave">{itensPlanos.length}</span>
-                {(filtro === "encerradas" || temFiltro || busca) && (
-                  <button
-                    onClick={limpar}
-                    className="flex items-center gap-1 rounded-full bg-superficie-2/70 py-1 pr-2.5 pl-2 text-[12.5px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
-                  >
-                    <X size={12} /> Limpar
-                  </button>
-                )}
-              </div>
-              <div className="cartao overflow-hidden">
-                {visiveis.length === 0 ? (
-                  <Vazio onLimpar={limpar} />
-                ) : (
-                  <ul className="py-1.5">{visiveis.map((it) => <ItemLista key={chave(it)} it={it} mostrarEstagio={!filtro} />)}</ul>
-                )}
-              </div>
-              <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itensPlanos.length} onMudar={setPagina} />
-            </motion.div>
-          ) : (
-            <motion.p
-              key="dica"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="px-1 text-[14px] text-texto-suave"
-            >
-              Escolha um estágio para ver as vagas.
-            </motion.p>
-          )}
-        </AnimatePresence>
+      {/* "user": com reduzir movimento ligado no sistema, só o esmaecer fica; nada desliza nem muda de altura. */}
+      <MotionConfig reducedMotion="user">
+        <section ref={lista} className="flex scroll-mt-20 flex-col gap-4 md:scroll-mt-8">
+          <Altura>
+            <AnimatePresence mode="wait" initial={false}>
+              {plana ? (
+                <motion.div
+                  key={`${filtro}-${temFiltro}-${!!termo}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0, transition: { duration: 0.1 } }}
+                  transition={{ duration: 0.2, ease: curvaSuave }}
+                  className="flex flex-col gap-4"
+                >
+                  <div className="flex items-center gap-3 px-1">
+                    <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-texto">{tituloLista}</h2>
+                    <span className="numero text-[14px] text-texto-suave">{itensPlanos.length}</span>
+                    {(filtro === "encerradas" || temFiltro || busca) && (
+                      <button
+                        onClick={limpar}
+                        className="flex items-center gap-1 rounded-full bg-superficie-2/70 py-1 pr-2.5 pl-2 text-[12.5px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
+                      >
+                        <X size={12} /> Limpar
+                      </button>
+                    )}
+                  </div>
+                  <div className="cartao overflow-hidden">
+                    {visiveis.length === 0 ? (
+                      <Vazio onLimpar={limpar} />
+                    ) : (
+                      <ul className="py-1.5">
+                        {visiveis.map((it, i) => (
+                          <ItemLista key={chave(it)} it={it} indice={i} mostrarEstagio={!filtro} />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itensPlanos.length} onMudar={setPagina} />
+                </motion.div>
+              ) : (
+                <motion.p
+                  key="dica"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="px-1 text-[14px] text-texto-suave"
+                >
+                  Escolha um estágio para ver as vagas.
+                </motion.p>
+              )}
+            </AnimatePresence>
+          </Altura>
 
-        {filtro !== "encerradas" && encerradas > 0 && (
-          <button
-            onClick={() => escolher("encerradas")}
-            className="self-start px-1 text-[13px] text-texto-suave underline-offset-4 hover:text-texto hover:underline"
-          >
-            Ver vagas encerradas ({encerradas})
-          </button>
-        )}
-      </section>
+          {filtro !== "encerradas" && encerradas > 0 && (
+            <button
+              onClick={() => escolher("encerradas")}
+              className="self-start px-1 text-[13px] text-texto-suave underline-offset-4 hover:text-texto hover:underline"
+            >
+              Ver vagas encerradas ({encerradas})
+            </button>
+          )}
+        </section>
+      </MotionConfig>
     </motion.div>
   );
 }
@@ -266,7 +284,11 @@ function CardEstagio({
     <motion.button
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: (passo - 1) * 0.06, ease: curvaSuave }}
+      transition={{
+        duration: 0.4,
+        delay: (passo - 1) * 0.06,
+        ease: curvaSuave,
+      }}
       onClick={onClick}
       aria-pressed={ativo}
       className={`group flex flex-col gap-5 rounded-[18px] p-5 text-left transition-[background-color,box-shadow,transform] duration-200 outline-none focus-visible:ring-2 focus-visible:ring-texto/30 active:scale-[0.99] ${
@@ -321,8 +343,52 @@ function Vazio({ onLimpar }: { onLimpar: () => void }) {
   );
 }
 
-function ItemLista({ it, mostrarEstagio = false }: { it: Item; mostrarEstagio?: boolean }) {
-  return it.tipo === "vaga" ? <LinhaVaga v={it.v} mostrarEstagio={mostrarEstagio} /> : <LinhaEscopo r={it.r} mostrarEstagio={mostrarEstagio} />;
+function ItemLista({ it, indice, mostrarEstagio = false }: { it: Item; indice: number; mostrarEstagio?: boolean }) {
+  return it.tipo === "vaga" ? (
+    <LinhaVaga v={it.v} indice={indice} mostrarEstagio={mostrarEstagio} />
+  ) : (
+    <LinhaEscopo r={it.r} indice={indice} mostrarEstagio={mostrarEstagio} />
+  );
+}
+
+/** Entrada de uma linha da lista: sobe 4px e aparece, uma logo depois da outra (no máximo ~0,2s de espera). */
+const entradaLinha = (i: number) =>
+  ({
+    initial: { opacity: 0, y: 4 },
+    animate: { opacity: 1, y: 0 },
+    transition: {
+      duration: 0.28,
+      delay: 0.04 + Math.min(i, 8) * 0.022,
+      ease: curvaSuave,
+    },
+  }) as const;
+
+/**
+ * Anima a altura até a do conteúdo, para a página abrir e fechar a lista sem pular.
+ * O respiro de 4px (com margem negativa) evita cortar a borda e a sombra dos cartões.
+ */
+function Altura({ children }: { children: ReactNode }) {
+  const dentro = useRef<HTMLDivElement>(null);
+  const [altura, setAltura] = useState<number | "auto">("auto");
+  useEffect(() => {
+    const el = dentro.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => setAltura(el.offsetHeight));
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  return (
+    <motion.div
+      initial={false}
+      animate={{ height: altura }}
+      transition={{ duration: 0.34, ease: curvaSuave }}
+      className="-m-1 overflow-hidden"
+    >
+      <div ref={dentro} className="p-1">
+        {children}
+      </div>
+    </motion.div>
+  );
 }
 
 /**
@@ -352,7 +418,9 @@ function Grade({
           <span className="truncate text-[15px] text-texto">{titulo}</span>
           <span className="truncate text-[12.5px] text-texto-suave">{sub}</span>
         </div>
-        <span className="hidden max-w-[240px] shrink-0 truncate text-right text-[13px] text-texto-suave sm:block">{situacao}</span>
+        <span className="hidden max-w-[240px] shrink-0 truncate text-right text-[13px] text-texto-suave sm:block">
+          {situacao}
+        </span>
         <ChevronRight size={15} className="shrink-0 text-texto-suave transition-transform group-hover:translate-x-0.5" />
       </Link>
       <div className="flex w-8 shrink-0 justify-center">{lateral}</div>
@@ -393,7 +461,7 @@ function estadoDa(v: Linha): { href: string; situacao: ReactNode } {
   };
 }
 
-function LinhaVaga({ v, mostrarEstagio }: { v: Linha; mostrarEstagio: boolean }) {
+function LinhaVaga({ v, indice, mostrarEstagio }: { v: Linha; indice: number; mostrarEstagio: boolean }) {
   const meta = [v.time, NOME_SENIORIDADE_VAGA[v.senioridade]].filter((x) => x && x !== "—").join(" · ");
   const sub = mostrarEstagio ? (
     <span className="flex items-center gap-2">
@@ -406,21 +474,16 @@ function LinhaVaga({ v, mostrarEstagio }: { v: Linha; mostrarEstagio: boolean })
   const porEstagio = estadoDa(v);
 
   return (
-    <li className="linha-lista mx-2">
-      <Grade
-        href={porEstagio.href}
-        titulo={v.cargo}
-        sub={sub}
-        situacao={porEstagio.situacao}
-      />
-    </li>
+    <motion.li {...entradaLinha(indice)} className="linha-lista mx-2">
+      <Grade href={porEstagio.href} titulo={v.cargo} sub={sub} situacao={porEstagio.situacao} />
+    </motion.li>
   );
 }
 
 /** Um escopo ainda com o Totti: leva de volta para a conversa. O X, no fim da linha, descarta. */
-function LinhaEscopo({ r, mostrarEstagio }: { r: RascunhoVaga; mostrarEstagio: boolean }) {
+function LinhaEscopo({ r, indice, mostrarEstagio }: { r: RascunhoVaga; indice: number; mostrarEstagio: boolean }) {
   return (
-    <li className="linha-lista group/linha mx-2">
+    <motion.li {...entradaLinha(indice)} className="linha-lista group/linha mx-2">
       <Grade
         href={`/vagas/nova?rascunho=${encodeURIComponent(r.id)}`}
         titulo={r.cargo}
@@ -445,7 +508,7 @@ function LinhaEscopo({ r, mostrarEstagio }: { r: RascunhoVaga; mostrarEstagio: b
           </button>
         }
       />
-    </li>
+    </motion.li>
   );
 }
 
