@@ -18,31 +18,40 @@ export function progressoDaFala(alinhamento: Alinhamento, tempo: number): number
 // uma vez num clique fica "liberado" e é reaproveitado nas falas seguintes.
 const WAV_SILENCIO = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
 let elementoLiberado: HTMLAudioElement | null = null;
-let liberando = false;
 
-/** Chame dentro de um gesto do usuário (clique ou tecla). Depois disso, as falas tocam sem bloqueio. */
+// No WebKit (principalmente iOS), pointerdown e touchstart de toque não contam como gesto para tocar mídia:
+// quem conta é touchend, pointerup e click. Os de "down" ficam para destravar o mais cedo possível no desktop.
+export const GESTOS_DE_ATIVACAO = ["pointerdown", "keydown", "touchstart", "pointerup", "touchend", "click"] as const;
+
+/**
+ * Chame dentro de um gesto do usuário (clique ou tecla). Depois disso, as falas tocam sem bloqueio.
+ * Cada gesto tenta de novo enquanto nenhum deu certo, mesmo com uma tentativa anterior pendente: um pointerdown
+ * sem ativação (Safari) não pode tirar a vez do click que vem logo depois.
+ */
 export function liberarAudio(): void {
-  if (elementoLiberado || liberando || typeof Audio === "undefined") return;
-  liberando = true;
+  if (elementoLiberado || typeof Audio === "undefined") return;
   try {
     const elemento = new Audio(WAV_SILENCIO);
     Promise.resolve(elemento.play()).then(
       () => {
         elemento.pause();
-        elementoLiberado = elemento;
-        liberando = false;
+        elementoLiberado ??= elemento;
       },
-      () => { liberando = false; },
+      () => {},
     );
-  } catch {
-    liberando = false;
-  }
+  } catch {}
 }
 
 export function tocarComAlinhamento(
   audio: Blob,
   alinhamento: Alinhamento,
-  opcoes: { aoProgresso?: (caracteres: number) => void; marcas?: MarcaDeFala[]; sinal?: AbortSignal },
+  opcoes: {
+    aoProgresso?: (caracteres: number) => void;
+    marcas?: MarcaDeFala[];
+    sinal?: AbortSignal;
+    /** O navegador bloqueou o play(): o áudio toca no próximo gesto do usuário (toque, clique ou tecla). */
+    aoAguardarGesto?: () => void;
+  },
 ): Promise<void> {
   return new Promise((resolver, rejeitar) => {
     const marcas = opcoes.marcas ?? [];
@@ -53,10 +62,12 @@ export function tocarComAlinhamento(
     let url: string | null = null;
     let quadro: number | null = null;
     let terminou = false;
+    let pararDeEsperarGesto: (() => void) | null = null;
 
     function terminar(erro?: unknown) {
       if (terminou) return;
       terminou = true;
+      pararDeEsperarGesto?.();
       if (quadro !== null) cancelAnimationFrame(quadro);
       opcoes.sinal?.removeEventListener("abort", cancelar);
       if (midia) {
@@ -98,6 +109,26 @@ export function tocarComAlinhamento(
       }
     }
 
+    // Bloqueio de autoplay: em vez de trocar de voz, espera o próximo gesto e toca o mesmo áudio dentro dele.
+    function esperarGesto() {
+      const tentar = () => {
+        const elemento = midia;
+        if (terminou || !elemento) return;
+        Promise.resolve(elemento.play()).then(() => {
+          if (terminou) return;
+          pararDeEsperarGesto?.();
+          elementoLiberado ??= elemento;
+          animar();
+        }, () => {});
+      };
+      GESTOS_DE_ATIVACAO.forEach((e) => window.addEventListener(e, tentar, { capture: true }));
+      pararDeEsperarGesto = () => {
+        GESTOS_DE_ATIVACAO.forEach((e) => window.removeEventListener(e, tentar, { capture: true }));
+        pararDeEsperarGesto = null;
+      };
+      opcoes.aoAguardarGesto?.();
+    }
+
     if (opcoes.sinal?.aborted) {
       cancelar();
       return;
@@ -119,8 +150,10 @@ export function tocarComAlinhamento(
       };
       midia.onerror = () => terminar(new Error("Não foi possível reproduzir o áudio da fala."));
       opcoes.sinal?.addEventListener("abort", cancelar, { once: true });
-      Promise.resolve(midia.play()).then(animar, () => {
-        terminar(new Error("Reprodução de áudio bloqueada ou indisponível."));
+      Promise.resolve(midia.play()).then(animar, (erro: unknown) => {
+        if (terminou) return;
+        if (erro instanceof DOMException && erro.name === "NotAllowedError") esperarGesto();
+        else terminar(new Error("Reprodução de áudio indisponível."));
       });
     } catch {
       terminar(new Error("Não foi possível iniciar a reprodução do áudio."));
