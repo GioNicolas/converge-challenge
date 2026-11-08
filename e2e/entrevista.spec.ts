@@ -156,10 +156,8 @@ test("entrevista no quadro roda 3 vezes seguidas sem erro", async ({ page }) => 
     });
 
     await test.step(`rodada ${rodada}: plin`, async () => {
+      // Sem bolha nem clique: a pergunta pendente é dita sozinha quando a vez chega.
       await page.getByRole("button", { name: "Demo: fazer pergunta" }).click();
-      const bolha = page.getByText("Tenho uma pergunta", { exact: true });
-      await expect(bolha).toBeVisible();
-      await bolha.click();
 
       const terminei = page.getByRole("button", { name: "Terminei de responder" });
       await expect(terminei).toBeVisible();

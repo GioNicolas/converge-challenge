@@ -572,17 +572,17 @@ export function useEntrevista(
     };
   }, [numeroPergunta, quadro, cursor, dizer, silenciarSeAtual, registrar, descarregarJa]);
 
-  // Uma pergunta pertinente pode entrar numa pausa, sem exigir autorização por clique.
-  // O plin continua disponível se a pessoa preferir chamá-la manualmente.
+  // A entrevista é só por voz: uma pergunta do Totti não espera clique. Ela fica pendente até a vez dele
+  // (candidato em pausa, nada tocando, nenhum pedido em andamento) e então é dita sozinha.
   useEffect(() => {
-    if (estado.plin !== "PLIN_PENDENTE" || estado.pendenteDeDemo) return;
+    if (estado.plin !== "PLIN_PENDENTE") return;
     const id = setInterval(() => {
       if (podeTomarTurno({ agora: Date.now(), ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) enviar({ tipo: "PLIN_CLICADO" });
     }, 150);
     return () => clearInterval(id);
-  }, [estado.plin, estado.perguntaPendente, estado.pendenteDeDemo, enviar]);
+  }, [estado.plin, estado.perguntaPendente, enviar]);
 
   // Mudança no problema (empecilho): no meio da entrevista, numa pausa do candidato, o agente traz UMA mudança
   // pronta do kit, fala e escreve no quadro como requisito novo. O servidor confere a hora e registra na linha do tempo.
@@ -730,7 +730,6 @@ export function useEntrevista(
     setIniciadaEm(Date.now());
     enviar({ tipo: "COMECAR" });
   }, [enviar]);
-  const clicarPlin = useCallback(() => enviar({ tipo: "PLIN_CLICADO" }), [enviar]);
   /** Demonstração: faz o agente ter uma dúvida agora, sobre o último componente desenhado. */
   const perguntaDemo = useCallback(() => {
     if (!quadro) return;
@@ -980,7 +979,6 @@ export function useEntrevista(
     silenciar,
     desenhoMudou,
     comecar,
-    clicarPlin,
     perguntaDemo,
     terminarResposta,
     mensagens,

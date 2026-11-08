@@ -2,7 +2,7 @@
 // Função pura (sem React, sem tempo real): recebe o estado, o evento e o horário, devolve o novo estado.
 //
 // Fases:  AGUARDANDO → APRESENTACAO → REQUISITOS → ALTO_NIVEL → APROFUNDAMENTO → FECHAMENTO → ENCERRADA
-// Plin:   LIVRE → PLIN_PENDENTE (análise devolveu dúvida) → PERGUNTA_ATIVA (candidato clicou) → LIVRE
+// Plin:   LIVRE → PLIN_PENDENTE (análise devolveu uma pergunta, esperando a vez) → PERGUNTA_ATIVA (o Totti a disse; sem clique) → LIVRE
 import { INTERVALO_ENTRE_PERGUNTAS_S, inicioDoIntervaloEntrePerguntas, MAX_PERGUNTAS } from "@/lib/contracts";
 import type { Fase, RespostaAnalise } from "@/lib/sessao/cliente";
 

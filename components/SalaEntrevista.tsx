@@ -326,7 +326,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       {estado.fase !== "AGUARDANDO" && (
         <JanelaChamada
           fase={NOME_DA_FASE[estado.fase]}
-          duvidaPendente={estado.plin === "PLIN_PENDENTE"}
           respondendo={estado.plin === "PERGUNTA_ATIVA"}
           encerrada={estado.fase === "ENCERRADA"}
           marcadores={{ fase: estado.fase, plin: estado.plin }}
@@ -334,7 +333,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           midia={midia}
           agenteFalando={entrevista.agenteFalando}
           agentePensando={entrevista.aguardandoResposta}
-          onClicarPlin={entrevista.clicarPlin}
           onTerminarResposta={entrevista.terminarResposta}
           onEncerrar={() => setConfirmandoFim(true)}
         />
