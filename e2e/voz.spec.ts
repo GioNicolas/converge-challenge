@@ -221,6 +221,75 @@ test("IDE: fala livre com pedido de feedback é respondida por voz e o grifo sai
   await expect.poll(() => grifos(page), { timeout: 6000 }).toBe(0);
 });
 
+test("IDE: no meio do código o Totti pede licença; 'espera um pouquinho' adia a pergunta", async ({ page }) => {
+  await preparar(page);
+  const blip = { id: "licenca-e2e", preview: "Sobre o seu loop", priority: 1, createdAt: 0 };
+  let liberar = false;
+  const eventos: string[] = [];
+  const pedidosDoBalao: number[] = [];
+  await page.route("**/api/events", async (rota) => {
+    eventos.push(rota.request().postDataJSON().type);
+    await rota.fulfill({ json: {} });
+  });
+  await page.route("**/api/blip/pending?**", (rota) => rota.fulfill({ json: liberar && !eventos.includes("blip_snoozed") ? { blip } : {} }));
+  await page.route("**/api/chat", async (rota) => {
+    const pedido = rota.request().postDataJSON() as { blipId?: string };
+    if (pedido.blipId) pedidosDoBalao.push(1);
+    return rota.fulfill({ json: { reply: "", commands: [], end: false, listening: true } });
+  });
+  await page.goto("/entrevista");
+  await expect.poll(async () => (await falas(page)).some((f) => f.includes("acompanhar o seu código"))).toBe(true);
+  // Ele está no meio do código: digita de tempos em tempos e a pergunta chega numa pausa curta.
+  await page.locator(".monaco-editor .view-lines").first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.type("x");
+  await expect.poll(() => eventos, { timeout: 8000 }).toContain("snapshot");
+  liberar = true;
+  const pediuLicenca = async () => (await falas(page)).some((f) => /posso (te )?(perguntar|interromper)/i.test(f));
+  for (let i = 0; i < 12 && !(await pediuLicenca()); i++) {
+    await page.keyboard.type("x");
+    await page.waitForTimeout(3000);
+  }
+  await expect.poll(pediuLicenca, { timeout: 10_000 }).toBe(true);
+  expect(pedidosDoBalao.length).toBe(0);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "espera um pouquinho");
+  await expect.poll(() => eventos, { timeout: 8000 }).toContain("blip_snoozed");
+  await expect.poll(() => falas(page)).toContain("Beleza, eu volto daqui a pouco.");
+  expect(pedidosDoBalao.length).toBe(0);
+  expect(eventos).not.toContain("blip_opened");
+});
+
+test("IDE: Finalizar abre a última conversa por voz, e o Totti se despede antes de encerrar", async ({ page }) => {
+  await preparar(page);
+  const encerramento = { id: "fim-e2e", preview: "Antes de encerrar, uns pontos rápidos", priority: 1, createdAt: 0 };
+  const pergunta = "Antes de você encerrar: qual o custo da sua solução?";
+  const eventos: string[] = [];
+  await page.route("**/api/events", async (rota) => {
+    eventos.push(rota.request().postDataJSON().type);
+    await rota.fulfill({ json: {} });
+  });
+  await page.route("**/api/blip/pending?**", (rota) => rota.fulfill({ json: {} }));
+  await page.route("**/api/encerramento", (rota) => rota.fulfill({ json: { blip: encerramento } }));
+  await page.route("**/api/chat", async (rota) => {
+    const pedido = rota.request().postDataJSON() as { blipId?: string; messages: { role: string }[] };
+    if (pedido.blipId && !pedido.messages.some((m) => m.role === "candidate")) return rota.fulfill({ json: { reply: pergunta, commands: [], end: false } });
+    if (pedido.blipId) return rota.fulfill({ json: { reply: "Valeu, era isso.", commands: [], end: true } });
+    return rota.fulfill({ json: { reply: "", commands: [], end: false, listening: true } });
+  });
+  await page.goto("/entrevista");
+  await expect.poll(async () => (await falas(page)).some((f) => f.includes("acompanhar o seu código"))).toBe(true);
+  await page.getByRole("button", { name: "Finalizar" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Encerrar", exact: true }).click();
+  await expect.poll(() => falas(page), { timeout: 8000 }).toContain(pergunta);
+  expect(eventos).not.toContain("session_ended");
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "Fica linear, porque cada caractere entra e sai da pilha uma vez.");
+  await expect.poll(() => falas(page), { timeout: 8000 }).toContain("Valeu, era isso.");
+  await expect.poll(async () => (await falas(page)).some((f) => f.startsWith("Combinado, vamos encerrar por aqui")), { timeout: 8000 }).toBe(true);
+  await expect.poll(() => eventos, { timeout: 8000 }).toContain("session_ended");
+});
+
 test("quadro encaminha transcrição para a conversa da sessão", async ({ page }) => {
   await preparar(page);
   await page.goto("/entrevista/system-design");

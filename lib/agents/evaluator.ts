@@ -3,6 +3,7 @@
  * o LLM só julga os critérios subjetivos, e cada evidência dele precisa citar um momento real da sessão.
  * Nota geral e recomendação também saem daqui, não do LLM.
  */
+import { ehFalaDeReserva } from "@/lib/conversa/falasDeReserva";
 import { learningFacts, learningScore } from "@/lib/agents/aprendizado";
 import { OBJECTIVE_CRITERION } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, PREFIXO_TESTE, primeiraAdaptacao } from "@/lib/agents/empecilho";
@@ -449,6 +450,8 @@ function describeEvent(session: SessionState, e: SessionEvent): string | undefin
     case "session_started":
       return "sessão começou";
     case "speech":
+      // Pedido para repetir é falha técnica do sistema (prazo, rede): nunca conta contra a fala do candidato.
+      if (e.role === "agent" && ehFalaDeReserva(e.text)) return "(falha técnica do sistema: o entrevistador não recebeu a fala e pediu para repetir; não avalie isso)";
       return `${e.role === "candidate" ? "CANDIDATO" : "entrevistador"}: ${truncate(e.text, 500)}`;
     case "run": {
       const failing = e.result.cases.find((c) => !c.passed);

@@ -58,7 +58,8 @@ test("etapa concluída: responde, avisa a IDE e marca o momento-chave para a pr�
   assert.equal(r.reply, "Beleza, primeira versão de pé.");
   assert.equal(r.concluded, true);
   assert.equal(r.end, true);
-  assert.deepEqual(r.commands[0], { type: "highlight_range", startLine: 1, endLine: 1 });
+  // A fala não cita nada da linha 1 (que nem tem código dele): o grifo sem propósito sai.
+  assert.equal(r.commands.some((c) => c.type === "highlight_range"), false);
   assert.notEqual(session.etapaConcluidaEm, undefined);
 });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { definirKvParaTestes, criarKvEmMemoria } from "@/lib/storage/kv";
-import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
+import { chaveEvento, guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 
 type G = typeof globalThis & { __convergeSessions?: Map<string, unknown> };
@@ -48,4 +48,39 @@ test("sem Supabase nada muda", async () => {
   definirKvParaTestes(criarKvEmMemoria());
   assert.equal(await sessaoViva("nao-existe"), undefined);
   definirKvParaTestes(null);
+});
+
+test("o mesmo evento com as chaves em outra ordem (jsonb) não entra em dobro", () => {
+  const a = { type: "speech", sessionId: "s", t: 5, role: "agent", text: "Oi" };
+  const b = { text: "Oi", role: "agent", t: 5, sessionId: "s", type: "speech" };
+  assert.equal(chaveEvento(a), chaveEvento(b));
+  assert.notEqual(chaveEvento(a), chaveEvento({ ...a, t: 6 }));
+});
+
+test("instância que não viu a pergunta de outra não a apaga ao gravar", async () => {
+  process.env.SUPABASE_URL = "http://falso.invalid";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "x";
+  delete process.env.ARMAZENAMENTO;
+  definirKvParaTestes({ ...criarKvEmMemoria(), nome: "supabase" } as never);
+  const mem = (globalThis as G).__convergeSessions!;
+  const id = "sess-persist-perguntas";
+  const a = getOrCreateSession(id);
+  appendEvent(a, { type: "session_started", sessionId: id, t: 0, language: "python", problemId: a.config.problemId } as never);
+  await guardarSessao(a);
+  // A instância B fica com a cópia de antes; a A levanta uma pergunta e grava.
+  const b = structuredClone(a);
+  a.queue.push({ id: "q-3", question: "Como você divide o tempo?", followUpTopic: "tempo", priority: 0.8, createdAt: 10, status: "blipped" });
+  a.blips.push({ id: "q-3", preview: "Quero entender o seu tempo", priority: 0.8, createdAt: 10 });
+  a.pendingBlipId = "q-3";
+  await guardarSessao(a);
+  // A B grava um evento seu: a pergunta da A tem que continuar lá.
+  mem.set(id, b);
+  appendEvent(b, { type: "pause", sessionId: id, t: 20, idleMs: 9000 } as never);
+  await guardarSessao(b);
+  assert.ok(b.blips.some((x) => x.id === "q-3"), "o balão da outra instância continua");
+  assert.equal(b.queue.find((q) => q.id === "q-3")?.status, "blipped");
+  assert.equal(b.pendingBlipId, "q-3");
+  definirKvParaTestes(null);
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 });

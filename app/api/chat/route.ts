@@ -30,9 +30,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "sessão não encontrada" }, { status: 404 });
   }
 
-  if (blipId !== undefined && !findBlipQuestion(session, blipId)) {
-    return NextResponse.json({ error: "blip não encontrado" }, { status: 404 });
-  }
+  // Pergunta que esta instância não conhece (estado atrasado): a fala segue como fala livre, nunca como erro.
+  // Um 404 aqui fazia a fala do candidato falhar e o Totti pedir para repetir a cada tentativa.
+  const conhecida = blipId === undefined || !!findBlipQuestion(session, blipId);
+  if (!conhecida) console.warn("[chat] pergunta desconhecida, seguindo como fala livre:", blipId);
 
   // Grava o código de agora antes do turno: o Totti nunca comenta uma versão velha.
   if (liveCode !== undefined && !session.ended && liveCode !== latestCode(session)) {
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const response = await runInterviewerTurn(session, { blipId, messages });
+  const response = await runInterviewerTurn(session, { blipId: conhecida ? blipId : undefined, messages });
   await guardarSessao(session);
   // Concluiu uma etapa: o analista olha o código agora (momento-chave), e a próxima pergunta já vem sobre o que segue.
   const gatilho = session.events.at(-1);
