@@ -63,6 +63,17 @@ export async function runInterviewerTurn(
   const code = latestCode(session);
   const lineCount = code.split("\n").length;
   const question = found?.question;
+  const problem = getProblem(session.config.problemId);
+
+  // A primeira fala de uma pergunta é a pergunta preparada, dita como está: a análise já a escreveu para este
+  // momento e o filtro já a aprovou. Reescrever com outra chamada de LLM era um segundo cérebro (mais um a
+  // dois segundos e às vezes um "oi, tudo bem?" no meio da entrevista). Só o encerramento, que junta vários
+  // pontos pendentes numa fala, passa pelo modelo.
+  if (found && req.messages.length === 0 && found.question.kind !== "encerramento") {
+    const grifo = found.question.highlight;
+    const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
+    return { reply: found.question.question, commands: highlightCommands(util ? grifo : undefined), end: false };
+  }
   const checkInDoEmpecilho = question?.checkInId
     ? session.checkIns.find((c) => c.id === question.checkInId)?.empecilhoId !== undefined
     : false;
@@ -76,7 +87,6 @@ export async function runInterviewerTurn(
       .filter(Boolean)
       .join(" | ") || undefined;
   const criterion = session.config.criteria.find((c) => c.id === question?.criterionId);
-  const problem = getProblem(session.config.problemId);
   const checkIn = question?.checkInId ? session.checkIns.find((c) => c.id === question.checkInId) : undefined;
   const input: InterviewerTurnInput = {
     mode: found ? "blip" : "candidate",

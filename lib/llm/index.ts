@@ -50,6 +50,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterDefault: "z-ai/glm-5.3-flash",
     maxTokens: 4000,
     reasoningEffort: "low",
+    // Vale para quem espera a resposta (a conversa de plano com a recrutadora). A análise do live coding, em
+    // segundo plano, chama com semHedge (ver lib/agents/analyst.ts).
     hedgeMs: 12_000,
   },
   fast: {
@@ -58,8 +60,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     openrouterEnv: "FAST_FALLBACK_MODEL",
     openrouterDefault: "openai/gpt-oss-120b",
     maxTokens: 800,
-    // Filtro de fala fica no caminho de cada resposta do chat (normalmente ~1 s): esperar mais trava a conversa.
-    hedgeMs: 3_000,
+    // Filtro das perguntas da análise e extrator da memória da squad: os dois em segundo plano, então sem hedge
+    // (o OpenRouter só entra se a Featherless falhar). O filtro da fala ao vivo é o papel "filtro".
   },
   evaluator: {
     featherlessEnv: "EVALUATOR_MODEL",
@@ -442,6 +444,11 @@ export async function completeJson<T>(opts: {
   prazoMs?: number;
   /** Imagem que acompanha o pedido (data URL). Só vai ao OpenRouter; sem ela, nada muda. */
   imageDataUrl?: string | null;
+  /**
+   * Sem hedge: a reserva só entra se o primário falhar, nunca por demora. Para chamadas em segundo plano
+   * (ninguém esperando): o hedge só fazia a mesma chamada correr em dobro e ser cobrada no OpenRouter.
+   */
+  semHedge?: boolean;
 }): Promise<ChatJsonResult<T>> {
   const cfg = ROLE_CONFIG[opts.role];
   const fala = PAPEIS_DE_FALA.has(opts.role);
@@ -473,7 +480,7 @@ export async function completeJson<T>(opts: {
   // mandavam tudo para a Featherless (que falha na hora) por minutos.
   if (!process.env.FEATHERLESS_API_KEY) return callOnly(call, "openrouter", opts.signal);
   if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
-  if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
+  if (cfg.hedgeMs === undefined || opts.semHedge) return callWithFallback(opts.role, call, opts.signal);
   return callHedged(opts.role, call, cfg.hedgeMs, opts.signal);
 }
 
