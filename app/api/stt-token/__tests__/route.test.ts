@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { criarRepositorioEmMemoria, type RepositorioSessoes } from "../../../../lib/agente/armazenamento";
 import { definirContextoParaTestes } from "../../../../lib/agente/rotas/contexto";
 import { estadoInicial } from "../../../../lib/agente/sessao/estado";
+import { getOrCreateSession } from "../../../../lib/session/store";
 import { GET } from "../route";
 
 const fetchOriginal = globalThis.fetch;
@@ -93,4 +94,35 @@ test("falha do ElevenLabs vira 502", async () => {
   assert.equal((await GET(pedido())).status, 502);
   globalThis.fetch = (async () => { throw new Error("rede"); }) as typeof fetch;
   assert.equal((await GET(pedido())).status, 502);
+});
+
+test("sessão da IDE de coding (store em memória) também recebe token", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  const calls = { n: 0 };
+  fetchFalso(calls);
+  getOrCreateSession("ide-ativa");
+  assert.equal((await GET(pedido("ide-ativa"))).status, 200);
+  assert.equal(calls.n, 1);
+});
+
+test("sessão encerrada da IDE responde 409 sem chamar o ElevenLabs", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  const calls = { n: 0 };
+  fetchFalso(calls);
+  getOrCreateSession("ide-fim").ended = true;
+  assert.equal((await GET(pedido("ide-fim"))).status, 409);
+  assert.equal(calls.n, 0);
+});
+
+test("teto global barra o gasto mesmo com muitas sessões e IPs diferentes (429)", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  const calls = { n: 0 };
+  fetchFalso(calls);
+  let barrou = false;
+  for (let i = 0; i < 400 && !barrou; i++) {
+    getOrCreateSession(`ide-global-${i}`);
+    barrou = (await GET(pedido(`ide-global-${i}`))).status === 429;
+  }
+  assert.equal(barrou, true);
+  assert.ok(calls.n <= 300);
 });

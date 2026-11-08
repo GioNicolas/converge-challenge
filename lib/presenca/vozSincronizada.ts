@@ -13,6 +13,32 @@ export function progressoDaFala(alinhamento: Alinhamento, tempo: number): number
   return textoFaladoAte(alinhamento, tempo).length;
 }
 
+// Safari (e Chrome em alguns casos) só deixa tocar áudio que começou num gesto do usuário. A voz chega depois de
+// uma chamada assíncrona, então o play() seria bloqueado e a fala cairia na voz do navegador. Um elemento tocado
+// uma vez num clique fica "liberado" e é reaproveitado nas falas seguintes.
+const WAV_SILENCIO = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+let elementoLiberado: HTMLAudioElement | null = null;
+let liberando = false;
+
+/** Chame dentro de um gesto do usuário (clique ou tecla). Depois disso, as falas tocam sem bloqueio. */
+export function liberarAudio(): void {
+  if (elementoLiberado || liberando || typeof Audio === "undefined") return;
+  liberando = true;
+  try {
+    const elemento = new Audio(WAV_SILENCIO);
+    Promise.resolve(elemento.play()).then(
+      () => {
+        elemento.pause();
+        elementoLiberado = elemento;
+        liberando = false;
+      },
+      () => { liberando = false; },
+    );
+  } catch {
+    liberando = false;
+  }
+}
+
 export function tocarComAlinhamento(
   audio: Blob,
   alinhamento: Alinhamento,
@@ -78,7 +104,10 @@ export function tocarComAlinhamento(
     }
     try {
       url = URL.createObjectURL(audio);
-      midia = new Audio(url);
+      if (elementoLiberado) {
+        midia = elementoLiberado;
+        midia.src = url;
+      } else midia = new Audio(url);
       midia.preload = "auto";
       midia.onended = () => {
         try {

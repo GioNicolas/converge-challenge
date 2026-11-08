@@ -18,6 +18,9 @@ import PainelConversa, { LARGURA_PAINEL } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
+import { calar, falar } from "@/lib/sessao/cliente";
+import { liberarAudio } from "@/lib/presenca/vozSincronizada";
+import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { postEncerramento } from "./ide/api";
 import { useChat } from "./ide/useChat";
 import { useCodeCapture } from "./ide/useCodeCapture";
@@ -32,6 +35,9 @@ const MARGEM_PROBLEMA = 392;
  */
 /** `vaga`: o que a IDE usa da config da vaga (padrão: DEFAULT_CONFIG). */
 export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty">;
+
+/** Fora da conversa, frases finais com menos palavras que isso são descartadas. */
+const MIN_PALAVRAS_FALA = 2;
 
 /** `convite`: id do link do e-mail; liga esta sessão ao candidato no painel da vaga. */
 export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { problemId?: string; vaga?: VagaIDE; convite?: string }) {
@@ -69,7 +75,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   /** Pediu para finalizar e o agente abriu a última conversa: a sessão encerra quando ela fechar. */
   const [finalizando, setFinalizando] = useState(false);
   const encerramentoAbertoRef = useRef(false);
-  // Microfone só estético por enquanto: mexe a onda da pílula, nada é transcrito nem analisado.
+  // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
 
   const executorRef = useRef<CommandExecutor | null>(null);
@@ -89,7 +95,83 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     applyCommands,
   });
 
+  // Fala do candidato (Scribe, ou o navegador como reserva): com a conversa aberta vira a resposta dele;
+  // fora dela, entra só na linha do tempo da sessão.
+  const falaRef = useRef<(texto: string) => void>(() => {});
+  /** Fala dita enquanto o agente ainda respondia: vai como resposta assim que o chat liberar. */
+  const falaPendenteRef = useRef<string | null>(null);
+  const registrarFala = (texto: string) => {
+    session.sendEvent({ type: "speech", role: "candidate", text: texto }).catch((err) => {
+      console.error("Falha ao registrar a fala do candidato", err);
+    });
+  };
+  falaRef.current = (texto) => {
+    const limpo = texto.trim();
+    if (!limpo) return;
+    if (chat.open && !chat.ended) {
+      // Dentro da conversa qualquer resposta vale, até "sim" ou "não".
+      if (chat.busy) falaPendenteRef.current = [falaPendenteRef.current, limpo].filter(Boolean).join(" ");
+      else chat.send(limpo);
+      return;
+    }
+    // Murmúrio solto ("hum", "é") não vira evento na linha do tempo.
+    if (limpo.split(/\s+/).filter(Boolean).length < MIN_PALAVRAS_FALA) return;
+    registrarFala(limpo);
+  };
+  useEffect(() => {
+    const pendente = falaPendenteRef.current;
+    if (!pendente) return;
+    if (chat.open && !chat.ended) {
+      if (chat.busy) return;
+      falaPendenteRef.current = null;
+      chat.send(pendente);
+    } else {
+      falaPendenteRef.current = null;
+      registrarFala(pendente);
+    }
+  });
+  const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
+  // Voz do agente: cada mensagem nova dele na conversa é falada (ElevenLabs, ou a voz do navegador como reserva).
+  // Enquanto ele fala, a escuta fica pausada para o microfone não transcrever o próprio agente.
+  const [agenteFalando, setAgenteFalando] = useState(false);
+  const ultimaFalaDita = useRef<number | null>(null);
+  const versaoDaVoz = useRef(0);
+  const ultimaDoAgente = chat.messages.at(-1)?.role === "agent" ? chat.messages.at(-1) : undefined;
+  useEffect(() => {
+    if (!ultimaDoAgente || ultimaFalaDita.current === ultimaDoAgente.at) return;
+    ultimaFalaDita.current = ultimaDoAgente.at;
+    const versao = ++versaoDaVoz.current;
+    setAgenteFalando(true);
+    // Só a fala mais recente libera a escuta; uma fala cortada por outra não destrava antes da hora.
+    void falar(ultimaDoAgente.text).finally(() => {
+      if (versao === versaoDaVoz.current) setAgenteFalando(false);
+    });
+  }, [ultimaDoAgente]);
+  // Conversa fechada ou sessão encerrada: corta a voz e volta a escutar.
+  useEffect(() => {
+    if (chat.open && !session.ended) return;
+    versaoDaVoz.current++;
+    calar();
+    setAgenteFalando(false);
+  }, [chat.open, session.ended]);
+  useEffect(() => () => calar(), []);
+
+  useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && !session.ended && !finalizando && !agenteFalando,
+    sessaoId: session.sessionId,
+    aoFinal: aoFalar,
+  });
+
   useEffect(() => warmUp(), []);
+  // A voz do agente chega depois de uma chamada assíncrona: libera o áudio no primeiro gesto do candidato.
+  useEffect(() => {
+    const eventos = ["pointerdown", "keydown", "touchstart"] as const;
+    // liberarAudio ignora as chamadas depois de liberar; se o primeiro gesto falhar, o próximo tenta de novo.
+    const liberar = () => liberarAudio();
+    eventos.forEach((e) => window.addEventListener(e, liberar));
+    return () => eventos.forEach((e) => window.removeEventListener(e, liberar));
+  }, []);
   const pedirMidia = midia.pedir;
   useEffect(() => {
     void pedirMidia();
