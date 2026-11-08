@@ -4,6 +4,7 @@ import { findConfig } from "@/lib/config/store";
 import { sendTriagemConvite } from "@/lib/email";
 import { criarConvite, salvarConvite } from "@/lib/convites/store";
 import { recebeEmail } from "@/lib/convites/teste";
+import { ipDe, reservarEnvioTestador } from "@/lib/convites/testador";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,15 +20,22 @@ const Body = z.object({
       z.object({
         nome: z.string().trim().min(1).max(120),
         email: z.string().trim().email().max(254),
+        /** O próprio testador do site (deixou o e-mail ao publicar): recebe e-mail de verdade, com limite. */
+        testador: z.boolean().optional(),
       }),
     )
     .min(1)
-    .max(200),
+    .max(200)
+    // Um testador por pedido: o campo é de uma pessoa só, e isso fecha a porta para disparo em massa.
+    .refine((l) => l.filter((c) => c.testador).length <= 1, "no máximo um testador por pedido"),
 });
 
 type Status = "enviado" | "simulado" | "erro";
 
-/** Cria um convite por candidato. Só quem `recebeEmail` (o Lucas) recebe email; os demais são simulados. */
+/**
+ * Cria um convite por candidato. Recebem email de verdade quem `recebeEmail` (o Lucas) e o testador que
+ * deixou o próprio e-mail (dentro do limite de lib/convites/testador.ts); os demais são simulados.
+ */
 export async function POST(req: NextRequest) {
   let json: unknown;
   try {
@@ -54,7 +62,8 @@ export async function POST(req: NextRequest) {
   const resultados: { email: string; status: Status; motivo?: string; link?: string }[] = [];
   for (const candidato of body.candidatos) {
     const email = candidato.email.toLowerCase();
-    const real = recebeEmail(email);
+    const testador = candidato.testador === true;
+    const real = recebeEmail(email) || (testador && reservarEnvioTestador(ipDe(req.headers), email));
     const convite = criarConvite({
       vagaId: body.vagaId,
       configId: body.configId,
@@ -63,6 +72,7 @@ export async function POST(req: NextRequest) {
       durationMin,
       languages,
       candidato: { nome: candidato.nome, email },
+      ...(testador ? { testador: true } : {}),
     });
     const link = `${base}/agendar/${convite.token}`;
 
@@ -70,7 +80,8 @@ export async function POST(req: NextRequest) {
     // resto do time, que fica simulado para não gastar envio).
     if (!real) {
       await salvarConvite({ ...convite, status: "simulado" });
-      resultados.push({ email, status: "simulado", motivo: "sem envio de e-mail (demonstração)", link });
+      const motivo = testador ? "limite de e-mails de teste atingido; use o link" : "sem envio de e-mail (demonstração)";
+      resultados.push({ email, status: "simulado", motivo, link });
       continue;
     }
 

@@ -48,7 +48,7 @@ export async function decidir(sessionId: string, decisao: Decisao): Promise<{ re
   let email: SituacaoDoEmail = "sem_candidato";
   if (convite) {
     const { nome, email: para } = convite.candidato;
-    if (!recebeEmail(para)) {
+    if (!recebeEmail(para) && !(convite.testador && convite.status !== "simulado")) {
       email = "simulado"; // mesma guarda dos convites: só quem está liberado recebe envio de verdade
     } else {
       try {

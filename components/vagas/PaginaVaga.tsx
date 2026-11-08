@@ -266,7 +266,7 @@ function Candidatos({
             configId: plano.configId,
             formato: plano.formato,
             duracaoMin: plano.duracaoMin,
-            candidatos: lote.map((c) => ({ nome: c.nome, email: c.email })),
+            candidatos: lote.map((c) => ({ nome: c.nome, email: c.email, ...(c.testador ? { testador: true } : {}) })),
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

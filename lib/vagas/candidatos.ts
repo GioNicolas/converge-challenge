@@ -3,6 +3,7 @@
 // em memória; o que o recrutador faz (convidar em lote) fica salvo no navegador, por índice.
 import { useCallback, useEffect, useState } from "react";
 import { entre, escolher, semente, sorteador } from "./aleatorio";
+import { EVENTO_TESTADOR, lerTestador, type Testador } from "./testador";
 
 export type Situacao = "inscrito" | "convidado" | "em_andamento" | "concluiu";
 
@@ -20,6 +21,8 @@ export type CandidatoVaga = {
   /** Só de quem concluiu: a nota geral (0–4, a mesma escala do relatório) e a recomendação que sai dela. */
   escore?: number;
   recomendacao?: RecomendacaoDemo;
+  /** É quem está usando o site (deixou o próprio e-mail): o convite e a decisão chegam de verdade. */
+  testador?: boolean;
 };
 
 /** As recomendações do relatório que uma nota de demonstração pode receber. */
@@ -81,7 +84,9 @@ const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLo
 
 /** Índices dos candidatos de teste começam aqui, longe dos demo, para não deslocar os convites salvos. */
 const INDICE_TESTE = 1_000_000;
-/** Candidato de teste (time): recebe e-mail de verdade. */
+/** Índice do testador: acima dos de teste e preso ao e-mail, para um e-mail novo não herdar o convite do anterior. */
+const INDICE_TESTADOR = 2_000_000;
+/** Candidato de teste (time ou o testador): pode receber e-mail de verdade. */
 export const ehCandidatoTeste = (c: CandidatoVaga) => c.i >= INDICE_TESTE;
 
 type CandidatoTeste = { nome: string; email: string };
@@ -167,8 +172,27 @@ export function useConvitesFeitos() {
   return convites;
 }
 
-/** Testes primeiro (como inscritos comuns, sem marca), depois os demonstrativos, com os convites já feitos aplicados. */
+/** O testador como inscrito da vaga. */
+export function candidatoTestador(t: Testador): CandidatoVaga {
+  return {
+    i: INDICE_TESTADOR + (semente(t.email) % 1_000_000),
+    nome: t.nome,
+    email: t.email,
+    cidade: CIDADES[0],
+    situacao: "inscrito",
+    haDias: 0,
+    novo: false,
+    testador: true,
+  };
+}
+
+/**
+ * O testador (se deixou o e-mail) e os testes primeiro, como inscritos comuns; depois os demonstrativos,
+ * com os convites já feitos aplicados.
+ */
 function montarLista(vagaId: string, funil: Funil, testes: CandidatoTeste[]): CandidatoVaga[] {
+  const testador = lerTestador();
+  if (testador) testes = testes.filter((t) => t.email.toLowerCase() !== testador.email);
   const deTeste: CandidatoVaga[] = testes.map((t, k) => ({
     i: INDICE_TESTE + k,
     nome: t.nome,
@@ -178,7 +202,7 @@ function montarLista(vagaId: string, funil: Funil, testes: CandidatoTeste[]): Ca
     haDias: 0,
     novo: false,
   }));
-  const todos = [...deTeste, ...gerar(vagaId, funil)];
+  const todos = [...(testador ? [candidatoTestador(testador)] : []), ...deTeste, ...gerar(vagaId, funil)];
   const convidados = new Set(lerConvites()[vagaId] ?? []);
   if (convidados.size === 0) return todos;
   return todos.map((c) => (c.situacao === "inscrito" && convidados.has(c.i) ? { ...c, situacao: "convidado", haDias: 0 } : c));
@@ -214,7 +238,11 @@ export function useCandidatos(vagaId: string, funil: Funil) {
   useEffect(() => {
     montar();
     window.addEventListener(CHAVE, montar);
-    return () => window.removeEventListener(CHAVE, montar);
+    window.addEventListener(EVENTO_TESTADOR, montar);
+    return () => {
+      window.removeEventListener(CHAVE, montar);
+      window.removeEventListener(EVENTO_TESTADOR, montar);
+    };
   }, [montar]);
 
   return lista;

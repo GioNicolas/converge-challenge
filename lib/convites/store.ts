@@ -32,6 +32,8 @@ const ConviteSchema = z.object({
   durationMin: z.number().int().positive(),
   languages: z.array(z.string()),
   candidato: z.object({ nome: z.string(), email: z.string() }),
+  /** O próprio testador do site se inscreveu (lib/convites/testador.ts): a decisão também vai por e-mail. */
+  testador: z.boolean().optional(),
   criadoEm: z.number(),
   status: z.enum(["enviado", "simulado", "agendado"]),
   agendadoPara: z.string().optional(),
