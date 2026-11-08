@@ -60,7 +60,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: false, erros: resultado.erros }, { status: 422 });
   }
 
-  // As regras da squad ativas agora vão junto (a entrevista recarrega as ativas quando começa).
+  // As regras ativas da vaga desta config vão junto (a entrevista recarrega as ativas quando começa).
+  // Config nova é vaga nova: começa sem regras de outras vagas.
   resultado.config = comRegrasDaSquad(resultado.config);
   await salvarConfig(sessao, resultado.config);
   registrarEvento(sessao, {

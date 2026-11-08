@@ -35,7 +35,8 @@ export async function POST(request: Request) {
   }
   const event = parsed.data;
 
-  // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started.
+  // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started,
+  // e com as regras ativas aprendidas nesta vaga (não as de outras vagas da empresa).
   const config = event.type === "session_started" ? comRegrasDaSquad(withProblem(await resolveConfig(event.configId), event.problemId)) : undefined;
   // Outra instância pode ter a sessão (Vercel): restaura antes de criar uma nova por cima.
   if (event.type !== "session_started") await sessaoViva(event.sessionId);

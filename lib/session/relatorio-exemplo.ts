@@ -3,11 +3,12 @@
  * o relatório e tirar imagens para o pitch sem fazer uma entrevista inteira. Dados inventados.
  *
  * As regras da squad não são fixas: saem da Memória Viva da Squad no momento em que a página abre, do mesmo jeito
- * que o avaliador faria se a entrevista terminasse agora. Assim, depois de responder os 90 dias da Bianca, o
- * critério Casos de borda já aparece com o critério aprendido com o time.
+ * que o avaliador faria se a entrevista terminasse agora. Como uma regra só vale na vaga de onde veio, entram só as
+ * da vaga desta entrevista: a Backend Pleno da config padrão (`DEFAULT_CONFIG.vagaId`, a vaga da demo).
  */
+import { DEFAULT_CONFIG } from "@/lib/config/default";
 import type { Gravacao, Report } from "@/lib/contracts";
-import { regrasDaEmpresa } from "@/lib/squad-memory/config";
+import { regrasDaVaga, vagaDaConfig } from "@/lib/squad-memory/config";
 import { regrasDoCriterio } from "@/lib/squad-memory/prompt";
 
 export const ID_EXEMPLO = "exemplo";
@@ -204,9 +205,9 @@ export const GRAVACAO_EXEMPLO: Gravacao = {
   ],
 };
 
-/** O relatório de exemplo, com as regras da squad que estão ativas agora em cada critério com nota. */
+/** O relatório de exemplo, com as regras da vaga que estão ativas agora em cada critério com nota. */
 export function relatorioExemplo(): Report {
-  const regras = regrasDaEmpresa();
+  const regras = regrasDaVaga(vagaDaConfig(DEFAULT_CONFIG));
   return {
     ...BASE,
     criteria: BASE.criteria.map((c) => {

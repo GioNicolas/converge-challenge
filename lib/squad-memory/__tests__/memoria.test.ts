@@ -1,7 +1,8 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { aprenderComAjuste, aprenderComDecisao } from "../aprender";
-import { comRegrasDaSquad } from "../config";
+import { DEFAULT_CONFIG } from "@/lib/config/default";
+import { comRegrasDaSquad, regrasDaVaga, vagaDaConfig } from "../config";
 import { regraAfeta } from "../criterios";
 import { extrairPorPalavrasChave, extrairRegras } from "../extrator";
 import { motivoNaoTecnico, triarMotivo } from "../guarda";
@@ -11,6 +12,7 @@ import {
   alternarRegra,
   apagarRegra,
   concordancia,
+  EMPRESA_DEMO,
   editarRegra,
   limparMemoria,
   listarMotivosIgnorados,
@@ -189,7 +191,7 @@ test("regras chegam à config, ao prompt e ao critério da rubrica", () => {
     criterio: "estimativa",
     origem: { tipo: "reprovacao", candidato: "A", vagaId: "v" },
   });
-  const config = comRegrasDaSquad({ id: "c" } as InterviewConfig, EMPRESA);
+  const config = comRegrasDaSquad({ id: "c", vagaId: "v" } as InterviewConfig, EMPRESA);
   assert.equal(config.squadRules?.length, 1);
   assert.match(blocoDasRegras(config.squadRules, "perguntar"), /Critérios aprendidos com o Tech Lead/);
   assert.equal(blocoDasRegras([], "observar"), "");
@@ -197,4 +199,78 @@ test("regras chegam à config, ao prompt e ao critério da rubrica", () => {
   assert.equal(regrasDoCriterio(config.squadRules, "escalabilidade").length, 1);
   assert.ok(regraAfeta({ criterio: "componentes" }, "dados_consistencia"));
   assert.ok(!regraAfeta({ criterio: "tradeoffs" }, "bordas"));
+});
+
+// ---------------------------------------------------------------------------
+// Uma regra só vale na vaga de onde veio
+// ---------------------------------------------------------------------------
+
+const regraNa = (vagaId: string, texto: string) =>
+  adicionarRegra({
+    empresaId: EMPRESA,
+    texto,
+    efeito: "penaliza",
+    criterio: "bordas",
+    origem: { tipo: "reprovacao", candidato: "A", vagaId },
+  });
+
+test("regra da vaga A não entra na entrevista da vaga B", () => {
+  const daA = regraNa("vaga-a", "Penaliza quem não trata lista vazia");
+  const daB = regraNa("vaga-b", "Penaliza quem não estima volume");
+  const configA = comRegrasDaSquad({ id: "vaga-a" } as InterviewConfig, EMPRESA);
+  const configB = comRegrasDaSquad({ id: "vaga-b" } as InterviewConfig, EMPRESA);
+  assert.deepEqual(configA.squadRules?.map((r) => r.id), [daA.id]);
+  assert.deepEqual(configB.squadRules?.map((r) => r.id), [daB.id]);
+});
+
+test("vaga nova começa sem regras de outras vagas e perde as que vieram na config salva", () => {
+  regraNa("vaga-a", "Penaliza quem não trata lista vazia");
+  assert.deepEqual(regrasDaVaga("vaga-nova", EMPRESA), []);
+  assert.deepEqual(regrasDaVaga(undefined, EMPRESA), []);
+  const antiga = { id: "vaga-nova", squadRules: [{ id: "x", text: "t", effect: "penaliza", criterion: "bordas" }] };
+  assert.equal("squadRules" in comRegrasDaSquad(antiga as InterviewConfig, EMPRESA), false);
+});
+
+test("a vaga da config é o vagaId dela; sem ele, o próprio id", () => {
+  assert.equal(vagaDaConfig({ id: "cfg-1", vagaId: "backend-pleno" }), "backend-pleno");
+  assert.equal(vagaDaConfig({ id: "cfg-1" }), "cfg-1");
+  const daVaga = regraNa("backend-pleno", "Penaliza quem não trata lista vazia");
+  const config = comRegrasDaSquad({ id: "cfg-1", vagaId: "backend-pleno" } as InterviewConfig, EMPRESA);
+  assert.deepEqual(config.squadRules?.map((r) => r.id), [daVaga.id]);
+});
+
+test("regra desligada da própria vaga também fica de fora", () => {
+  const r = regraNa("vaga-a", "Penaliza quem não trata lista vazia");
+  alternarRegra(r.id, false);
+  assert.deepEqual(regrasDaVaga("vaga-a", EMPRESA), []);
+});
+
+test("o que se aprende no Slack volta para a mesma vaga, não para as outras", async () => {
+  await aprenderComDecisao(
+    {
+      empresaId: EMPRESA,
+      vagaId: "vaga-a",
+      candidato: "Rafael",
+      decisao: "reprovado",
+      motivo: "propôs Kafka sem necessidade para esse volume",
+      report: REPORT,
+    },
+    null,
+  );
+  await aprenderComAjuste({ empresaId: EMPRESA, vagaId: "vaga-b", comentario: "mais modelagem de dados" }, null);
+  assert.deepEqual(regrasDaVaga("vaga-a", EMPRESA).map((r) => r.criterion), ["tradeoffs"]);
+  assert.deepEqual(regrasDaVaga("vaga-b", EMPRESA).map((r) => r.criterion), ["componentes"]);
+});
+
+test("semente: o ajuste de plano de Engenharia de Dados não entra na entrevista Backend Pleno da demo", () => {
+  const regras = comRegrasDaSquad(DEFAULT_CONFIG, EMPRESA_DEMO).squadRules ?? [];
+  const ids = regras.map((r) => r.id);
+  assert.ok(!ids.includes("semente-regra-modelagem"));
+  assert.ok(!ids.includes("semente-regra-estimativa"));
+  assert.ok(!ids.includes("semente-regra-observabilidade"));
+  // As da vaga atual (Backend Pleno da demo) entram.
+  assert.deepEqual([...ids].sort(), ["semente-regra-custo", "semente-regra-plano-antes"]);
+  // Toda regra da semente aponta para uma vaga que tem decisões (a tela mostra o nome da vaga).
+  const vagas = new Set(concordancia(EMPRESA_DEMO).porVaga.map((v) => v.vagaId));
+  for (const r of listarRegras(EMPRESA_DEMO)) assert.ok(vagas.has(r.origem.vagaId), r.id);
 });

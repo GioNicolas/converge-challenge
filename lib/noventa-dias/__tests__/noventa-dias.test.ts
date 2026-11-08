@@ -50,7 +50,7 @@ test("deu certo num critério com nota baixa: regra de crédito", () => {
   assert.equal(regraDoCriterio(c, true, "nao-existe"), undefined);
 });
 
-test("ajuste: a regra do critério entra ativa, com origem resultado_90_dias, e vai para a próxima entrevista", async () => {
+test("ajuste: a regra do critério entra ativa, com origem resultado_90_dias, e vale só na mesma vaga", async () => {
   const c = listarContratacoes(EMPRESA_DEMO)[0];
   const antes = regrasAtivas(EMPRESA_DEMO).length;
   const ajuste = await ajustarComResultado(c, { deuCerto: false, criterioErrado: "bordas" }, null);
@@ -63,8 +63,11 @@ test("ajuste: a regra do critério entra ativa, com origem resultado_90_dias, e 
     deuCerto: false,
   });
   assert.equal(regrasAtivas(EMPRESA_DEMO).length, antes + 1);
-  const config = comRegrasDaSquad({ mode: "live_coding" } as never, EMPRESA_DEMO) as { squadRules?: { id: string }[] };
-  assert.ok(config.squadRules?.some((r) => r.id === regra.id));
+  // Vale nas próximas entrevistas da mesma vaga, e só nela.
+  const daVaga = comRegrasDaSquad({ id: "config-backend-pagamentos", vagaId: "backend-pagamentos" } as never, EMPRESA_DEMO);
+  assert.ok(daVaga.squadRules?.some((r) => r.id === regra.id));
+  const outraVaga = comRegrasDaSquad({ id: "config-frontend-junior", vagaId: "frontend-junior" } as never, EMPRESA_DEMO);
+  assert.ok(!outraVaga.squadRules?.some((r) => r.id === regra.id));
 });
 
 test("ajuste: no máximo 2 regras, sem repetir o critério, e o guarda-corpo ignora o que não é técnico", async () => {
