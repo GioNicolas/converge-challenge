@@ -186,8 +186,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   // o modal normal continua à espera do clique.
   const iniciouSozinho = useRef(false);
 
-  // Conversa por texto: só com servidor real e entrevista em andamento. Demo e digitadas aparecem juntas, por horário.
-  const podeDigitar = usarServidor() && sessao !== null && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA";
+  // A entrevista é só por voz: o painel Conversa é a transcrição, para reler uma pergunta. Demo e falas aparecem juntas, por horário.
   const mensagensDaConversa = [...demo.mensagens, ...entrevista.mensagens].sort((a, b) => a.horario - b.horario);
 
   // "ver no quadro": o que a fala marcou no desenho, ou o requisito que ela combinou e o agente escreveu.
@@ -206,7 +205,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   }, [quadro, elementosDaFala]);
   const { enviarTexto } = entrevista;
   const { combinar } = demo;
-  const enviarDigitado = useCallback(
+  const enviarFala = useCallback(
     async (texto: string, opcoes?: { sinal?: AbortSignal; substitui?: boolean }) => {
       const { requisito } = await enviarTexto(texto, opcoes);
       if (requisito) combinar(requisito);
@@ -220,8 +219,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (midia.microfoneLigado && midia.volume > 0.08) registrarSom();
   }, [midia.microfoneLigado, midia.volume, registrarSom]);
   const [falaPendente, setFalaPendente] = useState<string | null>(null);
-  const enviarVozRef = useRef(enviarDigitado);
-  enviarVozRef.current = enviarDigitado;
+  const enviarVozRef = useRef(enviarFala);
+  enviarVozRef.current = enviarFala;
   const pedirParaRepetirRef = useRef(entrevista.pedirParaRepetir);
   pedirParaRepetirRef.current = entrevista.pedirParaRepetir;
   const filaVoz = useRef<FilaFalas | null>(null);
@@ -310,7 +309,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       {estado.fase !== "AGUARDANDO" && (
         <JanelaChamada
           fase={NOME_DA_FASE[estado.fase]}
-          duvidaPendente={estado.plin === "PLIN_PENDENTE"}
           respondendo={estado.plin === "PERGUNTA_ATIVA"}
           encerrada={estado.fase === "ENCERRADA"}
           marcadores={{ fase: estado.fase, plin: estado.plin }}
@@ -318,7 +316,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           midia={midia}
           agenteFalando={entrevista.agenteFalando}
           agentePensando={entrevista.aguardandoResposta}
-          onClicarPlin={entrevista.clicarPlin}
           onTerminarResposta={entrevista.terminarResposta}
           onEncerrar={() => setConfirmandoFim(true)}
         />
@@ -411,8 +408,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
         aberto={conversaAberta}
         onFechar={fecharConversa}
         mensagens={mensagensDaConversa}
-        onEnviar={podeDigitar ? enviarDigitado : undefined}
-        onDigitando={entrevista.registrarAtividade}
         onVerNoQuadro={verNoQuadro}
         temNoQuadro={(m) => elementosDaFala(m).length > 0}
       />

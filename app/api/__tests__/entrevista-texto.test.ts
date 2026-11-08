@@ -84,7 +84,7 @@ async function eventos(id: string, lista: { tipo: string; dados: unknown }[]) {
   assert.equal(r.status, 200);
 }
 
-async function analisar(id: string, fase: string, grafo: string, mudancas: string, perguntas: number) {
+async function analisar(id: string, fase: string, grafo: string, mudancas: string, perguntas: number, paradoHaS?: number) {
   const r = await ler(
     await analisarPost(
       post(`/api/sessoes/${id}/analisar`, {
@@ -95,6 +95,7 @@ async function analisar(id: string, fase: string, grafo: string, mudancas: strin
         conversa_recente: [{ quem: "agente", texto: "Projete um serviço." }],
         perguntas_feitas: perguntas,
         imagem_url: null,
+        ...(paradoHaS !== undefined ? { parado_ha_s: paradoHaS } : {}),
       }),
       params(id),
     ),
@@ -104,6 +105,71 @@ async function analisar(id: string, fase: string, grafo: string, mudancas: strin
 }
 
 const estado = async (id: string) => (await ler(await estadoGet(get(`/api/dev/sessoes/${id}/estado`), params(id)))).corpo;
+
+describe("pergunta nova logo depois de uma fala solta do agente", () => {
+  it("a bola fica com o candidato até ele agir; depois ou num silêncio de verdade a pergunta sai", async () => {
+    definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const p = await ler(await perguntarPost(post(`/api/sessoes/${id}/perguntar`, { sessao_id: id, fase: "REQUISITOS", texto: "Qual a escala de acessos?" }), params(id)));
+    assert.equal(p.corpo.responder, true);
+
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    // O agente acabou de responder e o candidato não fez nada depois (parado há 30 s, antes da resposta).
+    const logo = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 30);
+    assert.equal(logo.status, "ok", "com a bola no candidato a pergunta é rebaixada");
+    assert.equal((await estado(id)).plinPendente, false);
+
+    // Ele desenhou logo depois da resposta (parado há 1 s): agora a pergunta pode sair.
+    relogio += 3_000;
+    const depois = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 1);
+    assert.equal(depois.status, "duvida", "depois de uma ação dele a pergunta pode sair");
+  });
+});
+
+describe("fala do agente gravada durante a análise", () => {
+  it("o /analisar refiltra com o estado fresco: a pergunta não sai e o plin não fica pendente", async () => {
+    // O LLM falso grava a fala do Totti (via /perguntar) enquanto a análise está em andamento.
+    let sessao = "";
+    let gravou = false;
+    const base = llmVariado();
+    const llm: LlmCliente = {
+      async completarJson(args) {
+        if (args.nomeSchema !== "abertura_entrevista" && sessao && !gravou) {
+          gravou = true; // o /perguntar também chama o LLM: sem isso a chamada recursiva não termina
+          relogio += 2_000;
+          const p = await ler(await perguntarPost(post(`/api/sessoes/${sessao}/perguntar`, { sessao_id: sessao, fase: "ALTO_NIVEL", texto: "Qual a escala de acessos?" }), params(sessao)));
+          assert.equal(p.corpo.responder, true);
+          relogio += 1_000;
+        }
+        return base.completarJson(args);
+      },
+    };
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    sessao = id;
+    const r = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 30);
+    sessao = "";
+    assert.equal(r.status, "ok", "a fala gravada no meio da análise segura a pergunta");
+    assert.equal(r.pergunta, null);
+    assert.equal((await estado(id)).plinPendente, false);
+  });
+
+  it("sem fala no meio da análise e com silêncio longo, a pergunta sai (sem regressão)", async () => {
+    definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    const r = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 30);
+    assert.equal(r.status, "duvida");
+    assert.equal((await estado(id)).plinPendente, true);
+  });
+});
 
 describe("entrevista completa por texto (handlers + LLM falso)", () => {
   it("percorre todas as fases, respeita os limites do plin, não vaza segredos e gera o scorecard", async () => {
@@ -141,7 +207,7 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     // Cinco rodadas: clique, (análise durante a resposta é bloqueada), resposta, reanálise forçada.
     for (let n = 1; n <= 5; n++) {
       if (n > 1) {
-        relogio += 61_000; // passa o intervalo de 60 s
+        relogio += 61_000; // passa o intervalo entre perguntas
         const nova = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(sem mudanças)", n - 1);
         assert.equal(nova.status, "duvida", `rodada ${n}: plin liberado`);
       }
@@ -157,7 +223,7 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
       assert.equal(e.perguntasFeitas, n);
       assert.equal(e.perguntaAtiva, false);
       if (n < 5) {
-        // Reanálise forçada logo após a resposta: o intervalo de 60 s segura o plin.
+        // Reanálise forçada logo após a resposta: o intervalo entre perguntas segura o plin.
         const forcada = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(o candidato terminou de responder)", n);
         assert.equal(forcada.status, "ok");
         assert.equal(e.fase, "APROFUNDAMENTO");

@@ -576,6 +576,21 @@ export function contagemDa(v: VagaEmpresa, etapa: EtapaVaga): number | null {
 /** Relatórios que acabaram de chegar: é o que o avaliador deve olhar primeiro. */
 export const novosDa = (v: VagaEmpresa) => (v.etapa === "encerrada" ? 0 : v.funil.novos);
 
+/** A partir de que fração dos convidados entrevistados a vaga sai de "Totti cuidando" e vai para a decisão. */
+export const FRACAO_PARA_DECIDIR = 0.5;
+
+/** Quanto dos convidados já fez a entrevista (0 a 1). Sem convidados ainda, conta como nada feito. */
+export function fracaoEntrevistada(v: Pick<VagaEmpresa, "funil">): number {
+  const f = v.funil;
+  return f.convidados ? Math.min(1, f.concluiram / f.convidados) : 0;
+}
+
+/**
+ * A vaga está pronta para a recrutadora decidir: tem relatório esperando e pelo menos metade dos convidados
+ * já foi entrevistada. Antes disso, decidir é comparar poucos candidatos; a vaga segue com o Totti.
+ */
+export const prontaParaDecidir = (v: VagaEmpresa) => novosDa(v) > 0 && fracaoEntrevistada(v) >= FRACAO_PARA_DECIDIR;
+
 const dias = (n: number) => (n === 0 ? "hoje" : n === 1 ? "ontem" : `há ${n} dias`);
 
 export function diasDoRascunho(r: RascunhoVaga): number {

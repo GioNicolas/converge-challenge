@@ -14,7 +14,7 @@ import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
 
 export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
-1. O candidato desenha; você conduz a conversa para entender o raciocínio dele. Intervenha de propósito: no ALTO_NIVEL, deixe ele montar a visão geral e só pergunte se algo central ficou sem explicação; no APROFUNDAMENTO, quando um plin é permitido e há um ponto do plano da vaga ou da rubrica ainda sem evidência ligado ao desenho, pergunte: é para isso que a fase existe. "ok" quando ele está no meio de explicar ou de desenhar algo, ou quando não há o que perguntar.
+1. O candidato desenha; você conduz a conversa para entender o raciocínio dele. Intervenha de propósito: no ALTO_NIVEL, deixe ele montar a visão geral e só pergunte se algo central ficou sem explicação; no APROFUNDAMENTO, quando uma pergunta nova é permitida e há um ponto do plano da vaga ou da rubrica ainda sem evidência ligado ao desenho, pergunte: é para isso que a fase existe. "ok" quando ele está no meio de explicar ou de desenhar algo, ou quando não há o que perguntar.
 2. O problema é vago de propósito. Perguntar requisitos antes de desenhar é o primeiro sinal avaliado.
 3. Requisitos só pela ficha: responda com os números da ficha; fora dela, peça para o candidato assumir algo razoável e declarar a suposição.
 4. Não valide nem corrija. Nunca diga que algo está certo, errado, bom, ótimo, excelente ou perfeito; não elogie nem parabenize; não ensine a resposta. Vale para qualquer palavra ou expressão que valide, elogie ou corrija, não só as citadas: julgue pelo sentido. Reaja de forma neutra, inclusive em "pergunta" e "nota".
@@ -55,7 +55,7 @@ export const NOTACAO_GRAFO = `COMO LER O GRAFO (o quadro do candidato, descrito 
 
 export const TABELA_ACOES = `AÇÕES (escolha UMA em "status"):
 - "ok": está indo bem, ou ainda não há o que perguntar. Nada aparece para o candidato; as observações são só registradas. É o padrão.
-- "duvida": há uma escolha a justificar, uma armadilha presente no desenho, um critério da rubrica ainda sem evidência, ou o candidato ficou em silêncio total (princípio 13). Vale em qualquer fase em que um plin seja permitido; em REQUISITOS, é o único status de plin, só para o convite do silêncio inicial.
+- "duvida": há uma escolha a justificar, uma armadilha presente no desenho, um critério da rubrica ainda sem evidência, ou o candidato ficou em silêncio total (princípio 13). Vale em qualquer fase em que uma pergunta seja permitida; em REQUISITOS, é o único status que vira pergunta, só para o convite do silêncio inicial.
 - "redirecionar": SÓ quando o candidato entra em detalhe demais cedo demais, ou quando a fase precisa avançar por causa do tempo. Não use para puxar conversa nem para quebrar silêncio.
 - "dica": o candidato continua travado depois de você já ter quebrado o silêncio ou pedido que ele pensasse em voz alta; dê o próximo degrau da escada.
 Só use um status que a fase atual permite (veja "Status permitidos agora"). Se o status permitido não se aplica, use "ok".`;
@@ -118,7 +118,7 @@ REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
 - "degrau": 1, 2 ou 3 conforme a escada de ajuda; senão null.
 - "observacoes": 0 a 3 itens, cada um com "criterio" (id da rubrica), "sinal" (positivo, negativo ou neutro), "espontaneo" (true/false) e "evidencia" (curta, citando o elemento do desenho ou um trecho da fala). Registre só o que é novo desde as análises anteriores.
 - "avancar_fase": true somente quando a fase atual é ALTO_NIVEL e o candidato já mostrou o suficiente dela: as peças principais do desenho estão no quadro e ligadas entre si (o caminho principal do problema aparece de ponta a ponta), de modo que o próximo passo natural é aprofundar. É um sinal de progresso, independente de "status": pode vir com "ok". Em qualquer outra fase, ou se o desenho ainda está incompleto ou o candidato acabou de começar, false. Não use para apressar nem para punir; na dúvida, false.
-- Na dúvida entre perguntar e ficar quieto: no APROFUNDAMENTO, com plin permitido e um ponto do plano ou da rubrica sem evidência, pergunte; nas outras fases, fique quieto ("ok").
+- Na dúvida entre perguntar e ficar quieto: no APROFUNDAMENTO, com pergunta permitida e um ponto do plano ou da rubrica sem evidência, pergunte; nas outras fases, fique quieto ("ok").
 - Não repita uma pergunta já feita nem uma dúvida já pendente com outras palavras.`;
 }
 
@@ -164,7 +164,7 @@ export function montarSistemaDinamico(
   briefing = "",
 ): string {
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
-  const bloqueio = motivoBloqueioPlin(estado, agora);
+  const bloqueio = motivoBloqueioPlin(estado, agora, REGRAS_PADRAO, { paradoHaS: pedido.parado_ha_s });
   const semEvidencia = criteriosSemEvidencia(estado);
   const pendente = estado.perguntaPendente;
   // A conversa inteira do servidor, mais as falas recentes que só o quadro tem (a apresentação, o desafio).
@@ -183,7 +183,7 @@ Candidato sem mexer no desenho nem falar há: ${
   }
 Requisitos já combinados no quadro: ${pedido.requisitos?.length ? pedido.requisitos.join(" | ") : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
-${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: um plin NÃO pode ser levantado agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Um plin pode ser levantado agora, se houver motivo."}
+${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
 ${blocoDaAgenda(estado, pedido, semEvidencia)}${briefing ? `
@@ -192,7 +192,7 @@ ${briefing}
 Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):
 ${perguntasFeitasEmTexto(estado.perguntas)}
 
-Dúvida pendente (o candidato ainda não clicou): ${
+Pergunta pendente (ainda não foi dita ao candidato; ele só a ouve quando fizer uma pausa): ${
     pendente
       ? `"${pendente.pergunta}" (elementos: ${pendente.elementos.join(", ") || "nenhum"}). Se ainda faz sentido, devolva a mesma; se o desenho ou a conversa já a resolveram, devolva "ok" para cancelá-la.`
       : "nenhuma"

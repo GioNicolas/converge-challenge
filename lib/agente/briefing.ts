@@ -8,6 +8,7 @@
 import type { FocusArea } from "../contracts";
 import type { Criterio, Kit } from "./kits/tipos";
 import { tempoDaEntrevista, type EstadoSessao, type EvidenciaDoCriterio, type ObservacaoRegistrada } from "./sessao/estado";
+import type { Fase } from "./sessao/tipos";
 
 /**
  * Área do foco da recrutadora que puxa o peso de cada critério da rubrica. Os critérios sem área aqui (requisitos,
@@ -18,6 +19,30 @@ const AREA_DO_CRITERIO: Record<string, FocusArea> = {
   uso_ia: "uso_ia",
   componentes_fluxo: "tecnico",
   dados_consistencia: "tecnico",
+};
+
+/**
+ * Critérios que não têm pergunta própria: aparecem nas respostas aos outros (a rubrica diz que a comunicação é
+ * "medida nas respostas aos plins e nas perguntas de requisito"). Ficam fora da cobertura e nunca viram alvo.
+ */
+const CRITERIOS_INDIRETOS = new Set(["comunicacao"]);
+
+/** O critério só se pergunta na etapa de requisitos; depois dela, não é mais alvo de pergunta. */
+const CRITERIO_DE_REQUISITOS = "requisitos";
+
+/** Etapas em que o agente já procura evidência dos critérios: antes disso o objetivo é outro. */
+const ETAPAS_DE_COBERTURA: Fase[] = ["APROFUNDAMENTO", "FECHAMENTO"];
+
+/** O que o entrevistador quer conseguir em cada etapa. Sem isso o alvo dos critérios não tem contexto. */
+const OBJETIVO_DA_ETAPA: Partial<Record<Fase, string>> = {
+  REQUISITOS:
+    "o candidato entende o problema. Responda as dúvidas dele e deixe-o perguntar; ainda não é hora de aprofundar nem de cobrar os critérios.",
+  ALTO_NIVEL:
+    "ver a visão geral desenhada (as peças principais e como elas se ligam). Só pergunte se algo central ficou sem explicação; os critérios são cobrados no aprofundamento.",
+  APROFUNDAMENTO:
+    "reunir evidência dos critérios que ainda faltam, com perguntas ligadas ao que ele desenhou, uma de cada vez.",
+  FECHAMENTO:
+    "fazer a última pergunta, no critério de maior peso ainda aberto, e encerrar.",
 };
 
 /** Quantas evidências por critério vão ao prompt (as mais recentes). */
@@ -86,7 +111,7 @@ export function ritmoDaCobertura(coberturaPonderada: number, tempoGasto: number)
 
 /** A situação de cada critério da rubrica e o ritmo geral, tudo calculado do estado da sessão. */
 export function resumoDaCobertura(criterios: Criterio[], estado: EstadoSessao, agora: number): ResumoDaCobertura {
-  const situacao: SituacaoDoCriterio[] = criterios.map((c) => {
+  const situacao: SituacaoDoCriterio[] = criterios.filter((c) => !CRITERIOS_INDIRETOS.has(c.id)).map((c) => {
     const contagem = estado.cobertura[c.id];
     const total = contagem ? contagem.positivo + contagem.negativo + contagem.neutro : 0;
     return {
@@ -126,17 +151,29 @@ function linhaDaEvidencia(o: ObservacaoRegistrada): string {
 }
 
 /**
- * O bloco de briefing que vai ao prompt, na análise e na conversa por voz. Tem a cobertura e o ritmo, o que já
- * temos do candidato em cada critério e o que ainda falta, do que mais pesa ao que menos pesa.
+ * O bloco de briefing que vai ao prompt, na análise e na conversa por voz. Diz o objetivo da etapa e o que já
+ * temos do candidato. Da etapa de aprofundamento em diante diz também a cobertura, o ritmo e o que falta, do que
+ * mais pesa ao que menos pesa: antes disso os critérios ainda não são o assunto, e um "alvo" só atrapalharia.
  */
 export function blocoDoBriefing(kit: Pick<Kit, "criterios">, estado: EstadoSessao, agora: number): string {
   const r = resumoDaCobertura(kit.criterios, estado, agora);
   const cobertos = r.criterios.filter((c) => c.suficiente);
-  const faltando = r.criterios.filter((c) => !c.suficiente).sort((a, b) => b.peso - a.peso);
+  const objetivo = OBJETIVO_DA_ETAPA[estado.fase];
+  const cobrando = ETAPAS_DE_COBERTURA.includes(estado.fase);
 
   const jaTemos = cobertos.length
-    ? cobertos.map((c) => `- ${c.nome}:\n${c.evidencias.map(linhaDaEvidencia).join("\n")}`).join("\n")
+    ? cobertos.map((c) => `- ${c.nome}:
+${c.evidencias.map(linhaDaEvidencia).join("\n")}`).join("\n")
     : "(nada com evidência suficiente ainda)";
+  const cabecalho = `BRIEFING DA ENTREVISTA (para você decidir o que perguntar; nunca cite ao candidato)${objetivo ? `
+Objetivo desta etapa: ${objetivo}` : ""}`;
+
+  if (!cobrando) return `${cabecalho}
+O que já temos do candidato:
+${jaTemos}`;
+
+  // Requisitos só se pergunta na etapa de requisitos: depois dela fica fora do que falta e dos alvos.
+  const faltando = r.criterios.filter((c) => !c.suficiente && c.id !== CRITERIO_DE_REQUISITOS).sort((a, b) => b.peso - a.peso);
   const falta = faltando.length
     ? faltando
         .map((c) => {
@@ -149,9 +186,9 @@ export function blocoDoBriefing(kit: Pick<Kit, "criterios">, estado: EstadoSessa
   const alvo = faltando[0];
   const rodape = alvo
     ? `Próximo alvo, se houver gancho no desenho: ${alvo.nome}. Critério com evidência suficiente não precisa de outra pergunta; só volte a ele se o candidato trouxer algo novo. Se faltar pouco tempo, a última pergunta vai para o critério de maior peso ainda aberto.`
-    : "Tudo coberto: aprofunde só o que o candidato trouxer de novo, sem repetir o que já está nas evidências.";
+    : "Tudo coberto: aprofundar só o que o candidato trouxer de novo, sem repetir o que já está nas evidências.";
 
-  return `BRIEFING DA ENTREVISTA (para você decidir o que perguntar; nunca cite ao candidato)
+  return `${cabecalho}
 Cobertura: ${cobertos.length} de ${r.criterios.length} critérios com evidência suficiente (${percentual(r.coberturaPonderada)} do peso). Tempo: ${percentual(r.tempoGasto)} gasto. Ritmo: ${ROTULO_RITMO[r.ritmo]}.
 O que já temos do candidato:
 ${jaTemos}

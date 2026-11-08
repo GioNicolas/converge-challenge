@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { INTERVALO_ENTRE_PERGUNTAS_S, MAX_PERGUNTAS } from "@/lib/contracts";
+import { REGRAS_PADRAO as REGRAS_SERVIDOR } from "@/lib/agente/sessao/politica";
 import {
   estadoInicial,
   podeAnalisar,
+  REGRAS_PADRAO,
   transicionar,
   type EstadoEntrevista,
   type EventoEntrevista,
@@ -105,12 +108,50 @@ test("ciclo completo do plin no aprofundamento", () => {
   assert.equal(e.ultimaRespostaEm, 5_000);
 });
 
-test("respeita 30s entre perguntas", () => {
+test("respeita o intervalo entre perguntas (25 s) depois da resposta", () => {
   const depois = { ...noAprofundamento(), ultimaRespostaEm: 10_000 };
-  const cedo = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 39_999);
+  const cedo = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 34_999);
   assert.equal(cedo.plin, "LIVRE");
-  const tarde = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 40_000);
+  const tarde = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 35_000);
   assert.equal(tarde.plin, "PLIN_PENDENTE");
+});
+
+test("o intervalo conta do mais recente entre o início da pergunta e o fim da resposta", () => {
+  const analisar = (e: EstadoEntrevista, t: number) =>
+    transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, t).plin;
+  // Resposta mais recente que a pergunta: conta da resposta.
+  const respondeu = { ...noAprofundamento(), ultimaPerguntaEm: 1_000, ultimaRespostaEm: 100_000 };
+  assert.equal(analisar(respondeu, 124_999), "LIVRE");
+  assert.equal(analisar(respondeu, 125_000), "PLIN_PENDENTE");
+  // Pergunta mais recente que a resposta anterior (pergunta ainda no ar): conta da pergunta.
+  const perguntando = { ...noAprofundamento(), ultimaPerguntaEm: 100_000, ultimaRespostaEm: 1_000 };
+  assert.equal(analisar(perguntando, 124_999), "LIVRE");
+  assert.equal(analisar(perguntando, 125_000), "PLIN_PENDENTE");
+});
+
+test("o clique na pergunta registra ultimaPerguntaEm e o fim da resposta o supera", () => {
+  let e = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
+  e = transicionar(e, { tipo: "PLIN_CLICADO" }, 5_000);
+  assert.equal(e.ultimaPerguntaEm, 5_000);
+  e = transicionar(e, { tipo: "RESPOSTA_TERMINOU" }, 50_000);
+  assert.equal(transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 74_999).plin, "LIVRE");
+  assert.equal(transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 75_000).plin, "PLIN_PENDENTE");
+});
+
+test("estado salvo sem ultimaPerguntaEm continua funcionando", () => {
+  const antigo = noAprofundamento();
+  delete (antigo as { ultimaPerguntaEm?: number | null }).ultimaPerguntaEm;
+  assert.equal(transicionar(antigo, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "PLIN_PENDENTE");
+  const comResposta = { ...antigo, ultimaRespostaEm: 10_000 };
+  assert.equal(transicionar(comResposta, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 34_999).plin, "LIVRE");
+  assert.equal(transicionar(comResposta, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 35_000).plin, "PLIN_PENDENTE");
+});
+
+test("servidor e quadro usam as mesmas regras de tempo (fonte única em contracts)", () => {
+  assert.equal(REGRAS_PADRAO.intervaloEntrePerguntasMs, INTERVALO_ENTRE_PERGUNTAS_S * 1000);
+  assert.equal(REGRAS_PADRAO.maxPerguntas, MAX_PERGUNTAS);
+  assert.equal(REGRAS_SERVIDOR.intervaloEntrePerguntasMs, REGRAS_PADRAO.intervaloEntrePerguntasMs);
+  assert.equal(REGRAS_SERVIDOR.maxPerguntas, REGRAS_PADRAO.maxPerguntas);
 });
 
 test("máximo de 5 perguntas; a quinta resposta leva ao fechamento", () => {
@@ -129,7 +170,7 @@ function noFechamento(): EstadoEntrevista {
   return { ...estadoInicial(), fase: "FECHAMENTO", faseIniciadaEm: 0, perguntasFeitas: 5 };
 }
 
-test("fechamento aceita a dúvida final mesmo com 5 perguntas feitas e sem esperar 60s", () => {
+test("fechamento aceita a dúvida final mesmo com 5 perguntas feitas e sem esperar o intervalo", () => {
   const acabouDeResponder = { ...noFechamento(), ultimaRespostaEm: 10_000 };
   let e = transicionar(acabouDeResponder, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 10_001);
   assert.equal(e.plin, "PLIN_PENDENTE");

@@ -128,9 +128,9 @@ describe("bloco dinâmico", () => {
   });
 
   it("avisa quando o plin está bloqueado por intervalo (mas a análise continua)", () => {
-    assert.ok(d.includes("NÃO pode ser levantado agora (INTERVALO_ENTRE_PERGUNTAS)"));
+    assert.ok(d.includes("NÃO pode ser feita agora (INTERVALO_ENTRE_PERGUNTAS)"));
     const livre = montarPromptAvaliador(kitDemo, problema, { ...estado, ultimaPerguntaEm: null }, pedido(), AGORA).sistema.dinamico;
-    assert.ok(livre.includes("Um plin pode ser levantado agora"));
+    assert.ok(livre.includes("Uma pergunta nova pode ser feita agora"));
   });
 
   it("mostra a dúvida pendente para o modelo não repetir", () => {

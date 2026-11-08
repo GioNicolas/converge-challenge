@@ -2,7 +2,7 @@
 //
 // Análise: responde `ok`, exceto quando o grafo tem um componente chamado "Postgres": aí devolve uma
 // `duvida` sobre o primeiro elemento com esse nome. (A política ainda rebaixa para `ok` fora de
-// APROFUNDAMENTO, ou antes de 60s da última pergunta, igual ao LLM real.)
+// APROFUNDAMENTO, ou antes do intervalo entre perguntas, igual ao LLM real.)
 // Perguntar: se a fala tem "?", responde com um texto genérico e um requisito fixo; senão fica quieto.
 // Nada daqui lê a ficha do problema.
 import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "../llm/cliente";
