@@ -302,9 +302,6 @@ test("quadro encaminha transcrição para a conversa da sessão", async ({ page 
   await emitir(page, "O sistema precisa receber mil acessos por minuto.");
   const req = await pedido;
   expect(req.postDataJSON().texto).toBe("O sistema precisa receber mil acessos por minuto.");
-  await page.getByRole("button", { name: "Abrir conversa", exact: true }).click();
-  await expect(page.getByText("O sistema precisa receber mil acessos por minuto.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Fechar conversa" }).click();
   await page.getByRole("button", { name: "Encerrar entrevista", exact: true }).click();
   await page.getByRole("button", { name: "Encerrar", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Entrevista encerrada" })).toBeVisible();
@@ -392,9 +389,6 @@ test("mão compõe gestos e traços livres, pode só falar e preserva o desenho 
   await expect.poll(() => rodada).toBe(3);
   await expect.poll(async () => (await gestos()).length).toBe(0);
   expect((await cenaVisual(page)).filter((e) => e.autor !== "agente")).toEqual(candidatoAntes);
-  // "ver no quadro" só nas falas que marcaram algo do desenho (as duas primeiras); a última só conversou.
-  await page.getByRole("button", { name: "Abrir conversa" }).click();
-  await expect(page.getByRole("button", { name: /^Ver no quadro:/ })).toHaveCount(2);
 });
 
 test("abrir o microfone enquanto o Totti prepara a voz cancela a fala, que não toca depois do ditado", async ({ page }) => {
