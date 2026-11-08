@@ -186,13 +186,15 @@ test("sinal já abortado não cria URL nem áudio", async (t) => {
   assert.equal(a.instancias.length, 0);
 });
 
-test("somente o valor 1 ativa o servidor; demonstração mantém sessão, análise e voz locais", async (t) => {
+test("o servidor é o padrão; só o valor 0 liga a demonstração, com sessão, análise e voz locais", async (t) => {
   ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: undefined });
-  for (const valor of [undefined, "0", "true", ""]) {
+  for (const valor of [undefined, "1", "true", ""]) {
     if (valor === undefined) delete process.env.NEXT_PUBLIC_USAR_SERVIDOR;
     else process.env.NEXT_PUBLIC_USAR_SERVIDOR = valor;
-    assert.equal(usarServidor(), false);
+    assert.equal(usarServidor(), true);
   }
+  process.env.NEXT_PUBLIC_USAR_SERVIDOR = "0";
+  assert.equal(usarServidor(), false);
   const falas = vozDoNavegador(t);
   let chamadas = 0;
   t.mock.method(globalThis, "fetch", async () => { chamadas++; throw new Error("não deveria chamar rota"); });
@@ -367,7 +369,7 @@ test("uma nova fala cancela a anterior sem progresso ou marcas antigos", async (
 });
 
 test("calar resolve a síntese do navegador mesmo sem evento de término", async (t) => {
-  ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: undefined });
+  ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "0" });
   const falas = vozDoNavegador(t, false, false);
   const progressos: number[] = [];
   const tocando = falar("Oi banco", (n) => progressos.push(n));
@@ -385,14 +387,14 @@ test("imagem rápida entra no pedido sem alterar o original", async () => {
   assert.equal(p.imagem_url, null);
 });
 
-test("imagem lenta libera o pedido em 300 ms e continua disponível para registro posterior", async (t) => {
+test("imagem lenta libera o pedido em 1800 ms e continua disponível para registro posterior", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let resolver!: (url: string) => void;
   const imagem = new Promise<string>((resolve) => { resolver = resolve; });
   let terminou = false;
   const p = pedido();
   const preparacao = pedidoComImagem(p, imagem, new AbortController().signal).then((pronto) => { terminou = true; return pronto; });
-  t.mock.timers.tick(299);
+  t.mock.timers.tick(1799);
   await andar();
   assert.equal(terminou, false);
   t.mock.timers.tick(1);

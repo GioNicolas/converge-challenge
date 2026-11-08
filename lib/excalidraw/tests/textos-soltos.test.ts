@@ -161,3 +161,35 @@ test("seta mais próxima com rótulo vinculado preserva a nota, mesmo com outra 
   assert.equal(atual.instantaneo.conexoes[1].rotulo, "");
   assert.equal(atual.instantaneo.anotacoes[0].texto, "anotação");
 });
+
+test("rótulo colado fora da elipse sem nome vira o nome dela", () => {
+  const atual = criarConversor().converter([forma("banco", "ellipse", 0, 0, 200, 100), texto("rotulo", "Postgres", 100, 120)]);
+  assert.equal(atual.instantaneo.componentes[0].nome, "Postgres");
+  assert.equal(atual.instantaneo.anotacoes.length, 0);
+  assert.match(atual.texto, /\[e1\] Postgres \(elipse\)/);
+});
+
+test("rótulo longe demais da forma continua anotação solta", () => {
+  const atual = criarConversor().converter([forma("banco", "ellipse", 0, 0, 200, 100), texto("rotulo", "Postgres", 100, 200)]);
+  assert.equal(atual.instantaneo.componentes[0].nome, "");
+  assert.equal(atual.instantaneo.anotacoes.length, 1);
+});
+
+test("setas ligam textos soltos (Cliente -> API -> Banco)", () => {
+  const atual = criarConversor().converter([
+    texto("a", "Cliente", 20, 10), texto("b", "API", 220, 10), texto("c", "Banco", 420, 10),
+    { ...seta("s1", [[50, 10], [180, 10]]), y: 0 } as ExcalidrawElement,
+    { ...seta("s2", [[250, 10], [380, 10]]), y: 0 } as ExcalidrawElement,
+  ]);
+  const nome = (id: string | null) => atual.instantaneo.anotacoes.find((a) => a.id === id)?.texto;
+  assert.deepEqual(atual.instantaneo.conexoes.map((c) => [nome(c.de), nome(c.para)]), [["Cliente", "API"], ["API", "Banco"]]);
+});
+
+test("seta tracejada ou pontilhada é marcada e descrita", () => {
+  const tracejada = { ...seta("s1"), strokeStyle: "dashed" } as ExcalidrawElement;
+  const solida = { ...seta("s2"), strokeStyle: "solid" } as ExcalidrawElement;
+  const atual = criarConversor().converter([tracejada, solida]);
+  assert.deepEqual(atual.instantaneo.conexoes.map((c) => c.tracejada ?? false), [true, false]);
+  assert.match(atual.texto, /\[s1\].*\(tracejada\)/);
+  assert.doesNotMatch(atual.texto, /\[s2\].*\(tracejada\)/);
+});

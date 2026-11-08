@@ -34,6 +34,7 @@ export type Gatilho = {
 
 export const PAUSA_PADRAO_MS = 3_500;
 export const LIMITE_PADRAO_MS = 8_000;
+const REAGENDAR_MS = 1_000;
 
 export function criarGatilho(opcoes: OpcoesGatilho): Gatilho {
   const pausaMs = opcoes.pausaMs ?? PAUSA_PADRAO_MS;
@@ -51,7 +52,17 @@ export function criarGatilho(opcoes: OpcoesGatilho): Gatilho {
   }
 
   async function disparar(forcar: boolean) {
-    if (parado || !opcoes.podeAnalisar()) return;
+    if (parado) return;
+    if (!opcoes.podeAnalisar()) {
+      // Candidato falando (ou agente ocupado): não descarta, tenta de novo daqui a pouco.
+      if (timer === null) {
+        timer = setTimeout(() => {
+          timer = null;
+          void disparar(forcar);
+        }, REAGENDAR_MS);
+      }
+      return;
+    }
     if (rodando) {
       // O último vence: só guarda que há um pedido novo (o desenho é lido na hora de mandar).
       esperando = (esperando ?? false) || forcar;

@@ -5,7 +5,33 @@ import { quebrarLinhas } from "../excalidraw/texto";
 
 export type Gesto = { tipo: "traco"; traco: Traco } | { tipo: "apontar"; ponto: Ponto }
   | { tipo: "texto"; texto: string; ponto: Ponto };
-const meio = (c: Caixa): Ponto => ({ x: c.x + c.largura / 2, y: c.y + c.altura / 2 });
+/** Caixa de um elemento; setas e linhas podem trazer a polilinha (pontos relativos a x,y) em `pontos`. */
+export type CaixaComPontos = Caixa & { pontos?: readonly (readonly [number, number])[] };
+
+/** Ponto médio ao longo da polilinha (pelo comprimento). */
+function pontoMedioDaPolilinha(c: CaixaComPontos): Ponto | null {
+  const pts = c.pontos;
+  if (!pts || pts.length < 2) return null;
+  const trechos = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
+  const total = trechos.reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  let alvo = total / 2;
+  for (let i = 0; i < trechos.length; i++) {
+    if (alvo <= trechos[i] || i === trechos.length - 1) {
+      const f = trechos[i] === 0 ? 0 : alvo / trechos[i];
+      return { x: c.x + pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, y: c.y + pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f };
+    }
+    alvo -= trechos[i];
+  }
+  return null;
+}
+const meio = (c: Caixa): Ponto => pontoMedioDaPolilinha(c) ?? { x: c.x + c.largura / 2, y: c.y + c.altura / 2 };
+/** Numa seta ou linha, os gestos de contorno miram um trecho pequeno no meio dela, não a caixa inteira
+ * (uma seta diagonal longa virava um círculo cobrindo metade do quadro). */
+function focoDe(c: CaixaComPontos): Caixa {
+  const m = pontoMedioDaPolilinha(c);
+  return m ? { x: m.x - 40, y: m.y - 26, largura: 80, altura: 52 } : c;
+}
 const traco = (c: Caixa, pontos: [number, number][]): Gesto => ({ tipo: "traco", traco: { origem: { x: c.x, y: c.y }, pontos } });
 const sublinhar = (c: Caixa): Gesto => traco(c, [[0, c.altura + 8], [c.largura * 0.45, c.altura + 10], [c.largura, c.altura + 7]]);
 function intersecao(a: Caixa, b: Caixa): number {
@@ -38,7 +64,7 @@ export function lugarDaAnotacao(texto: string, alvo: Caixa | undefined, ocupados
 }
 
 /** Converte o plano relativo em gestos na cena, sem modificar os elementos do candidato. */
-export function comporGestos(acao: AcaoVisual, caixas: ReadonlyMap<string, Caixa>, area: Caixa, semente: number): Gesto[] {
+export function comporGestos(acao: AcaoVisual, caixas: ReadonlyMap<string, CaixaComPontos>, area: Caixa, semente: number): Gesto[] {
   if (acao.tipo === "anotar") {
     const alvo = acao.alvo ? caixas.get(acao.alvo) : undefined;
     if (acao.alvo && !alvo) return [];
@@ -50,12 +76,13 @@ export function comporGestos(acao: AcaoVisual, caixas: ReadonlyMap<string, Caixa
     if (alvos.some((c) => !c)) return [];
     return alvos.flatMap((c, i): Gesto[] => acao.tipo === "percorrer"
       ? [{ tipo: "apontar", ponto: meio(c!) }]
-      : [sublinhar(c!), { tipo: "texto", texto: String.fromCharCode(65 + i), ponto: { x: c!.x - 22, y: c!.y } }]);
+      : [sublinhar(focoDe(c!)), { tipo: "texto", texto: String.fromCharCode(65 + i), ponto: { x: c!.x - 22, y: c!.y } }]);
   }
-  const c = caixas.get(acao.alvo);
-  if (!c) return [];
+  const original = caixas.get(acao.alvo);
+  if (!original) return [];
+  const c = focoDe(original);
   switch (acao.tipo) {
-    case "apontar": return [{ tipo: "apontar", ponto: meio(c) }];
+    case "apontar": return [{ tipo: "apontar", ponto: meio(original) }];
     case "sublinhar": return [sublinhar(c)];
     case "circular": return [{ tipo: "traco", traco: circuloAMao(c, semente) }];
     case "enquadrar": return [traco(c, [[-10, -10], [c.largura + 10, -8], [c.largura + 8, c.altura + 10], [-10, c.altura + 8], [-10, -10]])];

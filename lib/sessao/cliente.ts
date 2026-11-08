@@ -4,9 +4,9 @@ import type { MarcaDeFala } from "../presenca/vozSincronizada";
 import { escolherVozPt } from "../voz/escolherVoz";
 
 // Único ponto de acesso do quadro ao servidor.
-// O modo de demonstração continua sendo o padrão.
+// O servidor é o padrão; só "0" liga a sessão de demonstração.
 export function usarServidor(): boolean {
-  return process.env.NEXT_PUBLIC_USAR_SERVIDOR === "1";
+  return process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0";
 }
 
 export type Fase =
@@ -49,6 +49,8 @@ export type PedidoAnalise = {
   conversa_recente: FalaRecente[];
   perguntas_feitas: number;
   imagem_url: string | null;
+  /** Miniatura JPEG do quadro (data URL), enviada junto da análise. */
+  imagem_base64?: string;
   /** Segundos desde a última atividade do candidato (desenho ou fala). */
   parado_ha_s?: number;
   /** Requisitos já combinados no quadro. */
