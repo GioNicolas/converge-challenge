@@ -1,9 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { CATALOGO, SYSTEM_DESIGN_ATIVO, criteriosIniciais, modoAlternativoQueMede, modoAtivo } from "@/lib/pre-entrevista/catalogo";
+import {
+  CATALOGO,
+  SYSTEM_DESIGN_ATIVO,
+  criteriosIniciais,
+  modoAlternativoQueMede,
+  modoAtivo,
+  problemaPadrao,
+} from "@/lib/pre-entrevista/catalogo";
 import { cortarNaPrimeiraPergunta, falaFormatoIndisponivel, limparFala } from "@/lib/pre-entrevista/conversa";
 import {
   aplicarPasso,
+  decisaoDaOferta,
+  decisoesAposTroca,
   MAX_APROFUNDAMENTOS,
   planoInicial,
   proximoPasso,
@@ -181,6 +190,72 @@ describe("troca para system design: do rascunho ao plano do quadro", () => {
     const final = paraInterviewConfig(r);
     assert.ok(final.ok, final.ok ? "" : final.erros.join("; "));
     assert.equal(final.config.problemId, "pagamentos-instantaneos");
+  });
+});
+
+describe("troca de formato: oferta, volta e resumo", () => {
+  const oferta = { tipo: "oferecer_tradeoff" as const, area: "uso_ia" as const, modoAlternativo: "system_design" as const };
+
+  it("pedir o formato oferecido é aceitar a troca, mesmo sem o sinal de escolha", () => {
+    assert.equal(decisaoDaOferta({ pediu_system_design: 1 }, oferta, "live_coding"), "trocou");
+    assert.equal(decisaoDaOferta({}, oferta, "live_coding"), "proxima_etapa");
+    assert.equal(decisaoDaOferta({ escolheu_seguir_sem: 1 }, oferta, "live_coding"), "seguir_sem");
+  });
+
+  it("pedido de live coding depois de system design volta o formato; pedido ambíguo não troca", () => {
+    assert.equal(trocaPedida({ pediu_live_coding: 1 }, "system_design"), "live_coding");
+    assert.equal(trocaPedida({ pediu_live_coding: 1 }, "live_coding"), undefined);
+    assert.equal(trocaPedida({ pediu_live_coding: 1, pediu_system_design: 1 }, "live_coding"), undefined);
+  });
+
+  it("voltar para um formato que não mede a área da troca deixa a área para a próxima etapa", () => {
+    assert.deepEqual(decisoesAposTroca({ uso_ia: "trocou", pressao: "seguir_sem" }, "live_coding"), {
+      uso_ia: "proxima_etapa",
+      pressao: "seguir_sem",
+    });
+    assert.deepEqual(decisoesAposTroca({ uso_ia: "trocou" }, "system_design"), { uso_ia: "trocou" });
+  });
+
+  it("aprovação do resumo com troca pendente não encerra: vem o resumo de revisão com o formato novo", () => {
+    const base = estado({
+      focus: [{ area: "escala_produto", weight: 1 }],
+      perguntasPorTopico: { confirmou_inicio: 1, criterio_escala_produto: 1 },
+      mode: "system_design",
+      resumos: 1,
+      ultimoPasso: { tipo: "resumo_final" },
+      sinais: { aprovou_resumo: 1, pediu_system_design: 1 },
+    });
+    assert.deepEqual(proximoPasso({ ...base, trocaPendente: "system_design" }), { tipo: "resumo_final", revisao: true });
+    assert.deepEqual(proximoPasso(base), { tipo: "encerrar" });
+  });
+});
+
+describe("problema de system design pela vaga", () => {
+  const tec = [{ area: "tecnico" as const, weight: 1 }];
+
+  it("termos genéricos não puxam domínio: banco de dados, tempo real, notificações", () => {
+    const texto = "Backend Sênior. Experiência com banco de dados relacional, dashboards em tempo real e notificações push.";
+    assert.equal(problemaPadrao("system_design", tec, texto), "encurtador-de-url");
+  });
+
+  it("termos do domínio puxam o problema certo", () => {
+    assert.equal(problemaPadrao("system_design", tec, "Fintech: time de meios de pagamento e Pix"), "pagamentos-instantaneos");
+    assert.equal(problemaPadrao("system_design", tec, "Banco digital, squad de contas"), "pagamentos-instantaneos");
+    assert.equal(problemaPadrao("system_design", tec, "Plataforma de mensagens instantâneas"), "chat-tempo-real");
+  });
+
+  it("uso de IA com peso baixo não passa na frente do domínio; com peso relevante, sim", () => {
+    const pouca = [
+      { area: "escala_produto" as const, weight: 0.8 },
+      { area: "uso_ia" as const, weight: 0.2 },
+    ];
+    const muita = [
+      { area: "escala_produto" as const, weight: 0.5 },
+      { area: "uso_ia" as const, weight: 0.5 },
+    ];
+    assert.equal(problemaPadrao("system_design", pouca, "Time de pagamentos"), "pagamentos-instantaneos");
+    assert.equal(problemaPadrao("system_design", pouca, "Backend"), "chatbot-atendimento-ia");
+    assert.equal(problemaPadrao("system_design", muita, "Time de pagamentos"), "chatbot-atendimento-ia");
   });
 });
 

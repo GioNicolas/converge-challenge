@@ -17,7 +17,8 @@ import { ErroChat } from "./llm";
 import { registrarEvento } from "./log";
 import {
   aplicarPasso,
-  decidirTradeoff,
+  decisaoDaOferta,
+  decisoesAposTroca,
   descreverPasso,
   nivelEmAberto,
   ofertaEmCurso,
@@ -25,12 +26,12 @@ import {
   trocaPedida,
   type EstadoPlanejamento,
   type Passo,
-  type PlanoEstado,
 } from "./planejador";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
-import { aplicarDecisoesTradeoff, duracaoDoRascunho, type Turno } from "./rascunho";
+import type { FocusArea, InterviewMode } from "@/lib/contracts";
+import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
@@ -136,24 +137,41 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
 }
 
 /**
- * Ela pediu system design e o plano está em live coding: troca o formato como uma troca escolhida na oferta. O formato
- * escolhido prevalece sobre o extrator, e a próxima pergunta de aprofundamento confirma a troca (ver `trocaPendente`).
+ * Troca o formato do plano para `modo`, pela oferta ou por pedido dela. O formato escolhido prevalece sobre o extrator,
+ * e a próxima pergunta de aprofundamento (ou o resumo) confirma a troca (ver `trocaPendente`). Área que tinha trocado
+ * de formato e que `modo` não mede volta para a próxima etapa (ver `decisoesAposTroca`). Com `areaCentral` (troca por
+ * causa de uma área), essa área fica central, com a fala que motivou a troca. O foco e as notas são refeitos depois,
+ * em `conduzirTurno`.
  */
+function aplicarTroca(sessao: Sessao, modo: InterviewMode, decisoes: DecisoesTradeoff, areaCentral?: FocusArea): void {
+  const ajustadas = decisoesAposTroca(decisoes, modo);
+  sessao.plano = { ...sessao.plano, decisoesTradeoff: ajustadas, modoEscolhido: modo, trocaPendente: modo };
+  if (areaCentral) {
+    sessao.enfaseEstado = declararCentral(sessao.enfaseEstado, areaCentral, ultimaFalaDaRecrutadora(sessao.transcricao) ?? "");
+  }
+  sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, ajustadas, modo);
+}
+
+/** Ela pediu um formato diferente do plano (ver `trocaPedida`): troca, como uma troca escolhida na oferta. */
 function resolverPedidoDeFormato(sessao: Sessao): void {
   const modo = trocaPedida(sessao.plano.sinais, sessao.rascunho.mode);
   if (!modo) return;
-  sessao.plano = { ...sessao.plano, modoEscolhido: modo, trocaPendente: modo };
-  sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, sessao.plano.decisoesTradeoff, modo);
+  aplicarTroca(sessao, modo, sessao.plano.decisoesTradeoff);
   registrarEvento(sessao, {
     tipo: "plano",
     resumo: `pedido de formato: troca para ${modo}`,
-    dados: { modoEscolhido: modo, sinais: { pediu_system_design: sessao.plano.sinais.pediu_system_design } },
+    dados: {
+      modoEscolhido: modo,
+      decisoesTradeoff: sessao.plano.decisoesTradeoff,
+      sinais: { pediu_system_design: sessao.plano.sinais.pediu_system_design, pediu_live_coding: sessao.plano.sinais.pediu_live_coding },
+    },
   });
 }
 
 /**
  * Aplica a escolha da recrutadora sobre a última oferta de troca de formato. Só age quando a fala dela é uma escolha
- * (não uma dúvida) e a área ainda não tem decisão. Ambígua vira "próxima etapa" (ver `decidirTradeoff`).
+ * (não uma dúvida) e a área ainda não tem decisão. Pedir o formato oferecido é aceitar; ambígua vira "próxima etapa"
+ * (ver `decisaoDaOferta`).
  */
 function resolverTradeoff(sessao: Sessao): void {
   const oferta = ofertaEmCurso(sessao.plano);
@@ -161,28 +179,22 @@ function resolverTradeoff(sessao: Sessao): void {
   // Dúvida dela não é escolha: o Totti responde e a oferta segue em aberto.
   if ((sessao.plano.sinais.fez_pergunta ?? 0) >= LIMIAR) return;
 
-  const decisao = decidirTradeoff(sessao.plano.sinais);
+  const decisao = decisaoDaOferta(sessao.plano.sinais, oferta, sessao.rascunho.mode);
   const decisoes = { ...sessao.plano.decisoesTradeoff, [oferta.area]: decisao };
-  const plano: PlanoEstado = { ...sessao.plano, decisoesTradeoff: decisoes };
   if (decisao === "trocou") {
-    plano.modoEscolhido = oferta.modoAlternativo;
-    plano.trocaPendente = oferta.modoAlternativo;
+    aplicarTroca(sessao, oferta.modoAlternativo, decisoes, oferta.area);
+  } else {
+    sessao.plano = { ...sessao.plano, decisoesTradeoff: decisoes };
+    sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, decisoes, sessao.plano.modoEscolhido);
   }
-  sessao.plano = plano;
-  // Trocar de formato por causa de uma área declara essa área central, com a fala que motivou a troca.
-  if (decisao === "trocou") {
-    sessao.enfaseEstado = declararCentral(sessao.enfaseEstado, oferta.area, ultimaFalaDaRecrutadora(sessao.transcricao) ?? "");
-  }
-
-  // O foco e as notas são refeitos depois, em `conduzirTurno`, com as decisões de agora.
-  sessao.rascunho = aplicarDecisoesTradeoff(sessao.rascunho, decisoes, plano.modoEscolhido);
+  const plano = sessao.plano;
   registrarEvento(sessao, {
     tipo: "plano",
     resumo: `troca de formato sobre ${oferta.area}: ${decisao}${decisao === "trocou" ? ` para ${oferta.modoAlternativo}` : ""}`,
     dados: {
       oferta,
       decisao,
-      decisoesTradeoff: decisoes,
+      decisoesTradeoff: plano.decisoesTradeoff,
       modoEscolhido: plano.modoEscolhido,
       sinais: {
         escolheu_trocar_formato: plano.sinais.escolheu_trocar_formato,

@@ -192,13 +192,38 @@ export function decidirTradeoff(sinais: Record<string, number>): DecisaoTradeoff
 }
 
 /**
- * Ela pediu system design na última fala, o formato está disponível e o plano ainda não está nele: devolve o formato
- * para a troca (como uma troca escolhida na oferta). Sem pedido, com o formato travado ou já nele: undefined. Função pura.
+ * Ela pediu um formato na última fala e o plano ainda não está nele: devolve o formato para a troca (como uma troca
+ * escolhida na oferta). System design só com o formato disponível. Volta para live coding vale depois de qualquer
+ * troca, inclusive a pedida. Sem pedido, ou já no formato pedido: undefined. Função pura.
  */
 export function trocaPedida(sinais: Record<string, number>, modoAtual: InterviewMode): InterviewMode | undefined {
-  if ((sinais.pediu_system_design ?? 0) < LIMIAR) return undefined;
-  if (modoAtual === "system_design" || !modoAtivo("system_design")) return undefined;
-  return "system_design";
+  const pediuSd = (sinais.pediu_system_design ?? 0) >= LIMIAR;
+  const pediuLc = (sinais.pediu_live_coding ?? 0) >= LIMIAR;
+  // Pedido ambíguo (os dois sinais): não troca.
+  if (pediuSd === pediuLc) return undefined;
+  if (pediuSd) return modoAtual !== "system_design" && modoAtivo("system_design") ? "system_design" : undefined;
+  return modoAtual !== "live_coding" ? "live_coding" : undefined;
+}
+
+/**
+ * Decisão sobre a oferta de troca em curso. Pedir o formato oferecido ("quero system design") é aceitar a troca,
+ * mesmo sem o sinal de escolha; senão, vale `decidirTradeoff`. Função pura.
+ */
+export function decisaoDaOferta(sinais: Record<string, number>, oferta: OferecerTradeoffPasso, modoAtual: InterviewMode): DecisaoTradeoff {
+  if (trocaPedida(sinais, modoAtual) === oferta.modoAlternativo) return "trocou";
+  return decidirTradeoff(sinais);
+}
+
+/**
+ * Decisões depois de uma troca para `modo`: área que tinha trocado de formato e que o novo formato não mede volta
+ * para a próxima etapa (ela desistiu do formato que a media). As demais ficam. Função pura.
+ */
+export function decisoesAposTroca(decisoes: DecisoesTradeoff, modo: InterviewMode): DecisoesTradeoff {
+  const novas: DecisoesTradeoff = { ...decisoes };
+  for (const area of Object.keys(novas) as FocusArea[]) {
+    if (novas[area] === "trocou" && !mede(modo, area)) novas[area] = "proxima_etapa";
+  }
+  return novas;
 }
 
 /** A oferta de troca que está em curso (a última, ou a que a dúvida retomou), se houver. */
@@ -237,8 +262,9 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   const ultimaFala = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
   const pediuMudanca = sinal("pediu_mudanca") >= LIMIAR && (ultimaFala === undefined || ultimaFala.tipo === "resumo_final");
 
-  // 1. Ela aprovou o resumo sem pedir mudança: acabou.
-  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && !pediuMudanca) return { tipo: "encerrar" };
+  // 1. Ela aprovou o resumo sem pedir mudança: acabou. Com troca de formato ainda não confirmada (pedida junto com a
+  // aprovação), não encerra: o resumo de revisão mostra o formato novo (passo 5).
+  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && !pediuMudanca && !e.trocaPendente) return { tipo: "encerrar" };
 
   // 1a. Nível em aberto: a Totti pergunta só o nível. Enquanto ele estiver em aberto, o início não conta como coberto
   // (ver `estadoDoPlanejamento` em `turno.ts`), então este passo vem antes do início e das demais perguntas.

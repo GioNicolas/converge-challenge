@@ -53,11 +53,12 @@ describe("avaliacaoDoPlano", () => {
   });
 
   it("todo problema de system design que a pré-entrevista escolhe tem avaliação estática no cérebro", () => {
+    const tec = [{ area: "tecnico" as const, weight: 1 }];
     const ids = [
-      problemaPadrao("system_design", ["tecnico"]),
-      problemaPadrao("system_design", ["tecnico"], "Engenheira de Software Sênior — Backend (pagamentos)"),
-      problemaPadrao("system_design", ["tecnico"], "Backend do app de mensagens em tempo real"),
-      problemaPadrao("system_design", ["uso_ia"]),
+      problemaPadrao("system_design", tec),
+      problemaPadrao("system_design", tec, "Engenheira de Software Sênior — Backend (pagamentos)"),
+      problemaPadrao("system_design", tec, "Backend do app de mensagens em tempo real"),
+      problemaPadrao("system_design", [{ area: "uso_ia", weight: 1 }]),
     ];
     assert.deepEqual(ids, ["encurtador-de-url", "pagamentos-instantaneos", "chat-tempo-real", "chatbot-atendimento-ia"]);
     for (const id of ids) {

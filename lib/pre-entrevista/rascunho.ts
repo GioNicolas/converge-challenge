@@ -254,7 +254,7 @@ function gerarId(): string {
 function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil" | "medio" } {
   if (r.mode !== "live_coding") {
     const textoDaVaga = `${r.roleTitle}\n${r.jobDescription ?? ""}`;
-    return { problemId: r.problemId ?? problemaPadrao(r.mode, r.focus.map((f) => f.area), textoDaVaga) };
+    return { problemId: r.problemId ?? problemaPadrao(r.mode, r.focus, textoDaVaga) };
   }
   if (r.problemId) return { problemId: r.problemId, difficulty: problems[r.problemId]?.difficulty };
   const escolhida = selecionarProblema({ seniority: r.seniority, focus: r.focus, semente: r.roleTitle });

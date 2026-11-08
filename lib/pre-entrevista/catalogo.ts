@@ -238,21 +238,34 @@ export const PROBLEMA_PADRAO: Record<InterviewMode, string> = {
   system_design: "encurtador-de-url",
 };
 
-/** Domínio da vaga (cargo e descrição) -> problema de system design mais próximo. A primeira regra que casa vale. */
+/**
+ * Domínio da vaga (cargo e descrição) -> problema de system design mais próximo. A primeira regra que casa vale.
+ * Só termos do domínio: "banco de dados", "tempo real" ou "notificações" aparecem em qualquer vaga e não contam.
+ */
 const PROBLEMA_POR_DOMINIO: Array<[RegExp, string]> = [
-  [/pagament|financ|banc[oá]|fintech|transfer[eê]ncia|\bpix\b|cobran[çc]a|cart[aã]o de cr[eé]dito|ledger/i, "pagamentos-instantaneos"],
-  [/\bchat\b|mensag|tempo real|real[- ]?time|websocket|notifica[çc]/i, "chat-tempo-real"],
+  [
+    /pagamento|fintech|\bpix\b|banc[aá]ri[oa]|banco digital|servi[çc]os financeiros|meios de pagamento|cart[aã]o de cr[eé]dito|adquir[eê]ncia|ledger/i,
+    "pagamentos-instantaneos",
+  ],
+  [/\bchat\b|mensageria|(app|aplicativo|plataforma) de mensagens|mensagens (instant[aâ]neas|em tempo real)/i, "chat-tempo-real"],
 ];
 
+/** Peso mínimo de uso de IA no foco para o chatbot passar na frente do domínio da vaga. */
+export const PESO_MINIMO_IA = 0.3;
+
 /**
- * Problema padrão do modo, das áreas do foco e do domínio da vaga (`textoDaVaga`: cargo e descrição).
- * System design com IA no foco usa o chatbot de atendimento (é a troca que mede uso de IA); senão, o problema do
- * domínio da vaga; senão, o encurtador. Cada id precisa ter avaliação no cérebro do quadro (`lib/agente/plano.ts`).
+ * Problema padrão do modo, do foco e do domínio da vaga (`textoDaVaga`: cargo e descrição).
+ * Em system design: uso de IA com peso relevante usa o chatbot de atendimento (é a troca que mede uso de IA); senão,
+ * o problema do domínio da vaga; senão, o chatbot se IA estiver no foco, ou o encurtador. Cada id precisa ter
+ * avaliação no cérebro do quadro (`lib/agente/plano.ts`).
  */
-export function problemaPadrao(mode: InterviewMode, areas: FocusArea[], textoDaVaga = ""): string {
+export function problemaPadrao(mode: InterviewMode, focus: Array<{ area: FocusArea; weight: number }>, textoDaVaga = ""): string {
   if (mode !== "system_design") return PROBLEMA_PADRAO[mode];
-  if (areas.includes("uso_ia")) return "chatbot-atendimento-ia";
-  return PROBLEMA_POR_DOMINIO.find(([re]) => re.test(textoDaVaga))?.[1] ?? PROBLEMA_PADRAO.system_design;
+  const pesoIa = focus.find((f) => f.area === "uso_ia")?.weight;
+  if (pesoIa !== undefined && pesoIa >= PESO_MINIMO_IA) return "chatbot-atendimento-ia";
+  const doDominio = PROBLEMA_POR_DOMINIO.find(([re]) => re.test(textoDaVaga))?.[1];
+  if (doDominio) return doDominio;
+  return pesoIa !== undefined ? "chatbot-atendimento-ia" : PROBLEMA_PADRAO.system_design;
 }
 
 /**

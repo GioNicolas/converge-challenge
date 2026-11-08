@@ -258,6 +258,15 @@ function sinaisDo(): Pergunta[] {
         "Não se ela só perguntou ou criticou o system design ('por que system design?'), escolheu live coding, ou respondeu outra coisa.",
     },
     {
+      id: "pediu_live_coding",
+      pergunta: "Na última fala, a recrutadora pediu para fazer live coding (resolver um problema de código numa IDE) nesta entrevista?",
+      sinal_sim:
+        "Sim se ela pediu o formato de live coding ou desistiu do system design: 'melhor live coding', 'volta pro código', " +
+        "'prefiro que ele programe', 'esquece o system design'.",
+      sinal_nao:
+        "Não se ela só perguntou ou criticou o live coding ('por que live coding?'), escolheu system design, ou respondeu outra coisa.",
+    },
+    {
       id: "quer_tom_desafiador",
       pergunta: "Na última fala, a recrutadora pediu um tom mais desafiador, exigente ou firme para a entrevista?",
       sinal_sim: "Sim se ela pediu tom mais duro: 'mais desafiadora', 'quero um tom mais firme', 'bem exigente'.",
