@@ -53,7 +53,7 @@ export default function PreInterview({ vaga = DEFAULT_CONFIG, convite }: { vaga?
   return (
     <div className="tema-recrutador min-h-dvh">
       <header className="mx-auto flex w-full max-w-[560px] items-center px-5 pt-6">
-        <span className="text-[17px] font-semibold tracking-[-0.025em] text-texto">Converge</span>
+        <span className="text-[17px] font-semibold tracking-[-0.025em] text-texto">Totti</span>
       </header>
 
       <main className="mx-auto flex w-full max-w-[560px] flex-col gap-9 px-5 pt-14 pb-16 sm:pt-20">

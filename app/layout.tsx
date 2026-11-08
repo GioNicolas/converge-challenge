@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Converge — Entrevista técnica",
+  title: "Totti — Entrevista técnica",
   description: "Entrevista técnica com um agente de voz que desenha no quadro.",
 };
 
