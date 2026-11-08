@@ -129,9 +129,11 @@ const EXEMPLOS_QUER: Record<FocusArea, string> = {
 
 const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
   tecnico:
-    "'isso não é tão importante pra gente', 'pode diminuir a parte de algoritmo'. Pedir um problema mais simples ou um código " +
-    "que não precisa ser perfeito ('não precisa ser complicado', 'não precisa estar 100% funcionando'), ou trocar algoritmo por " +
-    "raciocínio lógico e explicação ('não tão focado em algoritmos, mais em raciocínio lógico'), NÃO é dispensar: raciocínio e explicação são desta área",
+    "'isso não é tão importante pra gente', 'a parte técnica pode pesar menos'. Pedir um problema mais simples ou um código " +
+    "que não precisa ser perfeito ('não precisa ser complicado', 'não precisa estar 100% funcionando'), trocar algoritmo por " +
+    "raciocínio lógico e explicação ('não tão focado em algoritmos, mais em raciocínio lógico'), ou trocar algoritmo difícil por " +
+    "problema prático ('menos algoritmo complicado e mais problema do dia a dia, tipo modelar uma API') NÃO é dispensar: " +
+    "raciocínio, explicação e problema prático são desta área",
   pressao: "'coloca menos pressão', 'pressão eu tiraria', 'não precisa ser muito rigoroso com prazo'",
   escala_produto: "'escala não é prioridade agora', 'pode tirar a parte de escalabilidade'",
   uso_ia: "'pode tirar IA', 'IA aplicada não pesa tanto'",

@@ -198,6 +198,8 @@ export default function PreEntrevistaTotti({
     };
   }, [encerrou]);
   const planoPronto = fechada && montou && !atualizando;
+  // Na tela larga o plano aparece ao lado e leva o status e o botão; na estreita, um cartão cobre a conversa.
+  const larga = useTelaLarga();
   // Se a conversa andar de novo (nova fala), o Totti pode encerrar outra vez.
   const falas = estado?.transcricao.length ?? 0;
   useEffect(() => setSeguirConversando(false), [falas]);
@@ -265,29 +267,18 @@ export default function PreEntrevistaTotti({
                 <Passos atual={3} />
               </div>
               <div className="flex justify-self-end">
-                {etapa === "conversa" && !planoPronto && (
+                {/* Com a conversa encerrada, o status e o botão ficam no plano (ou no cartão, no celular). */}
+                {etapa === "conversa" && !fechada && (
                   <motion.button
                     layoutId="cta-plano"
                     onClick={() => setEtapa("plano")}
                     // O plano é montado pela extração em segundo plano: espera ela terminar para mostrar o plano completo.
-                    disabled={atualizando || pensando || fechada}
+                    disabled={atualizando || pensando}
                     transition={{ type: "spring", stiffness: 260, damping: 30 }}
-                    className={`rounded-full px-4 py-2.5 text-[14px] font-medium transition-colors duration-200 disabled:cursor-wait ${
-                      fechada
-                        ? "bg-superficie text-texto-suave shadow-[0_0_0_1px_rgb(28_24_18/0.08)]"
-                        : "bg-texto text-texto-claro hover:opacity-90 disabled:opacity-50"
-                    }`}
+                    className="rounded-full bg-texto px-4 py-2.5 text-[14px] font-medium text-texto-claro transition-colors duration-200 hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
                   >
                     <motion.span layout="position" className="flex items-center gap-2">
-                      {fechada ? (
-                        <>
-                          <Girando /> Montando o plano
-                        </>
-                      ) : atualizando || pensando ? (
-                        "Atualizando o plano…"
-                      ) : (
-                        "Concluir conversa"
-                      )}
+                      {atualizando || pensando ? "Atualizando o plano…" : "Concluir conversa"}
                     </motion.span>
                   </motion.button>
                 )}
@@ -301,10 +292,14 @@ export default function PreEntrevistaTotti({
                 }`}
               >
                 {/* A conversa fica limpa: só o palco do Totti. O plano sobe quando ela termina. */}
-                <div className="relative flex min-h-0 flex-col [&>section]:min-h-0 [&>section]:flex-1">
+                <div
+                  className={`relative flex min-h-0 flex-col transition-opacity duration-500 [&>section]:min-h-0 [&>section]:flex-1 ${
+                    fechada && larga ? "pointer-events-none opacity-55" : ""
+                  }`}
+                >
                   <ConversaTotti transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
                   <AnimatePresence>
-                    {fechada && (
+                    {fechada && !larga && (
                       <ConversaConcluida
                         pronto={planoPronto}
                         combinados={combinados}
@@ -315,16 +310,21 @@ export default function PreEntrevistaTotti({
                   </AnimatePresence>
                 </div>
                 <AnimatePresence>
-                  {fechada && (
+                  {fechada && larga && (
                     <motion.div
                       key="plano-sobe"
                       initial={{ opacity: 0, y: 56 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 24 }}
                       transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
-                      className="hidden min-h-0 lg:flex lg:flex-col [&>aside]:flex-1"
+                      className="flex min-h-0 flex-col [&>aside]:flex-1"
                     >
-                      <PlanoSeMontando rascunho={estado.rascunho} combinados={combinados} total={total} />
+                      <PlanoSeMontando
+                        rascunho={estado.rascunho}
+                        pronto={planoPronto}
+                        onRevisar={() => setEtapa("plano")}
+                        onContinuar={() => setSeguirConversando(true)}
+                      />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -485,14 +485,15 @@ function Montando() {
   );
 }
 
-/** Um anel girando, do tamanho do texto. */
-function Girando() {
-  return (
-    <motion.span
-      aria-hidden
-      className="block size-3.5 rounded-full border-[1.5px] border-current border-t-transparent"
-      animate={{ rotate: 360 }}
-      transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-    />
-  );
+/** A tela tem largura para o plano ao lado da conversa (o `lg` do Tailwind). */
+function useTelaLarga() {
+  const [larga, setLarga] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    setLarga(mq.matches);
+    const mudar = () => setLarga(mq.matches);
+    mq.addEventListener("change", mudar);
+    return () => mq.removeEventListener("change", mudar);
+  }, []);
+  return larga;
 }
