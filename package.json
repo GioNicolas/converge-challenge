@@ -37,6 +37,7 @@
     "test:squad": "tsx --test lib/squad-memory/__tests__/*.test.ts",
     "test:noventa-dias": "tsx --test lib/noventa-dias/__tests__/*.test.ts",
     "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
+    "test:ide": "tsx --test lib/agents/__tests__/*.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts"
   },
   "dependencies": {
