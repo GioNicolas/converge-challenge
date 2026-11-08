@@ -2,6 +2,7 @@
 // perguntar requisitos. Responde SÓ pela ficha do problema. Só servidor.
 import { z } from "zod";
 import type { Kit, Problema } from "../kits/tipos";
+import { blocoDoPlano } from "../plano";
 import type { EstadoSessao } from "../sessao/estado";
 import type { Fase } from "../sessao/tipos";
 
@@ -47,7 +48,10 @@ export function montarSistemaDinamicoPerguntar(
   requisitosAtuais: string[],
 ): string {
   const conversa = estado.conversa.slice(-8);
-  return `Fase: ${fase}
+  const plano = blocoDoPlano(estado.plano);
+  return `${plano ? `${plano}
+
+` : ""}Fase: ${fase}
 Requisitos já no quadro: ${requisitosAtuais.length ? requisitosAtuais.join(" | ") : "(nenhum)"}
 Conversa recente:
 ${

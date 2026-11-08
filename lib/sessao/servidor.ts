@@ -8,7 +8,7 @@ export type { Alinhamento } from "../presenca/alinhamento";
 const EsquemaSessao: z.ZodType<Sessao> = z.object({
   sessao_id: z.string().min(1),
   area: z.string(),
-  problema: z.object({ titulo: z.string(), enunciado: z.string() }),
+  problema: z.object({ titulo: z.string(), enunciado: z.string(), fala_do_desafio: z.string().optional() }),
   tempos: z.record(
     z.enum(["AGUARDANDO", "APRESENTACAO", "REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO", "ENCERRADA"]),
     z.number().finite().nonnegative(),
@@ -96,9 +96,10 @@ function erroDeFormato(rota: string, erro: z.ZodError): Error {
   return new Error(`Resposta inesperada de ${rota}: ${detalhe}`);
 }
 
-export async function criarSessao(opcoes: { avaliacaoId: string; candidatoId: string }): Promise<Sessao> {
+export async function criarSessao(opcoes: { avaliacaoId: string; candidatoId: string; configId?: string }): Promise<Sessao> {
   const rota = "/api/sessoes";
-  const dados = await lerJson(rota, jsonPost({ avaliacao_id: opcoes.avaliacaoId, candidato_id: opcoes.candidatoId }));
+  // `config_id`: plano de entrevista da vaga (pré-entrevista); o servidor escolhe o kit e calibra o agente por ele.
+  const dados = await lerJson(rota, jsonPost({ avaliacao_id: opcoes.avaliacaoId, candidato_id: opcoes.candidatoId, config_id: opcoes.configId }));
   return validar(rota, dados, EsquemaSessao);
 }
 

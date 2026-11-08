@@ -46,7 +46,7 @@ const DICAS: Record<NonNullable<InterviewConfig["hints"]>, { titulo: string; tex
 };
 
 /** `vaga`: config da vaga (saída da pré-entrevista da recrutadora); sem ela, a padrão. */
-export default function PreInterview({ vaga = DEFAULT_CONFIG }: { vaga?: InterviewConfig }) {
+export default function PreInterview({ vaga = DEFAULT_CONFIG, convite }: { vaga?: InterviewConfig; convite?: string }) {
   const router = useRouter();
   const { roleTitle, durationMin, languages } = vaga;
   const passos = [...PASSOS.slice(0, 2), { icon: Lightbulb, ...DICAS[vaga.hints ?? "livres"] }, ...PASSOS.slice(2)];
@@ -118,7 +118,10 @@ export default function PreInterview({ vaga = DEFAULT_CONFIG }: { vaga?: Intervi
           </button>
           <button
             type="button"
-            onClick={() => router.push(`/entrevista?config=${encodeURIComponent(vaga.id)}`)}
+            onClick={() =>
+              // System design abre o quadro; live coding abre o IDE. A mesma config e o mesmo convite seguem nos dois.
+              router.push(`${vaga.mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}`)
+            }
             className="inline-flex items-center justify-center gap-2 rounded-controle bg-marca px-6 py-3 text-corpo font-semibold text-texto-claro transition-all duration-rapida ease-suave hover:brightness-110 active:scale-[0.98]"
           >
             <Play size={16} strokeWidth={1.75} /> Estou pronto(a), iniciar

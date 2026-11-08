@@ -13,6 +13,7 @@ import { POST as perguntarPost } from "../sessoes/[id]/perguntar/route";
 import { POST as eventosPost } from "../sessoes/[id]/eventos/route";
 import { POST as imagemPost } from "../sessoes/[id]/imagens/route";
 import { GET as imagemGet } from "../sessoes/[id]/imagens/[n]/route";
+import { NextRequest } from "next/server";
 import { POST as falarPost } from "../falar/route";
 import { GET as sttGet } from "../stt-token/route";
 
@@ -70,7 +71,7 @@ describe("POST /api/sessoes", () => {
   it("cria a sessão com o formato do contrato e só dados públicos do problema", async () => {
     const { corpo, sessao_id } = await novaSessao();
     assert.deepEqual(Object.keys(corpo).sort(), ["apresentacao", "area", "despedida", "problema", "sessao_id", "tempos"]);
-    assert.deepEqual(Object.keys(corpo.problema as object).sort(), ["enunciado", "titulo"]);
+    assert.deepEqual(Object.keys(corpo.problema as object).filter((k) => k !== "fala_do_desafio").sort(), ["enunciado", "titulo"]);
     assert.match(sessao_id, /^[0-9a-f-]{36}$/);
     assert.equal(corpo.area, "system design");
     assert.ok((corpo.tempos as Record<string, number>).REQUISITOS > 0);
@@ -93,6 +94,42 @@ describe("POST /api/sessoes", () => {
     assert.equal(comErro.apresentacao, null);
     assert.equal(comErro.despedida, null);
     assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura");
+  });
+  it("a abertura é guardada por kit+problema: a 2ª sessão não chama o modelo de novo", async () => {
+    const llm = criarClienteFalso([{ apresentacao: "Olá, tudo bem? Vamos começar.", despedida: "Obrigado. Daremos retorno." }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const a = (await novaSessao()).corpo;
+    const b = (await novaSessao()).corpo;
+    assert.equal(a.apresentacao, "Olá, tudo bem? Vamos começar.");
+    assert.equal(b.apresentacao, a.apresentacao);
+    assert.equal(llm.chamadas.filter((c) => c.nomeSchema === "abertura_entrevista").length, 1);
+  });
+  it("com config_id: o plano escolhe o kit, escala os tempos e vai para o estado; config desconhecida cai no padrão", async () => {
+    const globais = globalThis as typeof globalThis & { __convergeConfigs?: Map<string, unknown> };
+    const mapa = (globais.__convergeConfigs ??= new Map());
+    mapa.set("cfg-teste-sd", {
+      id: "cfg-teste-sd", mode: "system_design", roleTitle: "Staff Engineer", seniority: "senior",
+      focus: [{ area: "escala_produto", weight: 1 }], recruiterNotes: "autonomia", hints: "nenhuma", tone: "desafiador",
+      criteria: [{ id: "c1", name: "Escala", description: "d", weight: 1, focus: "escala_produto" }],
+      problemId: "chatbot-atendimento-ia", languages: ["python"], durationMin: 70,
+    });
+    try {
+      const r = await criar(post("/api/sessoes", { avaliacao_id: "demo", candidato_id: "c1", config_id: "cfg-teste-sd" }));
+      assert.equal(r.status, 200);
+      const corpo = await r.json();
+      assert.equal((corpo.problema as { titulo: string }).titulo, "Chat em tempo real", "o plano trocou o kit pelo do problema");
+      const estado = (await repo.obter(corpo.sessao_id))?.estado;
+      assert.equal(estado?.plano?.cargo, "Staff Engineer");
+      assert.equal(estado?.plano?.dicas, "nenhuma");
+      assert.equal(estado?.tempos.ALTO_NIVEL, 1200, "70 min é o dobro de 35: 600 s viram 1200");
+      assert.equal(JSON.stringify(corpo).includes("autonomia"), false, "as notas da recrutadora não vão ao navegador");
+
+      const padrao = await (await criar(post("/api/sessoes", { avaliacao_id: "demo", candidato_id: "c1", config_id: "nao-existe" }))).json();
+      assert.equal((padrao.problema as { titulo: string }).titulo, "Encurtador de URL");
+      assert.equal((await repo.obter(padrao.sessao_id))?.estado.plano ?? null, null);
+    } finally {
+      mapa.delete("cfg-teste-sd");
+    }
   });
   it("avaliação desconhecida: 404 {erro}", async () => {
     const r = await criar(post("/api/sessoes", { avaliacao_id: "nao-existe", candidato_id: "c" }));
@@ -318,13 +355,18 @@ describe("imagens", () => {
   });
 });
 
-describe("voz (stubs)", () => {
-  it("/falar e /stt-token respondem 501 {erro}", async () => {
-    const a = await falarPost();
-    const b = await sttGet();
-    for (const r of [a, b]) {
-      assert.equal(r.status, 501);
-      assert.deepEqual(await r.json(), { erro: "voz ainda não implementada" });
+describe("voz e transcrição (sem chave do ElevenLabs)", () => {
+  it("/falar responde 501 e /stt-token responde 503, ambos com {erro}", async () => {
+    const chave = process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_API_KEY;
+    try {
+      const a = await falarPost(new NextRequest("http://localhost/api/falar", { method: "POST", body: JSON.stringify({ texto: "oi" }) }));
+      const b = await sttGet(new NextRequest("http://localhost/api/stt-token?sessao_id=s1"));
+      assert.equal(a.status, 501);
+      assert.equal(b.status, 503);
+      for (const r of [a, b]) assert.equal(typeof (await r.json()).erro, "string");
+    } finally {
+      if (chave !== undefined) process.env.ELEVENLABS_API_KEY = chave;
     }
   });
 });

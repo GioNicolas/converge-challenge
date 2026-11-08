@@ -52,8 +52,15 @@ export async function resolverAvaliacao(avaliacaoId: string): Promise<AvaliacaoR
 }
 
 /** O único recorte do problema que pode sair do servidor (sem ficha, sinais, armadilhas ou rubrica). */
-export function dadosPublicosDoProblema(problema: Problema): { titulo: string; enunciado: string } {
-  return { titulo: problema.titulo, enunciado: problema.enunciado };
+export function dadosPublicosDoProblema(
+  problema: Problema,
+): { titulo: string; enunciado: string; fala_do_desafio?: string } {
+  const publico: { titulo: string; enunciado: string; fala_do_desafio?: string } = {
+    titulo: problema.titulo,
+    enunciado: problema.enunciado,
+  };
+  if (problema.falaDoDesafio?.trim()) publico.fala_do_desafio = problema.falaDoDesafio.trim();
+  return publico;
 }
 
 /** Carrega um kit ESTÁTICO pelo id do kit ("system_design") ou da avaliação ("demo", "demo-produto"...). */

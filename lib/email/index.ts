@@ -35,7 +35,7 @@ export async function sendInterviewFeedback(input: unknown): Promise<EmailSendRe
   const payload = InterviewFeedbackPayload.parse(input);
   return sendEmail({
     to: payload.to,
-    subject: `Feedback da sua entrevista — ${payload.roleTitle}`,
+    subject: `Sobre sua entrevista para ${payload.roleTitle}`,
     template: InterviewFeedbackEmail(payload),
     templateName: "feedback",
   });
@@ -45,7 +45,7 @@ export async function sendTriagemConvite(input: unknown): Promise<EmailSendResul
   const payload = TriagemConvitePayload.parse(input);
   return sendEmail({
     to: payload.to,
-    subject: `Você avançou para a triagem técnica: ${payload.roleTitle}`,
+    subject: `Entrevista técnica para ${payload.roleTitle}: escolha seu horário`,
     template: TriagemConviteEmail(payload),
     templateName: "triagem",
   });

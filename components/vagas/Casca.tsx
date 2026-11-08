@@ -51,7 +51,8 @@ function useRecolhido() {
 
 export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
   const { vagas, rascunhos } = useVagas();
-  const aba = useSearchParams().get("aba");
+  const params = useSearchParams();
+  const aba = params.get("estagio") ?? params.get("aba");
   const [gaveta, setGaveta] = useState(false);
   const { recolhido, animar, alternar } = useRecolhido();
 
@@ -112,7 +113,7 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
         </ItemMenu>
         {!!rascunhos?.length && (
           <ItemMenu
-            href="/vagas?aba=escopo"
+            href="/vagas?estagio=escopo"
             icone={<PencilLine size={16} strokeWidth={1.75} />}
             atual={!vagaAtual && aba === "escopo"}
             n={rascunhos.length}

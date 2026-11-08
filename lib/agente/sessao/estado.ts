@@ -7,6 +7,7 @@
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu dúvida) → PERGUNTA_ATIVA (candidato clicou) → LIVRE
 //
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
+import type { PlanoDaSessao } from "../plano";
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
 import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
 
@@ -55,6 +56,8 @@ export type EstadoSessao = {
   fase: Fase;
   faseIniciadaEm: number | null;
   tempos: Tempos;
+  /** Plano de entrevista da vaga (pré-entrevista). Ausente/null: entrevista padrão. */
+  plano?: PlanoDaSessao | null;
 
   plin: CicloPlin;
   perguntaPendente: PlinPendente | null;
@@ -63,6 +66,8 @@ export type EstadoSessao = {
   perguntasFeitas: number;
   /** A pergunta única do FECHAMENTO já foi feita? */
   perguntaFinalFeita: boolean;
+  /** O convite único de REQUISITOS (silêncio inicial) já foi feito? Ele não conta na cota de perguntas. */
+  conviteFeito: boolean;
   /** Quando o candidato clicou na última pergunta (o intervalo de 60s conta daqui). */
   ultimaPerguntaEm: number | null;
   /** Quando o candidato terminou de responder a última pergunta. */
@@ -111,16 +116,18 @@ export type Efeito =
 
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
 
-export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[] } = {}): EstadoSessao {
+export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; plano?: PlanoDaSessao | null } = {}): EstadoSessao {
   return {
     fase: "AGUARDANDO",
     faseIniciadaEm: null,
     tempos: opcoes.tempos ?? TEMPOS_PADRAO,
+    plano: opcoes.plano ?? null,
     plin: "LIVRE",
     perguntaPendente: null,
     perguntaAtiva: null,
     perguntasFeitas: 0,
     perguntaFinalFeita: false,
+    conviteFeito: false,
     ultimaPerguntaEm: null,
     ultimaRespostaEm: null,
     perguntas: [],
@@ -272,7 +279,8 @@ export function transicionar(
       const pendente = estado.perguntaPendente;
       if (estado.plin !== "PLIN_PENDENTE" || !pendente) return nada;
       const pergunta: PerguntaFeita = {
-        numero: estado.perguntasFeitas + 1,
+        // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
+        numero: estado.perguntasFeitas + (estado.conviteFeito ? 1 : 0) + 1,
         status: pendente.status,
         pergunta: pendente.pergunta ?? "",
         nota: pendente.nota,
@@ -288,8 +296,9 @@ export function transicionar(
           perguntaAtiva: pergunta,
           perguntaPendente: null,
           // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
-          perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : pergunta.numero,
+          perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
           perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
+          conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
           ultimaPerguntaEm: agora,
           perguntas: [...estado.perguntas, pergunta],
           conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],

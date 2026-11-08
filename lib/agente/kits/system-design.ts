@@ -56,6 +56,8 @@ export const KIT_SYSTEM_DESIGN: Kit = {
       titulo: "Encurtador de URL",
       enunciado:
         "Projete um serviço como o bit.ly: recebe uma URL longa e devolve uma curta. Quem acessa a curta é redirecionado.",
+      falaDoDesafio:
+        "Hoje a conversa é sobre um encurtador de links, tipo o bit.ly: a pessoa cola um endereço comprido, recebe um curtinho, e quem abrir o curto é levado ao original. O problema é aberto de propósito, então pergunte o que quiser antes de desenhar. E vá pensando em voz alta, que o que me interessa é entender como você pensa.",
       ficha: [
         { pergunta: "Quantas URLs novas?", resposta: "100 milhões por mês (~40 por segundo, picos de 400)" },
         { pergunta: "Quantos acessos?", resposta: "Leitura 100x maior que escrita (~4 mil por segundo, picos de 40 mil)" },
@@ -93,6 +95,8 @@ export const KIT_SYSTEM_DESIGN: Kit = {
       titulo: "Chat em tempo real",
       enunciado:
         "Projete um app de mensagens: conversas um a um e em grupo, com entrega em tempo real.",
+      falaDoDesafio:
+        "Hoje o tema é um aplicativo de mensagens, desses com conversa entre duas pessoas e em grupo, em que a mensagem chega na hora. O enunciado é curto de propósito, então pergunte o que precisar antes de desenhar. Vá contando o que pensa enquanto desenha, que é isso que eu quero acompanhar.",
       ficha: [
         { pergunta: "Quantos usuários?", resposta: "50 milhões ativos por dia, 10 milhões online ao mesmo tempo no pico" },
         { pergunta: "Volume de mensagens?", resposta: "~1 bilhão por dia (~12 mil por segundo, picos de 50 mil)" },
@@ -131,6 +135,8 @@ export const KIT_SYSTEM_DESIGN: Kit = {
       titulo: "Pagamentos instantâneos",
       enunciado:
         "Projete o sistema de transferências instantâneas de um banco digital: o cliente envia dinheiro para outra conta e o recebedor vê na hora.",
+      falaDoDesafio:
+        "Hoje vamos falar de transferências instantâneas num banco digital: o cliente manda dinheiro pra outra conta e quem recebe vê o valor na hora. Tem muita coisa que não foi dita, então pergunte à vontade antes de começar a desenhar. E pense em voz alta, que o caminho que você escolhe me importa mais que o desenho final.",
       ficha: [
         { pergunta: "Volume?", resposta: "20 milhões de transferências por dia, picos de 2 mil por segundo (ex.: dia 5, Black Friday)" },
         { pergunta: "Tempo de resposta?", resposta: "Confirmação em menos de 2 segundos" },

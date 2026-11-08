@@ -3,6 +3,8 @@
 // A conversa com o Totti. Sem balões coloridos: as falas dele em texto corrido, as do recrutador
 // num bloco discreto à direita. Dá para anexar documentos (PDF, TXT, Markdown) pelo clipe:
 // o texto vai para o Totti; na tela aparece só o cartão do documento.
+// Depois de a pessoa enviar, o Totti "lê" por um instante e só então aparecem os três pontinhos de quem
+// está digitando (ver ATRASO_DIGITANDO), como numa conversa de verdade.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUp, FileText, Paperclip } from "lucide-react";
@@ -14,6 +16,9 @@ import ListaDocumentos from "./ListaDocumentos";
 
 /** Marca que separa a fala dos documentos anexados (ver `montarMensagem`). */
 const MARCA = "\n\n[Documento anexado: ";
+
+/** Quanto tempo depois do envio os três pontinhos aparecem. */
+const ATRASO_DIGITANDO = 650;
 
 export function montarMensagem(texto: string, documentos: Documento[]) {
   return texto + documentos.map((d) => `${MARCA}${d.nome}]\n${d.texto}`).join("");
@@ -50,9 +55,16 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
     return () => clearTimeout(t);
   }, [falasDaTotti]);
 
+  const [digitando, setDigitando] = useState(false);
+  useEffect(() => {
+    if (!pensando) return setDigitando(false);
+    const t = setTimeout(() => setDigitando(true), ATRASO_DIGITANDO);
+    return () => clearTimeout(t);
+  }, [pensando]);
+
   useEffect(() => {
     lista.current?.scrollTo({ top: lista.current.scrollHeight, behavior: "smooth" });
-  }, [transcricao.length, pensando]);
+  }, [transcricao.length, digitando]);
 
   useEffect(() => {
     const c = campo.current;
@@ -93,10 +105,10 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-padrao bg-superficie">
       <header className="flex items-center gap-3 border-b border-borda px-5 py-3">
-        <OndaDeVoz estado={pensando ? "pensando" : falando ? "falando" : "ouvindo"} tamanho={34} fundo="claro" />
+        <OndaDeVoz estado={digitando ? "pensando" : falando ? "falando" : "ouvindo"} tamanho={34} fundo="claro" />
         <div className="flex flex-1 items-baseline justify-between gap-3">
           <span className="text-[15px] text-texto">Totti</span>
-          <span className="rotulo text-texto-suave">{pensando ? "Escrevendo…" : "Conversa"}</span>
+          <span className="rotulo text-texto-suave">{digitando ? "Digitando…" : "Conversa"}</span>
         </div>
       </header>
 
@@ -142,11 +154,18 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
               </motion.div>
             );
           })}
-          {pensando && (
-            <motion.div key="pensando" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <span className="rotulo text-texto-suave">
-                Totti está escrevendo <span className="inline-block animate-pulse">▍</span>
-              </span>
+          {digitando && (
+            <motion.div
+              key="digitando"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, transition: { duration: 0.12 } }}
+              transition={{ duration: 0.24, ease: curvaSuave }}
+              className="flex flex-col gap-1"
+              aria-live="polite"
+            >
+              <span className="rotulo text-texto-suave">Totti</span>
+              <Digitando />
             </motion.div>
           )}
         </AnimatePresence>
@@ -201,5 +220,21 @@ export default function ConversaTotti({ transcricao, pensando, erro, onEnviar }:
         </div>
       </div>
     </section>
+  );
+}
+
+/** Os três pontinhos de quem está digitando. */
+function Digitando() {
+  return (
+    <span className="flex h-9 w-fit items-center gap-1 rounded-full bg-fundo px-3.5" aria-label="Totti está digitando">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="size-1.5 rounded-full bg-texto/60"
+          animate={{ y: [0, -3.5, 0], opacity: [0.45, 1, 0.45] }}
+          transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+        />
+      ))}
+    </span>
   );
 }

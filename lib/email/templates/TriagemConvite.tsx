@@ -30,7 +30,7 @@ export function TriagemConviteEmail(props: TriagemConvitePayload) {
         </Text>
       )}
       <Text style={emailTypography.body}>Não precisa instalar nada. Escolha o horário que for melhor para você:</Text>
-      <Section style={{ textAlign: "center", margin: "28px 0" }}>
+      <Section style={{ margin: "24px 0" }}>
         <Button href={props.scheduleUrl} style={emailTypography.button}>
           Escolher meu horário
         </Button>

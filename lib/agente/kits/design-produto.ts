@@ -117,6 +117,8 @@ export const KIT_DESIGN_PRODUTO: Kit = {
       id: "onboarding_60_mais",
       titulo: "Onboarding de banco digital para 60+",
       enunciado: "Redesenhe o cadastro de um banco digital para pessoas acima de 60 anos.",
+      falaDoDesafio:
+        "Hoje o desafio é repensar o cadastro de um banco digital, pensando em pessoas mais velhas. O enunciado é enxuto de propósito, então pergunte o que quiser antes de desenhar, e vá contando o que pensa enquanto desenha.",
       ficha: [
         { pergunta: "Qual o problema hoje?", resposta: "40% abandonam o cadastro, a maioria na etapa de selfie e documento" },
         { pergunta: "Plataforma?", resposta: "Celular (app)" },

@@ -111,7 +111,7 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     const respostas: unknown[] = [];
     const { id, resposta } = await novaSessao();
     respostas.push(resposta);
-    assert.deepEqual(Object.keys(resposta.problema).sort(), ["enunciado", "titulo"]);
+    assert.deepEqual(Object.keys(resposta.problema).filter((k) => k !== "fala_do_desafio").sort(), ["enunciado", "titulo"]);
 
     // REQUISITOS: perguntar um requisito (a ficha responde, vira item no quadro).
     await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
