@@ -18,6 +18,7 @@ import PainelConversa, { LARGURA_PAINEL } from "./PainelConversa";
 import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
+import { calar, falar } from "@/lib/sessao/cliente";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { postEncerramento } from "./ide/api";
 import { useChat } from "./ide/useChat";
@@ -129,9 +130,34 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     }
   });
   const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
+  // Voz do agente: cada mensagem nova dele na conversa é falada (ElevenLabs, ou a voz do navegador como reserva).
+  // Enquanto ele fala, a escuta fica pausada para o microfone não transcrever o próprio agente.
+  const [agenteFalando, setAgenteFalando] = useState(false);
+  const ultimaFalaDita = useRef<number | null>(null);
+  const versaoDaVoz = useRef(0);
+  const ultimaDoAgente = chat.messages.at(-1)?.role === "agent" ? chat.messages.at(-1) : undefined;
+  useEffect(() => {
+    if (!ultimaDoAgente || ultimaFalaDita.current === ultimaDoAgente.at) return;
+    ultimaFalaDita.current = ultimaDoAgente.at;
+    const versao = ++versaoDaVoz.current;
+    setAgenteFalando(true);
+    // Só a fala mais recente libera a escuta; uma fala cortada por outra não destrava antes da hora.
+    void falar(ultimaDoAgente.text).finally(() => {
+      if (versao === versaoDaVoz.current) setAgenteFalando(false);
+    });
+  }, [ultimaDoAgente]);
+  // Conversa fechada ou sessão encerrada: corta a voz e volta a escutar.
+  useEffect(() => {
+    if (chat.open && !session.ended) return;
+    versaoDaVoz.current++;
+    calar();
+    setAgenteFalando(false);
+  }, [chat.open, session.ended]);
+  useEffect(() => () => calar(), []);
+
   useTranscricao({
     stream: midia.stream,
-    ativo: midia.microfoneLigado && !session.ended && !finalizando,
+    ativo: midia.microfoneLigado && !session.ended && !finalizando && !agenteFalando,
     sessaoId: session.sessionId,
     aoFinal: aoFalar,
   });
