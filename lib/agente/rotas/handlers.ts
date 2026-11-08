@@ -15,7 +15,8 @@ import type { LlmCliente } from "../llm/cliente";
 import type { Kit, Problema } from "../kits/tipos";
 import { apresentacaoReserva, DESPEDIDA_RESERVA, type Abertura, type ContextoAbertura } from "../prompts/abertura";
 import { etapasEmTexto } from "../prompts/contexto";
-import { avaliacaoDoPlano, escalarTempos, planoDaConfig } from "../plano";
+import { escalarTempos, planoDaConfig } from "../plano";
+import { avaliacaoDaConfig } from "../kits/questao-da-vaga";
 import { perguntar } from "../perguntar";
 import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
@@ -75,7 +76,8 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   if (encontrada) await hidratarSquadMemory();
   const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
-  const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;
+  // A questão gerada para a vaga, se já existe; senão o problema fixo do catálogo (ver `avaliacaoDaConfig`).
+  const avaliacaoId = (config && (await avaliacaoDaConfig(config))) || corpo.dados.avaliacao_id;
 
   const alvo = await resolverAvaliacao(avaliacaoId);
   if (!alvo) return erro(404, "avaliação não encontrada");
