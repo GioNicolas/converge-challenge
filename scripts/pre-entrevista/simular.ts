@@ -13,6 +13,7 @@ import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { chat, type Mensagem } from "@/lib/pre-entrevista/llm";
 import { descreverPasso } from "@/lib/pre-entrevista/planejador";
+import { perguntaObvia } from "@/lib/pre-entrevista/perguntas";
 import { normalizarTexto } from "@/lib/pre-entrevista/pesos";
 import { DURACAO_PADRAO, paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
@@ -145,6 +146,32 @@ const PERSONAS: Persona[] = [
       dicas: "leves",
       duracaoMin: 45,
     },
+  },
+  {
+    id: "rh_leiga",
+    vagaId: "frontend-junior",
+    descricao:
+      "Você é de RH e não é técnica. Não sabe o que é complexidade nem caso de borda; se o Totti perguntar algo técnico, diz que não sabe " +
+      "e pergunta o que ele recomenda. Sabe contar do time: os dois últimos juniores contratados travavam e ficavam calados quando não sabiam, " +
+      "e o time quer alguém que pergunte e peça ajuda. Copiar código pronto sem entender, para você, reprova. Aceita dica leve se ele travar.",
+    verdade: { ordemFoco: ["tecnico"], dispensa: [], eliminatorio: "copiar", tom: "amigavel", dicas: "leves" },
+  },
+  {
+    id: "tech_lead",
+    vagaId: "tech-lead-mobile",
+    descricao:
+      "Você é recrutadora técnica e responde direto, em uma ou duas frases. Concorda com system design. O que mais importa: como o app se comporta " +
+      "sem internet e sincroniza depois, e como ele aguenta pico de pedidos no almoço. Eliminatório: ignorar o cenário sem conexão. " +
+      "Liderança do time você avalia em outra etapa. Quer tom desafiador.",
+    verdade: { ordemFoco: ["escala_produto", "tecnico"], dispensa: [], eliminatorio: "conex", tom: "desafiador", dicas: "leves" },
+  },
+  {
+    id: "estagio",
+    vagaId: "estagio-dados",
+    descricao:
+      "Você responde de forma curta e um pouco genérica. Para estágio, quer ver raciocínio lógico e se a pessoa sabe explicar o que está fazendo; " +
+      "não espera solução perfeita. Pode dar dicas sempre que ele pedir. Não liga para pressão nem para escala nesse nível.",
+    verdade: { ordemFoco: ["tecnico"], dispensa: ["pressao", "escala_produto"], tom: "amigavel", dicas: "leves" },
   },
 ];
 
@@ -333,6 +360,7 @@ function checarEstilo(sessao: Sessao): string[] {
     const sem = t.text.normalize("NFD").replace(/[̀-ͯ]/g, "");
     if (IDENTIFICADOR_INTERNO.test(t.text) || EXPRESSAO_INTERNA.test(sem.toLowerCase()))
       avisos.push(`fala ${i + 1} usa rótulo interno: "${t.text}"`);
+    if (perguntaObvia(t.text)) avisos.push(`fala ${i + 1} faz pergunta óbvia (ótimo x fraco): "${t.text}"`);
     if (/^\s*entendi/i.test(t.text)) avisos.push(`fala ${i + 1} começa com "Entendi": "${t.text}"`);
     // A apresentação é só a abertura (índice 0): depois dela, o Totti não se apresenta de novo.
     if (i > 0 && /\bsou (a )?totti\b/i.test(sem)) avisos.push(`fala ${i + 1} se apresenta de novo: "${t.text}"`);

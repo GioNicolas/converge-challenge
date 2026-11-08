@@ -22,7 +22,10 @@ import {
   type PedidoAnalise,
   type RespostaAnalise,
 } from "../sessao/tipos";
+import { kvPadrao } from "@/lib/storage/kv";
+import { registrarNoIndice } from "../resultados";
 import { contexto } from "./contexto";
+import { finalizarEmSegundoPlano } from "./scorecard";
 import { criarLimitador, erro, ipDe, json, lerJsonValidado, type ParamsId } from "./http";
 
 export const PRAZO_ANALISE_MS = 8000;
@@ -85,6 +88,21 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
     candidatoId: corpo.dados.candidato_id,
     estado: comeco.estado,
   });
+  // A sessão aberta com a vaga entra no índice do painel (a tech lead acompanha e vê o resultado por ele).
+  if (config) {
+    try {
+      await registrarNoIndice(kvPadrao(), {
+        sessionId: sessao.id,
+        configId: config.id,
+        roleTitle: config.roleTitle,
+        startedAt: sessao.criadaEm,
+        ended: false,
+        state: "running",
+      });
+    } catch (e) {
+      console.warn("[agente] indice_nao_registrado", { sessao_id: sessao.id, erro: e instanceof Error ? e.name : "desconhecido" });
+    }
+  }
   // Apresentação e despedida escritas pelo modelo (1 chamada, guardada por kit+problema: só a primeira sessão paga a espera).
   // Sem LLM ou em erro: null, e o quadro não fala.
   const abertura = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema) : null;
@@ -350,6 +368,8 @@ export async function eventosHandler(req: Request, { params }: ParamsId): Promis
       for (const ev of eventosDaMaquina(e.tipo, e.dados)) estado = transicionar(estado, ev, agora).estado;
     }
     if (estado !== atual) await ctx.repositorio.salvarEstado(id, estado);
+    // A entrevista de uma vaga acabou: o scorecard sai agora, em segundo plano, e aparece no painel.
+    if (estado.fase === "ENCERRADA" && atual.fase !== "ENCERRADA" && estado.plano) finalizarEmSegundoPlano(id);
   }
   return json({ ok: true, recebidos: corpo.dados.eventos.length, novos: novos.length });
 }

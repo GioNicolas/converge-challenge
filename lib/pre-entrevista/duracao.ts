@@ -68,7 +68,8 @@ function valida(minutos: number | undefined): number | undefined {
 export function perguntouSobreTempo(textoAgente: string | undefined): boolean {
   if (!textoAgente) return false;
   const t = normalizar(textoAgente);
-  return t.includes("?") && /\b(tempo|minutos?|duracao|dura|durar)\b/.test(t);
+  // "Quanto tempo", não qualquer "tempo": "se o tempo acabar, o que conta mais?" é sobre o candidato, não sobre a duração.
+  return t.includes("?") && /\b(minutos?|duracao|dura|durar)\b|\bquanto tempo\b/.test(t);
 }
 
 /**
@@ -89,7 +90,8 @@ export function lerDuracao(texto: string, contexto: { perguntouTempo?: boolean }
   if (horas) return valida(valorDe(horas[1]) * 60);
 
   if (contexto.perguntouTempo) {
-    const numero = t.match(new RegExp(`\\b(${NUMERO})\\b`));
+    // Porcentagem não é duração ("não precisa estar 100% funcionando").
+    const numero = t.match(new RegExp(`\\b(${NUMERO})\\b(?!\\s*(?:%|por cento))`));
     if (numero) return valida(valorDe(numero[1]));
   }
   return undefined;

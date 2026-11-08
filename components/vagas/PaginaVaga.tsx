@@ -50,6 +50,7 @@ import AprendidoNoPlano from "./AprendidoNoPlano";
 import Casca from "./Casca";
 import Contratacoes from "./Contratacoes";
 import { Abas, Busca, Paginacao, Seletor, Voltar } from "./controles";
+import ResultadosDaVaga from "./ResultadosDaVaga";
 
 const POR_PAGINA = 50;
 /** Limite de candidatos por pedido em /api/convites. */
@@ -134,7 +135,8 @@ function Conteudo({ vaga, etapa }: { vaga: VagaEmpresa; etapa: EtapaVaga }) {
       </header>
 
       {etapa === "plano" && <Plano vaga={vaga} />}
-      {(etapa === "entrevistas" || etapa === "escores") && reais.length > 0 && <EntrevistasReais reais={reais} />}
+      {etapa === "entrevistas" && reais.length > 0 && <EntrevistasReais reais={reais} />}
+      {etapa === "escores" && reais.length > 0 && <ResultadosDaVaga reais={reais} />}
       {etapa === "entrevistas" && <Candidatos key="candidatos" vaga={vaga} modo="candidatos" href={href} temReais={reais.length > 0} />}
       {etapa === "escores" && <Candidatos key="escores" vaga={vaga} modo="escores" href={href} temReais={reais.length > 0} />}
       {etapa === "contratacoes" && <Contratacoes vaga={vaga} />}
@@ -666,7 +668,7 @@ function EntrevistasReais({ reais }: { reais: EntrevistaReal[] }) {
               <span className="hidden text-right md:block">
                 {e.ended && (
                   <Link
-                    href={`/report?sessionId=${encodeURIComponent(e.sessionId)}`}
+                    href={e.href}
                     className="inline-flex items-center gap-1 text-[13px] text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto"
                   >
                     Relatório <ArrowRight size={13} />

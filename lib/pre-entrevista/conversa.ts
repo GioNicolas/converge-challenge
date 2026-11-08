@@ -10,6 +10,7 @@ import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
 import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
+import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
@@ -60,14 +61,19 @@ Como falar:
   Quando falar de si, use o masculino (o Totti é ele).
 - Varie as palavras: não repita de uma fala para a outra a mesma expressão de fechamento ou de tom.
 - Para pressão, diga "lidar com pressão e imprevistos" ou "manter a calma quando dá errado". Nunca diga "alta demanda": isso é escala.
+- Nunca pergunte o que separa ou diferencia um candidato ótimo de um fraco, o que destaca um bom candidato, nem nada cuja
+  resposta seja óbvia ("o que destaca quem mantém a calma?" só rende "manter a calma"). Toda pergunta tem que decidir algo
+  da entrevista: uma escolha entre duas posturas que times diferentes responderiam diferente.
+- A recrutadora quase nunca é técnica. Não use jargão (complexidade, big O, casos de borda, edge case, escalabilidade
+  horizontal) a menos que ela tenha usado: diga com palavras do dia a dia ("se fica lento com muitos dados", "entrada vazia").
 - Nunca ofereça escolher o tema, o tipo ou o enunciado da questão ("lógica pura ou listas?", "otimização de rotas ou
   restrições de horário?"). A questão de algoritmo é sorteada do banco pelo nível e pelo que pesa, e não tem o tema da vaga.
   Pergunte sobre o que avaliar no candidato, nunca sobre qual problema dar.
 
 Exemplos de tom (não copie as palavras):
-- "Num problema de algoritmo, o que faz você achar um candidato ótimo e não só bom?"
-- "Você prefere que ele explique a complexidade, ou que trate entrada vazia sem ser lembrado?"
-- "IA aplicada fica de lado, e escalabilidade entra no foco. O que separa uma solução simples de uma que não aguenta volume?"
+- "Se o tempo acabar, conta mais ele ter uma solução funcionando ou ter explicado bem o caminho?"
+- "Você falou de pedido sem internet: o que é pior pra vocês, perder um pedido ou o app demorar pra sincronizar?"
+- "IA aplicada fica de lado, e escalabilidade entra no foco. Basta ele saber dizer se fica lento com muitos dados, ou ele precisa chegar na versão mais rápida?"
 
 A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, o PASSO desta fala e a transcrição.
 Siga o PASSO. Responda somente com a fala do Totti, sem prefixo, sem aspas e sem explicações.`;
@@ -318,12 +324,30 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       const confirma = passo.confirmaTroca
         ? `Confirme a troca em 1 frase, com as palavras dela (ex.: 'Fechado, então ${FORMATO_CURTO[passo.confirmaTroca]}.'), e na mesma fala siga o passo abaixo. `
         : "";
+      const area = nomeAreaFala(passo.area, r.mode);
+      // O padrão do catálogo já é avaliado: perguntar isso de novo só rende o óbvio.
+      const padrao = CATALOGO[r.mode]
+        .filter((c) => c.focus === passo.area)
+        .map((c) => c.description)
+        .join(" ");
+      const opcoes = perguntasDoBanco(sessao, passo.area)
+        .map((p) => `- ${p.texto}`)
+        .join("\n");
       return (
         confirma +
-        `Pergunte o que separa um candidato ótimo de um candidato fraco em ${nomeAreaFala(passo.area, r.mode)}, ` +
-        `de forma concreta e ligada ao cargo ${r.roleTitle}. Uma pergunta só. ${SEM_LOGISTICA}`
+        `Assunto: ${area}, na vaga de ${r.roleTitle}. Faça UMA pergunta que decida algo da entrevista nesse assunto.\n` +
+        `O que a entrevista já avalia por padrão (não pergunte isso, a resposta seria óbvia): ${padrao}\n` +
+        "Se a última fala dela trouxe algo concreto desse assunto, pergunte a escolha que falta sobre aquilo, com as palavras dela " +
+        "(ex.: ela falou de app sem internet; pergunte o que é pior, perder pedido ou demorar pra sincronizar). " +
+        `Senão, use a pergunta abaixo que mais combina com a vaga, adaptando as palavras:\n${opcoes}\n` +
+        `A pergunta oferece duas opções concretas que alguém de RH entende. ${SEM_LOGISTICA}`
       );
     }
+    case "perguntar_contexto":
+      return (
+        "Pergunte o que a descrição da vaga não diz e só ela sabe: se tem algo que reprova o candidato direto, ou o que fez uma " +
+        `contratação passada não dar certo. Uma pergunta só, curta e natural (ex.: '${PERGUNTA_CONTEXTO}'). ${SEM_LOGISTICA}`
+      );
     case "informar_formato_indisponivel":
       return (
         "Ela pediu system design, que ainda não está disponível nesta versão. Diga isso numa frase curta, sem pedir desculpa, " +
@@ -370,9 +394,17 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         "Ela fez uma pergunta ou dúvida sobre a entrevista (formato, avaliação ou processo). A resposta tem no máximo 2 frases, " +
           "concretas e honestas, usando só o que está abaixo; não prometa nada além disso. " +
           "Se ela discordou de algo, não concorde com ela: explique como a entrevista é. " +
+          "Se ela pediu sua opinião ou recomendação ('o que você acha?', 'o que eu devo procurar?'), recomende algo concreto, " +
+          "do que a entrevista observa abaixo, em vez de devolver a pergunta. " +
           "Se a dúvida for sobre algo que você não sabe, diga isso com franqueza e ofereça um padrão, por exemplo 'a gente segue com o que já combinamos'.",
         `COMO AS ÁREAS EM JOGO SÃO AVALIADAS (${FORMATO_CURTO[r.mode]}):\n${comoAvaliamosDoFoco(sessao)
           .map((f) => `- ${f}`)
+          .join("\n")}`,
+        // Os critérios inteiros: sem eles, "pedir ajuda" virava pressão, quando é o critério de comunicação.
+        `CRITÉRIOS QUE A ENTREVISTA JÁ OBSERVA (use para mostrar onde o que ela quer já entra; não ofereça trocar um pelo outro):\n${CATALOGO[
+          r.mode
+        ]
+          .map((c) => `- ${c.name}: ${c.description}`)
           .join("\n")}`,
         `Depois, em uma pergunta curta, retome o que ficou sem resposta: ${perguntaParaRetomar(passo.retomar, sessao)} ` +
           "É a mesma pergunta de antes: reformule, sem repetir as palavras dela, e termine perguntando o que ela prefere.",
@@ -381,6 +413,28 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       // Não passa pelo modelo: a fala de encerramento é fixa (ver `falaDeEncerramento`).
       return "Fala fixa, sem modelo.";
   }
+}
+
+/** Perguntas decisivas da área para esta vaga: as que a vaga e as falas dela puxam vêm primeiro. */
+function perguntasDoBanco(sessao: Sessao, area: FocusArea) {
+  const r = sessao.rascunho;
+  const falasDela = sessao.transcricao
+    .filter((t) => t.role === "recrutadora")
+    .map((t) => t.text)
+    .join(" ");
+  return perguntasDaArea(r.mode, area, r.seniority, `${r.jobDescription ?? ""} ${falasDela}`);
+}
+
+/**
+ * Troca a pergunta da fala por `pergunta`, mantendo as frases de antes dela (ex.: a confirmação de uma troca de formato).
+ * Função pura.
+ */
+export function trocarPergunta(texto: string, pergunta: string): string {
+  const i = texto.indexOf("?");
+  const fim = i < 0 ? texto.length : i;
+  const inicioDaFrase = Math.max(texto.lastIndexOf(".", fim), texto.lastIndexOf("!", fim));
+  const antes = i < 0 ? texto.trim() : inicioDaFrase >= 0 ? texto.slice(0, inicioDaFrase + 1).trim() : "";
+  return [antes, pergunta].filter(Boolean).join(" ");
 }
 
 /** Frases de como as duas áreas mais pesadas em jogo são observadas no formato atual. */
@@ -713,6 +767,15 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
   }
   // Uma pergunta por fala: corta a parte do modelo antes de qualquer sufixo que o código acrescente.
   if (texto) texto = cortarNaPrimeiraPergunta(texto);
+  // Pergunta no molde óbvio ("o que separa um ótimo de um fraco?"): troca pela pergunta do banco, sem nova chamada.
+  const areaAprofundada = passo.tipo === "aprofundar" ? passo.area : passo.tipo === "confirmar_mudanca_foco" ? passo.proximo?.area : undefined;
+  if (texto && areaAprofundada && perguntaObvia(texto)) {
+    const doBanco = perguntasDoBanco(sessao, areaAprofundada)[0];
+    if (doBanco) texto = trocarPergunta(texto, doBanco.texto);
+  }
+  if (texto && passo.tipo === "perguntar_contexto" && (!texto.includes("?") || perguntaObvia(texto))) {
+    texto = trocarPergunta(texto, PERGUNTA_CONTEXTO);
+  }
   // Confirmação do início e resposta a dúvida devolvem a decisão para ela: sem pergunta, o código acrescenta uma.
   if (texto && !texto.includes("?") && (passo.tipo === "confirmar_inicio" || passo.tipo === "responder_duvida")) {
     texto = `${texto} ${passo.tipo === "confirmar_inicio" ? "Prefere seguir assim ou mudar alguma coisa?" : "O que você prefere?"}`;
