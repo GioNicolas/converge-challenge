@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return NextResponse.json({ error: "corpo inválido" }, { status: 400 });
   await hidratarSquadMemory();
   const { sessionId, decisao, motivo } = parsed.data;
-  const { registro, jaDecidida } = await decidir(sessionId, decisao, motivo);
+  const { registro, jaDecidida } = await decidir(sessionId, decisao);
   // O Totti aprende com a decisão depois da resposta (o extrator do motivo chama o LLM e a recrutadora não espera).
   if (!jaDecidida) {
     const aprender = async () => {

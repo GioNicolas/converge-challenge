@@ -29,11 +29,7 @@ export async function lerDecisoes(): Promise<Map<string, DecisaoRegistrada>> {
 }
 
 /** Registra a decisão (a primeira vale) e avisa o candidato por e-mail. Nunca lança por causa do e-mail. */
-export async function decidir(
-  sessionId: string,
-  decisao: Decisao,
-  motivo?: string,
-): Promise<{ registro: DecisaoRegistrada; jaDecidida: boolean }> {
+export async function decidir(sessionId: string, decisao: Decisao): Promise<{ registro: DecisaoRegistrada; jaDecidida: boolean }> {
   const kv = kvPadrao();
   const existente = await kv.get<DecisaoRegistrada>(NS, sessionId);
   if (existente) return { registro: existente, jaDecidida: true };
