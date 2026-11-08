@@ -28,7 +28,7 @@ export function BotaoDitado({ transcricao: t, disabled = false, campo, className
       aria-label={rotulo}
       title={rotulo}
       aria-pressed={t.ativa}
-      className={`flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${t.ativa ? "bg-red-100 text-red-700" : "text-inherit hover:bg-black/5"} ${className}`}
+      className={`flex size-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${t.ativa ? "bg-red-100 text-red-700" : "text-inherit hover:bg-black/5"} ${className}`}
     >
       {ocupado ? <LoaderCircle size={16} className="animate-spin" /> : t.ativa ? <Square size={14} fill="currentColor" /> : <Mic size={16} />}
     </button>
