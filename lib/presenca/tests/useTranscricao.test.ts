@@ -452,3 +452,22 @@ test("recusa definitiva do servidor ao pedir token cai direto no navegador", asy
   assert.equal(m.sockets.length, 0);
   assert.equal(m.estado()?.motor, "navegador");
 });
+
+test("pausa longa fecha o socket e retomar pede token novo", async (t) => {
+  const m = montar(t);
+  let relogio = 0;
+  t.mock.method(performance, "now", () => relogio);
+  const avancar = (ms: number) => { relogio += ms; t.mock.timers.tick(ms); };
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  m.controle.ativar(false);
+  avancar(29000);
+  assert.equal(m.sockets[0].fechamentos, 0);
+  avancar(1400);
+  assert.equal(m.sockets[0].fechamentos, 1);
+  assert.equal(m.tokens(), 1);
+  m.controle.ativar(true);
+  await andar();
+  assert.equal(m.tokens(), 2);
+});

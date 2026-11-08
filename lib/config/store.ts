@@ -1,23 +1,26 @@
 /**
  * Store das configs de entrevista (saída da pré-entrevista com a recrutadora). Só servidor.
  *
- * Memória + `data/configs/<id>.json` (mesma pasta que a pré-entrevista usa), então uma config
- * salva por qualquer lado sobrevive a restart e é achada pelo `configId` do `session_started`.
+ * Memória + (Supabase, quando configurado; senão `data/configs/<id>.json`, a mesma pasta que a pré-entrevista
+ * usa), então uma config salva por qualquer lado sobrevive a restart e a outra instância e é achada pelo
+ * `configId` do `session_started`.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { InterviewConfig } from "@/lib/contracts";
+import { kvRemoto } from "@/lib/storage/kv";
 import { selecionarProblema, sortearProblema } from "@/lib/problems/selecao";
 import { problems } from "@/lib/problems";
 import { hasProblem } from "@/problems";
+import { pastaDados } from "@/lib/dados";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
 
 const globalForConfigs = globalThis as typeof globalThis & { __convergeConfigs?: Map<string, InterviewConfig> };
 const configs = (globalForConfigs.__convergeConfigs ??= new Map<string, InterviewConfig>());
 
-const pasta = () => join(process.cwd(), "data", "configs");
+const pasta = () => pastaDados("configs");
 
 /**
  * Config com questão que o agente não pode usar: id desconhecido, formato sem IDE (system design) ou
@@ -38,6 +41,11 @@ export function normalizarConfig(config: InterviewConfig): InterviewConfig {
 export async function saveConfig(config: InterviewConfig): Promise<void> {
   if (!ID_VALIDO.test(config.id)) throw new Error(`id de config inválido: ${config.id}`);
   configs.set(config.id, config);
+  const kv = kvRemoto();
+  if (kv) {
+    await kv.set("config", config.id, config);
+    return;
+  }
   await mkdir(pasta(), { recursive: true });
   await writeFile(join(pasta(), `${config.id}.json`), JSON.stringify(config, null, 2), "utf8");
 }
@@ -61,7 +69,10 @@ export async function findConfig(id: string): Promise<InterviewConfig | undefine
   const cached = configs.get(id);
   if (cached) return cached;
   try {
-    const parsed = InterviewConfig.safeParse(JSON.parse(await readFile(join(pasta(), `${id}.json`), "utf8")));
+    const kv = kvRemoto();
+    const bruto = kv ? await kv.get("config", id) : JSON.parse(await readFile(join(pasta(), `${id}.json`), "utf8"));
+    if (bruto === null) return undefined;
+    const parsed = InterviewConfig.safeParse(bruto);
     if (!parsed.success) return undefined;
     configs.set(id, parsed.data);
     return parsed.data;

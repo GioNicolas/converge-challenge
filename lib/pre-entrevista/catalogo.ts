@@ -195,11 +195,11 @@ function comoAvaliamos(): Record<InterviewMode, Record<FocusArea, string>> {
 export const COMO_AVALIAMOS: Record<InterviewMode, Record<FocusArea, string>> = comoAvaliamos();
 
 /**
- * System design ainda não está pronto nesta versão: o agente entrevistador só conduz live coding. Enquanto for `false`,
- * a classificação vira live coding (ver `classificacaoDoFormatoAtivo`), não há oferta de troca de formato, e um pedido
- * de system design recebe um aviso. Ligar só quando o agente souber conduzir o desenho no quadro.
+ * System design está ligado: o plano com `mode: "system_design"` abre o quadro (`/entrevista/system-design`), e o agente
+ * conduz o desenho por lá. Se voltar a `false`, a classificação vira live coding (ver `classificacaoDoFormatoAtivo`),
+ * não há oferta de troca de formato, e um pedido de system design recebe um aviso.
  */
-export const SYSTEM_DESIGN_ATIVO = false;
+export const SYSTEM_DESIGN_ATIVO = true;
 
 /** O formato está disponível nesta versão? */
 export function modoAtivo(modo: InterviewMode): boolean {
@@ -239,12 +239,33 @@ export const PROBLEMA_PADRAO: Record<InterviewMode, string> = {
 };
 
 /**
- * Problema padrão do modo e das áreas do foco. System design com IA no foco usa o chatbot de atendimento.
- * ATENÇÃO: `chatbot-atendimento-ia` precisa existir no catálogo de problemas do time do entrevistador.
+ * Domínio da vaga (cargo e descrição) -> problema de system design mais próximo. A primeira regra que casa vale.
+ * Só termos do domínio: "banco de dados", "tempo real" ou "notificações" aparecem em qualquer vaga e não contam.
  */
-export function problemaPadrao(mode: InterviewMode, areas: FocusArea[]): string {
-  if (mode === "system_design" && areas.includes("uso_ia")) return "chatbot-atendimento-ia";
-  return PROBLEMA_PADRAO[mode];
+const PROBLEMA_POR_DOMINIO: Array<[RegExp, string]> = [
+  [
+    /pagamento|fintech|\bpix\b|banc[aá]ri[oa]|banco digital|servi[çc]os financeiros|meios de pagamento|cart[aã]o de cr[eé]dito|adquir[eê]ncia|ledger/i,
+    "pagamentos-instantaneos",
+  ],
+  [/\bchat\b|mensageria|(app|aplicativo|plataforma) de mensagens|mensagens (instant[aâ]neas|em tempo real)/i, "chat-tempo-real"],
+];
+
+/** Peso mínimo de uso de IA no foco para o chatbot passar na frente do domínio da vaga. */
+export const PESO_MINIMO_IA = 0.3;
+
+/**
+ * Problema padrão do modo, do foco e do domínio da vaga (`textoDaVaga`: cargo e descrição).
+ * Em system design: uso de IA com peso relevante usa o chatbot de atendimento (é a troca que mede uso de IA); senão,
+ * o problema do domínio da vaga; senão, o chatbot se IA estiver no foco, ou o encurtador. Cada id precisa ter
+ * avaliação no cérebro do quadro (`lib/agente/plano.ts`).
+ */
+export function problemaPadrao(mode: InterviewMode, focus: Array<{ area: FocusArea; weight: number }>, textoDaVaga = ""): string {
+  if (mode !== "system_design") return PROBLEMA_PADRAO[mode];
+  const pesoIa = focus.find((f) => f.area === "uso_ia")?.weight;
+  if (pesoIa !== undefined && pesoIa >= PESO_MINIMO_IA) return "chatbot-atendimento-ia";
+  const doDominio = PROBLEMA_POR_DOMINIO.find(([re]) => re.test(textoDaVaga))?.[1];
+  if (doDominio) return doDominio;
+  return pesoIa !== undefined ? "chatbot-atendimento-ia" : PROBLEMA_PADRAO.system_design;
 }
 
 /**
