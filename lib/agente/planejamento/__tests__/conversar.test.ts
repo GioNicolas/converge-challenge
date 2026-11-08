@@ -34,7 +34,7 @@ const saida = (extra: Record<string, unknown> = {}) => ({
 const base = { descricao: "Coordenador de obras, edifícios.", historico: [] };
 
 describe("conversarPlano", () => {
-  it("turno de pergunta: sem plano, vaga estruturada com id derivado no servidor", async () => {
+  it("texto curto que não parece vaga: pode pedir o texto da vaga (sem plano), com id derivado no servidor", async () => {
     const llm = criarClienteFalso([saida({ mensagem: "O que pesa mais?" })]);
     const r = await conversarPlano({ llm, ...base });
     assert.equal(r.mensagem, "O que pesa mais?");
@@ -45,6 +45,44 @@ describe("conversarPlano", () => {
     assert.equal(llm.chamadas[0].raciocinio, false);
     assert.equal(llm.chamadas[0].maxTokens, 2500);
     assert.equal(llm.chamadas[0].modelo, "anthropic/claude-sonnet-5.5");
+  });
+
+  it("vaga de verdade: se o modelo pergunta antes de propor, o servidor manda propor (um retry) e entrega o plano", async () => {
+    const llm = criarClienteFalso([
+      saida({ mensagem: "O que pesa mais? Etapa única ou duas?" }),
+      saida({
+        mensagem: "Proposta pronta.\nPremissas: foco em prazo.\nQuer ajustar algo ou posso aprovar?",
+        plano: planoLlm(),
+        pronto: true,
+      }),
+    ]);
+    const descricaoLonga = "Coordenador de obras sênior em construtora de edifícios residenciais. ".repeat(4);
+    const r = await conversarPlano({ llm, descricao: descricaoLonga, historico: [] });
+    assert.ok(r.plano, "o plano veio já no primeiro retorno");
+    assert.equal(r.pronto, true);
+    assert.equal(llm.chamadas.length, 2);
+    const reforco = JSON.stringify(llm.chamadas[1].mensagens);
+    assert.match(reforco, /proponha agora o plano completo/);
+  });
+
+  it("vaga de verdade: se mesmo após o reforço vier sem plano, devolve a mensagem sem travar", async () => {
+    const llm = criarClienteFalso([saida({ mensagem: "Pergunta 1" }), saida({ mensagem: "Pergunta 2" })]);
+    const r = await conversarPlano({ llm, descricao: "Vaga detalhada de engenharia. ".repeat(10), historico: [] });
+    assert.equal(r.plano, null);
+    assert.equal(r.mensagem, "Pergunta 2");
+    assert.equal(llm.chamadas.length, 2);
+  });
+
+  it("revisão com plano já existente não dispara o reforço de 'propor primeiro'", async () => {
+    const llm = criarClienteFalso([saida({ mensagem: "Entendi, mantenho o plano.", plano: null, pronto: false })]);
+    const r = await conversarPlano({
+      llm,
+      descricao: "Vaga detalhada de engenharia. ".repeat(10),
+      historico: [{ quem: "usuario", texto: "Por que 30 min?" }],
+      planoAtual: { ...planoLlm(), jobPostingId: "x" } as never,
+    });
+    assert.equal(llm.chamadas.length, 1);
+    assert.ok(r.mensagem);
   });
 
   it("proposta de plano: valida, amarra jobPostingId à vaga e marca pronto", async () => {

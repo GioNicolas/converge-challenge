@@ -1,23 +1,17 @@
-// Coreografia da mão do agente ao fazer uma pergunta:
-//   1. a tela desliza até o elemento (se ele não estiver à vista);
-//   2. o cursor vem em curva até lá;
-//   3. circula o elemento aos poucos (o cursor segue a ponta do traço);
-//   4. puxa uma seta da nota até o elemento;
-//   5. escreve a nota letra a letra; o cursor sai de cena.
-// Tudo que o agente desenha entra no grupo da pergunta, para ele apagar depois.
+// A mão executa uma composição escolhida pelo modelo, em sincronia com a fala.
+// Sem plano, os gestos de apoio variam com o histórico. [] significa não desenhar.
+// Tudo pertence a um grupo temporário; nenhuma ação altera o desenho do candidato.
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
-import { quebrarLinhas } from "@/lib/excalidraw/texto";
+import { alvosDaAcao, escolherAcoesVisuais, criarMemoriaVisual, type AcaoVisual, type MemoriaVisual } from "./acoesVisuais";
+import { comporGestos } from "./gestos";
 import {
   caixaDosElementos,
   cenaParaTela,
-  circuloAMao,
   estaVisivel,
   parteDoTraco,
   planejarMovimento,
-  posicionarNota,
   scrollParaCentralizar,
-  setaAMao,
   suavizar,
   type Caixa,
   type Ponto,
@@ -75,6 +69,8 @@ export type OpcoesApontar = {
   semente: number;
   /** Abortar para a coreografia no meio (o cursor some; o que já foi desenhado fica para quem chamou apagar). */
   sinal?: AbortSignal;
+  visual?: AcaoVisual[];
+  memoria?: MemoriaVisual;
 };
 
 // A mão do agente faz uma coisa por vez: as ações entram numa fila.
@@ -190,15 +186,6 @@ export function anotarRequisito(o: OpcoesRequisito) {
 }
 
 
-/** Caixa que envolve os pontos de um traço, na cena. */
-function caixaDoTraco(t: Traco): Caixa {
-  const xs = t.pontos.map((p) => t.origem.x + p[0]);
-  const ys = t.pontos.map((p) => t.origem.y + p[1]);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, largura: Math.max(...xs) - x, altura: Math.max(...ys) - y };
-}
-
 /**
  * A parte da vista onde dá para escrever: sem a barra de ferramentas (em cima), os controles (embaixo)
  * e a janela de chamada (no canto em que ela estiver).
@@ -220,107 +207,64 @@ function areaLivre(v: Vista): Caixa {
   return { x, y: area.y + topo, largura: Math.max(120, largura), altura: Math.max(80, area.altura - topo - base) };
 }
 
-const FONTE = 20;
-const POR_LINHA = 26;
-const PADDING = { x: 14, y: 10 };
-
 async function coreografar(o: OpcoesApontar) {
   const { quadro, cursor, grupo, sinal } = o;
-
-  // Não disputa o quadro: se o candidato está no meio de um traço, espera ele soltar.
+  const memoria = o.memoria ?? criarMemoriaVisual();
+  const acoes = escolherAcoesVisuais(o.visual, o.alvos, o.nota, memoria);
+  if (!acoes.length || sinal?.aborted) return;
   await quadro.agente.esperarCandidatoLivre();
-
-  const cena = quadro.api.getSceneElements();
-  const elementosAlvo = cena.filter((e) => o.alvos.includes(e.id));
-  const temAlvo = elementosAlvo.length > 0;
-  const doCandidato = cena.filter((e) => e.customData?.autor !== "agente");
-  const alvo =
-    caixaDosElementos(elementosAlvo, 4) ??
-    caixaDosElementos(doCandidato, 4) ?? { x: 40, y: 260, largura: 160, altura: 80 };
-  if (temAlvo) quadro.agente.ancorar(grupo, o.alvos);
-
-  // 1. A tela desliza até o alvo, se preciso.
-  const inicial = vistaDe(quadro);
-  if (!estaVisivel(alvo, inicial, 80)) {
-    const de = { x: inicial.scrollX, y: inicial.scrollY };
-    const para = scrollParaCentralizar(alvo, inicial);
-    await animar(
-      560,
-      (p) => {
-        const k = suavizar(p);
-        quadro.agente.rolar(de.x + (para.scrollX - de.x) * k, de.y + (para.scrollY - de.y) * k);
-      },
-      sinal,
-    );
-  }
-
-  // A vista é lida a cada quadro: se o candidato rolar ou der zoom no meio, o cursor continua no lugar certo.
+  if (quadro.agente.candidatoOcupado() || sinal?.aborted) return;
+  const conferir = () => {
+    if (sinal?.aborted || quadro.agente.candidatoOcupado()) throw new Cancelada();
+  };
   const naTela = (p: Ponto) => cenaParaTela(p, vistaDe(quadro));
-  const moverCursor = async (para: Ponto, semente: number) => {
+  const mover = async (para: Ponto, semente: number) => {
+    conferir();
     if (!cursor) return;
-    const de = cursor.posicao() ?? { x: innerWidth - 180, y: innerHeight - 160 }; // sai da janela de chamada
+    const de = cursor.posicao() ?? { x: innerWidth - 180, y: innerHeight - 160 };
     const movimento = planejarMovimento(de, naTela(para), semente);
-    await animar(movimento.duracaoMs, (p) => cursor.mover(movimento.pontoEm(p)), sinal);
+    await animar(Math.min(450, movimento.duracaoMs), (p) => { conferir(); cursor.mover(movimento.pontoEm(p)); }, sinal);
   };
-  const desenhar = async (id: string, traco: Traco, tipo: "linha" | "seta", duracaoMs: number) => {
-    await animar(
-      duracaoMs,
-      (p) => {
-        const parte = parteDoTraco(traco, suavizar(p));
-        quadro.agente.tracar({ id, grupo, origem: parte.origem, pontos: parte.pontos, tipo, semente: o.semente });
-        cursor?.mover(naTela(pontaDoTraco(parte)));
-      },
-      sinal,
-    );
-  };
-
+  const ids = [...new Set(acoes.flatMap(alvosDaAcao))];
+  const primeiro = quadro.api.getSceneElements().find((e) => e.id === ids[0] && !e.isDeleted);
+  const foco = primeiro && caixaDosElementos([primeiro], 12);
+  if (foco && !estaVisivel(foco, vistaDe(quadro), 60)) {
+    const inicial = vistaDe(quadro);
+    const para = scrollParaCentralizar(foco, inicial);
+    await animar(420, (p) => {
+      conferir();
+      const k = suavizar(p);
+      quadro.agente.rolar(inicial.scrollX + (para.scrollX - inicial.scrollX) * k, inicial.scrollY + (para.scrollY - inicial.scrollY) * k);
+    }, sinal);
+  }
+  if (ids.length) quadro.agente.ancorar(grupo, ids);
   cursor?.mostrar();
-
-  // 2 e 3. Vai até o alvo, mira por um instante e circula.
-  let ocupado = alvo;
-  if (temAlvo) {
-    const circulo = circuloAMao(alvo, o.semente);
-    ocupado = caixaDoTraco(circulo);
-    await moverCursor(circulo.origem, o.semente);
-    await esperar(150);
-    await desenhar(`agente-${grupo}-circulo`, circulo, "linha", 820);
-    await esperar(140);
+  let indice = 0;
+  for (const acao of acoes) {
+    conferir();
+    const caixas = new Map(quadro.api.getSceneElements().filter((e) => !e.isDeleted).flatMap((e) => {
+      const caixa = caixaDosElementos([e], 0);
+      return caixa ? [[e.id, caixa] as const] : [];
+    }));
+    for (const gesto of comporGestos(acao, caixas, areaLivre(vistaDe(quadro)), o.semente + indice)) {
+      conferir();
+      const id = `agente-${grupo}-gesto-${indice++}`;
+      if (gesto.tipo === "apontar") {
+        await mover(gesto.ponto, o.semente + indice);
+        await animar(220, () => conferir(), sinal);
+      } else if (gesto.tipo === "texto") {
+        await mover(gesto.ponto, o.semente + indice);
+        await quadro.agente.escrever({ id, grupo, texto: gesto.texto, x: gesto.ponto.x, y: gesto.ponto.y,
+          tamanho: 20, largura: 26, velocidade: 55, sinal });
+      } else {
+        await mover(gesto.traco.origem, o.semente + indice);
+        await animar(450, (p) => {
+          conferir();
+          const parte = parteDoTraco(gesto.traco, suavizar(p));
+          quadro.agente.tracar({ id, grupo, origem: parte.origem, pontos: parte.pontos, semente: o.semente + indice });
+          cursor?.mover(naTela(pontaDoTraco(parte)));
+        }, sinal);
+      }
+    }
   }
-
-  // 4. Lugar da nota: ao lado do círculo, numa área livre da tela. Tamanho pela fonte do quadro.
-  const texto = quebrarLinhas(o.nota, POR_LINHA);
-  const linhas = texto.split("\n");
-  const largura = Math.max(...linhas.map((l) => l.length)) * FONTE * 0.55 + PADDING.x * 2;
-  const altura = linhas.length * FONTE * 1.25 + PADDING.y * 2;
-  const lugar = posicionarNota(ocupado, { largura, altura }, areaLivre(vistaDe(quadro)));
-
-  if (temAlvo) {
-    const seta = setaAMao(lugar.setaPara, lugar.setaDe, o.semente + 1);
-    await moverCursor(seta.origem, o.semente + 2);
-    await esperar(80);
-    await desenhar(`agente-${grupo}-seta`, seta, "seta", 420);
-    await esperar(100);
-  }
-
-  // 5. A moldura aparece, o texto é escrito dentro dela e o cursor sai de cena.
-  await moverCursor({ x: lugar.nota.x + PADDING.x, y: lugar.nota.y + altura - PADDING.y }, o.semente + 3);
-  await quadro.agente.emoldurar({
-    id: `agente-${grupo}-moldura`,
-    grupo,
-    x: lugar.nota.x,
-    y: lugar.nota.y,
-    largura,
-    altura,
-  });
-  await quadro.agente.escrever({
-    id: `agente-${grupo}-nota`,
-    grupo,
-    texto: o.nota,
-    x: lugar.nota.x + PADDING.x,
-    y: lugar.nota.y + PADDING.y,
-    tamanho: FONTE,
-    largura: POR_LINHA,
-    sinal,
-  });
-  await esperar(450);
 }

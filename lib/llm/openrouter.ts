@@ -9,8 +9,8 @@ export const openrouter: ProviderConfig = {
     return Number(process.env.OPENROUTER_CONCURRENCY) || 4;
   },
   buildExtraBody: (opts) => ({
-    // Prefere o host mais rápido no momento; usage.cost vem na resposta.
-    provider: { sort: "throughput" },
+    // Falas curtas priorizam o início da resposta; relatórios priorizam tokens por segundo.
+    provider: { sort: opts.priorizarLatencia ? "latency" : "throughput" },
     usage: { include: true },
     ...(opts.reasoningEffort ? { reasoning: { effort: opts.reasoningEffort } } : {}),
   }),

@@ -6,6 +6,11 @@ import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import type { EventoLog, TipoEvento } from "@/lib/pre-entrevista/log";
 import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
 import type { Origem } from "@/lib/pre-entrevista/rascunho";
+import { useTranscricao } from "@/lib/transcricao/useTranscricao";
+import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
+import { useVozAgente } from "@/lib/voz/useVozAgente";
+import ControleVoz from "@/components/voz/ControleVoz";
 
 const API = "/api/pre-entrevista/sessoes";
 
@@ -107,6 +112,15 @@ export default function PaginaPreEntrevista() {
   const [erroRevisao, setErroRevisao] = useState<string | null>(null);
   const [finalizando, setFinalizando] = useState(false);
   const [final, setFinal] = useState<{ config?: InterviewConfig; erros?: string[] } | null>(null);
+  const ditado = useTranscricao({
+    bloqueada: enviando || !sessaoId || revisando || finalizando || !!final,
+    aoTexto: (texto) => setFala((atual) => acrescentarFala(atual, texto)),
+  });
+  const ultimaFala = estado?.transcricao.at(-1);
+  const voz = useVozAgente({
+    ultimaFala: ultimaFala?.role === "agente" ? { id: `${sessaoId}:${estado?.transcricao.length}`, texto: ultimaFala.text } : null,
+    bloqueada: enviando || !sessaoId || revisando || finalizando || !!final,
+  });
 
   // Atualiza o estado da sessão a cada 1 s enquanto ela está aberta.
   useEffect(() => {
@@ -180,7 +194,8 @@ export default function PaginaPreEntrevista() {
 
   async function enviarFala() {
     const texto = fala.trim();
-    if (!sessaoId || !texto || enviando) return;
+    if (!sessaoId || !texto || enviando || ditado.ativa) return;
+    voz.parar();
     setEnviando(true);
     setErro(null);
     setFala("");
@@ -376,9 +391,11 @@ export default function PaginaPreEntrevista() {
             ))}
             {enviando && <p className="text-sm italic text-neutral-500">Totti está digitando…</p>}
           </div>
+          <ControleVoz voz={voz} texto={ultimaFala?.role === "agente" ? ultimaFala.text : undefined} disabled={enviando || revisando || finalizando || !!final} />
           <div className="mt-3 flex gap-2">
             <textarea
               value={fala}
+              readOnly={ditado.ativa}
               onChange={(e) => setFala(e.target.value)}
               onKeyDown={teclaNaFala}
               disabled={enviando}
@@ -386,14 +403,16 @@ export default function PaginaPreEntrevista() {
               placeholder="Responda ao Totti (Enter envia, Shift+Enter quebra linha)"
               className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
             />
+            <BotaoDitado transcricao={ditado} disabled={enviando} />
             <button
               onClick={() => void enviarFala()}
-              disabled={enviando || !fala.trim()}
+              disabled={enviando || !fala.trim() || ditado.ativa}
               className="rounded bg-neutral-900 px-4 text-sm font-medium text-white disabled:opacity-50"
             >
               Enviar
             </button>
           </div>
+          <EstadoDitado transcricao={ditado} />
         </Bloco>
 
         {/* Coluna 2: rascunho ao vivo */}

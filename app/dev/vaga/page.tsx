@@ -103,7 +103,9 @@ function PaginaVagaInterno() {
       .then(setEstado)
       .catch((e) => setErro(`Não consegui ler o estado: ${e.message}`));
   }, []);
-  useEffect(() => fim.current?.scrollIntoView({ block: "nearest" }), [historico, ocupado]);
+  useEffect(() => {
+    fim.current?.scrollIntoView({ block: "nearest" });
+  }, [historico, ocupado]);
 
   function gerarExemplo() {
     setDescricao(vagaDeExemplo(indiceExemplo).texto);
@@ -114,11 +116,16 @@ function PaginaVagaInterno() {
     setOcupado(true);
     setErro(null);
     try {
-      const r = await postar<{ mensagem: string; vaga: JobPosting | null; plano: InterviewPlan | null }>(
+      const r = await postar<{ mensagem: string; vaga: JobPosting | null; plano: InterviewPlan | null; diagnostico?: string }>(
         "/api/dev/plano",
         { descricao, historico: novoHistorico, vaga: vagaAtual, plano: planoAtual },
       );
-      setHistorico([...novoHistorico, { quem: "agente", texto: r.mensagem }]);
+      setHistorico([
+        ...novoHistorico,
+        { quem: "agente", texto: r.diagnostico ? `${r.mensagem}
+
+[detalhe técnico: ${r.diagnostico}]` : r.mensagem },
+      ]);
       setVaga(r.vaga);
       setPlano(r.plano);
     } catch (e) {

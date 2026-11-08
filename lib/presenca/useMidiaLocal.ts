@@ -2,7 +2,7 @@
 
 // Câmera e microfone do candidato.
 // A câmera é SÓ local: aparece na janela de chamada e não é enviada, gravada nem analisada.
-// O microfone daqui só mede o volume (para o orb); a transcrição usa o mesmo stream depois.
+// O microfone mede o volume e fornece o mesmo stream à transcrição.
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ErroMidia = "camera" | "microfone" | null;
@@ -14,20 +14,47 @@ export function useMidiaLocal() {
   const [microfoneLigado, setMicrofoneLigado] = useState(false);
   const [volume, setVolume] = useState(0);
   const streamRef = useRef<MediaStream | null>(null);
+  const versaoRef = useRef(0);
+  const pedidoRef = useRef<Promise<MediaStream> | null>(null);
+
+  const liberar = useCallback(() => {
+    versaoRef.current += 1;
+    pedidoRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setStream(null);
+    setMicrofoneLigado(false);
+    setVolume(0);
+  }, []);
 
   /** Pede só o microfone (a câmera do candidato não é usada). Chamar a partir de um clique ou ao abrir a sala. */
-  const pedir = useCallback(async () => {
-    if (streamRef.current) return;
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-      streamRef.current = s;
-      setStream(s);
-      setMicrofoneLigado(true);
-    } catch {
-      setErro("microfone");
-    }
+  const pedir = useCallback((): Promise<MediaStream> => {
+    if (streamRef.current) return Promise.resolve(streamRef.current);
+    if (pedidoRef.current) return pedidoRef.current;
+    const versao = versaoRef.current;
+    const pedido = (async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        if (versaoRef.current !== versao) {
+          s.getTracks().forEach((t) => t.stop());
+          throw new DOMException("Captura cancelada", "AbortError");
+        }
+        streamRef.current = s;
+        setStream(s);
+        setErro(null);
+        setMicrofoneLigado(true);
+        return s;
+      } catch (e) {
+        if (versaoRef.current === versao) setErro("microfone");
+        throw e;
+      } finally {
+        if (versaoRef.current === versao) pedidoRef.current = null;
+      }
+    })();
+    pedidoRef.current = pedido;
+    return pedido;
   }, []);
 
   const alternarCamera = useCallback(() => {
@@ -70,6 +97,7 @@ export function useMidiaLocal() {
     raf = requestAnimationFrame(medir);
     return () => {
       cancelAnimationFrame(raf);
+      fonte.disconnect();
       void contexto.close();
     };
   }, [stream]);
@@ -77,10 +105,11 @@ export function useMidiaLocal() {
   // Desliga tudo ao sair da página.
   useEffect(
     () => () => {
+      versaoRef.current += 1;
       streamRef.current?.getTracks().forEach((t) => t.stop());
     },
     [],
   );
 
-  return { stream, erro, cameraLigada, microfoneLigado, volume, pedir, alternarCamera, alternarMicrofone };
+  return { stream, erro, cameraLigada, microfoneLigado, volume, pedir, liberar, alternarCamera, alternarMicrofone };
 }

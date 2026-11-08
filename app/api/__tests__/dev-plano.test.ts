@@ -89,19 +89,16 @@ describe("rotas /api/dev", () => {
   });
 
   it("conversa -> plano -> aprovar guarda avaliação APROVADA e a sessão pode ser criada", async () => {
-    // 1º turno: pergunta
-    let r = await plano(post("/api/dev/plano", { descricao: texto, historico: [] }));
+    // 1º turno: o agente JÁ propõe o plano (sem perguntas antes) e fecha perguntando se pode aprovar.
+    const r = await plano(post("/api/dev/plano", { descricao: texto, historico: [] }));
     assert.equal(r.status, 200);
-    let d = await r.json();
-    assert.equal(d.plano, null);
+    const d = await r.json();
+    assert.ok(d.plano, "o primeiro turno já traz o plano");
     assert.ok(d.vaga.id);
-    // 2º turno: plano
-    const historico = [{ quem: "agente", texto: d.mensagem }, { quem: "usuario", texto: "Faça você" }];
-    r = await plano(post("/api/dev/plano", { descricao: texto, historico, vaga: d.vaga }));
-    d = await r.json();
-    assert.ok(d.plano);
     assert.equal(d.plano.jobPostingId, d.vaga.id);
     assert.equal(d.pronto, true);
+    assert.match(d.mensagem, /Premissas:/);
+    assert.match(d.mensagem, /posso aprovar\?\s*$/);
 
     const ap = await aprovar(post("/api/dev/plano/aprovar", { vaga: d.vaga, plano: d.plano }));
     assert.equal(ap.status, 201);

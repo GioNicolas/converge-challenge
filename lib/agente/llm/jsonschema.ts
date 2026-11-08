@@ -25,8 +25,20 @@ export function paraJsonSchema(schema: ZodTypeAny): JsonSchema {
       return { type: "array", items: paraJsonSchema(def.type as ZodTypeAny) };
     case "ZodNullable":
       return { anyOf: [paraJsonSchema(def.innerType as ZodTypeAny), { type: "null" }] };
+    case "ZodTuple":
+      return {
+        type: "array",
+        prefixItems: (def.items as ZodTypeAny[]).map(paraJsonSchema),
+        minItems: (def.items as ZodTypeAny[]).length,
+        maxItems: (def.items as ZodTypeAny[]).length,
+      };
+    case "ZodUnion":
+      return { anyOf: (def.options as ZodTypeAny[]).map(paraJsonSchema) };
+    case "ZodDiscriminatedUnion":
+      return { anyOf: [...(def.options as ZodTypeAny[])].map(paraJsonSchema) };
     case "ZodOptional":
     case "ZodDefault":
+    case "ZodCatch":
       return paraJsonSchema(def.innerType as ZodTypeAny);
     case "ZodEffects":
       return paraJsonSchema(def.schema as ZodTypeAny);
