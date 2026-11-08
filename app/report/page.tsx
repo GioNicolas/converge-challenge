@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Report } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
+import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 import type { ReportListItem } from "@/app/api/report/route";
 
 const REC = { avancar: "Avançar", talvez: "Talvez", nao_avancar: "Não avançar" } as const;
@@ -91,6 +92,7 @@ function SessionReport({ id }: { id: string }) {
                 <span className="numero">{formatMs(e.t)}</span> — {e.text}
               </p>
             ))}
+            <AprendidoComOTime regras={c.squadRules?.map((r) => ({ texto: r.text, efeito: r.effect }))} />
           </div>
         ))}
       </section>
