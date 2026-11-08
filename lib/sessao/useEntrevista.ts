@@ -30,6 +30,7 @@ import {
   type Sessao,
 } from "@/lib/sessao/cliente";
 import { criarLinhaDoTempo } from "@/lib/sessao/eventos";
+import { FilaDoAgente, type Descartado, type MotivoDoDescarte, type OrigemDaFala } from "@/lib/audio/filaDoAgente";
 import { apontarEAnotar } from "@/lib/presenca/coreografia";
 import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
 import {
@@ -42,6 +43,16 @@ import {
 import { criarGatilho, type Gatilho } from "@/lib/sessao/gatilho";
 import { criarConversor, type Instantaneo } from "@/lib/excalidraw/conversor";
 import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff";
+
+/** Como uma fala do Totti entra na fila única (ver lib/audio/filaDoAgente.ts). */
+interface OpcoesDeFala {
+  /** Quem pediu a fala; define quando ela ainda vale depois de esperar. Padrão: "sempre" (abertura, desafio, despedida). */
+  origem?: OrigemDaFala;
+  /** Número da pergunta ativa do Analista (origem "pergunta"). */
+  numeroPergunta?: number | null;
+  /** Chamado logo depois que a fala saiu da fila e foi para o ar (a versão da fala já é a dela). */
+  aoTocar?: () => void;
+}
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
@@ -166,7 +177,36 @@ export function useEntrevista(
 
   /** O que o agente estava dizendo (ou ia dizer) na última fala: para saber o que uma fala nova cortou. */
   const textoDaUltimaFala = useRef("");
-  const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
+  /**
+   * Fila única das falas do Totti (lib/audio/filaDoAgente.ts): uma fala que chega com OUTRA tocando espera, não corta.
+   * `foiParaAFila` diz, logo depois de `void dizer(...)`, se aquela chamada ficou esperando (então `versaoDaFala`
+   * ainda é a da fala que toca, não a dela).
+   */
+  const filaDoAgente = useRef(new FilaDoAgente<{ texto: string; marcas?: MarcaDeFala[]; aoTocar?: () => void }>());
+  const foiParaAFila = useRef(false);
+  const dizerRef = useRef<(texto: string, marcas?: MarcaDeFala[], opcoes?: OpcoesDeFala) => Promise<void>>(async () => {});
+  const registrarDescarte = useCallback((texto: string, origem: OrigemDaFala, motivo: MotivoDoDescarte) => {
+    console.warn("[fala] descartada", { motivo, origem, texto });
+    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto, falaDescartada: motivo, origem });
+  }, []);
+  const registrarDescartes = useCallback((lista: Descartado<{ texto: string }>[]) => {
+    lista.forEach((d) => registrarDescarte(d.item.carga.texto, d.item.origem, d.motivo));
+  }, [registrarDescarte]);
+  const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[], opcoes: OpcoesDeFala = {}) => {
+    const { origem = "sempre", numeroPergunta = null, aoTocar } = opcoes;
+    foiParaAFila.current = false;
+    if (vozHabilitadaRef.current) {
+      const admissao = filaDoAgente.current.admitir(
+        { origem, carga: { texto, marcas, aoTocar }, fase: estadoAtual.current.fase, numeroPergunta },
+        agenteFalandoRef.current, Date.now(),
+      );
+      if (admissao.resultado === "descartar") return registrarDescarte(texto, origem, admissao.motivo);
+      if (admissao.resultado === "esperar") {
+        foiParaAFila.current = true;
+        console.log("[fala] espera a fala atual terminar", { origem, texto });
+        return;
+      }
+    }
     // Uma fala nova corta a que está tocando (falarComMarcas chama calar()). Registra o que foi cortado, para a
     // linha do tempo da sessão mostrar quando o Totti fala por cima de si mesmo.
     const cortou = agenteFalandoRef.current ? textoDaUltimaFala.current : "";
@@ -220,9 +260,22 @@ export function useEntrevista(
     agenteFalandoRef.current = false;
     // A legenda fica um pouco depois da voz, para dar tempo de terminar de ler.
     fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 1800);
-  }, []);
+    // A fala terminou sozinha (ninguém a cortou): sai a próxima da fila que ainda faz sentido.
+    const e = estadoAtual.current;
+    const { item, descartados } = filaDoAgente.current.proximo({
+      agora: Date.now(), fase: e.fase, numeroPerguntaAtiva: e.perguntaAtiva?.numero ?? null,
+      ultimaAtividadeDoCandidatoEm: Math.max(ultimaAtividade.current, ultimaFalaEm.current),
+    });
+    registrarDescartes(descartados);
+    if (item) {
+      void dizerRef.current(item.carga.texto, item.carga.marcas, { origem: item.origem, numeroPergunta: item.numeroPergunta });
+      item.carga.aoTocar?.();
+    }
+  }, [registrarDescarte, registrarDescartes]);
+  dizerRef.current = dizer;
 
   const silenciar = useCallback(() => {
+    registrarDescartes(filaDoAgente.current.limpar());
     limparVisualDaConversa();
     versaoDaFala.current++;
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
@@ -232,7 +285,7 @@ export function useEntrevista(
     preparandoVozRef.current = false;
     agenteFalandoRef.current = false;
     setFalaAtual(null);
-  }, [limparVisualDaConversa]);
+  }, [limparVisualDaConversa, registrarDescartes]);
   const alternarVoz = useCallback(() => {
     vozHabilitadaRef.current = !vozHabilitadaRef.current;
     setVozHabilitada(vozHabilitadaRef.current);
@@ -245,6 +298,7 @@ export function useEntrevista(
   useEffect(() => () => {
     cicloDaSala.current++;
     versaoDaFala.current++;
+    filaDoAgente.current.limpar();
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     calar();
     limparVisualDaConversa();
@@ -503,8 +557,12 @@ export function useEntrevista(
     if (p.pergunta) {
       conversa.current.push({ quem: "agente", texto: p.pergunta });
       const alvo = ultimoInstantaneo.current?.componentes.find((c) => c.id === p.elementos[0]);
-      void dizer(p.pergunta, [{ trecho: alvo?.nome ?? "", aoChegar: desenhar }]);
-      versaoDestaPergunta = versaoDaFala.current;
+      void dizer(p.pergunta, [{ trecho: alvo?.nome ?? "", aoChegar: desenhar }], {
+        origem: "pergunta", numeroPergunta,
+        // Se esperou na fila, a versão da fala só é desta pergunta quando ela começa a tocar.
+        aoTocar: () => { versaoDestaPergunta = versaoDaFala.current; },
+      });
+      versaoDestaPergunta = foiParaAFila.current ? -1 : versaoDaFala.current;
     } else desenhar();
 
     return () => {
@@ -557,7 +615,7 @@ export function useEntrevista(
       if (!requisitosCombinados.current.includes(requisito)) requisitosCombinados.current.push(requisito);
       setMensagens((m) => [...m, { id: `empecilho-${++contadorDeMensagens.current}`, quem: "agente", texto: fala, horario: Date.now(), requisito }]);
       setEmpecilho({ requisito });
-      void dizer(fala);
+      void dizer(fala, undefined, { origem: "mudanca" });
     } catch (erro) {
       console.warn("[empecilho] não foi possível pedir a mudança:", erro);
     } finally {
@@ -721,7 +779,7 @@ export function useEntrevista(
     if (fase === "AGUARDANDO" || fase === "ENCERRADA") return;
     const texto = FALAS_DE_REPETICAO[pedidosDeRepeticao.current++ % FALAS_DE_REPETICAO.length];
     conversa.current.push({ quem: "agente", texto });
-    void dizer(texto);
+    void dizer(texto, undefined, { origem: "iniciativa" });
   }, [dizer]);
 
   // Conversa por texto (enquanto não há voz do candidato): as falas digitadas e as respostas do /perguntar.
@@ -756,7 +814,9 @@ export function useEntrevista(
       enviar({ tipo: "CANDIDATO_CONTINUOU" });
       // A fala junta as partes da anterior, que ele continuou antes de ouvir a resposta: a anterior (e a resposta
       // que não tocou) saem do histórico. Ver lib/audio/filaFalas.ts.
+      const marcarRespostaComoAtual = () => { versaoRespostaConversa.current = versaoDaFala.current; };
       if (substitui) {
+        registrarDescartes(filaDoAgente.current.remover((i) => i.origem === "resposta", "substituida"));
         conversa.current = semFalaSubstituida(conversa.current, texto);
         const descartadas = mensagensNaoOuvidas.current;
         mensagensNaoOuvidas.current = [];
@@ -839,10 +899,11 @@ export function useEntrevista(
               semente: contadorDeMensagens.current * 7919, sinal: atual.controle.signal,
             }).catch((erro) => console.warn("[gesto da conversa]", erro));
           };
-          void dizer(r.texto, [{ trecho: "", aoChegar: desenhar }]);
-        } else void dizer(r.texto);
+          void dizer(r.texto, [{ trecho: "", aoChegar: desenhar }], { origem: "resposta", aoTocar: marcarRespostaComoAtual });
+        } else void dizer(r.texto, undefined, { origem: "resposta", aoTocar: marcarRespostaComoAtual });
         // Até começar a tocar, uma fala nova do candidato pode substituir esta resposta (lib/audio/filaFalas.ts).
-        versaoRespostaConversa.current = versaoDaFala.current;
+        // Se ela esperou na fila, a versão só é dela quando começa a tocar (aoTocar); até lá a fila é que a retira.
+        if (!foiParaAFila.current) marcarRespostaComoAtual();
         mensagensNaoOuvidas.current.push(novas[novas.length - 1].id);
       }
       setMensagens((m) => [...m, ...novas]);
@@ -863,7 +924,7 @@ export function useEntrevista(
       }
       return { requisito: r.responder ? r.requisito : null };
     },
-    [sessao, quadro, cursor, registrar, dizer, terminarResposta, agendarFimDaResposta, enviar, limparVisualDaConversa],
+    [sessao, quadro, cursor, registrar, dizer, registrarDescartes, terminarResposta, agendarFimDaResposta, enviar, limparVisualDaConversa],
   );
   /** A resposta do Totti à última fala ainda não começou a tocar (sendo sintetizada ou esperando a vez). */
   const respostaNaoOuvida = useCallback(
@@ -871,8 +932,10 @@ export function useEntrevista(
     [],
   );
   const descartarRespostaNaoOuvida = useCallback(() => {
+    // A resposta que ainda espera a fala atual terminar também é "não ouvida": sai da fila.
+    registrarDescartes(filaDoAgente.current.remover((i) => i.origem === "resposta", "substituida"));
     if (respostaNaoOuvida()) silenciar();
-  }, [respostaNaoOuvida, silenciar]);
+  }, [respostaNaoOuvida, silenciar, registrarDescartes]);
   const registrarFalaParcial = useCallback((texto: string) => {
     falaParcial.current = !!texto.trim();
     if (texto.trim()) {
