@@ -254,6 +254,32 @@ describe("POST /api/sessoes/[id]/perguntar", () => {
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /Como funciona a leitura/);
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /100 leituras/);
   });
+  it("aceita o que o cliente do quadro envia: foto, mudanças e conversa do quadro chegam ao modelo", async () => {
+    const { sessao_id } = await novaSessao();
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei.", requisito: null }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const foto = "data:image/jpeg;base64," + "A".repeat(200_000);
+    const conversa = Array.from({ length: 20 }, (_, i) => ({ quem: i % 2 ? "agente" : "candidato", texto: `fala ${i}` }));
+    const r = await perguntarPost(post("/x", {
+      sessao_id, fase: "ALTO_NIVEL", texto: "Olha isso", grafo: GRAFO,
+      imagem_base64: foto, mudancas: "+ adicionou [r9] Fila " + "x".repeat(9000), conversa_do_quadro: conversa,
+    }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.equal(llm.chamadas[0].imagem, foto);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /adicionou \[r9\] Fila/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /fala 19/);
+  });
+  it("foto grande demais é descartada, não derruba a fala nem a análise", async () => {
+    const { sessao_id } = await novaSessao();
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei.", requisito: null }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const enorme = "data:image/jpeg;base64," + "A".repeat(600_000);
+    const r = await perguntarPost(post("/x", { sessao_id, fase: "ALTO_NIVEL", texto: "Olha isso", imagem_base64: enorme }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.equal(llm.chamadas[0].imagem ?? null, null);
+    const a = await analisarPost(post("/x", pedido(sessao_id, { imagem_base64: enorme })), params(sessao_id));
+    assert.equal(a.status, 200);
+  });
   it("falha do modelo devolve erro recuperável em vez de silêncio deliberado", async () => {
     const { sessao_id } = await novaSessao();
     definirContextoParaTestes({ repositorio: repo, llm: criarClienteFalso([new Error("indisponível")]), agora: () => relogio });

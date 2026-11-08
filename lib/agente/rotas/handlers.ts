@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { findConfig } from "@/lib/config/store";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
+import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, respostaSilencio } from "../analisar";
@@ -19,6 +20,7 @@ import { perguntar } from "../perguntar";
 import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
+  EsquemaImagemOpcional,
   EsquemaFase,
   EsquemaPedidoAnalise,
   type PedidoAnalise,
@@ -68,7 +70,9 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   // O plano da vaga (se vier) escolhe o kit e calibra a entrevista; config desconhecida cai na entrevista padrão.
   const encontrada = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
   // Regras ativas da vaga no começo da sessão (só as aprendidas nesta vaga): o entrevistador e o scorecard
-  // usam (ver `lib/squad-memory/config.ts`).
+  // usam (ver `lib/squad-memory/config.ts`). Na Vercel cada lambda tem o próprio Map: hidrata do banco antes,
+  // senão a sessão pode nascer sem as regras salvas em outra instância (a função não lança e tem cache curto).
+  if (encontrada) await hidratarSquadMemory();
   const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
   const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;
@@ -142,7 +146,7 @@ const EsquemaPedidoLimitado = EsquemaPedidoAnalise.extend({
     .max(40),
   perguntas_feitas: z.number().int().min(0).max(1000),
   imagem_url: z.string().max(2048).nullable(),
-  imagem_base64: z.string().max(500_000).nullable().optional(),
+  imagem_base64: EsquemaImagemOpcional,
 });
 
 /** Leva o estado do servidor até a fase que o quadro informou (só avança), por evento da máquina. */
@@ -263,11 +267,15 @@ const EsquemaPerguntar = z.object({
   requisitos: z.array(z.string().max(200)).max(30).optional(),
   gestos_recentes: z.array(z.string().max(250)).max(6).optional(),
   /** Foto leve do quadro (data URL JPEG). */
-  imagem_base64: z.string().max(500_000).nullable().optional(),
+  imagem_base64: EsquemaImagemOpcional,
   /** O que acabou de mudar no desenho. */
-  mudancas: z.string().max(8000).optional(),
+  // Texto longo é cortado, não recusado: perder a fala do candidato por causa do contexto seria pior.
+  mudancas: z.string().transform((v) => v.slice(0, 8000)).optional(),
   /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
-  conversa_do_quadro: z.array(EsquemaFalaRecente.extend({ texto: z.string().max(4000) })).max(30).optional(),
+  conversa_do_quadro: z
+    .array(EsquemaFalaRecente.extend({ texto: z.string().transform((v) => v.slice(0, 4000)) }))
+    .transform((v) => v.slice(-30))
+    .optional(),
 });
 
 /** Corpo do /perguntar: a foto do quadro não cabe no limite padrão. */
