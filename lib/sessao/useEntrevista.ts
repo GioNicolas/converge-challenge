@@ -522,8 +522,35 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const registrarAtividade = useCallback(() => {
     ultimaAtividade.current = Date.now();
   }, []);
+  /** Transcrição do candidato: o parcial vai para a legenda (e conta como atividade); a frase final segue o mesmo caminho do texto digitado. */
+  const [parcialDoCandidato, setParcialDoCandidatoBruto] = useState("");
+  const setParcialDoCandidato = useCallback((texto: string) => {
+    if (texto.trim()) ultimaAtividade.current = Date.now();
+    setParcialDoCandidatoBruto(texto);
+  }, []);
+  /**
+   * Frase final transcrita da voz do candidato. Com uma pergunta (plin) ativa ela só entra na conversa:
+   * quem encerra a resposta é o silêncio (useFimPorSilencio), pois a fala chega em vários pedaços.
+   * Sem plin ativo, vai ao /perguntar como o texto digitado (responde, escreve requisito, conta como atividade).
+   * Devolve o requisito combinado, se houver, para quem escreve no quadro.
+   */
+  const falaDoCandidato = useCallback(
+    async (texto: string): Promise<{ requisito: string | null }> => {
+      const limpo = texto.trim();
+      if (!limpo) return { requisito: null };
+      ultimaAtividade.current = Date.now();
+      if (estadoAtual.current.plin === "PERGUNTA_ATIVA") {
+        conversa.current.push({ quem: "candidato", texto: limpo });
+        registrar("fala", { quem: "candidato", texto: limpo });
+        return { requisito: null };
+      }
+      return enviarTexto(limpo);
+    },
+    [enviarTexto, registrar],
+  );
   const encerrar = useCallback(() => {
     silenciar();
+    setParcialDoCandidato("");
     enviar({ tipo: "ENCERRAR" });
     // Entrevista encerrada: o desenho salvo localmente não é mais necessário (a prova fica no servidor).
     try {
@@ -546,5 +573,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     enviarTexto,
     registrarAtividade,
     encerrar,
+    parcialDoCandidato,
+    setParcialDoCandidato,
+    falaDoCandidato,
   };
 }

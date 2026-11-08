@@ -13,6 +13,7 @@ import { POST as perguntarPost } from "../sessoes/[id]/perguntar/route";
 import { POST as eventosPost } from "../sessoes/[id]/eventos/route";
 import { POST as imagemPost } from "../sessoes/[id]/imagens/route";
 import { GET as imagemGet } from "../sessoes/[id]/imagens/[n]/route";
+import { NextRequest } from "next/server";
 import { POST as falarPost } from "../falar/route";
 import { GET as sttGet } from "../stt-token/route";
 
@@ -327,13 +328,18 @@ describe("imagens", () => {
   });
 });
 
-describe("voz (stubs)", () => {
-  it("/falar e /stt-token respondem 501 {erro}", async () => {
-    const a = await falarPost();
-    const b = await sttGet();
-    for (const r of [a, b]) {
-      assert.equal(r.status, 501);
-      assert.deepEqual(await r.json(), { erro: "voz ainda não implementada" });
+describe("voz e transcrição (sem chave do ElevenLabs)", () => {
+  it("/falar responde 501 e /stt-token responde 503, ambos com {erro}", async () => {
+    const chave = process.env.ELEVENLABS_API_KEY;
+    delete process.env.ELEVENLABS_API_KEY;
+    try {
+      const a = await falarPost(new NextRequest("http://localhost/api/falar", { method: "POST", body: JSON.stringify({ texto: "oi" }) }));
+      const b = await sttGet(new NextRequest("http://localhost/api/stt-token?sessao_id=s1"));
+      assert.equal(a.status, 501);
+      assert.equal(b.status, 503);
+      for (const r of [a, b]) assert.equal(typeof (await r.json()).erro, "string");
+    } finally {
+      if (chave !== undefined) process.env.ELEVENLABS_API_KEY = chave;
     }
   });
 });

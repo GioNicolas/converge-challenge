@@ -15,6 +15,7 @@ import { useEntrevista } from "@/lib/sessao/useEntrevista";
 import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
+import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
@@ -138,6 +139,34 @@ export default function SalaEntrevista() {
     aoTerminar: entrevista.terminarResposta,
   });
 
+  // Frase final da voz do candidato: mesmo caminho do texto digitado (o cérebro responde; o requisito vai ao quadro).
+  const { falaDoCandidato } = entrevista;
+  const { combinar: combinarRequisito } = demo;
+  const aoFalaTranscrita = useCallback(
+    (texto: string) => {
+      falaDoCandidato(texto).then(
+        ({ requisito }) => {
+          if (requisito) combinarRequisito(requisito);
+        },
+        (erro) => console.warn("[voz] a fala não chegou ao cérebro:", erro),
+      );
+    },
+    [falaDoCandidato, combinarRequisito],
+  );
+
+  // Transcrição da fala do candidato: pausa enquanto o agente fala e fora da entrevista.
+  useTranscricao({
+    stream: midia.stream,
+    ativo: midia.microfoneLigado && !entrevista.agenteFalando && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA",
+    sessaoId: sessao?.sessao_id ?? null,
+    aoParcial: entrevista.setParcialDoCandidato,
+    aoFinal: aoFalaTranscrita,
+  });
+  const legenda = entrevista.falaAtual
+    ?? (entrevista.parcialDoCandidato
+      ? { quem: "candidato" as const, texto: entrevista.parcialDoCandidato, ate: entrevista.parcialDoCandidato.length }
+      : null);
+
   function aoMudarDesenho(elementos: NonDeletedExcalidrawElement[]) {
     if (process.env.NODE_ENV === "development") {
       console.debug(`[quadro] ${elementos.length} elemento(s)`, elementos);
@@ -194,7 +223,7 @@ export default function SalaEntrevista() {
         />
       )}
 
-      <Legenda fala={entrevista.falaAtual} />
+      <Legenda fala={legenda} />
 
       {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
       {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
