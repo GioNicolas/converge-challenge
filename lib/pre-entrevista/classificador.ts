@@ -242,7 +242,7 @@ export function pesosDoFoco(scores: FocoSugerido[]): InterviewConfig["focus"] {
 }
 
 /**
- * Formato que o Jev sugeriu mas que não está disponível nesta versão vira o formato ativo (live coding). Sem a pergunta
+ * Só com a trava desligada (`SYSTEM_DESIGN_ATIVO = false`): formato que o Jev sugeriu e que não está disponível vira o formato ativo (live coding). Sem a pergunta
  * de formato, porque ele já está decidido. A classificação original continua com o Jev (quem chama guarda no log). Função pura.
  */
 export function classificacaoDoFormatoAtivo(c: Classificacao): Classificacao {

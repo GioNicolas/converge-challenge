@@ -4,8 +4,8 @@
  * Ordem fixa, e cada parte só aparece se houver conteúdo. Quando há, usa as palavras dela: o trecho do critério,
  * a frase do eliminatório, a frase do tom e das dicas. Sem o modelo: o mesmo estado sempre gera o mesmo texto.
  */
-import type { FocusArea } from "@/lib/contracts";
-import { NOME_AREA_FALA } from "./cobertura";
+import type { FocusArea, InterviewMode } from "@/lib/contracts";
+import { nomeAreaFala } from "./cobertura";
 import { normalizarTexto, RE_CONTEXTO, RE_REQUISITO, RE_TOM } from "./frases";
 import type { Preferencias } from "./preferencias";
 import { listar } from "./rascunho";
@@ -14,6 +14,8 @@ import { listar } from "./rascunho";
 export const ENFASE_CENTRAL = 2.5;
 
 export interface EntradaGuia {
+  /** Formato da entrevista: muda o nome da área técnica (ver `nomeAreaFala`). */
+  mode?: InterviewMode;
   /** Áreas que estão no foco. */
   focus: FocusArea[];
   /** Ênfase final de cada área no foco (0 a 3). */
@@ -45,7 +47,7 @@ export function montarGuia(e: EntradaGuia): string {
     partes.push(`O que mais importa: ${e.frasesImportantes.slice(0, 2).map(citar).join("; ")}.`);
   } else {
     const ordenadas = [...e.focus].sort((a, b) => (e.enfase[b] ?? 0) - (e.enfase[a] ?? 0));
-    if (ordenadas.length) partes.push(`O que mais importa: ${NOME_AREA_FALA[ordenadas[0]]}.`);
+    if (ordenadas.length) partes.push(`O que mais importa: ${nomeAreaFala(ordenadas[0], e.mode)}.`);
   }
 
   if (e.eliminatorios.length) partes.push(`Eliminatório: ${e.eliminatorios.slice(0, 2).map(citar).join("; ")}.`);
@@ -56,7 +58,7 @@ export function montarGuia(e: EntradaGuia): string {
     return enfase >= 0.5 && enfase < 1.5;
   });
   const menos = [...new Set([...menosNoFoco, ...e.dispensadas])];
-  if (menos.length) partes.push(`Menos importante: ${listar(menos.map((a) => NOME_AREA_FALA[a]))}.`);
+  if (menos.length) partes.push(`Menos importante: ${listar(menos.map((a) => nomeAreaFala(a, e.mode)))}.`);
 
   // Tom e dicas: a citação de tom só vale com uma palavra de tom (amigável, tranquilo, desafiador…).
   const tomTxt = e.tom === "desafiador" ? "desafiador" : "amigável";
