@@ -49,6 +49,8 @@ O Nícolas decide a ordem. Abaixo, uma sugestão de prioridade pelo impacto na d
 
 **F1 concluída** (07/11/2026): requisito muda e caso novo, um empecilho por questão com testes reais, evento `empecilho` na linha do tempo com o conceito que exige (base para a F2) e nota de adaptação no relatório. Ficou para depois: o tempo cortado.
 
+**F1 no quadro** (08/11/2026): o empecilho também existe na entrevista de system design. No meio da entrevista (metade da visão geral em diante, ou no aprofundamento enquanto sobra tempo), com pelo menos 3 peças no quadro, numa pausa do candidato e 20 s depois da última fala do Totti, ele traz UMA mudança pronta do kit (`Problema.empecilho` em `lib/agente/kits/`, uma por problema: volume 10x no encurtador, grupos de 100 mil no chat, sistema externo fora do ar nos pagamentos, orçamento cortado pela metade no chatbot). Fala a mudança, escreve no quadro como requisito novo ("Mudança: ...") e o evento `empecilho` fica na linha do tempo. A análise passa a acompanhar a adaptação e o relatório ganha o bloco "Como se adaptou", com nota de 1 a 4 fora da nota geral, provas só de falas depois da mudança e quantas versões novas do desenho vieram depois. Rota: `POST /api/sessoes/[id]/empecilho`; botão "Forçar empecilho" só fora de produção.
+
 **F2 concluída** (07/11/2026): seção "Aprendizado" no relatório (`Report.learning`, fora da nota geral). Mede pelos eventos quando ele travou (execuções seguidas falhando sem avanço ou 2 min parado com o código falhando), que dica recebeu, quanto levou para destravar e a reação à mudança (tempo até adaptar, tentativas, dicas e o conceito). O LLM só julga como ele usou a ajuda.
 
 **F3 concluída** (07/11/2026): o relatório (`/report`) abre com o gráfico "Como foi a entrevista": quanto dos testes passava a cada execução, com os acontecimentos escritos em cima (travou, dica, mudança, adaptou). Embaixo, as notas em barras. Clicar num acontecimento, numa nota ou numa prova abre o código naquele minuto (com as linhas que ele tinha acabado de escrever marcadas) e a conversa em volta, com uma régua para andar pela entrevista. A gravação da sessão (`Gravacao` em `lib/contracts.ts`) fica salva junto com o relatório.
@@ -82,6 +84,8 @@ Atualizar a cada frente concluída. Cada item diz o que mostrar, a frase de palc
 - O gráfico conta a entrevista sem legenda: "Travou por 2 min" → "Dica 1 → destravou em 50 s" → "Mudança" → "Adaptou em 1 min 50 s".
 - Clicar em "Travou" ou numa nota abre o código daquele minuto e o que foi falado. É a prova.
 - Adaptação e Aprendizado têm nota própria, fora da nota geral: não punem quem pediu ajuda, mostram como usou.
+
+**No quadro (system design, ~40 s):** com o desenho montado, o Totti diz "uma mudança no problema: o volume cresceu dez vezes..." e escreve "Mudança: volume 10x" na lista de requisitos. O candidato mexe no desenho; no relatório aparece "Como se adaptou", com as falas dele depois da mudança. Para a demo, "Forçar empecilho" solta na hora.
 
 **Frases de palco:**
 - "A gente não para no 'acertou ou errou'. Mudamos o problema no meio, como acontece no trabalho, e medimos quanto tempo ele leva para se adaptar."

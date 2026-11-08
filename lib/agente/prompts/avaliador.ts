@@ -120,6 +120,17 @@ function tempoRestante(estado: EstadoSessao, agora: number): string {
   return `${min} min ${seg} s restantes na fase`;
 }
 
+/** A mudança no problema já anunciada: a partir dela, a análise acompanha a adaptação. */
+function blocoDoEmpecilho(estado: EstadoSessao, agora: number): string {
+  const e = estado.empecilho;
+  if (!e) return "";
+  const ha = Math.max(0, Math.round((agora - e.anunciadoEm) / 1000));
+  return `MUDANÇA NO PROBLEMA (você anunciou há ${ha} s; vale daqui pra frente): ${JSON.stringify(e.fala)}
+O que ela pede do desenho (só para você; nunca diga nem sugira): ${e.exige}
+Acompanhe como o candidato se adapta: se ele revisa o desenho onde a mudança pega, ignora a mudança ou recomeça do zero. Registre isso nas observações do critério mais ligado, com a evidência começando por "Após a mudança:". Não repita a mudança nem dê a solução; se ele ignorar a mudança, uma pergunta curta sobre o efeito dela no desenho é válida.
+`;
+}
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -152,7 +163,7 @@ Candidato sem mexer no desenho nem falar há: ${
   }
 Requisitos já combinados no quadro: ${pedido.requisitos?.length ? pedido.requisitos.join(" | ") : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
-${bloqueio ? `Atenção: um plin NÃO pode ser levantado agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Um plin pode ser levantado agora, se houver motivo."}
+${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: um plin NÃO pode ser levantado agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Um plin pode ser levantado agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
 

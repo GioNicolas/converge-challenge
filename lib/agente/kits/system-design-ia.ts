@@ -75,6 +75,15 @@ export const KIT_SYSTEM_DESIGN_IA: Kit = {
         "E se o provedor do modelo ficar fora do ar ou estourar o limite?",
         "Quanto isso custa por mês, e como você baixaria esse custo?",
       ],
+      empecilho: {
+        id: "chatbot_orcamento_metade",
+        tipo: "restricao_nova",
+        fala:
+          "Uma mudança no problema: o orçamento mensal do provedor do modelo foi cortado pela metade, e o volume de conversas continua o mesmo. Olhando o caminho de uma pergunta no seu desenho, onde você mexe primeiro?",
+        requisito: "Mudança: orçamento do provedor caiu 50%",
+        exige:
+          "Reduzir custo por conversa sem perder qualidade: cache de respostas frequentes, menos contexto por chamada (recuperação mais precisa), modelo menor para casos simples, limite de tamanho da resposta e medir o impacto na qualidade.",
+      },
     },
   ],
 };

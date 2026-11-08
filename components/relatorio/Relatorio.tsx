@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Icone from "@/components/quadro/Icone";
 import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
-import type { CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
+import type { AdaptacaoVista, CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
 import type { Recomendacao } from "@/lib/agente/scorecard";
 
 const CURVA = [0.32, 0.72, 0, 1] as const;
@@ -147,6 +147,47 @@ function Criterio({ c, ordem, aoAbrirImagem }: { c: CriterioVisto; ordem: number
           </ul>
         )}
       </article>
+    </Surgir>
+  );
+}
+
+const vezes = (n: number, um: string, varios: string) => (n === 1 ? `1 ${um}` : `${n} ${varios}`);
+
+/** A mudança que o Totti trouxe no meio da entrevista e como o candidato reagiu. Nota à parte da geral. */
+function Adaptacao({ a, ordem, aoAbrirImagem }: { a: AdaptacaoVista; ordem: number; aoAbrirImagem: (url: string) => void }) {
+  return (
+    <Surgir ordem={ordem}>
+      <section className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao">
+        <header className="flex items-start justify-between gap-6">
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-medium text-texto-suave">
+              Mudança no problema{a.momento ? `, aos ${a.momento}` : ""}
+            </p>
+            <h3 className="text-lg font-semibold tracking-tight">Como se adaptou</h3>
+            {a.significado && <p className="text-sm text-texto-suave">{a.significado}</p>}
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1">
+            {a.nota === null ? (
+              <span className="text-sm text-texto-suave">Sem nota</span>
+            ) : (
+              <span className="text-sm font-medium tabular-nums">{a.nota} de 4</span>
+            )}
+            <Escala nota={a.nota} />
+          </div>
+        </header>
+        <p className="w-fit rounded-pequeno bg-superficie-2 px-3 py-1.5 text-sm">{a.mudanca}</p>
+        <p className="leading-relaxed text-texto">{a.justificativa}</p>
+        <p className="text-sm text-texto-suave">
+          Depois da mudança: {vezes(a.falasDepois, "fala", "falas")} e {vezes(a.desenhosDepois, "versão nova do desenho", "versões novas do desenho")}. Esta nota fica fora da nota geral.
+        </p>
+        {a.provas.length > 0 && (
+          <ul className="flex flex-col gap-3.5 border-t border-borda pt-4">
+            {a.provas.map((p, i) => (
+              <Prova key={i} prova={p} aoAbrirImagem={aoAbrirImagem} />
+            ))}
+          </ul>
+        )}
+      </section>
     </Surgir>
   );
 }
@@ -350,6 +391,8 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
             </Surgir>
           )}
         </section>
+
+        {r.adaptacao && <Adaptacao a={r.adaptacao} ordem={6 + r.criterios.length} aoAbrirImagem={setImagem} />}
 
         <Surgir ordem={6 + r.criterios.length} className="grid gap-4 sm:grid-cols-2">
           <Lista titulo="Pontos fortes" icone="check" itens={r.pontosFortes} vazio="Nada que se destacou." />

@@ -132,6 +132,12 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       );
     }
   }, [demo.requisitos, quadro]);
+  // A mudança no problema (empecilho) entra como um requisito novo, escrito do mesmo jeito que os outros.
+  const { combinar: combinarRequisito } = demo;
+  const requisitoDaMudanca = entrevista.empecilho?.requisito;
+  useEffect(() => {
+    if (requisitoDaMudanca) combinarRequisito(requisitoDaMudanca);
+  }, [requisitoDaMudanca, combinarRequisito]);
   const [conversaAberta, setConversaAberta] = useState(false);
   const [confirmandoFim, setConfirmandoFim] = useState(false);
   const cancelarFim = useCallback(() => setConfirmandoFim(false), []);
@@ -281,6 +287,17 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           >
             Demo: combinar requisito
           </button>
+          {/* Só fora de produção (o servidor também recusa): solta a mudança no problema na hora. */}
+          {(process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_E2E === "1") && usarServidor() && (
+            <button
+              type="button"
+              onClick={entrevista.forcarEmpecilho}
+              disabled={entrevista.empecilho !== null || entrevista.forcandoEmpecilho}
+              className="rounded-full border border-borda bg-vidro px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[opacity,transform] duration-150 ease-suave outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95 disabled:opacity-40"
+            >
+              Forçar empecilho
+            </button>
+          )}
         </div>
       )}
 

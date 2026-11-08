@@ -86,4 +86,18 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
   provasConferidas: 7,
   ajustes: ["evidência de fala descartada em tradeoffs: citação não encontrada", "nota de tradeoffs removida: sem evidência"],
   demonstracao: true,
+  adaptacao: {
+    mudanca: "Mudança: volume 10x (1 bilhão de URLs/mês)",
+    momento: "18:40",
+    nota: 3,
+    significado: "Achou onde a mudança pega no desenho, ajustou essa parte e explicou o impacto",
+    justificativa:
+      "Foi direto ao banco: dividiu os links por faixa de código e acrescentou réplicas de leitura. Refez a conta do código curto, mas não revisou o que acontece com o cache com dez vezes mais acessos.",
+    provas: [
+      { tipo: "fala", momento: "19:05", texto: "Com dez vezes mais escrita, um banco só não aguenta: vou dividir os links pelo começo do código." },
+      { tipo: "fala", momento: "20:10", texto: "Sete caracteres ainda dão conta, são uns três trilhões de combinações." },
+    ],
+    desenhosDepois: 3,
+    falasDepois: 5,
+  },
 };

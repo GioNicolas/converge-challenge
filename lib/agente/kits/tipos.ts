@@ -33,7 +33,24 @@ export const Problema = z.object({
   armadilhas: z.array(z.string()),
   perguntasSugeridas: z.array(z.string()),
 });
-export type Problema = z.infer<typeof Problema>;
+/**
+ * Empecilho do quadro: no meio da entrevista o entrevistador traz UMA mudança no problema (um requisito muda,
+ * entra uma restrição nova ou cai uma parte do sistema). O conteúdo é escrito à mão, por problema, e nunca
+ * inventado pelo modelo. Fica fora do schema Zod de propósito: o gerador de kits (modo estrito, todo campo
+ * obrigatório) não deve ser forçado a criar um. Só servidor até ser anunciado.
+ */
+export type Empecilho = {
+  id: string;
+  tipo: "requisito_muda" | "restricao_nova" | "parte_cai";
+  /** O que o entrevistador fala, em pt-BR falado. Termina deixando a bola com o candidato. */
+  fala: string;
+  /** O que ele escreve no quadro, como requisito novo (até 50 caracteres). */
+  requisito: string;
+  /** O que a mudança pede do desenho (para a análise e o scorecard; nunca falado). */
+  exige: string;
+};
+
+export type Problema = z.infer<typeof Problema> & { empecilho?: Empecilho };
 
 export const TipoPergunta = z.object({ nome: z.string(), exemplo: z.string(), revela: z.string() });
 
@@ -51,4 +68,4 @@ export const Kit = z.object({
   termosTranscricao: z.array(z.string()),
   problemas: z.array(Problema).min(1),
 });
-export type Kit = z.infer<typeof Kit>;
+export type Kit = Omit<z.infer<typeof Kit>, "problemas"> & { problemas: Problema[] };

@@ -5,7 +5,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
-import { perguntar } from "@/lib/sessao/servidor";
+import { pedirEmpecilho, perguntar } from "@/lib/sessao/servidor";
+import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/sessao/turnos";
@@ -48,6 +49,10 @@ const SILENCIO_INICIAL_MS = SILENCIO_INICIAL_S * 1000;
 const REPETIR_SILENCIO_MS = SILENCIO_REPETIR_S * 1000;
 /** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
 const COR_ENUNCIADO = "#1e1e1e";
+/** Entre um pedido de mudança recusado pelo servidor e o próximo. */
+const INTERVALO_PEDIDO_EMPECILHO_MS = 15_000;
+/** Respostas do servidor que encerram as tentativas nesta sessão. */
+const MOTIVOS_DEFINITIVOS_EMPECILHO = ["problema sem mudança prevista", "já anunciado"];
 
 function redutor(estado: EstadoEntrevista, acao: Acao) {
   return transicionar(estado, acao.evento, acao.agora);
@@ -111,6 +116,8 @@ export function useEntrevista(
   const versaoDaFala = useRef(0);
   const cicloDaSala = useRef(0);
   const ultimaFalaEm = useRef(0);
+  /** Última vez que o agente começou ou terminou de falar (o empecilho espera um respiro). */
+  const ultimaFalaDoAgenteEm = useRef<number | null>(null);
   const falaParcial = useRef(false);
   const agenteFalandoRef = useRef(false);
   const pedidosEmAndamento = useRef(0);
@@ -130,6 +137,7 @@ export function useEntrevista(
 
   const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
     const versao = ++versaoDaFala.current;
+    ultimaFalaDoAgenteEm.current = Date.now();
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(false);
@@ -169,6 +177,7 @@ export function useEntrevista(
     if (marcas) await falarComMarcas(texto, marcas, aoProgresso, antesDeTocar);
     else await falar(texto, aoProgresso, antesDeTocar);
     if (versao !== versaoDaFala.current) return;
+    ultimaFalaDoAgenteEm.current = Date.now();
     setAgenteFalando(false);
     setPreparandoVoz(false);
     preparandoVozRef.current = false;
@@ -468,6 +477,69 @@ export function useEntrevista(
     return () => clearInterval(id);
   }, [estado.plin, estado.perguntaPendente, estado.pendenteDeDemo, enviar]);
 
+  // Mudança no problema (empecilho): no meio da entrevista, numa pausa do candidato, o agente traz UMA mudança
+  // pronta do kit, fala e escreve no quadro como requisito novo. O servidor confere a hora e registra na linha do tempo.
+  const [empecilho, setEmpecilho] = useState<{ requisito: string } | null>(null);
+  const empecilhoEmAndamento = useRef(false);
+  const empecilhoEncerrado = useRef(false);
+  const ultimoPedidoEmpecilho = useRef(0);
+  const [forcandoEmpecilho, setForcandoEmpecilho] = useState(false);
+  const pedirMudanca = useCallback(async (forcar: boolean) => {
+    if (!sessao || !quadro || empecilhoEmAndamento.current || empecilhoEncerrado.current) return;
+    const fase = estadoAtual.current.fase;
+    if (fase === "AGUARDANDO" || fase === "ENCERRADA") return;
+    empecilhoEmAndamento.current = true;
+    ultimoPedidoEmpecilho.current = Date.now();
+    if (forcar) setForcandoEmpecilho(true);
+    try {
+      const grafo = conversor.current.converter(quadro.api.getSceneElements()).texto.slice(0, 60_000);
+      const r = await pedirEmpecilho(sessao.sessao_id, { fase, grafo, ...(forcar ? { forcar: true } : {}) });
+      if (!r.empecilho) {
+        if (r.motivo && MOTIVOS_DEFINITIVOS_EMPECILHO.includes(r.motivo)) empecilhoEncerrado.current = true;
+        console.log("[empecilho] ainda não:", r.motivo);
+        return;
+      }
+      empecilhoEncerrado.current = true;
+      if (estadoAtual.current.fase === "ENCERRADA") return;
+      const { fala, requisito } = r.empecilho;
+      ultimaAtividade.current = Date.now();
+      revisaoDaConversa.current++;
+      conversa.current.push({ quem: "agente", texto: fala });
+      if (!requisitosCombinados.current.includes(requisito)) requisitosCombinados.current.push(requisito);
+      setMensagens((m) => [...m, { id: `empecilho-${++contadorDeMensagens.current}`, quem: "agente", texto: fala, horario: Date.now(), requisito }]);
+      setEmpecilho({ requisito });
+      void dizer(fala);
+    } catch (erro) {
+      console.warn("[empecilho] não foi possível pedir a mudança:", erro);
+    } finally {
+      empecilhoEmAndamento.current = false;
+      if (forcar) setForcandoEmpecilho(false);
+    }
+  }, [sessao, quadro, dizer]);
+  /** Demonstração (fora de produção): traz a mudança agora, sem esperar a hora certa. */
+  const forcarEmpecilho = useCallback(() => { void pedirMudanca(true); }, [pedirMudanca]);
+  useEffect(() => {
+    if (!usarServidor() || !sessao || !quadro) return;
+    const id = setInterval(() => {
+      if (empecilhoEncerrado.current || empecilhoEmAndamento.current) return;
+      if (Date.now() - ultimoPedidoEmpecilho.current < INTERVALO_PEDIDO_EMPECILHO_MS) return;
+      const e = estadoAtual.current;
+      const agora = Date.now();
+      // Sem cortar ninguém: pausa do candidato, agente quieto, nada pendente, nenhuma pergunta no ar.
+      if (e.plin !== "LIVRE" || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
+        falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
+        aguardandoResposta: pedidosEmAndamento.current > 0 })) return;
+      const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS: sessao.tempos[e.fase],
+        jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current };
+      // O grafo só é montado quando o resto já permite (é a parte cara da conta).
+      if (esperaDoEmpecilho({ ...base, componentes: Number.MAX_SAFE_INTEGER })) return;
+      const componentes = contarComponentes(conversor.current.converter(quadro.api.getSceneElements()).texto);
+      if (esperaDoEmpecilho({ ...base, componentes })) return;
+      void pedirMudanca(false);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [sessao, quadro, pedirMudanca]);
+
   // Despedida: ao encerrar (botão ou fim do tempo) o agente se despede, uma vez.
   const despedidaDita = useRef(false);
   useEffect(() => {
@@ -700,5 +772,8 @@ export function useEntrevista(
     enviarTexto,
     registrarAtividade,
     encerrar,
+    empecilho,
+    forcarEmpecilho,
+    forcandoEmpecilho,
   };
 }
