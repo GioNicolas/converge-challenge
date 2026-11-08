@@ -89,7 +89,7 @@ export function pcm16LE(amostras: Float32Array): Uint8Array {
 export function urlDoScribe(token: string): string {
   const parametros = new URLSearchParams({
     model_id: "scribe_v2_realtime", token, audio_format: "pcm_16000", language_code: "pt",
-    commit_strategy: "vad", vad_silence_threshold_secs: "1.5", include_timestamps: "false",
+    commit_strategy: "vad", vad_silence_threshold_secs: "0.9", include_timestamps: "false",
   });
   return `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${parametros}`;
 }

@@ -9,6 +9,7 @@ type ControleVozTeste = {
   autoTerminar: boolean;
   midias: MediaStream[];
   emitir: (texto: string) => void;
+  emitirParcial: (texto: string) => void;
   terminar: () => void;
 };
 type JanelaTeste = Window & { vozTeste: ControleVozTeste };
@@ -20,6 +21,7 @@ async function preparar(page: Page) {
     const controle: ControleVozTeste = {
       falas: [], ouvindo: false, falando: false, autoTerminar: true, midias: [],
       emitir: (texto) => reconhecimentos.findLast((r) => r.ativa)?.emitir(texto),
+      emitirParcial: (texto) => reconhecimentos.findLast((r) => r.ativa)?.emitir(texto, false),
       terminar: () => {
         const fala = atual;
         atual = null;
@@ -43,9 +45,9 @@ async function preparar(page: Page) {
       start() { reconhecimentos.push(this); this.ativa = true; controle.ouvindo = true; this.onstart?.(); }
       abort() { this.ativa = false; controle.ouvindo = false; this.onend?.(); }
       stop() { this.abort(); }
-      emitir(texto: string) {
+      emitir(texto: string, final = true) {
         const indice = this.resultados.length;
-        this.resultados.push({ isFinal: true, 0: { transcript: texto } });
+        this.resultados.push({ isFinal: final, 0: { transcript: texto } });
         this.onresult?.({ resultIndex: indice, results: this.resultados });
       }
     }
@@ -70,6 +72,14 @@ async function preparar(page: Page) {
 const ouvindo = (page: Page) => page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.ouvindo);
 const falas = (page: Page) => page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.falas);
 const emitir = (page: Page, texto: string) => page.evaluate((t) => (window as unknown as JanelaTeste).vozTeste.emitir(t), texto);
+
+async function cenaVisual(page: Page) {
+  return page.evaluate(() => {
+    type Elemento = { id: string; type: string; text?: string; x: number; y: number; width: number; height: number; isDeleted?: boolean; points?: [number, number][]; customData?: { autor?: string; grupo?: string } };
+    return (window as unknown as { quadro: { api: { getSceneElements(): Elemento[] } } }).quadro.api.getSceneElements()
+      .filter((e) => !e.isDeleted).map((e) => ({ id: e.id, tipo: e.type, texto: e.text, x: e.x, y: e.y, largura: e.width, altura: e.height, pontos: e.points, autor: e.customData?.autor, grupo: e.customData?.grupo }));
+  });
+}
 
 test("recrutadora dita a vaga e conversa com Totti sem repetir voz no polling", async ({ page }) => {
   await preparar(page);
@@ -156,4 +166,86 @@ test("quadro encaminha transcrição para a conversa da sessão", async ({ page 
   await expect(page.getByRole("heading", { name: "Entrevista encerrada" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.midias
     .flatMap((stream) => stream.getTracks()).every((trilha) => trilha.readyState === "ended"))).toBe(true);
+});
+
+test("quadro pergunta na pausa, responde no loop rápido e aguarda a continuação da fala", async ({ page }) => {
+  await preparar(page);
+  const pergunta = "Como o componente que você desenhou recebe uma solicitação?";
+  await page.route("**/analisar", (rota) => rota.fulfill({ json: {
+    status: "duvida", pergunta, nota: "Entrada de solicitações", elementos: [], degrau: null, observacoes: [],
+  } }));
+  let liberar: (() => void) | undefined;
+  const aguardar = new Promise<void>((resolver) => { liberar = resolver; });
+  const pedidos: { texto: string; grafo: string; pergunta_ativa?: string }[] = [];
+  await page.route("**/perguntar", async (rota) => {
+    pedidos.push(rota.request().postDataJSON());
+    if (pedidos.length === 1) await aguardar;
+    await rota.fulfill({ json: { responder: pedidos.length === 1, texto: pedidos.length === 1 ? "Você descreveu o caminho de entrada da solicitação." : "", requisito: null, concluiu: false } });
+  });
+  await page.goto("/entrevista/system-design");
+  await expect(page.getByText(/Quando terminar uma etapa ou quiser um comentário/)).toBeVisible();
+  await page.getByRole("button", { name: "Começar", exact: true }).click();
+  await expect(page.getByText("Requisitos", { exact: true })).toBeVisible({ timeout: 45000 });
+  expect((await falas(page)).some((f) => f.includes("é só me avisar"))).toBe(true);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await page.keyboard.press("r");
+  await page.mouse.move(650, 450);
+  await page.mouse.down();
+  await page.mouse.move(850, 560, { steps: 8 });
+  await page.mouse.up();
+  // Nenhum clique no plin: a pergunta deve ser falada automaticamente.
+  await expect.poll(() => falas(page), { timeout: 20000 }).toContain(pergunta);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "A solicitação entra neste componente pela API.");
+  await expect.poll(() => pedidos.length).toBe(1);
+  expect(pedidos[0].pergunta_ativa).toBe(pergunta);
+  expect(pedidos[0].grafo).toContain("COMPONENTES");
+  await expect(page.getByText("O agente está preparando a resposta…")).toBeVisible();
+  await page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.emitirParcial("E também vou explicar"));
+  const quantidadeAntes = (await falas(page)).length;
+  liberar!();
+  await expect(page.getByText("O agente está preparando a resposta…")).toBeHidden();
+  await page.waitForTimeout(1300);
+  expect((await falas(page)).length).toBe(quantidadeAntes);
+  await emitir(page, "E também vou explicar como autentico essa solicitação.");
+  await expect.poll(() => falas(page)).toContain("Você descreveu o caminho de entrada da solicitação.");
+  await expect.poll(() => pedidos.length).toBe(2);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+});
+
+test("mão compõe gestos e traços livres, pode só falar e preserva o desenho do candidato", async ({ page }) => {
+  await preparar(page);
+  await page.route("**/analisar", (rota) => rota.fulfill({ json: { status: "ok" } }));
+  const planos = [
+    [{ tipo: "colchetes", alvo: "r1" }, { tipo: "anotar", alvo: "r1", texto: "Como chega a solicitação?" }],
+    [{ tipo: "traco", alvo: "r1", pontos: [[0, 0.8], [0.4, 1], [1, 0.2]] }], [],
+  ];
+  let rodada = 0;
+  await page.route("**/perguntar", (rota) => rota.fulfill({ json: {
+    responder: true, texto: "Estou acompanhando a sua explicação.", requisito: null, concluiu: false, visual: planos[rodada++],
+  } }));
+  await page.goto("/entrevista/system-design");
+  await page.getByRole("button", { name: "Começar", exact: true }).click();
+  await expect(page.getByText("Requisitos", { exact: true })).toBeVisible({ timeout: 45000 });
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await page.getByRole("radio", { name: "Retângulo", exact: true }).check({ force: true });
+  await page.mouse.move(650, 450); await page.mouse.down();
+  await page.mouse.move(850, 560, { steps: 8 }); await page.mouse.up();
+  await expect.poll(async () => (await cenaVisual(page)).filter((e) => e.autor !== "agente").length).toBe(1);
+  const candidatoAntes = (await cenaVisual(page)).filter((e) => e.autor !== "agente");
+  const gestos = async () => (await cenaVisual(page)).filter((e) => e.grupo?.startsWith("conversa:"));
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "Pode destacar o componente?");
+  await expect.poll(async () => (await gestos()).length).toBe(3);
+  await expect.poll(async () => (await gestos()).some((e) => e.texto === "Como chega a solicitação?")).toBe(true);
+  await page.screenshot({ path: "test-results/gestos-no-quadro.png" });
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "Agora acompanhe este outro ponto.");
+  await expect.poll(async () => (await gestos()).length).toBe(1);
+  await expect.poll(async () => (await gestos())[0]?.pontos?.length).toBe(3);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "Agora vamos só conversar.");
+  await expect.poll(() => rodada).toBe(3);
+  await expect.poll(async () => (await gestos()).length).toBe(0);
+  expect((await cenaVisual(page)).filter((e) => e.autor !== "agente")).toEqual(candidatoAntes);
 });

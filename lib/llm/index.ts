@@ -352,6 +352,7 @@ export async function completeJson<T>(opts: {
       schema: opts.schema,
       maxTokens: opts.maxTokens ?? cfg.maxTokens,
       reasoningEffort: cfg.reasoningEffort,
+      priorizarLatencia: opts.role === "interviewer" || opts.role === "fast",
     },
     models: {
       featherless: process.env[cfg.featherlessEnv] || cfg.featherlessDefault,

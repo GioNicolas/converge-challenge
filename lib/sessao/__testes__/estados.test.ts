@@ -19,6 +19,13 @@ const duvida: RespostaAnalise = {
 };
 const ok: RespostaAnalise = { ...duvida, status: "ok", pergunta: null, nota: null, elementos: [] };
 
+test("nova fala cancela intervenção ainda não feita, preservando a pergunta já ativa", () => {
+  const pendente = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
+  assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU" }, 1).plin, "LIVRE");
+  const ativa = transicionar(pendente, { tipo: "PLIN_CLICADO" }, 1);
+  assert.equal(transicionar(ativa, { tipo: "CANDIDATO_CONTINUOU" }, 2).plin, "PERGUNTA_ATIVA");
+});
+
 function rodar(eventos: [EventoEntrevista, number][], inicio: EstadoEntrevista = estadoInicial()) {
   return eventos.reduce((e, [ev, t]) => transicionar(e, ev, t), inicio);
 }

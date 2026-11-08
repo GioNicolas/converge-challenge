@@ -10,7 +10,23 @@ Branch: `henrique-giorgio/voz-integrada`, baseada em `origin/sofia/coding-transc
 | Entrevista no quadro | Contínua, encaminhada à conversa da sessão | Mantém voz, legenda e movimentos; permite silenciar/interromper |
 | Páginas de desenvolvimento | Mesmos componentes de entrada | Mesma saída de voz |
 
-Na IDE e no quadro a captura pausa enquanto o agente prepara/reproduz a voz. Nos formulários, iniciar o microfone interrompe a reprodução. Ocultar a aba pausa a escuta; desmontar/encerrar cancela filas e invalida respostas atrasadas. No quadro, falhas de envio conservam a fala e as seguintes para tentar novamente em ordem.
+Na IDE a captura pausa enquanto o agente prepara/reproduz a voz. No quadro, a síntese prepara o áudio com a escuta ativa e confere o turno novamente antes de reproduzir; a captura pausa durante a reprodução. Nos formulários, iniciar o microfone interrompe a reprodução. Ocultar a aba pausa a escuta; desmontar/encerrar cancela filas e invalida respostas atrasadas. No quadro, falhas de envio conservam a fala e as seguintes para tentar novamente em ordem.
+
+## Conversa no quadro
+
+A abertura explica que o candidato pode avisar quando concluir uma etapa ou pedir um comentário sobre o desenho. Todas as falas, inclusive respostas às perguntas do agente, usam o loop rápido com o grafo atual, os requisitos combinados e a pergunta ativa. Pedidos de feedback recebem observações neutras e, quando pertinente, uma pergunta sobre o que está visível; notas, critérios internos e solução pronta continuam reservados ao processo de avaliação.
+
+Uma pergunta escolhida pela análise pode ser falada numa pausa de pelo menos 900 ms, sem clique obrigatório. Transcrição parcial, som de fala, resposta em andamento e áudio sendo preparado/reproduzido adiam a intervenção. A análise que ficou desatualizada por uma nova fala não inicia uma pergunta. O botão de demonstração continua manual. O Scribe finaliza os trechos após 0,9 s de silêncio, em vez de 1,5 s, conforme o parâmetro [VAD da ElevenLabs](https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/transcripts-and-commit-strategies). Esse valor controla a detecção de pausa; não garante o tempo total de resposta do LLM e TTS.
+
+O teste adicional `npx tsx --env-file-if-exists=.env.local scripts/validar-conversa.ts` usa o LLM real com seis situações sintéticas. Usa créditos, imprime somente respostas e tempos e verifica intenção de resposta/conclusão da etapa. O teste de navegador cobre intervenção automática, contexto da pergunta ativa e uma continuação parcial que impede a reprodução da resposta pronta.
+
+## Mão e desenhos do agente
+
+O campo opcional `visual` aceita composições de até cinco ações: apontar, sublinhar, circular, enquadrar, colchetes, percorrer, comparar, anotar e traço livre. O modelo escolhe as ações em `/analisar` e também nas respostas de `/perguntar`, na mesma chamada que prepara a fala. Os traços livres usam pontos relativos à região de um elemento; o navegador resolve as coordenadas reais. `visual: []` permite conversar sem acrescentar tinta.
+
+O histórico da sala evita repetir a mesma marca no mesmo alvo e informa os gestos recentes ao modelo. Respostas antigas sem esse campo usam gestos variados de apoio; um quadro sem alvo não recebe círculos ou caixas decorativas. Notas procuram espaço livre, e percorrer um fluxo só move o cursor, sem criar conexões técnicas. Ações com IDs inexistentes e planos inválidos são descartados sem perder a resposta falada. As marcas ficam em grupos temporários do agente e não alteram os elementos do candidato.
+
+O teste de navegador verifica colchetes com nota, um traço definido pelo modelo, uma resposta sem desenho e a preservação do desenho original. O smoke test real também exige um plano válido quando o candidato pede explicitamente um destaque.
 
 Ao encerrar o quadro, câmera, microfone e conexão de transcrição são liberados imediatamente. O teste de navegador confirma que as trilhas de mídia terminam.
 

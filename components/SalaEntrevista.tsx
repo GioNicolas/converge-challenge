@@ -178,6 +178,14 @@ export default function SalaEntrevista() {
   );
 
   const [parcialVoz, setParcialVoz] = useState("");
+  const { registrarSom, registrarFalaParcial } = entrevista;
+  useEffect(() => {
+    if (midia.microfoneLigado && midia.volume > 0.08) registrarSom();
+  }, [midia.microfoneLigado, midia.volume, registrarSom]);
+  const receberParcial = useCallback((texto: string) => {
+    setParcialVoz(texto);
+    registrarFalaParcial(texto);
+  }, [registrarFalaParcial]);
   const [falaPendente, setFalaPendente] = useState<string | null>(null);
   const enviarVozRef = useRef(enviarDigitado);
   enviarVozRef.current = enviarDigitado;
@@ -197,7 +205,7 @@ export default function SalaEntrevista() {
     sessaoId: sessao?.sessao_id ?? null,
     contexto: "quadro",
     servidor: usarServidor(),
-    aoParcial: setParcialVoz,
+    aoParcial: receberParcial,
     aoFinal: receberVoz,
   });
 
@@ -225,9 +233,10 @@ export default function SalaEntrevista() {
       )}
 
       <Legenda fala={entrevista.falaAtual} />
-      {estado.fase !== "ENCERRADA" && (parcialVoz || escuta.erro || falaPendente) && (
+      {estado.fase !== "ENCERRADA" && (parcialVoz || escuta.erro || falaPendente || entrevista.aguardandoResposta) && (
         <div role="status" className="absolute bottom-20 left-4 z-10 max-w-md rounded-padrao bg-superficie p-3 text-sm shadow-padrao">
           {parcialVoz && <p>{parcialVoz}</p>}
+          {entrevista.aguardandoResposta && !parcialVoz && <p>O agente está preparando a resposta…</p>}
           {escuta.erro && <p>{escuta.erro}</p>}
           {falaPendente && (
             <div>
@@ -343,7 +352,8 @@ export default function SalaEntrevista() {
                   <h1 className="text-2xl font-semibold tracking-tight">Pronto para começar?</h1>
                   <p className="leading-relaxed text-texto-suave">
                     O entrevistador vai apresentar o problema no quadro e acompanhar o seu desenho. Fale com
-                    ele sempre que quiser.
+                    ele sempre que quiser. Quando terminar uma etapa ou quiser um comentário sobre o desenho,
+                    é só avisar. O agente também pode fazer perguntas nas pausas da conversa.
                   </p>
                   <p className="text-sm leading-relaxed text-texto-suave">
                     Vamos pedir a câmera e o microfone. A sua câmera aparece só para você: não é gravada nem

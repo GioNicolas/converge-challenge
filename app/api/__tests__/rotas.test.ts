@@ -205,6 +205,34 @@ describe("POST /api/sessoes/[id]/analisar", () => {
 });
 
 describe("POST /api/sessoes/[id]/perguntar", () => {
+  it("entrega o plano visual junto da fala e remove alvos que não existem", async () => {
+    const { sessao_id } = await novaSessao();
+    const llm = criarClienteFalso([{ responder: true, texto: "Como funciona este fluxo?", requisito: null,
+      visual: [{ tipo: "colchetes", alvo: "e1" }, { tipo: "sublinhar", alvo: "inventado" }],
+    }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const r = await perguntarPost(post("/x", { sessao_id, fase: "ALTO_NIVEL", texto: "Pode destacar?", grafo: GRAFO, gestos_recentes: ["circular"] }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.deepEqual((await r.json()).visual, [{ tipo: "colchetes", alvo: "e1" }]);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /circular/);
+  });
+  it("repassa o contexto do quadro para a devolutiva rápida", async () => {
+    const { sessao_id } = await novaSessao();
+    const llm = criarClienteFalso([{ responder: true, texto: "Você ligou a API ao banco.", requisito: null }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const r = await perguntarPost(post("/x", { sessao_id, fase: "ALTO_NIVEL", texto: "Pode comentar?", grafo: GRAFO, pergunta_ativa: "Como funciona a leitura?", requisitos: ["100 leituras/s"] }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /Postgres/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /Como funciona a leitura/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /100 leituras/);
+  });
+  it("falha do modelo devolve erro recuperável em vez de silêncio deliberado", async () => {
+    const { sessao_id } = await novaSessao();
+    definirContextoParaTestes({ repositorio: repo, llm: criarClienteFalso([new Error("indisponível")]), agora: () => relogio });
+    const r = await perguntarPost(post("/x", { sessao_id, fase: "REQUISITOS", texto: "Qual a escala?" }), params(sessao_id));
+    assert.equal(r.status, 503);
+    assert.equal((await repo.obter(sessao_id))!.estado.conversa.length, 0);
+  });
   it("responde no formato do contrato e guarda a conversa", async () => {
     const { sessao_id } = await novaSessao();
     const r = await perguntarPost(

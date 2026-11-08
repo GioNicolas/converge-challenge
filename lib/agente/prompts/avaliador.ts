@@ -3,6 +3,7 @@
 // - DINÂMICO: fase, tempo, grafo, mudanças, conversa e o estado do cérebro.
 // Tudo aqui é só servidor: a ficha, a rubrica e os motivos nunca vão ao navegador.
 import type { Kit, Problema } from "../kits/tipos";
+import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import { criteriosSemEvidencia, type EstadoSessao } from "../sessao/estado";
 import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitido } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
@@ -75,6 +76,8 @@ ${TABELA_ACOES}
 
 ${NOTACAO_GRAFO}
 
+${INSTRUCOES_VISUAIS}
+
 PROBLEMA
 ${problema.enunciado}
 
@@ -95,6 +98,7 @@ ${tipos}
 Escolha no máximo 1 ou 2 áreas para aprofundar. Critérios de escolha: armadilhas presentes no desenho, critérios da rubrica sem evidência e o nível da vaga. Não tente cobrir tudo.
 
 REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
+- "visual": composição dos gestos descritos acima, ou [] para só falar. Não precisa decorar toda pergunta com uma marca.
 - "status": um de ${STATUS_ANALISE.map((s) => `"${s}"`).join(", ")}.
 - "pergunta": para status diferente de "ok", a fala do entrevistador, em pt-BR, natural e clara (princípio 11): no máximo duas frases curtas, a primeira dizendo o que você vê ou quer entender e por que importa para o cargo, a segunda com UMA pergunta concreta (com as opções, se for uma escolha). Sem elogio, sem dizer se está certo ou errado. Para "ok", null.
 - "nota": versão escrita no quadro, no máximo 40 caracteres (ex.: "Prazo: e se atrasar?"), coerente com a pergunta e com os elementos circulados. Para "ok", null.
@@ -164,6 +168,7 @@ CONVERSA RECENTE (só as linhas "Candidato:" são falas dele; cite apenas o que 
 ${conversa}
 
 GRAFO ATUAL (dados do candidato)
+Gestos recentes (não repetir sem motivo): ${JSON.stringify(pedido.gestos_recentes ?? [])}
 <grafo>
 ${pedido.grafo}
 </grafo>`;

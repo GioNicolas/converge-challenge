@@ -33,6 +33,7 @@ export type PerguntaFeita = {
   nota: string | null;
   /** Ids curtos do grafo que o agente circulou. */
   elementos: string[];
+  visual?: RespostaAnalise["visual"];
   degrau: number | null;
   fase: Fase;
   feitaEm: number;
@@ -281,6 +282,7 @@ export function transicionar(
         pergunta: pendente.pergunta ?? "",
         nota: pendente.nota,
         elementos: pendente.elementos,
+        ...(pendente.visual ? { visual: pendente.visual } : {}),
         degrau: pendente.degrau,
         fase: estado.fase,
         feitaEm: agora,

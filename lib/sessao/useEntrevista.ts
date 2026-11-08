@@ -8,6 +8,8 @@ import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import { perguntar } from "@/lib/sessao/servidor";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
+import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/sessao/turnos";
+import { criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {
   analisar,
@@ -99,43 +101,91 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
   const fimDaLegenda = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versaoDaFala = useRef(0);
   const cicloDaSala = useRef(0);
+  const ultimaFalaEm = useRef(0);
+  const falaParcial = useRef(false);
+  const agenteFalandoRef = useRef(false);
+  const pedidosEmAndamento = useRef(0);
+  const revisaoDaConversa = useRef(0);
+  const [aguardandoResposta, setAguardandoResposta] = useState(false);
+  const [preparandoVoz, setPreparandoVoz] = useState(false);
+  const preparandoVozRef = useRef(false);
+  const memoriaVisual = useRef(criarMemoriaVisual());
+  const visualDaConversa = useRef<{ quadro: Quadro; grupo: string; controle: AbortController; tarefa?: Promise<void> } | null>(null);
+  const limparVisualDaConversa = useCallback(() => {
+    const atual = visualDaConversa.current;
+    visualDaConversa.current = null;
+    if (!atual) return;
+    atual.controle.abort();
+    void (atual.tarefa ?? Promise.resolve()).then(() => atual.quadro.agente.apagarGrupo(atual.grupo));
+  }, []);
 
   const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
     const versao = ++versaoDaFala.current;
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     setFalaAtual({ quem: "agente", texto, ate: 0 });
-    setAgenteFalando(true);
+    setAgenteFalando(false);
+    agenteFalandoRef.current = false;
     linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
     if (!vozHabilitadaRef.current) {
+      setPreparandoVoz(false);
+      preparandoVozRef.current = false;
       marcas?.forEach((marca) => marca.aoChegar());
       setAgenteFalando(false);
+      agenteFalandoRef.current = false;
       setFalaAtual({ quem: "agente", texto, ate: texto.length });
       fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 8000);
       return;
     }
+    setPreparandoVoz(true);
+    preparandoVozRef.current = true;
+    // Sintetize enquanto a escuta segue ativa; confira o turno só antes de reproduzir.
+    const antesDeTocar = async () => {
+      const esperandoDesde = Date.now();
+      while (estadoAtual.current.fase !== "APRESENTACAO" && estadoAtual.current.fase !== "ENCERRADA"
+        && deveAguardarParaFalar({ agora: Date.now(), esperandoDesde, ultimaFalaEm: ultimaFalaEm.current, falaParcial: falaParcial.current })) {
+        await new Promise<void>((resolver) => setTimeout(resolver, 100));
+        if (versao !== versaoDaFala.current) return false;
+      }
+      if (versao !== versaoDaFala.current) return false;
+      setPreparandoVoz(false);
+      preparandoVozRef.current = false;
+      setAgenteFalando(true);
+      agenteFalandoRef.current = true;
+      return true;
+    };
     const aoProgresso = (ate: number) => {
       if (versao !== versaoDaFala.current) return;
       setFalaAtual((atual) => (versao === versaoDaFala.current && atual && atual.texto === texto && atual.ate !== ate ? { ...atual, ate } : atual));
     };
-    if (marcas) await falarComMarcas(texto, marcas, aoProgresso);
-    else await falar(texto, aoProgresso);
+    if (marcas) await falarComMarcas(texto, marcas, aoProgresso, antesDeTocar);
+    else await falar(texto, aoProgresso, antesDeTocar);
     if (versao !== versaoDaFala.current) return;
     setAgenteFalando(false);
+    setPreparandoVoz(false);
+    preparandoVozRef.current = false;
+    agenteFalandoRef.current = false;
     // A legenda fica um pouco depois da voz, para dar tempo de terminar de ler.
     fimDaLegenda.current = setTimeout(() => setFalaAtual(null), 1800);
   }, []);
 
   const silenciar = useCallback(() => {
+    limparVisualDaConversa();
     versaoDaFala.current++;
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     calar();
     setAgenteFalando(false);
+    setPreparandoVoz(false);
+    preparandoVozRef.current = false;
+    agenteFalandoRef.current = false;
     setFalaAtual(null);
-  }, []);
+  }, [limparVisualDaConversa]);
   const alternarVoz = useCallback(() => {
     vozHabilitadaRef.current = !vozHabilitadaRef.current;
     setVozHabilitada(vozHabilitadaRef.current);
     if (!vozHabilitadaRef.current) silenciar();
+  }, [silenciar]);
+  const silenciarSeAtual = useCallback((versao: number) => {
+    if (versaoDaFala.current === versao) silenciar();
   }, [silenciar]);
 
   useEffect(() => () => {
@@ -143,7 +193,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     versaoDaFala.current++;
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     calar();
-  }, []);
+    limparVisualDaConversa();
+  }, [limparVisualDaConversa]);
 
   const conversor = useRef(criarConversor());
   const ultimoInstantaneo = useRef<Instantaneo | null>(null);
@@ -207,9 +258,14 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     if (!quadro || !sessao) return;
     let ativo = true;
     const imagens = new WeakMap<PedidoAnalise, Promise<string | null>>();
+    let falaAoAnalisar = 0;
+    let conversaAoAnalisar = 0;
     const g = criarGatilho({
-      podeAnalisar: () => podeAnalisar(estadoAtual.current),
+      podeAnalisar: () => podeAnalisar(estadoAtual.current) && !falaParcial.current
+        && !agenteFalandoRef.current && !preparandoVozRef.current && pedidosEmAndamento.current === 0,
       montarPedido: (forcar) => {
+        falaAoAnalisar = ultimaFalaEm.current;
+        conversaAoAnalisar = revisaoDaConversa.current;
         const elementos = quadro.api.getSceneElements();
         const r = conversor.current.converter(elementos);
         if (!forcar && !houveMudancaRelevante(ultimoInstantaneo.current, r.instantaneo)) return null;
@@ -225,6 +281,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
           imagem_url: null,
           parado_ha_s: Math.round((Date.now() - ultimaAtividade.current) / 1000),
           requisitos: requisitosCombinados.current.slice(-30),
+          gestos_recentes: resumirGestosRecentes(memoriaVisual.current),
         };
         console.log("[análise] pedido", pedido);
         if (mudancas) {
@@ -275,6 +332,9 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         const resposta = { ...bruta, elementos: bruta.elementos.filter((c) => conversor.current.idReal(c)) };
         console.log("[análise] resposta", resposta);
         registrar("analise", resposta);
+        // A pessoa continuou a explicação: uma intervenção calculada antes disso ficou velha.
+        if (ultimaFalaEm.current > falaAoAnalisar || revisaoDaConversa.current !== conversaAoAnalisar
+          || pedidosEmAndamento.current > 0) return;
         enviar({ tipo: "ANALISE_RECEBIDA", resposta });
       },
       aoErro: (erro) => console.warn("[análise] ignorada:", erro),
@@ -301,7 +361,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     (async () => {
       const { titulo, enunciado } = sessao.problema;
       // O que se ESCREVE no quadro é o enunciado; o que se FALA é a fala natural do desafio (ver falaDoDesafio.ts).
-      const falaDoDesafio = montarFalaDoDesafio(sessao.problema);
+      const falaDoDesafio = `${montarFalaDoDesafio(sessao.problema)} Quando terminar uma etapa ou quiser um comentário sobre o desenho, é só me avisar.`;
       // O agente se apresenta antes de passar o desafio (a fala vem do cérebro; sem ela, vai direto ao desafio).
       if (sessao.apresentacao) {
         conversa.current.push({ quem: "agente", texto: sessao.apresentacao });
@@ -350,6 +410,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     void descarregarJa();
     const controle = new AbortController();
     let coreografia: Promise<void> | null = null;
+    let versaoDestaPergunta = versaoDaFala.current;
     const desenhar = () => {
       if (controle.signal.aborted || coreografia) return;
       coreografia = apontarEAnotar({
@@ -358,6 +419,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         grupo,
         alvos,
         nota: p.nota ?? p.pergunta ?? "?",
+        visual: mapearAcoesVisuais(p.visual, (id) => conversor.current.idReal(id)),
+        memoria: memoriaVisual.current,
         semente: numeroPergunta * 7919,
         sinal: controle.signal,
       }).catch((erro) => console.warn("[mão do agente]", erro));
@@ -366,14 +429,27 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       conversa.current.push({ quem: "agente", texto: p.pergunta });
       const alvo = ultimoInstantaneo.current?.componentes.find((c) => c.id === p.elementos[0]);
       void dizer(p.pergunta, [{ trecho: alvo?.nome ?? "", aoChegar: desenhar }]);
+      versaoDestaPergunta = versaoDaFala.current;
     } else desenhar();
 
     return () => {
-      silenciar();
+      silenciarSeAtual(versaoDestaPergunta);
       controle.abort();
       void (coreografia ?? Promise.resolve()).then(() => quadro.agente.apagarGrupo(grupo));
     };
-  }, [numeroPergunta, quadro, cursor, dizer, silenciar, registrar, descarregarJa]);
+  }, [numeroPergunta, quadro, cursor, dizer, silenciarSeAtual, registrar, descarregarJa]);
+
+  // Uma pergunta pertinente pode entrar numa pausa, sem exigir autorização por clique.
+  // O plin continua disponível se a pessoa preferir chamá-la manualmente.
+  useEffect(() => {
+    if (estado.plin !== "PLIN_PENDENTE" || estado.pendenteDeDemo) return;
+    const id = setInterval(() => {
+      if (podeTomarTurno({ agora: Date.now(), ultimaFalaEm: ultimaFalaEm.current,
+        falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
+        aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) enviar({ tipo: "PLIN_CLICADO" });
+    }, 150);
+    return () => clearInterval(id);
+  }, [estado.plin, estado.perguntaPendente, estado.pendenteDeDemo, enviar]);
 
   // Despedida: ao encerrar (botão ou fim do tempo) o agente se despede, uma vez.
   const despedidaDita = useRef(false);
@@ -462,11 +538,11 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     const { texto } = conversor.current.converter(quadro.api.getSceneElements());
     enviar({ tipo: "PLIN_DEMO", resposta: duvidaDeDemonstracao(texto) });
   }, [enviar, quadro]);
-  const terminarResposta = useCallback((texto?: unknown) => {
+  const terminarResposta = useCallback((texto?: unknown, reanalisar = true) => {
     registrar("resposta", { numero: estadoAtual.current.perguntaAtiva?.numero, quem: "candidato", ...(typeof texto === "string" && texto.trim() ? { texto: texto.trim() } : {}) });
     enviar({ tipo: "RESPOSTA_TERMINOU" });
     // A resposta pode mudar a avaliação: analisa de novo logo depois que o servidor souber dela.
-    void descarregarJa().then(() => gatilho.current?.dispararAgora());
+    if (reanalisar) void descarregarJa().then(() => gatilho.current?.dispararAgora());
   }, [descarregarJa, enviar, registrar]);
 
   // Conversa por texto (enquanto não há voz do candidato): as falas digitadas e as respostas do /perguntar.
@@ -491,6 +567,9 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         horario: Date.now(),
       });
       ultimaAtividade.current = Date.now();
+      revisaoDaConversa.current++;
+      limparVisualDaConversa();
+      enviar({ tipo: "CANDIDATO_CONTINUOU" });
       // A fala já entra na conversa que as análises recebem (uma análise pode rodar enquanto o /perguntar espera).
       const falaDoCandidato: FalaRecente = { quem: "candidato", texto };
       conversa.current.push(falaDoCandidato);
@@ -499,27 +578,44 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         return nova("candidato", texto);
       };
 
-      if (atual.plin === "PERGUNTA_ATIVA") {
-        setMensagens((m) => [...m, registrarFalaDoCandidato()]);
-        terminarResposta();
-        return { requisito: null };
-      }
-
       let r: Awaited<ReturnType<typeof perguntar>>;
+      pedidosEmAndamento.current++;
+      setAguardandoResposta(true);
       try {
-        r = await perguntar(sessao.sessao_id, atual.fase, texto);
+        const grafo = quadro ? conversor.current.converter(quadro.api.getSceneElements()).texto.slice(0, 24000) : undefined;
+        r = await perguntar(sessao.sessao_id, atual.fase, texto, {
+          grafo, pergunta_ativa: atual.perguntaAtiva?.pergunta ?? undefined,
+          requisitos: requisitosCombinados.current.slice(-30),
+          gestos_recentes: resumirGestosRecentes(memoriaVisual.current),
+        });
       } catch (erro) {
         // Não foi enviada: sai da conversa para o texto poder ser reenviado sem duplicar.
         const i = conversa.current.indexOf(falaDoCandidato);
         if (i >= 0) conversa.current.splice(i, 1);
         throw erro;
+      } finally {
+        pedidosEmAndamento.current--;
+        setAguardandoResposta(pedidosEmAndamento.current > 0);
       }
       if (ciclo !== cicloDaSala.current || estadoAtual.current.fase === "ENCERRADA") return { requisito: null };
       const novas = [registrarFalaDoCandidato()];
+      // A devolutiva vem do loop rápido, sem flush + nova análise antes de responder.
+      if (atual.plin === "PERGUNTA_ATIVA" && (r.responder || r.concluiu)) terminarResposta(texto, false);
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
         novas.push(nova("agente", r.texto));
-        void dizer(r.texto); // registra a fala do agente na linha do tempo
+        if (quadro && r.visual?.length) {
+          const atual = { quadro, grupo: `conversa:${contadorDeMensagens.current}`, controle: new AbortController(), tarefa: undefined as Promise<void> | undefined };
+          visualDaConversa.current = atual;
+          const desenhar = () => {
+            if (atual.controle.signal.aborted || atual.tarefa) return;
+            atual.tarefa = apontarEAnotar({ quadro, cursor: cursor.current, grupo: atual.grupo, alvos: [], nota: "",
+              visual: mapearAcoesVisuais(r.visual, (id) => conversor.current.idReal(id)), memoria: memoriaVisual.current,
+              semente: contadorDeMensagens.current * 7919, sinal: atual.controle.signal,
+            }).catch((erro) => console.warn("[gesto da conversa]", erro));
+          };
+          void dizer(r.texto, [{ trecho: "", aoChegar: desenhar }]);
+        } else void dizer(r.texto);
       }
       setMensagens((m) => [...m, ...novas]);
       if (r.responder && r.requisito && !requisitosCombinados.current.includes(r.requisito)) {
@@ -534,11 +630,26 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       }
       return { requisito: r.responder ? r.requisito : null };
     },
-    [sessao, registrar, dizer, terminarResposta, enviar],
+    [sessao, quadro, cursor, registrar, dizer, terminarResposta, enviar, limparVisualDaConversa],
   );
+  const registrarFalaParcial = useCallback((texto: string) => {
+    falaParcial.current = !!texto.trim();
+    if (texto.trim()) {
+      limparVisualDaConversa();
+      enviar({ tipo: "CANDIDATO_CONTINUOU" });
+      ultimaFalaEm.current = Date.now();
+      ultimaAtividade.current = Date.now();
+    }
+  }, [enviar, limparVisualDaConversa]);
+  const registrarSom = useCallback(() => {
+    if (agenteFalandoRef.current) return;
+    ultimaFalaEm.current = Date.now();
+    ultimaAtividade.current = Date.now();
+  }, []);
   /** Digitar na Conversa é atividade: o silêncio só conta depois que o candidato para de escrever. */
   const registrarAtividade = useCallback(() => {
     ultimaAtividade.current = Date.now();
+    ultimaFalaEm.current = Date.now();
   }, []);
   const encerrar = useCallback(() => {
     cicloDaSala.current++;
@@ -556,6 +667,9 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     iniciadaEm,
     falaAtual,
     agenteFalando,
+    aguardandoResposta: aguardandoResposta || preparandoVoz,
+    registrarFalaParcial,
+    registrarSom,
     vozHabilitada,
     alternarVoz,
     silenciar,
