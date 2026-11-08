@@ -56,7 +56,12 @@ test("ajuste: a regra do critério entra ativa, com origem resultado_90_dias, e 
   const ajuste = await ajustarComResultado(c, { deuCerto: false, criterioErrado: "bordas" }, null);
   assert.equal(ajuste.regras.length, 1);
   const [regra] = ajuste.regras;
-  assert.deepEqual(regra.origem, { tipo: "resultado_90_dias", candidato: "Bianca Nunes", vagaId: "backend-pagamentos", deuCerto: false });
+  assert.deepEqual(regra.origem, {
+    tipo: "resultado_90_dias",
+    candidato: "Bianca Nunes",
+    vagaId: "backend-pagamentos",
+    deuCerto: false,
+  });
   assert.equal(regrasAtivas(EMPRESA_DEMO).length, antes + 1);
   const config = comRegrasDaSquad({ mode: "live_coding" } as never, EMPRESA_DEMO) as { squadRules?: { id: string }[] };
   assert.ok(config.squadRules?.some((r) => r.id === regra.id));
@@ -90,7 +95,13 @@ test("acertou em tudo: nenhuma regra (só a surpresa técnica, se houver)", asyn
 test("visão: a resposta mostra o ajuste; regra apagada some do ajuste", async () => {
   const c = listarContratacoes(EMPRESA_DEMO)[0];
   const ajuste = await ajustarComResultado(c, { deuCerto: false, criterioErrado: "bordas" }, null);
-  registrarResultado(c.id, { deuCerto: false, criterioErrado: "bordas", respondidoEm: new Date().toISOString(), regras: ajuste.regras.map((r) => r.id), ignorados: [] });
+  registrarResultado(c.id, {
+    deuCerto: false,
+    criterioErrado: "bordas",
+    respondidoEm: new Date().toISOString(),
+    regras: ajuste.regras.map((r) => r.id),
+    ignorados: [],
+  });
   const visao = visaoDasContratacoes("backend-pagamentos", EMPRESA_DEMO);
   const vista = visao.contratacoes.find((x) => x.id === c.id)!;
   assert.equal(vista.ajuste?.regras[0].mudanca.manchete, "mais rigor");

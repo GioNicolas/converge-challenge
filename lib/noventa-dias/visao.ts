@@ -31,7 +31,10 @@ export function vistaDa(c: Contratacao, agora = Date.now()): ContratacaoVista {
   if (c.resultado) {
     const ids = new Set(c.resultado.ignorados);
     vista.ajuste = {
-      regras: c.resultado.regras.map((id) => obterRegra(id)).filter((r): r is RegraSquad => !!r).map(comMudanca),
+      regras: c.resultado.regras
+        .map((id) => obterRegra(id))
+        .filter((r): r is RegraSquad => !!r)
+        .map(comMudanca),
       ignorados: listarMotivosIgnorados(c.empresaId).filter((m) => ids.has(m.id)),
     };
   }

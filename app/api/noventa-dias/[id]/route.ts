@@ -31,7 +31,8 @@ export async function POST(req: Request, { params }: Ctx) {
   const lido = Resposta.safeParse(await req.json().catch(() => null));
   if (!lido.success) return NextResponse.json({ error: "resposta inválida" }, { status: 400 });
   const { deuCerto, criterioErrado, surpresa } = lido.data;
-  if (criterioErrado && !criterioValido(criterioErrado)) return NextResponse.json({ error: "critério desconhecido" }, { status: 400 });
+  if (criterioErrado && !criterioValido(criterioErrado))
+    return NextResponse.json({ error: "critério desconhecido" }, { status: 400 });
 
   const ajuste = await ajustarComResultado(c, { deuCerto, criterioErrado: criterioErrado ?? undefined, surpresa });
   registrarResultado(id, {
