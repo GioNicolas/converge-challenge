@@ -131,6 +131,7 @@ function LinhaDeResultado({ e, posicao }: { e: EntrevistaReal; posicao?: number 
 // ---------------------------------------------------------------------------
 
 export function CartaoEnxuto({ e, cartao }: { e: EntrevistaReal; cartao: CartaoDoResultado }) {
+  const [detalhes, setDetalhes] = useState(false);
   return (
     <div className="flex flex-col gap-5 text-[13.5px] leading-relaxed text-texto">
       {cartao.resumo && <p className="text-texto/90">{cartao.resumo}</p>}
@@ -138,13 +139,61 @@ export function CartaoEnxuto({ e, cartao }: { e: EntrevistaReal; cartao: CartaoD
         <ListaDePontos titulo="Pontos fortes" itens={cartao.pontosFortes} vazio="Nenhum ponto forte registrado." marca="+" />
         <ListaDePontos titulo="Pontos fracos" itens={cartao.pontosFracos} vazio="Nenhum ponto fraco registrado." marca="–" />
       </div>
-      <Link
-        href={e.href}
-        className="inline-flex w-fit items-center gap-1 text-[13px] text-texto-suave underline decoration-texto/25 underline-offset-4 hover:text-texto"
-      >
-        Abrir o relatório completo <ArrowRight size={13} />
-      </Link>
+
+      {detalhes && (
+        <>
+          {cartao.criterios.length > 0 && (
+            <section className="flex flex-col gap-2.5">
+              <h3 className="rotulo text-texto-suave">Critérios e por que cada nota</h3>
+              <ul className="flex flex-col gap-3.5">
+                {[...cartao.criterios]
+                  .sort((x, y) => (y.nota ?? -1) - (x.nota ?? -1))
+                  .map((c) => (
+                    <li key={c.nome} className="flex flex-col gap-1.5">
+                      <div className="grid grid-cols-[minmax(0,1fr)_72px_44px] items-center gap-3">
+                        <span className={`truncate font-medium ${c.nota === null ? "text-texto-suave" : ""}`} title={c.nome}>
+                          {c.nome}
+                        </span>
+                        <BarraDaNota nota={c.nota} />
+                        <span className="numero text-right text-[13px]">
+                          {c.nota === null ? <span className="text-texto-suave">—</span> : <>{c.nota}<span className="text-texto-suave">/4</span></>}
+                        </span>
+                      </div>
+                      <p className="text-[12.5px] text-texto-suave">
+                        {c.nota === null ? "Não explorado na entrevista." : c.justificativa || "Sem justificativa registrada."}
+                      </p>
+                    </li>
+                  ))}
+              </ul>
+            </section>
+          )}
+          {cartao.proximosPassos.length > 0 && <ListaDePontos titulo="Para a próxima etapa" itens={cartao.proximosPassos} vazio="" marca="→" />}
+        </>
+      )}
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
+        <button type="button" aria-expanded={detalhes} onClick={() => setDetalhes((v) => !v)} className="text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto">
+          {detalhes ? "Esconder detalhes" : "Ver detalhes das notas"}
+        </button>
+        <Link href={e.href} className="inline-flex items-center gap-1 text-texto-suave underline decoration-texto/25 underline-offset-4 hover:text-texto">
+          Ver a entrevista (código e conversa) <ArrowRight size={13} />
+        </Link>
+      </div>
     </div>
+  );
+}
+
+/** Quatro partes, como nas notas do relatório: dá para comparar de relance. Nota baixa (até 2) vai em vermelho. */
+function BarraDaNota({ nota }: { nota: number | null }) {
+  return (
+    <span className="flex h-2 gap-0.5" aria-hidden>
+      {[1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className={`flex-1 first:rounded-l-full last:rounded-r-full ${nota !== null && i <= nota ? (nota <= 2 ? "bg-perigo" : "bg-texto") : "bg-texto/10"}`}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -214,6 +263,7 @@ export function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
   };
 
   const botao = "rounded-lg border border-borda px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-superficie-2 disabled:opacity-50";
+  const botaoForte = "rounded-lg border border-texto bg-texto px-3 py-1.5 text-[13px] font-medium text-fundo transition-opacity hover:opacity-85 disabled:opacity-50";
 
   return (
     <section className="flex flex-col gap-2 border-t border-borda pt-3" aria-label="Decisão sobre o candidato">
@@ -229,7 +279,7 @@ export function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
             {escolha === "avancar" ? "Avançar" : "Não avançar"} com {e.candidato ?? "este candidato"}? O candidato recebe o feedback por e-mail.
           </p>
           <div className="flex gap-2">
-            <button type="button" className={`${botao} bg-texto text-fundo`} disabled={enviando} onClick={confirmar}>
+            <button type="button" className={botaoForte} disabled={enviando} onClick={confirmar}>
               {enviando ? "Enviando…" : "Confirmar e avisar"}
             </button>
             <button type="button" className={botao} disabled={enviando} onClick={() => setEscolha(null)}>

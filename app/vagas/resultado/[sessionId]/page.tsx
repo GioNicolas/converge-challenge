@@ -3,15 +3,14 @@
 // O cartão de um candidato: nota total, resumo, critérios, pontos fortes e fracos e, no fim, Avançar / Não avançar.
 // Chega pelo "Ver relatório" da lista de resultados da vaga.
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import VoltarLink from "@/components/VoltarLink";
 import { BlocoDeDecisao, CartaoEnxuto } from "@/components/vagas/ResultadosDaVaga";
 import type { EntrevistaReal } from "@/lib/vagas/entrevistas";
 
 export default function PaginaDoResultado() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const router = useRouter();
   const [item, setItem] = useState<EntrevistaReal | null | undefined>(undefined);
 
   useEffect(() => {
@@ -29,9 +28,7 @@ export default function PaginaDoResultado() {
 
   return (
     <main className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-4 py-8 text-texto">
-      <button type="button" onClick={() => router.back()} className="inline-flex w-fit items-center gap-1.5 text-[13px] text-texto-suave hover:text-texto">
-        <ArrowLeft size={14} /> Voltar aos resultados
-      </button>
+      <VoltarLink texto="Voltar aos resultados" />
 
       {item === undefined && <p className="text-[14px] text-texto-suave">Carregando…</p>}
       {item === null && <p className="text-[14px] text-texto-suave">Não encontrei esta entrevista.</p>}
