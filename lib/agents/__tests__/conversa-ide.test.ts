@@ -31,3 +31,23 @@ test("grifo sem propósito sai: fala que não fala das linhas, ou linhas só do 
   assert.equal(grifoComProposito("Como você costuma dividir o tempo da entrevista?", codigo, { startLine: 1, endLine: 3 }, inicio), false);
   assert.equal(grifoComProposito("Como você pensa em resolver?", inicio, { startLine: 1, endLine: 3 }, inicio), false);
 });
+
+test("pergunta de foco só no momento dela: pressão com falhas seguidas, escala e IA com a solução funcionando", async () => {
+  const { focoPendente } = await import("@/lib/agents/focoQuota");
+  const { getOrCreateSession, appendEvent } = await import("@/lib/session/store");
+  const { DEFAULT_CONFIG } = await import("@/lib/config/default");
+  const config = { ...DEFAULT_CONFIG, focus: [{ area: "pressao" as const, weight: 0.5 }, { area: "escala_produto" as const, weight: 0.3 }, { area: "uso_ia" as const, weight: 0.2 }] };
+  const s = getOrCreateSession(`foco-${Date.now()}`, config);
+  const id = s.sessionId;
+  appendEvent(s, { type: "session_started", sessionId: id, t: 0, configId: config.id, problemId: config.problemId, language: "python" });
+  appendEvent(s, { type: "snapshot", sessionId: id, t: 30_000, code: "def f(s):\n    return s", version: 1, language: "python" });
+  // Logo depois de começar a codar: nenhum foco (era aqui que saía o "como você divide o seu tempo?").
+  assert.equal(focoPendente(s, 40_000), undefined);
+  const falhou = { passed: 0, total: 5, cases: [], stdout: "", stderr: "erro", durationMs: 1 };
+  appendEvent(s, { type: "run", sessionId: id, t: 50_000, result: falhou });
+  assert.equal(focoPendente(s, 51_000), undefined, "um erro só: ele ainda está olhando");
+  appendEvent(s, { type: "run", sessionId: id, t: 60_000, result: falhou });
+  assert.equal(focoPendente(s, 61_000), "pressao", "duas falhas seguidas");
+  appendEvent(s, { type: "run", sessionId: id, t: 90_000, result: { ...falhou, passed: 5, stderr: "" } });
+  assert.equal(focoPendente(s, 91_000), "escala_produto", "funcionou: pressão sai, entra o próximo foco do momento");
+});

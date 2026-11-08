@@ -37,14 +37,6 @@ const TOPO_RECOLHIDO = 104;
 const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 /** Teto da espera acima: ruído constante no microfone não segura a fala para sempre. */
 const FALA_ESPERA_MAX_MS = 12_000;
-/**
- * Barge-in: o candidato fala por cima do Totti, alto e sem parar, e o Totti cala para ouvir. Volume e tempo
- * altos de propósito: um "hum", o teclado ou um barulho da sala não podem cortar a frase dele no meio.
- */
-const VOLUME_BARGE_IN = 0.3;
-const TEMPO_BARGE_IN_MS = 700;
-/** Digitou há menos que isso: o som é do teclado, não é alguém querendo falar. */
-const DIGITANDO_MS = 1200;
 /** Depois de uma fala do Totti, ele espera isso antes de puxar outro assunto (o candidato precisa de vez). */
 const PAUSA_ENTRE_FALAS_MS = 8000;
 /** Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. */
@@ -223,19 +215,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   }, []);
   useEffect(() => () => clearTimeout(bufferTimerRef.current), []);
 
-  // Barge-in: o candidato fala por cima do Totti (volume alto e contínuo): o Totti cala e ouve.
-  const vozParar = voz.parar;
-  const volumeRef = useRef(0);
-  volumeRef.current = midia.volume;
-  const passouDoLimite = midia.microfoneLigado && midia.volume > VOLUME_BARGE_IN;
-  useEffect(() => {
-    if (voz.estado !== "falando" || !passouDoLimite) return;
-    const id = setTimeout(() => {
-      const digitando = Date.now() - ultimaDigitacaoEmRef.current < DIGITANDO_MS;
-      if (volumeRef.current > VOLUME_BARGE_IN && !digitando) vozParar();
-    }, TEMPO_BARGE_IN_MS);
-    return () => clearTimeout(id);
-  }, [voz.estado, passouDoLimite, vozParar]);
+  // Sem barge-in: ninguém fala por cima de ninguém. O Totti termina a frase dele (a escuta pausa enquanto ele
+  // fala) e só toma a vez numa pausa do candidato (lib/conversa/turnos.ts).
   const escuta = useTranscricao({
     stream: midia.stream,
     // A escuta só para enquanto a voz do agente toca (preparando, ela ainda ouve: o candidato pode continuar falando).

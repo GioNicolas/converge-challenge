@@ -46,7 +46,7 @@ export const GUIA_DA_FASE: Record<Fase, string> = {
   implementando:
     "Ele está concentrado escrevendo a primeira versão, e o código ainda está pela metade: isso é normal, não é erro. Se perguntar, pergunte sobre a INTENÇÃO do trecho que ele acabou de escrever ou do próximo passo que ele está montando (\"o que você está montando aqui?\"). Nada de complexidade, bordas ou otimização ainda: ele nem terminou.",
   depurando:
-    "Um teste falhou e ele está tentando entender por quê. A pergunta natural é sobre o raciocínio dele diante do resultado: o que ele esperava que saísse, o que ele acha que está acontecendo, por onde vai investigar. Nunca diga onde está o erro nem sugira um caso.",
+    "Um teste falhou e ele está tentando entender por quê. No primeiro erro, deixe ele olhar. Se continua falhando ou parou, a pergunta natural é sobre o raciocínio dele diante do resultado: o que ele esperava que saísse, o que está olhando agora. Fale do resultado como ele viu (\"rodou e não passou\"), nunca nomeie o erro, a linha ou um caso.",
   funcionando:
     "O código passou em todos os testes visíveis. É o momento de olhar a solução como um todo: custo de tempo e memória, como se comporta com entradas grandes ou diferentes, por que escolheu esse caminho. Se não for a melhor abordagem conhecida, cabe um desafio para melhorar.",
   otimizando:
