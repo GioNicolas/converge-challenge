@@ -23,8 +23,16 @@ const curvaSuave = [0.32, 0.72, 0, 1] as const;
 const nota1 = (n: number) => n.toFixed(1).replace(".", ",");
 const quando = (t: number) => new Date(t).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
+const NOME_DECISAO = { avancar: "Avançar", nao_avancar: "Não avançar" } as const;
+type Registro = NonNullable<EntrevistaReal["decisao"]>;
+/** O que acabou de ser decidido nesta página vale até a próxima leitura da lista (o cartão flutuante desmonta e remonta). */
+const decididas = new Map<string, Registro>();
+const decisaoAtual = (e: EntrevistaReal): Registro | undefined => decididas.get(e.sessionId) ?? e.decisao;
+
 /** "Avançar", ou onde a entrevista está quando ainda não há nota (com o pontinho que pulsa enquanto roda). */
 function textoDaSituacao(e: EntrevistaReal, a: ReturnType<typeof andamentoDa>): React.ReactNode {
+  const d = decisaoAtual(e);
+  if (d) return `Decidido: ${NOME_DECISAO[d.decisao]}`;
   if (e.recommendation) return NOME_RECOMENDACAO_DO_RESULTADO[e.recommendation];
   return (
     <>
@@ -360,6 +368,8 @@ function CartaoCompleto({ e, cartao, flutuante = false }: { e: EntrevistaReal; c
         <ListaDePontos titulo="Para a próxima etapa" itens={cartao.proximosPassos} vazio="" marca="→" />
       )}
 
+      <BlocoDeDecisao e={e} />
+
       <footer className="flex items-center justify-between border-t border-borda pt-3">
         <span className="numero text-[12px] text-texto-suave">{quando(e.startedAt)}</span>
         <Link
@@ -409,5 +419,85 @@ function BarraDaNota({ nota }: { nota: number | null }) {
         />
       ))}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Decisão da recrutadora: Avançar / Não avançar. O candidato recebe o feedback por e-mail (depois de confirmar).
+// ---------------------------------------------------------------------------
+
+const TEXTO_DO_EMAIL: Record<Registro["email"], string> = {
+  enviado: "E-mail de feedback enviado ao candidato.",
+  simulado: "Decisão registrada. Nenhum e-mail saiu (candidato de demonstração ou envio desligado).",
+  sem_candidato: "Decisão registrada. Esta entrevista não veio de um convite, então não há e-mail para avisar.",
+  falhou: "Decisão registrada, mas o e-mail de feedback falhou.",
+};
+
+function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
+  const [registro, setRegistro] = useState<Registro | undefined>(() => decisaoAtual(e));
+  const [escolha, setEscolha] = useState<"avancar" | "nao_avancar" | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState(false);
+
+  if (!e.ended || e.state !== "done") return null;
+
+  const confirmar = async () => {
+    if (!escolha) return;
+    setEnviando(true);
+    setErro(false);
+    try {
+      const r = await fetch("/api/decisao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: e.sessionId, decisao: escolha }),
+      });
+      if (!r.ok) throw new Error();
+      const novo = (await r.json()) as Registro;
+      decididas.set(e.sessionId, novo);
+      setRegistro(novo);
+      setEscolha(null);
+    } catch {
+      setErro(true);
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  const botao = "rounded-lg border border-borda px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-superficie-2 disabled:opacity-50";
+
+  return (
+    <section className="flex flex-col gap-2 border-t border-borda pt-3" aria-label="Decisão sobre o candidato">
+      <h3 className="rotulo text-texto-suave">Decisão</h3>
+      {registro ? (
+        <p className="text-[13px]">
+          <strong className="font-semibold">{NOME_DECISAO[registro.decisao]}</strong>
+          <span className="text-texto-suave"> · {TEXTO_DO_EMAIL[registro.email]}</span>
+        </p>
+      ) : escolha ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-[13px]">
+            {escolha === "avancar" ? "Avançar" : "Não avançar"} com {e.candidato ?? "este candidato"}? O candidato recebe o feedback por e-mail.
+          </p>
+          <div className="flex gap-2">
+            <button type="button" className={`${botao} bg-texto text-fundo`} disabled={enviando} onClick={confirmar}>
+              {enviando ? "Enviando…" : "Confirmar e avisar"}
+            </button>
+            <button type="button" className={botao} disabled={enviando} onClick={() => setEscolha(null)}>
+              Voltar
+            </button>
+          </div>
+          {erro && <p className="text-[12.5px] text-perigo">Não consegui registrar. Tente de novo.</p>}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <button type="button" className={botao} onClick={() => setEscolha("avancar")}>
+            Avançar
+          </button>
+          <button type="button" className={botao} onClick={() => setEscolha("nao_avancar")}>
+            Não avançar
+          </button>
+        </div>
+      )}
+    </section>
   );
 }

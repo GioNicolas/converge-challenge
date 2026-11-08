@@ -9,6 +9,7 @@ import { findReport, listReports } from "@/lib/session/reports";
 import { cartaoDoRelatorio } from "@/lib/session/cartao";
 import { AVALIACAO_PERDIDA_MS, guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 import { listSessions } from "@/lib/session/store";
+import { lerDecisoes, type DecisaoRegistrada } from "@/lib/vagas/decisao";
 import { kvPadrao } from "@/lib/storage/kv";
 import type { CartaoDoResultado, FormatoDaEntrevista, RecomendacaoDoResultado } from "@/lib/vagas/cartao";
 
@@ -33,6 +34,8 @@ export interface ReportListItem {
   cartao?: CartaoDoResultado;
   /** Nome do candidato, quando a entrevista foi aberta pelo link do convite. */
   candidato?: string;
+  /** O que a recrutadora decidiu, quando decidiu. */
+  decisao?: DecisaoRegistrada;
 }
 
 /**
@@ -94,7 +97,11 @@ export async function GET(request: NextRequest) {
       });
     }
     const nomes = await candidatosPorSessao();
-    for (const item of items) item.candidato = nomes.get(item.sessionId);
+    const decisoes = await lerDecisoes();
+    for (const item of items) {
+      item.candidato = nomes.get(item.sessionId);
+      item.decisao = decisoes.get(item.sessionId);
+    }
     return NextResponse.json(items.sort((a, b) => b.startedAt - a.startedAt));
   }
 
