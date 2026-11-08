@@ -1,6 +1,6 @@
-// Voz reserva do navegador (quando o áudio do ElevenLabs não toca). A voz do agente é masculina (Fernando - Casual),
-// então a reserva também prefere uma voz masculina em pt-BR. Pegar a primeira voz "pt" da lista dava a Luciana
-// no Mac (feminina) e a fala trocava de pessoa no meio da entrevista.
+// Voz do navegador, usada só no modo de demonstração do quadro (sem servidor, não há ElevenLabs). A voz do agente é
+// masculina (Fernando - Casual), então a demonstração também prefere uma voz masculina em pt-BR. Com servidor, o
+// agente fala sempre com a voz do ElevenLabs.
 
 type VozNavegador = Pick<SpeechSynthesisVoice, "name" | "lang">;
 
@@ -30,20 +30,4 @@ export function escolherVozPt<V extends VozNavegador>(vozes: readonly V[]): V | 
     if (voz) return voz;
   }
   return ptBr.find((v) => !REGEX_FEMININA.test(v.name)) ?? ptBr[0] ?? vozes.find(ehPt);
-}
-
-let vozesAquecidas = false;
-
-/**
- * Chrome e Safari devolvem a lista de vozes vazia na primeira chamada de getVoices() e só a preenchem depois do
- * evento voiceschanged. Sem a lista, a fala sai na voz padrão de pt-BR (feminina). Chamado ao abrir as telas que
- * falam, para a lista já estar pronta quando a primeira fala de reserva acontecer.
- */
-export function aquecerVozes(): void {
-  if (vozesAquecidas || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  vozesAquecidas = true;
-  try {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.addEventListener?.("voiceschanged", () => window.speechSynthesis.getVoices(), { once: true });
-  } catch {}
 }

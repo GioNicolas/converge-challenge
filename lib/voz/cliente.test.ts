@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { criarVoz, dividirFala, falarNoNavegador } from "./cliente";
+import { criarVoz, dividirFala, MENSAGEM_VOZ_INDISPONIVEL } from "./cliente";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
 
@@ -27,7 +27,6 @@ test("usa o áudio da Sofia e propaga o progresso do player", async () => {
       assert.equal(iniciou, true);
       opcoes.aoProgresso?.(2);
     },
-    navegador: async () => { assert.fail("não deveria usar fallback"); },
   });
   await falar("oi", new AbortController().signal, {
     aoIniciar: (fonte) => { provedor = fonte; iniciou = true; },
@@ -37,18 +36,35 @@ test("usa o áudio da Sofia e propaga o progresso do player", async () => {
   assert.equal(progresso.at(-1), 2);
 });
 
-test("501 usa navegador e evita repetir requisições sem configuração", async () => {
+function semAvisos(t: TestContext) {
+  const aviso = console.warn;
+  console.warn = () => {};
+  t.after(() => { console.warn = aviso; });
+}
+
+test("501 não troca para a voz do navegador e não repete requisições sem configuração", async (t) => {
+  semAvisos(t);
   let pedidos = 0;
-  const falas: string[] = [];
   const falar = criarVoz({
     fetch: async () => { pedidos++; return new Response(null, { status: 501 }); },
     tocar: async () => { assert.fail("sem áudio remoto"); },
-    navegador: async (texto) => { falas.push(texto); },
   });
-  await falar("Primeira resposta.", new AbortController().signal, eventos());
-  await falar("Segunda resposta.", new AbortController().signal, eventos());
+  await assert.rejects(falar("Primeira resposta.", new AbortController().signal, eventos()), { message: MENSAGEM_VOZ_INDISPONIVEL });
+  await assert.rejects(falar("Segunda resposta.", new AbortController().signal, eventos()), { message: MENSAGEM_VOZ_INDISPONIVEL });
   assert.equal(pedidos, 1);
-  assert.deepEqual(falas, ["Primeira resposta.", "Segunda resposta."]);
+});
+
+test("falha passageira do servidor tenta de novo a voz do ElevenLabs", async (t) => {
+  semAvisos(t);
+  let pedidos = 0;
+  let tocou = 0;
+  const falar = criarVoz({
+    fetch: async () => (++pedidos === 1 ? new Response(null, { status: 503 }) : Response.json(dadosVoz)),
+    tocar: async () => { tocou++; },
+  });
+  await falar("oi", new AbortController().signal, eventos());
+  assert.equal(pedidos, 2);
+  assert.equal(tocou, 1);
 });
 
 test("cancelar requisição pendente ignora resposta tardia e não chama fallback", async () => {
@@ -58,7 +74,6 @@ test("cancelar requisição pendente ignora resposta tardia e não chama fallbac
   const falar = criarVoz({
     fetch: async () => pendente,
     tocar: async () => { assert.fail("não deve tocar resposta atrasada"); },
-    navegador: async () => { assert.fail("cancelamento não é falha para fallback"); },
   });
   const reproduzir = falar("Resposta velha.", controle.signal, eventos());
   controle.abort();
@@ -78,25 +93,27 @@ test("respostas grandes chegam inteiras em trechos de até 2000 caracteres", asy
   const recebidos: string[] = [];
   const progresso: number[] = [];
   const falar = criarVoz({
-    fetch: async () => new Response(null, { status: 501 }),
+    fetch: async (_url, opcoes) => {
+      recebidos.push(JSON.parse(String(opcoes?.body)).texto);
+      return Response.json(dadosVoz);
+    },
     tocar: async () => {},
-    navegador: async (trecho, _sinal, e) => { recebidos.push(trecho); e.aoProgresso(trecho.length); },
   });
   await falar(texto, new AbortController().signal, { aoIniciar: () => {}, aoProgresso: (n) => progresso.push(n) });
   assert.deepEqual(recebidos, partes.map((p) => p.texto));
   assert.equal(progresso.at(-1), texto.length);
 });
 
-test("alinhamento inválido não é usado e falha do player recorre ao navegador", async () => {
+test("alinhamento inválido não é usado e falha do player fica no texto, sem outra voz", async (t) => {
+  semAvisos(t);
   assert.equal(RespostaVoz.safeParse({ ...dadosVoz, alinhamento: { ...dadosVoz.alinhamento, character_start_times_seconds: [0] } }).success, false);
-  let fallback = 0;
+  let tentativas = 0;
   const falar = criarVoz({
     fetch: async () => Response.json(dadosVoz),
-    tocar: async () => { throw new Error("autoplay bloqueado"); },
-    navegador: async () => { fallback++; },
+    tocar: async () => { tentativas++; throw new Error("player indisponível"); },
   });
-  await falar("oi", new AbortController().signal, eventos());
-  assert.equal(fallback, 1);
+  await assert.rejects(falar("oi", new AbortController().signal, eventos()), { message: MENSAGEM_VOZ_INDISPONIVEL });
+  assert.equal(tentativas, 2);
 });
 
 function globalFalso(t: TestContext, nome: string, valor: unknown) {
@@ -132,45 +149,57 @@ test("player da Sofia pausa e revoga o áudio quando o microfone interrompe", as
   assert.equal(revogou, true);
 });
 
-test("fallback do navegador também para a fala e não completa progresso cancelado", async (t) => {
-  let falou: SpeechSynthesisUtterance | undefined;
-  let cancelou = false;
-  class FalaFalsa {
-    onstart = null;
-    onboundary = null;
-    onend = null;
-    onerror = null;
-  }
-  globalFalso(t, "SpeechSynthesisUtterance", FalaFalsa);
-  globalFalso(t, "window", { speechSynthesis: {
-    getVoices: () => [], speak: (fala: SpeechSynthesisUtterance) => { falou = fala; }, cancel: () => { cancelou = true; },
-  } });
-  const controle = new AbortController();
-  const progresso: number[] = [];
-  const reproduzir = falarNoNavegador("Olá", controle.signal, { aoIniciar: () => {}, aoProgresso: (n) => progresso.push(n) });
-  controle.abort();
-  await assert.rejects(reproduzir, { name: "AbortError" });
-  assert.equal(cancelou, true);
-  assert.equal(falou?.onend, null);
-  assert.deepEqual(progresso, []);
-});
-
-test("áudio que para no meio não repete a parte com a voz do navegador", async () => {
+test("áudio que para no meio não repete a parte", async (t) => {
+  semAvisos(t);
+  let tentativas = 0;
   const progresso: number[] = [];
   const falar = criarVoz({
     fetch: async () => Response.json(dadosVoz),
     tocar: async (_audio, _alinhamento, opcoes) => {
+      tentativas++;
       opcoes.aoProgresso?.(1);
       throw new Error("erro de decodificação");
     },
-    navegador: async () => { assert.fail("não deveria repetir a fala no navegador"); },
   });
-  const aviso = console.warn;
-  console.warn = () => {};
-  try {
-    await falar("oi", new AbortController().signal, { aoIniciar: () => {}, aoProgresso: (n) => progresso.push(n) });
-  } finally {
-    console.warn = aviso;
-  }
+  await falar("oi", new AbortController().signal, { aoIniciar: () => {}, aoProgresso: (n) => progresso.push(n) });
+  assert.equal(tentativas, 1);
   assert.equal(progresso.at(-1), 2);
+});
+
+test("autoplay bloqueado espera o próximo gesto e toca o mesmo áudio", async (t) => {
+  const ouvintes = new Map<string, () => void>();
+  let liberado = false;
+  let tocadas = 0;
+  let aguardou = false;
+  class AudioFalso {
+    preload = "";
+    currentTime = 0;
+    src = "";
+    onended: (() => void) | null = null;
+    onerror = null;
+    async play() {
+      if (!liberado) throw new DOMException("bloqueado", "NotAllowedError");
+      tocadas++;
+      queueMicrotask(() => this.onended?.());
+    }
+    pause() {}
+    removeAttribute() {}
+  }
+  globalFalso(t, "Audio", AudioFalso);
+  globalFalso(t, "window", {
+    addEventListener: (e: string, f: () => void) => ouvintes.set(e, f),
+    removeEventListener: (e: string) => ouvintes.delete(e),
+  });
+  globalFalso(t, "requestAnimationFrame", () => 1);
+  globalFalso(t, "cancelAnimationFrame", () => {});
+  globalFalso(t, "URL", { createObjectURL: () => "blob:teste", revokeObjectURL: () => {} });
+  const reproduzir = tocarComAlinhamento(new Blob(), dadosVoz.alinhamento, { aoAguardarGesto: () => { aguardou = true; } });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(aguardou, true);
+  assert.equal(tocadas, 0);
+  liberado = true;
+  ouvintes.get("click")?.();
+  await reproduzir;
+  assert.equal(tocadas, 1);
+  assert.equal(ouvintes.size, 0);
 });

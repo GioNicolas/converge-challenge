@@ -16,7 +16,7 @@ type JanelaTeste = Window & { vozTeste: ControleVozTeste };
 
 async function preparar(page: Page) {
   await page.addInitScript(() => {
-    let atual: SpeechSynthesisUtterance | null = null;
+    let atual: AudioFalso | null = null;
     const reconhecimentos: ReconhecimentoFalso[] = [];
     const controle: ControleVozTeste = {
       falas: [], ouvindo: false, falando: false, autoTerminar: true, midias: [],
@@ -26,7 +26,7 @@ async function preparar(page: Page) {
         const fala = atual;
         atual = null;
         controle.falando = false;
-        fala?.dispatchEvent(new Event("end"));
+        fala?.onended?.();
       },
     };
     const pedirMidia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -53,18 +53,39 @@ async function preparar(page: Page) {
     }
     Object.defineProperty(window, "SpeechRecognition", { configurable: true, value: ReconhecimentoFalso });
     Object.defineProperty(window, "webkitSpeechRecognition", { configurable: true, value: ReconhecimentoFalso });
-    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: {
-      getVoices: () => [],
-      speak: (fala: SpeechSynthesisUtterance) => {
-        atual = fala; controle.falando = true; controle.falas.push(fala.text);
-        queueMicrotask(() => fala.dispatchEvent(new Event("start")));
+    // A voz do agente é só a do ElevenLabs: o /api/falar falso manda o texto como "áudio" e este Audio falso o lê.
+    const tocar = (audio: AudioFalso, texto: string) => {
+      atual = audio; controle.falando = true; controle.falas.push(texto);
+    };
+    class AudioFalso {
+      src = ""; preload = ""; currentTime = 0;
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(src = "") { this.src = src; }
+      async play() {
+        if (this.src.startsWith("data:")) return; // destrave do áudio no primeiro gesto
+        const texto = await (await fetch(this.src)).text();
+        tocar(this, texto);
         if (controle.autoTerminar) setTimeout(controle.terminar, 100);
-      },
-      cancel: () => { atual = null; controle.falando = false; },
-    } });
+      }
+      pause() { if (atual === this) { atual = null; controle.falando = false; } }
+      removeAttribute(nome: string) { if (nome === "src") this.src = ""; }
+    }
+    Object.defineProperty(window, "Audio", { configurable: true, value: AudioFalso });
     (window as unknown as JanelaTeste).vozTeste = controle;
   });
-  await page.route("**/api/falar", (rota) => rota.fulfill({ status: 501, json: { erro: "fallback do teste" } }));
+  await page.route("**/api/falar", (rota) => {
+    const { texto } = rota.request().postDataJSON() as { texto: string };
+    const caracteres = [...texto];
+    return rota.fulfill({ json: {
+      audio_base64: Buffer.from(texto, "utf8").toString("base64"),
+      alinhamento: {
+        characters: caracteres,
+        character_start_times_seconds: caracteres.map((_, i) => i * 0.01),
+        character_end_times_seconds: caracteres.map((_, i) => (i + 1) * 0.01),
+      },
+    } });
+  });
   await page.route("**/api/transcricao/sessao", (rota) => rota.fulfill({ json: { provedor: "navegador" } }));
   await page.route("**/api/stt-token?**", (rota) => rota.fulfill({ status: 503, json: { erro: "fallback do teste" } }));
 }

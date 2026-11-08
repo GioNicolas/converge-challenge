@@ -153,9 +153,9 @@ test("fim do áudio atualiza marcas mesmo quando não houve quadros intermediár
   assert.equal(chamadas, 1);
 });
 
-test("autoplay bloqueado rejeita com erro claro e revoga a URL", async (t) => {
+test("play() que falha (sem ser bloqueio de autoplay) rejeita com erro claro e revoga a URL", async (t) => {
   const a = audioFalso(t, true);
-  await assert.rejects(tocarComAlinhamento(new Blob(), alinhamento, {}), /bloqueada ou indisponível/);
+  await assert.rejects(tocarComAlinhamento(new Blob(), alinhamento, {}), /áudio indisponível/);
   assert.equal(a.revogadas.length, 1);
   assert.equal(a.quadros.size, 0);
 });
@@ -281,20 +281,22 @@ test("cancelar durante a espera pelo turno descarta o áudio preparado", async (
   assert.equal(a.instancias.length, 0);
 });
 
-test("falha da rota cai na voz do navegador e falha total ainda completa a legenda", async (t) => {
+test("falha da rota tenta de novo, não usa a voz do navegador e ainda completa a legenda", async (t) => {
   ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "1" });
-  const falas = vozDoNavegador(t, true);
+  const falas = vozDoNavegador(t);
   t.mock.method(console, "warn", () => {});
-  t.mock.method(globalThis, "fetch", async () => new Response("indisponível", { status: 503 }));
+  let pedidos = 0;
+  t.mock.method(globalThis, "fetch", async () => { pedidos++; return new Response("indisponível", { status: 503 }); });
   const progressos: number[] = [];
   let desenho = 0;
   await falarComMarcas("Oi banco", [{ trecho: "banco", aoChegar: () => desenho++ }], (n) => progressos.push(n));
-  assert.equal(falas.length, 1);
+  assert.equal(pedidos, 2);
+  assert.equal(falas.length, 0);
   assert.equal(desenho, 1);
   assert.equal(progressos.at(-1), 8);
 });
 
-test("autoplay bloqueado também cai na síntese do navegador sem repetir marcas", async (t) => {
+test("player que não toca não cai na síntese do navegador e não repete marcas", async (t) => {
   ambiente(t, { NEXT_PUBLIC_USAR_SERVIDOR: "1" });
   audioFalso(t, true);
   const falas = vozDoNavegador(t);
@@ -302,7 +304,7 @@ test("autoplay bloqueado também cai na síntese do navegador sem repetir marcas
   t.mock.method(globalThis, "fetch", async () => Response.json({ audio_base64: "T2k=", alinhamento }));
   let desenho = 0;
   await falarComMarcas("Oi banco", [{ trecho: "banco", aoChegar: () => desenho++ }]);
-  assert.equal(falas.length, 1);
+  assert.equal(falas.length, 0);
   assert.equal(desenho, 1);
 });
 
@@ -422,7 +424,7 @@ test("voz não implementada (501) não é pedida de novo até a próxima sessão
   await falar("Oi");
   await falar("Tudo bem?");
   assert.deepEqual(rotas, ["/api/falar"]);
-  assert.equal(falas.length, 2);
+  assert.equal(falas.length, 0);
   await criarSessao();
   await falar("De novo");
   assert.deepEqual(rotas, ["/api/falar", "/api/sessoes", "/api/falar"]);

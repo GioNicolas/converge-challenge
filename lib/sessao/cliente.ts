@@ -204,7 +204,7 @@ export async function finalizarSessao(sessaoId: string): Promise<void> {
   console.debug(`[fim] ${sessaoId}: sem servidor, nenhum relatório gerado`);
 }
 
-// --- Síntese do navegador: demonstração e fallback do áudio remoto ---
+// --- Síntese do navegador: só no modo de demonstração (sem servidor não há ElevenLabs) ---
 
 /**
  * Fala o texto. `aoProgresso(n)` recebe quantos caracteres já foram falados (para a legenda andar junto).
@@ -253,6 +253,31 @@ function falarNoNavegador(texto: string, aoProgresso: (caracteres: number) => vo
   });
 }
 
+/**
+ * Sem a voz do ElevenLabs no modo com servidor: a legenda anda no ritmo de uma fala (~15 caracteres/s) e o quadro
+ * segue, sem trocar para uma voz do navegador (feminina em vários sistemas).
+ */
+function legendaSemVoz(texto: string, aoProgresso: (caracteres: number) => void, sinal: AbortSignal): Promise<void> {
+  return new Promise((resolver) => {
+    if (sinal.aborted) return resolver();
+    const inicio = performance.now();
+    const passo = setInterval(() => {
+      const ate = Math.min(texto.length, Math.round(((performance.now() - inicio) / 1000) * 15));
+      aoProgresso(ate);
+      if (ate >= texto.length) terminar();
+    }, 80);
+    function terminar() {
+      clearInterval(passo);
+      sinal.removeEventListener("abort", terminar);
+      resolver();
+    }
+    sinal.addEventListener("abort", terminar, { once: true });
+  });
+}
+
+// Uma falha passageira do servidor (rede, timeout, 5xx) ganha mais uma tentativa antes de desistir da voz.
+const TENTATIVAS_DE_VOZ = 2;
+
 let controleDaVoz: AbortController | null = null;
 /** Vira false quando o servidor diz que não tem voz (501): até a próxima sessão, nem tenta. */
 let vozDoServidorDisponivel = true;
@@ -284,20 +309,38 @@ export async function falarComMarcas(texto: string, marcas: MarcaDeFala[], aoPro
     if (!controle.signal.aborted && controleDaVoz === controle) aoProgresso?.(Math.min(texto.length, n));
   };
   try {
-    if (usarServidor() && vozDoServidorDisponivel) {
+    if (usarServidor()) {
+      // Com servidor, o agente fala só com a voz do ElevenLabs (Fernando - Casual).
       const servidor = await import("./servidor");
-      try {
-        const voz = await servidor.sintetizarFala(texto, controle.signal);
-        if (!await iniciar()) return;
-        const { tocarComAlinhamento } = await import("../presenca/vozSincronizada");
-        await tocarComAlinhamento(voz.audio, voz.alinhamento, { aoProgresso: progresso, marcas: marcasUnicas, sinal: controle.signal });
-        progresso(texto.length);
-        return;
-      } catch (erro) {
-        if (controle.signal.aborted) return;
-        if (erro instanceof servidor.ErroHttp && erro.status === 501) vozDoServidorDisponivel = false;
-        console.warn("[voz] usando síntese do navegador:", erro);
+      let tocou = false;
+      for (let tentativa = 1; vozDoServidorDisponivel && tentativa <= TENTATIVAS_DE_VOZ; tentativa++) {
+        try {
+          const voz = await servidor.sintetizarFala(texto, controle.signal);
+          if (!await iniciar()) return;
+          const { tocarComAlinhamento } = await import("../presenca/vozSincronizada");
+          await tocarComAlinhamento(voz.audio, voz.alinhamento, {
+            aoProgresso: (n) => { tocou = true; progresso(n); }, marcas: marcasUnicas, sinal: controle.signal,
+          });
+          progresso(texto.length);
+          return;
+        } catch (erro) {
+          if (controle.signal.aborted) return;
+          if (erro instanceof servidor.ErroHttp && erro.status === 501) vozDoServidorDisponivel = false;
+          // Se o áudio já começou, repetir faria o candidato ouvir a frase duas vezes: as marcas e a legenda fecham.
+          if (tocou) {
+            console.warn("[voz] o áudio parou no meio da fala:", erro);
+            marcasUnicas.forEach((m) => m.aoChegar());
+            progresso(texto.length);
+            return;
+          }
+          console.warn("[voz] falha na voz do ElevenLabs:", erro);
+        }
       }
+      if (!controle.signal.aborted && (!antesDeTocar || await iniciar())) {
+        marcasUnicas.forEach((m) => m.aoChegar());
+        await legendaSemVoz(texto, progresso, controle.signal);
+      }
+      return;
     }
     if (!controle.signal.aborted && (!antesDeTocar || await iniciar())) {
       marcasUnicas.forEach((m) => m.aoChegar());
