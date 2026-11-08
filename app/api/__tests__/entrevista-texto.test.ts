@@ -128,6 +128,49 @@ describe("pergunta nova logo depois de uma fala solta do agente", () => {
   });
 });
 
+describe("fala do agente gravada durante a análise", () => {
+  it("o /analisar refiltra com o estado fresco: a pergunta não sai e o plin não fica pendente", async () => {
+    // O LLM falso grava a fala do Totti (via /perguntar) enquanto a análise está em andamento.
+    let sessao = "";
+    let gravou = false;
+    const base = llmVariado();
+    const llm: LlmCliente = {
+      async completarJson(args) {
+        if (args.nomeSchema !== "abertura_entrevista" && sessao && !gravou) {
+          gravou = true; // o /perguntar também chama o LLM: sem isso a chamada recursiva não termina
+          relogio += 2_000;
+          const p = await ler(await perguntarPost(post(`/api/sessoes/${sessao}/perguntar`, { sessao_id: sessao, fase: "ALTO_NIVEL", texto: "Qual a escala de acessos?" }), params(sessao)));
+          assert.equal(p.corpo.responder, true);
+          relogio += 1_000;
+        }
+        return base.completarJson(args);
+      },
+    };
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    sessao = id;
+    const r = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 30);
+    sessao = "";
+    assert.equal(r.status, "ok", "a fala gravada no meio da análise segura a pergunta");
+    assert.equal(r.pergunta, null);
+    assert.equal((await estado(id)).plinPendente, false);
+  });
+
+  it("sem fala no meio da análise e com silêncio longo, a pergunta sai (sem regressão)", async () => {
+    definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    const r = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 30);
+    assert.equal(r.status, "duvida");
+    assert.equal((await estado(id)).plinPendente, true);
+  });
+});
+
 describe("entrevista completa por texto (handlers + LLM falso)", () => {
   it("percorre todas as fases, respeita os limites do plin, não vaza segredos e gera o scorecard", async () => {
     definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
