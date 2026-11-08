@@ -60,6 +60,11 @@ export class FilaFalas {
     void this.processar();
   }
 
+  /** Há fala pendente ou um pedido em voo. */
+  get emAndamento(): boolean {
+    return this.ocupada || this.pendente !== null;
+  }
+
   /** Reenvia a última fala que falhou (o botão de último recurso). */
   tentarNovamente() {
     if (!this.falhou) return;
