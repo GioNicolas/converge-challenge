@@ -32,3 +32,7 @@ test("sem pt-BR, cai em qualquer pt; sem pt, nenhuma", () => {
   assert.equal(escolherVozPt([v("Joana", "pt-PT")])?.name, "Joana");
   assert.equal(escolherVozPt([v("Samantha", "en-US")]), undefined);
 });
+
+test("só a voz feminina do Google é descartada, não qualquer voz Google", () => {
+  assert.equal(escolherVozPt([v("Google português do Brasil", "pt-BR"), v("Google masculino", "pt-BR")])?.name, "Google masculino");
+});

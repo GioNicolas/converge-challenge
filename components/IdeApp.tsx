@@ -148,7 +148,6 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   });
 
   useEffect(() => warmUp(), []);
-  // O destrave do áudio no primeiro gesto fica no useVozAgente (vale para todas as telas que falam).
   const pedirMidia = midia.pedir;
   useEffect(() => {
     void pedirMidia().catch(() => {});

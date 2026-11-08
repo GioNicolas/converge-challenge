@@ -102,6 +102,7 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
         if (!sinal.aborted) eventos.aoProgresso(Math.min(parte.fim, parte.inicio + n));
       };
       if (servidorDisponivel) {
+        let iniciou = false;
         try {
           const resposta = await dependencias.fetch("/api/falar", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -113,7 +114,6 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           const dados = RespostaVoz.parse(await resposta.json());
           sinal.throwIfAborted();
           const bytes = Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0));
-          let iniciou = false;
           await dependencias.tocar(new Blob([bytes], { type: "audio/mpeg" }), dados.alinhamento as Alinhamento, {
             sinal,
             aoProgresso: (n) => {
@@ -127,6 +127,13 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           continue;
         } catch (erro) {
           sinal.throwIfAborted();
+          // Se o áudio já começou, repetir a parte com a voz do navegador faria o candidato ouvir a frase duas vezes,
+          // com duas vozes. Dá a parte por falada e segue.
+          if (iniciou) {
+            console.warn("[voz] o áudio parou no meio da fala:", erro);
+            progresso(parte.texto.length);
+            continue;
+          }
           console.warn("[voz] usando síntese do navegador:", erro);
         }
       }

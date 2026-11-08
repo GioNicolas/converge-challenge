@@ -18,25 +18,24 @@ export function progressoDaFala(alinhamento: Alinhamento, tempo: number): number
 // uma vez num clique fica "liberado" e é reaproveitado nas falas seguintes.
 const WAV_SILENCIO = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
 let elementoLiberado: HTMLAudioElement | null = null;
-let liberando = false;
 
-/** Chame dentro de um gesto do usuário (clique ou tecla). Depois disso, as falas tocam sem bloqueio. */
+/**
+ * Chame dentro de um gesto do usuário (clique ou tecla). Depois disso, as falas tocam sem bloqueio.
+ * Cada gesto tenta de novo enquanto nenhum deu certo, mesmo com uma tentativa anterior pendente: um pointerdown
+ * sem ativação (Safari) não pode tirar a vez do click que vem logo depois.
+ */
 export function liberarAudio(): void {
-  if (elementoLiberado || liberando || typeof Audio === "undefined") return;
-  liberando = true;
+  if (elementoLiberado || typeof Audio === "undefined") return;
   try {
     const elemento = new Audio(WAV_SILENCIO);
     Promise.resolve(elemento.play()).then(
       () => {
         elemento.pause();
-        elementoLiberado = elemento;
-        liberando = false;
+        elementoLiberado ??= elemento;
       },
-      () => { liberando = false; },
+      () => {},
     );
-  } catch {
-    liberando = false;
-  }
+  } catch {}
 }
 
 export function tocarComAlinhamento(

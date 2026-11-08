@@ -154,3 +154,23 @@ test("fallback do navegador também para a fala e não completa progresso cancel
   assert.equal(falou?.onend, null);
   assert.deepEqual(progresso, []);
 });
+
+test("áudio que para no meio não repete a parte com a voz do navegador", async () => {
+  const progresso: number[] = [];
+  const falar = criarVoz({
+    fetch: async () => Response.json(dadosVoz),
+    tocar: async (_audio, _alinhamento, opcoes) => {
+      opcoes.aoProgresso?.(1);
+      throw new Error("erro de decodificação");
+    },
+    navegador: async () => { assert.fail("não deveria repetir a fala no navegador"); },
+  });
+  const aviso = console.warn;
+  console.warn = () => {};
+  try {
+    await falar("oi", new AbortController().signal, { aoIniciar: () => {}, aoProgresso: (n) => progresso.push(n) });
+  } finally {
+    console.warn = aviso;
+  }
+  assert.equal(progresso.at(-1), 2);
+});
