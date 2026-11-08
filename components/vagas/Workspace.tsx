@@ -1,32 +1,47 @@
 "use client";
 
-// A tela inicial do recrutador: as vagas como uma pipeline, na ordem em que andam.
-//   Definir escopo → Aguardando entrevistas → Ver resultados
-// Três cards grandes, um por estágio, com o número de vagas em destaque. Abaixo, a lista com todas as vagas abertas;
-// clicar num card mostra só as daquele estágio (clicar de novo volta a tudo). Busca e filtros valem para a lista.
-// Os convites saem sozinhos ao publicar, então não há estágio de "enviar convites" nem "divulgar link".
-// Cada vaga tem o cargo e uma frase curta (com um número, no máximo); os detalhes ficam dentro da vaga.
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// A tela inicial da recrutadora, pensada para escala (dezenas de vagas, dezenas de milhares de inscritos):
+//   1. Painel executivo: os grandes números somados das vagas abertas e o funil da empresa (clicável: filtra a lista).
+//   2. Entrevistas ao vivo, quando houver.
+//   3. Barra de filtros: busca, chips de recorte com contagem, gaveta com área/senioridade/time/responsável e a ordem,
+//      e os filtros aplicados à vista, cada um com seu X.
+//   4. A lista em cards: volume em destaque, micro-barra do funil, alerta de relatórios prontos e o atalho
+//      direto para onde a vaga pede atenção (escores, entrevistas ou a conversa com o Totti).
+// Os convites saem sozinhos ao publicar, então não há estágio de "enviar convites".
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
-import { ArrowRight, Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
+import { ArrowRight, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import {
-  ESTAGIOS,
+  ALTO_VOLUME,
+  MINUTOS_POR_TRIAGEM,
   NOME_AREA_VAGA,
-  NOME_ESTAGIO,
+  NOME_FORMATO_CURTO,
+  NOME_ORDEM,
+  NOME_RECORTE,
   NOME_SENIORIDADE_VAGA,
+  ORDENS,
+  RECORTES_RAPIDOS,
+  compararVagas,
   descartarRascunho,
   diasDoRascunho,
   estagioDa,
+  noRecorte,
   novosDa,
-  numeroCurto,
+  numero,
+  porcento,
   quandoFoi,
+  recorteDaUrl,
   situacaoDoRascunho,
+  totaisDas,
   useVagas,
   type Area,
-  type Estagio,
+  type OrdemVagas,
   type RascunhoVaga,
+  type Recorte,
+  type Senioridade,
+  type Totais,
   type VagaEmpresa,
 } from "@/lib/vagas/workspace";
 import { buscaNormalizada, comConvites, useConvitesFeitos } from "@/lib/vagas/candidatos";
@@ -36,14 +51,16 @@ import { BarrasDeVoz } from "@/components/totti/Perola";
 import { useContar } from "@/components/totti/useContar";
 import TituloRevelado from "@/components/totti/TituloRevelado";
 import Casca from "./Casca";
-import { Busca, Paginacao } from "./controles";
+import { Busca, Chip, Etiqueta, Grupo, Paginacao, Pilula, Popover } from "./controles";
 
-type Filtro = Estagio | "encerradas" | null;
-type Ordem = "recentes" | "inscritos" | "az";
 type Linha = VagaEmpresa & { estagio: ReturnType<typeof estagioDa> };
 type Item = { tipo: "vaga"; v: Linha } | { tipo: "escopo"; r: RascunhoVaga };
 
 const POR_PAGINA = 12;
+const ORDEM_PADRAO: OrdemVagas = "inscritos";
+
+const hrefVaga = (id: string, etapa: "escores" | "entrevistas") => `/vagas/vaga?id=${encodeURIComponent(id)}&etapa=${etapa}`;
+const hrefRascunho = (id: string) => `/vagas/nova?rascunho=${encodeURIComponent(id)}`;
 
 export default function Workspace() {
   const { vagas, rascunhos } = useVagas();
@@ -64,125 +81,130 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
     [vagas, convites, reais],
   );
 
-  // O que está acontecendo de verdade: entrevistas em andamento e relatórios que esperam decisão.
+  const totais = useMemo(() => totaisDas(linhas), [linhas]);
   const aoVivo = useMemo(() => linhas.filter((v) => v.estagio !== "encerrada" && v.funil.emAndamento > 0), [linhas]);
-  const comNovos = useMemo(
-    () => linhas.filter((v) => novosDa(v) > 0).sort((a, b) => novosDa(b) - novosDa(a)),
+  const maisPendente = useMemo(
+    () => linhas.reduce<Linha | undefined>((m, v) => (novosDa(v) > (m ? novosDa(m) : 0) ? v : m), undefined),
     [linhas],
   );
 
+  // O recorte pode vir na URL (?recorte=... ou o antigo ?estagio=...); "Todas as vagas", no menu lateral, volta a tudo.
   const params = useSearchParams();
-  const daUrl = params.get("estagio") ?? params.get("aba");
-  const [filtro, setFiltro] = useState<Filtro>(null);
-  const lista = useRef<HTMLElement>(null);
+  const daUrl = params.get("recorte") ?? params.get("estagio") ?? params.get("aba");
+  const [recorte, setRecorte] = useState<Recorte>("todas");
+  const [pagina, setPagina] = useState(0);
   useEffect(() => {
-    // O estágio pode vir na URL (?estagio=...); "Todas as vagas", no menu lateral, volta à lista com tudo.
-    setFiltro(daUrl && (ESTAGIOS.includes(daUrl as Estagio) || daUrl === "encerradas") ? (daUrl as Filtro) : null);
+    setRecorte(recorteDaUrl(daUrl));
     setPagina(0);
   }, [daUrl]);
 
   const [busca, setBusca] = useState("");
   const termo = useDeferredValue(buscaNormalizada(busca.trim()));
   const [area, setArea] = useState<Area | "">("");
+  const [senioridade, setSenioridade] = useState<Senioridade | "">("");
   const [time, setTime] = useState("");
   const [responsavel, setResponsavel] = useState("");
-  const [ordem, setOrdem] = useState<Ordem>("recentes");
-  const [pagina, setPagina] = useState(0);
+  const [ordem, setOrdem] = useState<OrdemVagas>(ORDEM_PADRAO);
 
-  const filtradas = useMemo(
+  const temFiltro = !!(area || senioridade || time || responsavel);
+
+  // Busca e gaveta valem para tudo; o recorte (chip ou funil) escolhe a fatia por cima disso.
+  const base = useMemo(
     () =>
       linhas.filter(
         (v) =>
           (!area || v.area === area) &&
+          (!senioridade || v.senioridade === senioridade) &&
           (!time || v.time === time) &&
           (!responsavel || v.responsavel === responsavel) &&
           (!termo || buscaNormalizada(`${v.cargo} ${v.time} ${v.responsavel} ${NOME_AREA_VAGA[v.area]}`).includes(termo)),
       ),
-    [linhas, area, time, responsavel, termo],
+    [linhas, area, senioridade, time, responsavel, termo],
   );
-  // Escopos não têm área, time nem responsável: com esses filtros ligados, eles saem da lista.
+  // Escopos não têm área, senioridade, time nem responsável: com esses filtros ligados, eles saem da lista.
   const escopos = useMemo(
-    () => (area || time || responsavel ? [] : rascunhos.filter((r) => !termo || buscaNormalizada(r.cargo).includes(termo))),
-    [rascunhos, area, time, responsavel, termo],
+    () => (temFiltro ? [] : rascunhos.filter((r) => !termo || buscaNormalizada(r.cargo).includes(termo))),
+    [rascunhos, temFiltro, termo],
   );
 
-  const ordenar = (l: Linha[], estagio?: Filtro) => {
-    const cmp: Record<Ordem, (a: Linha, b: Linha) => number> = {
-      recentes: (a, b) => a.abertaHaDias - b.abertaHaDias,
-      inscritos: (a, b) => b.funil.inscritos - a.funil.inscritos,
-      az: (a, b) => a.cargo.localeCompare(b.cargo, "pt-BR"),
-    };
-    // Sem ordem escolhida, cada estágio põe na frente o que mais pede atenção.
-    if (ordem === "recentes" && estagio === "resultados") return [...l].sort((a, b) => b.funil.novos - a.funil.novos);
-    return [...l].sort(cmp[ordem]);
+  const contagem = (r: Recorte) => {
+    if (r === "escopo") return escopos.length;
+    const n = base.filter((v) => noRecorte(v, r)).length;
+    return r === "todas" ? n + escopos.length : n;
   };
 
-  const doEstagio = (e: Filtro): Item[] => {
-    if (e === "escopo") {
-      const r = [...escopos].sort((a, b) =>
-        ordem === "az" ? a.cargo.localeCompare(b.cargo, "pt-BR") : diasDoRascunho(a) - diasDoRascunho(b),
-      );
-      return r.map((r) => ({ tipo: "escopo", r }));
-    }
-    const l = filtradas.filter((v) => (e === "encerradas" ? v.estagio === "encerrada" : v.estagio === e));
-    return ordenar(l, e).map((v) => ({ tipo: "vaga", v }));
-  };
+  const itens: Item[] = useMemo(() => {
+    const deEscopo = [...escopos]
+      .sort((a, b) => (ordem === "az" ? a.cargo.localeCompare(b.cargo, "pt-BR") : diasDoRascunho(a) - diasDoRascunho(b)))
+      .map((r): Item => ({ tipo: "escopo", r }));
+    if (recorte === "escopo") return deEscopo;
+    const lista = base
+      .filter((v) => noRecorte(v, recorte))
+      .sort(compararVagas(ordem))
+      .map((v): Item => ({ tipo: "vaga", v }));
+    // Em "Todas", os escopos (sem inscritos ainda) vêm depois das vagas publicadas.
+    return recorte === "todas" ? [...lista, ...deEscopo] : lista;
+  }, [base, escopos, recorte, ordem]);
 
-  const contagem = (e: Estagio) => (e === "escopo" ? escopos.length : filtradas.filter((v) => v.estagio === e).length);
-  const encerradas = filtradas.filter((v) => v.estagio === "encerrada").length;
-
-  const temFiltro = !!(area || time || responsavel);
-  // Sem estágio escolhido, a lista mostra tudo que está aberto (com busca e filtros aplicados).
-  const itensPlanos = useMemo(() => {
-    if (filtro) return doEstagio(filtro);
-    return ESTAGIOS.flatMap((e) => doEstagio(e));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtro, filtradas, escopos, ordem]);
-
-  const paginaSegura = Math.min(pagina, Math.max(0, Math.ceil(itensPlanos.length / POR_PAGINA) - 1));
-  const visiveis = itensPlanos.slice(paginaSegura * POR_PAGINA, (paginaSegura + 1) * POR_PAGINA);
+  const paginaSegura = Math.min(pagina, Math.max(0, Math.ceil(itens.length / POR_PAGINA) - 1));
+  const visiveis = itens.slice(paginaSegura * POR_PAGINA, (paginaSegura + 1) * POR_PAGINA);
+  const encerradas = base.filter((v) => v.estagio === "encerrada").length;
 
   // Um só agendamento de rolagem por vez; some junto com a tela.
+  const lista = useRef<HTMLElement>(null);
   const rolagem = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(rolagem.current), []);
 
-  const escolher = (e: Filtro) => {
-    const proximo = filtro === e ? null : e;
-    setFiltro(proximo);
+  const escolher = (r: Recorte, rolar = false) => {
+    const proximo = recorte === r && r !== "todas" ? "todas" : r;
+    setRecorte(proximo);
     setPagina(0);
     clearTimeout(rolagem.current);
-    // No celular os cards empilham e a lista abre abaixo da dobra: a página desce até ela, sem pressa.
-    if (proximo)
+    // Vindo do funil (lá em cima), a página desce até a lista se ela estiver abaixo da dobra.
+    if (rolar && proximo !== "todas")
       rolagem.current = setTimeout(() => {
         const topo = lista.current?.getBoundingClientRect().top ?? 0;
-        if (topo > window.innerHeight - 160) {
+        if (topo > window.innerHeight - 200) {
           const suave = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          lista.current?.scrollIntoView({
-            behavior: suave ? "smooth" : "auto",
-            block: "start",
-          });
+          lista.current?.scrollIntoView({ behavior: suave ? "smooth" : "auto", block: "start" });
         }
-      }, 360);
+      }, 200);
   };
-  const limpar = () => {
+  const mudar =
+    <T,>(set: (v: T) => void) =>
+    (v: T) => {
+      set(v);
+      setPagina(0);
+    };
+  const limparGaveta = () => {
     setArea("");
+    setSenioridade("");
     setTime("");
     setResponsavel("");
-    setBusca("");
-    setFiltro(null);
     setPagina(0);
+  };
+  const limparTudo = () => {
+    limparGaveta();
+    setBusca("");
+    setRecorte("todas");
+    setOrdem(ORDEM_PADRAO);
   };
   const unicos = (k: "time" | "responsavel") =>
     [...new Set(linhas.map((v) => v[k]).filter((x) => x && x !== "—"))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 
-  const tituloLista =
-    filtro === "encerradas"
-      ? "Encerradas"
-      : filtro
-        ? NOME_ESTAGIO[filtro]
-        : temFiltro || termo
-          ? "Resultado da busca"
-          : "Todas as vagas";
+  // Os filtros aplicados, à vista: cada um sai no próprio X.
+  const aplicados: { rotulo: string; valor: string; tirar: () => void }[] = [
+    ...(recorte !== "todas" ? [{ rotulo: "Recorte", valor: NOME_RECORTE[recorte], tirar: () => escolher("todas") }] : []),
+    ...(busca.trim() ? [{ rotulo: "Busca", valor: busca.trim(), tirar: () => setBusca("") }] : []),
+    ...(area ? [{ rotulo: "Área", valor: NOME_AREA_VAGA[area], tirar: () => mudar(setArea)("") }] : []),
+    ...(senioridade
+      ? [{ rotulo: "Senioridade", valor: NOME_SENIORIDADE_VAGA[senioridade], tirar: () => mudar(setSenioridade)("") }]
+      : []),
+    ...(time ? [{ rotulo: "Time", valor: time, tirar: () => mudar(setTime)("") }] : []),
+    ...(responsavel ? [{ rotulo: "Responsável", valor: responsavel, tirar: () => mudar(setResponsavel)("") }] : []),
+  ];
+
+  const tituloLista = recorte === "todas" ? (aplicados.length ? "Resultado da busca" : "Todas as vagas") : NOME_RECORTE[recorte];
 
   return (
     // "user": com reduzir movimento ligado no sistema, o motion tira os deslizes; a altura da lista é tratada em Altura.
@@ -193,86 +215,105 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         transition={{ duration: 0.4, ease: curvaSuave }}
         className="mx-auto flex max-w-[1120px] flex-col gap-8"
       >
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[15px] text-texto-suave first-letter:uppercase">{dataDeHoje()}</span>
-            <h1 className="titulo-display text-[44px] text-texto">
-              <TituloRevelado texto={saudacao()} />
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <Busca valor={busca} onMudar={(v) => (setBusca(v), setPagina(0))} placeholder="Buscar vaga, time ou responsável" />
-            <Filtros
-              area={area}
-              time={time}
-              responsavel={responsavel}
-              ordem={ordem}
-              times={unicos("time")}
-              responsaveis={unicos("responsavel")}
-              onArea={(v) => (setArea(v), setPagina(0))}
-              onTime={(v) => (setTime(v), setPagina(0))}
-              onResponsavel={(v) => (setResponsavel(v), setPagina(0))}
-              onOrdem={setOrdem}
-            />
-          </div>
+        <header className="flex flex-col gap-0.5">
+          <span className="text-[15px] text-texto-suave first-letter:uppercase">{dataDeHoje()}</span>
+          <h1 className="titulo-display text-[44px] text-texto">
+            <TituloRevelado texto={saudacao()} />
+          </h1>
         </header>
 
+        <Painel totais={totais} maisPendente={maisPendente} recorte={recorte} onRecorte={(r) => escolher(r, true)} />
+
         <AoVivo linhas={aoVivo} />
-        <Atencao novos={comNovos} rascunho={rascunhos[0]} />
 
-        {/* Os estágios, em ordem. Clicado, o card abre a lista das vagas dele logo abaixo. */}
-        <nav aria-label="Estágios das vagas" className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {ESTAGIOS.map((e, i) => (
-            <CardEstagio key={e} passo={i + 1} estagio={e} n={contagem(e)} total={ESTAGIOS.reduce((t, x) => t + contagem(x), 0)} ativo={filtro === e} onClick={() => escolher(e)} />
-          ))}
-        </nav>
+        <section ref={lista} aria-label="Vagas" className="flex scroll-mt-20 flex-col gap-4 md:scroll-mt-8">
+          {/* Barra de controle: busca e gaveta de filtros; abaixo, os recortes rápidos com contagem. */}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Busca valor={busca} onMudar={mudar(setBusca)} placeholder="Buscar vaga, time ou responsável" />
+              <Gaveta
+                area={area}
+                senioridade={senioridade}
+                time={time}
+                responsavel={responsavel}
+                ordem={ordem}
+                times={unicos("time")}
+                responsaveis={unicos("responsavel")}
+                onArea={mudar(setArea)}
+                onSenioridade={mudar(setSenioridade)}
+                onTime={mudar(setTime)}
+                onResponsavel={mudar(setResponsavel)}
+                onOrdem={mudar(setOrdem)}
+                onLimpar={limparGaveta}
+              />
+            </div>
+            <div role="group" aria-label="Recortes rápidos" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+              {RECORTES_RAPIDOS.map((r) => (
+                <Chip key={r} ativo={recorte === r} n={contagem(r)} destaque={r === "pendentes"} onClick={() => escolher(r)}>
+                  {NOME_RECORTE[r]}
+                </Chip>
+              ))}
+            </div>
+            {aplicados.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-0.5 text-[12.5px] text-texto-suave">Filtrando por</span>
+                {aplicados.map((a) => (
+                  <Etiqueta key={a.rotulo} rotulo={a.rotulo} valor={a.valor} onTirar={a.tirar} />
+                ))}
+                <button
+                  onClick={limparTudo}
+                  className="flex h-7 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium text-texto underline-offset-4 hover:underline"
+                >
+                  <X size={12} /> Limpar tudo
+                </button>
+              </div>
+            )}
+          </div>
 
-        <section ref={lista} className="flex scroll-mt-20 flex-col gap-4 md:scroll-mt-8">
           <Altura>
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
-                key={`${filtro}-${temFiltro}-${!!termo}`}
+                key={`${recorte}-${area}-${senioridade}-${time}-${responsavel}-${ordem}-${!!termo}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0, transition: { duration: 0.1 } }}
                 transition={{ duration: 0.2, ease: curvaSuave }}
                 className="flex flex-col gap-4"
               >
-                <div className="flex items-center gap-3 px-1">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-1">
                   <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-texto">{tituloLista}</h2>
-                  <span className="numero text-[14px] text-texto-suave">{itensPlanos.length}</span>
-                  {(temFiltro || busca) && (
-                    <button
-                      onClick={limpar}
-                      className="flex items-center gap-1 rounded-full bg-superficie-2/70 py-1 pr-2.5 pl-2 text-[12.5px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
-                    >
-                      <X size={12} /> Limpar
-                    </button>
+                  <span className="numero text-[14px] text-texto-suave">{numero(itens.length)}</span>
+                  {recorte !== "escopo" && itens.length > 1 && (
+                    <span className="text-[12.5px] text-texto-suave sm:ml-auto">Ordenadas por: {NOME_ORDEM[ordem].toLowerCase()}</span>
                   )}
                 </div>
-                <div className="cartao overflow-hidden">
-                  {visiveis.length === 0 ? (
-                    <Vazio onLimpar={limpar} />
-                  ) : (
-                    <ul className="py-1.5">
-                      {visiveis.map((it, i) => (
-                        <ItemLista key={chave(it)} it={it} indice={i} mostrarEstagio={!filtro} />
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itensPlanos.length} onMudar={setPagina} />
+                {visiveis.length === 0 ? (
+                  <div className="cartao">
+                    <Vazio onLimpar={limparTudo} />
+                  </div>
+                ) : (
+                  <ul className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+                    {visiveis.map((it, i) =>
+                      it.tipo === "vaga" ? (
+                        <CartaoVaga key={it.v.id} v={it.v} indice={i} />
+                      ) : (
+                        <CartaoEscopo key={`escopo-${it.r.id}`} r={it.r} indice={i} />
+                      ),
+                    )}
+                  </ul>
+                )}
+                <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itens.length} onMudar={setPagina} />
               </motion.div>
             </AnimatePresence>
           </Altura>
 
-          {/* Encerradas não têm card: o mesmo link abre e fecha, sem mexer na busca nem nos filtros. */}
-          {(filtro === "encerradas" || encerradas > 0) && (
+          {/* Encerradas não têm chip: o mesmo link abre e fecha, sem mexer na busca nem nos filtros. */}
+          {(recorte === "encerradas" || encerradas > 0) && (
             <button
               onClick={() => escolher("encerradas")}
               className="self-start px-1 text-[13px] text-texto-suave underline-offset-4 hover:text-texto hover:underline"
             >
-              {filtro === "encerradas" ? "Voltar às vagas abertas" : `Ver vagas encerradas (${encerradas})`}
+              {recorte === "encerradas" ? "Voltar às vagas abertas" : `Ver vagas encerradas (${numero(encerradas)})`}
             </button>
           )}
         </section>
@@ -281,74 +322,173 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   );
 }
 
-const chave = (it: Item) => (it.tipo === "vaga" ? it.v.id : `escopo-${it.r.id}`);
+// ---------------------------------------------------------------------------
+// Painel executivo
+// ---------------------------------------------------------------------------
 
-/**
- * Um estágio da pipeline: o passo, o nome, quantas vagas estão nele (em destaque, contando do zero ao chegar)
- * e o que acontece ali. O escolhido fica em tinta cheia.
- */
-function CardEstagio({
-  passo,
-  estagio,
-  n,
-  total,
-  ativo,
-  onClick,
+/** Os quatro grandes números e, abaixo, o funil da empresa. */
+function Painel({
+  totais: t,
+  maisPendente,
+  recorte,
+  onRecorte,
 }: {
-  passo: number;
-  estagio: Estagio;
+  totais: Totais;
+  maisPendente?: Linha;
+  recorte: Recorte;
+  onRecorte: (r: Recorte) => void;
+}) {
+  return (
+    <section aria-label="Visão geral da empresa" className="flex flex-col gap-3.5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <GrandeNumero indice={0} rotulo="Total de inscrições" n={t.inscritos} sub={`em ${numero(t.vagas)} vagas abertas`} />
+        <GrandeNumero
+          indice={1}
+          rotulo="Triados pelo Totti"
+          n={t.entrevistados}
+          sub={`entrevistas feitas pela IA${t.emAndamento ? ` · ${numero(t.emAndamento)} agora` : ""}`}
+        />
+        <GrandeNumero
+          indice={2}
+          escuro
+          rotulo="Aguardando sua decisão"
+          n={t.pendentes}
+          sub={t.pendentes ? `relatórios prontos em ${numero(t.vagasComPendentes)} ${t.vagasComPendentes === 1 ? "vaga" : "vagas"}` : "Nada esperando por você"}
+          acao={maisPendente ? { href: hrefVaga(maisPendente.id, "escores"), texto: "Decidir agora" } : undefined}
+        />
+        <GrandeNumero
+          indice={3}
+          rotulo="Tempo poupado pela IA"
+          n={t.horasPoupadas}
+          prefixo="~"
+          sufixo="h"
+          sub={`de entrevistas, ~${MINUTOS_POR_TRIAGEM} min por triagem`}
+        />
+      </div>
+      <FunilMacro totais={t} recorte={recorte} onRecorte={onRecorte} />
+    </section>
+  );
+}
+
+function GrandeNumero({
+  indice,
+  rotulo,
+  n,
+  sub,
+  prefixo,
+  sufixo,
+  escuro = false,
+  acao,
+}: {
+  indice: number;
+  rotulo: string;
   n: number;
-  total: number;
-  ativo: boolean;
-  onClick: () => void;
+  sub: string;
+  prefixo?: string;
+  sufixo?: string;
+  escuro?: boolean;
+  acao?: { href: string; texto: string };
 }) {
   const contado = Math.round(useContar(n));
   return (
-    <motion.button
+    <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{
-        duration: 0.48,
-        delay: (passo - 1) * 0.06,
-        ease: curvaSaida,
-      }}
-      onClick={onClick}
-      aria-pressed={ativo}
-      className={`group flex flex-col gap-5 rounded-[22px] p-5 text-left transition-[background-color,box-shadow,transform] duration-[240ms] outline-none focus-visible:ring-2 focus-visible:ring-texto/30 active:scale-[0.99] ${
-        ativo
-          ? "bg-[#1c1812] text-[#f5f0e8] shadow-[0_24px_44px_-22px_rgb(28_24_18/0.55)]"
-          : "bg-superficie text-texto shadow-padrao hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_44px_-22px_rgb(28_24_18/0.4)]"
+      transition={{ duration: 0.48, delay: indice * 0.06, ease: curvaSaida }}
+      className={`flex min-h-[156px] flex-col gap-3 rounded-[22px] p-5 ${
+        escuro ? "bg-[#1c1812] text-[#f5f0e8] shadow-[0_24px_44px_-22px_rgb(28_24_18/0.55)]" : "bg-superficie text-texto shadow-padrao"
       }`}
     >
-      <span className="flex items-center justify-between gap-3">
-        <span className="flex items-center gap-2.5">
-          <span
-            className={`font-mono flex size-6 items-center justify-center rounded-full text-[11.5px] ${
-              ativo ? "bg-[#f5f0e8]/15 text-[#f5f0e8]" : "bg-superficie-2 text-texto-suave"
-            }`}
-          >
-            {passo}
-          </span>
-          <span className="text-[15px] font-medium tracking-[-0.012em]">{NOME_ESTAGIO[estagio]}</span>
-        </span>
-        <ChevronRight
-          size={16}
-          className={`shrink-0 transition-transform duration-[240ms] ${ativo ? "rotate-90 text-[#f5f0e8]/70" : "text-texto-suave group-hover:translate-x-0.5"}`}
-        />
+      <span className={`flex items-center gap-2 text-[13.5px] ${escuro ? "text-[#f5f0e8]/75" : "text-texto-suave"}`}>
+        {escuro && n > 0 && <span aria-hidden className="size-1.5 rounded-full bg-[#f5f0e8] anim-pulso" />}
+        {rotulo}
       </span>
-      <span className="flex flex-col gap-1">
-        <span className="titulo-display text-[52px]">{contado}</span>
-        {/* Quanto das vagas abertas está neste estágio: a barra cresce ao chegar */}
-        <span aria-hidden className={`mt-2 h-1 overflow-hidden rounded-full ${ativo ? "bg-[#f5f0e8]/15" : "bg-superficie-2"}`}>
-          <motion.span
-            className={`block h-full rounded-full ${ativo ? "bg-[#f5f0e8]" : "bg-texto"}`}
-            initial={{ width: 0 }}
-            animate={{ width: `${total ? Math.max(4, Math.round((n / total) * 100)) : 0}%` }}
-            transition={{ duration: 1.1, delay: 0.2 + passo * 0.08, ease: curvaSaida }}
-          />
-        </span>
+      <span className="titulo-display text-[44px] leading-none">
+        {prefixo && <span className="text-[0.6em] opacity-60">{prefixo}</span>}
+        {numero(contado)}
+        {sufixo && <span className="ml-1 text-[0.55em] opacity-70">{sufixo}</span>}
       </span>
-    </motion.button>
+      <span className={`mt-auto flex flex-wrap items-end justify-between gap-x-3 gap-y-1 text-[12.5px] ${escuro ? "text-[#f5f0e8]/70" : "text-texto-suave"}`}>
+        <span>{sub}</span>
+        {acao && (
+          <Link href={acao.href} className="group/acao flex items-center gap-1 text-[13px] font-medium text-[#f5f0e8] sublinha">
+            {acao.texto} <ArrowRight size={13} className="transition-transform group-hover/acao:translate-x-0.5" />
+          </Link>
+        )}
+      </span>
+    </motion.div>
+  );
+}
+
+/**
+ * O funil agregado da empresa, em quatro etapas. A barra de cada uma é a fatia dos inscritos;
+ * clicar numa etapa filtra a lista pelas vagas que têm gente nela.
+ */
+function FunilMacro({ totais: t, recorte, onRecorte }: { totais: Totais; recorte: Recorte; onRecorte: (r: Recorte) => void }) {
+  const etapas: { nome: string; n: number; recorte: Recorte; dica: string }[] = [
+    { nome: "Inscritos", n: t.inscritos, recorte: "todas", dica: "Todas as vagas abertas" },
+    { nome: "Convidados", n: t.convidados, recorte: "em_entrevista", dica: "Vagas em entrevista" },
+    { nome: "Entrevistados pela IA", n: t.entrevistados, recorte: "com_relatorios", dica: "Vagas com entrevistas feitas" },
+    { nome: "Em decisão", n: t.pendentes, recorte: "pendentes", dica: "Vagas com decisão pendente" },
+  ];
+  return (
+    <motion.nav
+      aria-label="Funil da empresa"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.48, delay: 0.24, ease: curvaSaida }}
+      className="flex flex-col gap-1 rounded-[22px] bg-superficie p-2 shadow-padrao"
+    >
+      <span className="flex items-center justify-between gap-3 px-3 pt-2 pb-1">
+        <span className="font-display text-[15px] font-semibold tracking-[-0.015em] text-texto">Funil da empresa</span>
+        <span className="hidden text-[12px] text-texto-suave sm:block">Clique numa etapa para filtrar as vagas</span>
+      </span>
+      <ol className="grid grid-cols-2 gap-1 md:grid-cols-4">
+        {etapas.map((e, i) => {
+          // "Inscritos" é o funil inteiro: não fica marcado, senão parece filtro ligado.
+          const ativa = recorte === e.recorte && e.recorte !== "todas";
+          const largura = t.inscritos ? Math.max(1.5, (e.n / t.inscritos) * 100) : 0;
+          return (
+            <li key={e.nome} className="relative flex">
+              <button
+                onClick={() => onRecorte(e.recorte)}
+                aria-pressed={ativa}
+                title={e.dica}
+                className={`group flex w-full flex-col gap-2 rounded-[16px] px-3 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-texto/30 ${
+                  ativa ? "bg-[#1c1812] text-[#f5f0e8]" : "text-texto hover:bg-superficie-2/60"
+                }`}
+              >
+                <span className={`flex items-center gap-1.5 text-[12.5px] ${ativa ? "text-[#f5f0e8]/75" : "text-texto-suave"}`}>
+                  <span className="font-mono text-[11px] opacity-70">{i + 1}</span>
+                  {e.nome}
+                </span>
+                <span className="flex items-baseline gap-2">
+                  <span className="titulo-display text-[26px] leading-none">{numero(e.n)}</span>
+                  <span className={`numero text-[12.5px] ${ativa ? "text-[#f5f0e8]/70" : "text-texto-suave"}`}>
+                    {i === 0 ? "100%" : porcento(e.n, t.inscritos)}
+                  </span>
+                </span>
+                <span aria-hidden className={`h-1 overflow-hidden rounded-full ${ativa ? "bg-[#f5f0e8]/15" : "bg-superficie-2"}`}>
+                  <motion.span
+                    className={`block h-full rounded-full ${ativa ? "bg-[#f5f0e8]" : "bg-texto"}`}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${largura}%` }}
+                    transition={{ duration: 1.1, delay: 0.3 + i * 0.08, ease: curvaSaida }}
+                  />
+                </span>
+              </button>
+              {i < etapas.length - 1 && (
+                <ChevronRight
+                  aria-hidden
+                  size={14}
+                  className="pointer-events-none absolute top-1/2 -right-[11px] z-10 hidden -translate-y-1/2 text-texto-suave/60 md:block"
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </motion.nav>
   );
 }
 
@@ -369,7 +509,7 @@ function AoVivo({ linhas }: { linhas: Linha[] }) {
           className="h-full"
         >
           <Link
-            href={`/vagas/vaga?id=${encodeURIComponent(v.id)}&etapa=entrevistas`}
+            href={hrefVaga(v.id, "entrevistas")}
             className="flex h-full min-h-[176px] flex-col gap-3.5 rounded-[22px] bg-[#13110e] p-[18px] text-[#f5f0e8] transition-transform duration-[240ms] hover:-translate-y-0.5"
           >
             <span className="flex items-center justify-between">
@@ -377,7 +517,7 @@ function AoVivo({ linhas }: { linhas: Linha[] }) {
                 <span aria-hidden className="size-2 rounded-full bg-[#f5f0e8] anim-pulso" style={{ animationDelay: `${i * 0.5}s` }} />
                 Ao vivo
               </span>
-              <span className="font-mono text-[13px] whitespace-nowrap">{v.funil.emAndamento} em andamento</span>
+              <span className="font-mono text-[13px] whitespace-nowrap">{numero(v.funil.emAndamento)} em andamento</span>
             </span>
             {/* Título em até 2 linhas, sempre com a altura de 2: cartões do mesmo tamanho com qualquer cargo */}
             <span className="flex flex-col">
@@ -394,89 +534,25 @@ function AoVivo({ linhas }: { linhas: Linha[] }) {
   );
 }
 
-/** "O que pede atenção": só o que existe de verdade. Relatórios novos e um plano ainda em definição. */
-function Atencao({ novos, rascunho }: { novos: Linha[]; rascunho?: RascunhoVaga }) {
-  const totalNovos = novos.reduce((soma, v) => soma + novosDa(v), 0);
-  if (totalNovos === 0 && !rascunho) return null;
-  const carta = "anim-subir flex flex-col gap-2 rounded-[20px] bg-superficie p-[18px] shadow-padrao transition-[transform,box-shadow] duration-[240ms] ease-saida hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_44px_-22px_rgb(28_24_18/0.4)]";
-  const acao = "group/acao flex w-fit items-center gap-1 text-[14px] font-medium text-texto sublinha";
-  return (
-    <section className="flex flex-col gap-3" aria-labelledby="atencao">
-      <h2 id="atencao" className="font-display text-[22px] leading-none font-semibold tracking-[-0.02em]">
-        O que pede atenção
-      </h2>
-      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
-        {totalNovos > 0 && (
-          <div className={carta}>
-            <span className="font-semibold"><Contado n={totalNovos} /> {totalNovos === 1 ? "relatório esperando decisão" : "relatórios esperando decisão"}</span>
-            <span className="text-[13.5px] text-texto-suave">
-              {novos[0].cargo}
-              {novos.length > 1 ? ` e mais ${novos.length - 1} vaga${novos.length > 2 ? "s" : ""}` : ""}.
-            </span>
-            <Link href={`/vagas/vaga?id=${encodeURIComponent(novos[0].id)}&etapa=escores`} className={acao}>
-              Decidir agora <ArrowRight size={14} className="transition-transform group-hover/acao:translate-x-0.5" />
-            </Link>
-          </div>
-        )}
-        {rascunho && (
-          <div className={carta} style={{ animationDelay: "0.08s" }}>
-            <span className="font-semibold">Plano em definição</span>
-            <span className="text-[13.5px] text-texto-suave">
-              {rascunho.cargo} — {situacaoDoRascunho(rascunho)}.
-            </span>
-            <Link href={`/vagas/nova?rascunho=${encodeURIComponent(rascunho.id)}`} className={acao}>
-              Continuar com o Totti <ArrowRight size={14} className="transition-transform group-hover/acao:translate-x-0.5" />
-            </Link>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/** Número que conta do zero ao chegar. */
-function Contado({ n }: { n: number }) {
-  return <span className="numero">{numeroCurto(Math.round(useContar(n)))}</span>;
-}
-
 const saudacao = () => {
   const h = new Date().getHours();
   return h < 12 ? "Bom dia." : h < 18 ? "Boa tarde." : "Boa noite.";
 };
 const dataDeHoje = () => new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
 
-/** O ponto do estágio: cheio pede ação, vazado está esperando. */
-function Ponto({ estagio }: { estagio: Estagio | "encerrada" }) {
-  const cheio = estagio === "resultados" || estagio === "escopo";
-  return (
-    <span
-      aria-hidden
-      className={`size-2 shrink-0 rounded-full ${cheio ? "bg-texto" : estagio === "encerrada" ? "bg-texto-suave/30" : "border-[1.5px] border-texto/50"}`}
-    />
-  );
-}
-
 function Vazio({ onLimpar }: { onLimpar: () => void }) {
   return (
     <div className="flex flex-col items-start gap-2 px-5 py-12">
       <p className="text-[15px] text-texto">Nenhuma vaga por aqui.</p>
       <button onClick={onLimpar} className="text-[13.5px] text-texto-suave underline underline-offset-4 hover:text-texto">
-        Ver todas as vagas
+        Limpar filtros e ver todas as vagas
       </button>
     </div>
   );
 }
 
-function ItemLista({ it, indice, mostrarEstagio = false }: { it: Item; indice: number; mostrarEstagio?: boolean }) {
-  return it.tipo === "vaga" ? (
-    <LinhaVaga v={it.v} indice={indice} mostrarEstagio={mostrarEstagio} />
-  ) : (
-    <LinhaEscopo r={it.r} indice={indice} mostrarEstagio={mostrarEstagio} />
-  );
-}
-
-/** Entrada de uma linha da lista: sobe 4px e aparece, uma logo depois da outra (no máximo ~0,2s de espera). */
-const entradaLinha = (i: number) =>
+/** Entrada de um card da lista: sobe 4px e aparece, um logo depois do outro (no máximo ~0,2s de espera). */
+const entradaCard = (i: number) =>
   ({
     initial: { opacity: 0, y: 4 },
     animate: { opacity: 1, y: 0 },
@@ -517,273 +593,256 @@ function Altura({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Uma linha: o cargo e o detalhe à esquerda, em que pé a vaga está à direita, e uma seta.
- * `lateral` fica fora do link, numa coluna própria no fim (ex.: descartar o escopo), para nunca cobrir o texto.
- */
-function Grade({
-  href,
-  titulo,
-  sub,
-  situacao,
-  lateral,
-}: {
-  href: string;
-  titulo: ReactNode;
-  sub: ReactNode;
-  situacao: ReactNode;
-  lateral?: ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      <Link
-        href={href}
-        className="group flex min-w-0 flex-1 items-center gap-4 rounded-xl px-3 py-3.5 transition-colors outline-none hover:bg-superficie-2/50 focus-visible:bg-superficie-2/70"
-      >
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-[15px] text-texto transition-transform duration-[240ms] ease-saida group-hover:translate-x-1">{titulo}</span>
-          <span className="truncate text-[12.5px] text-texto-suave">{sub}</span>
-          {/* No celular a situação desce para baixo do detalhe, em vez de sumir. */}
-          <span className="truncate text-[13px] text-texto-suave sm:hidden">{situacao}</span>
-        </div>
-        <span className="hidden max-w-[240px] shrink-0 truncate text-right text-[13px] text-texto-suave sm:block">
-          {situacao}
-        </span>
-        <ChevronRight size={15} className="shrink-0 text-texto-suave transition-transform group-hover:translate-x-0.5" />
-      </Link>
-      <div className="flex w-8 shrink-0 justify-center">{lateral}</div>
-    </div>
-  );
-}
+// ---------------------------------------------------------------------------
+// Cards da lista
+// ---------------------------------------------------------------------------
 
-function Selo({ estagio }: { estagio: Linha["estagio"] | "escopo" }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <Ponto estagio={estagio} />
-      {estagio === "encerrada" ? "Encerrada" : NOME_ESTAGIO[estagio]}
-    </span>
-  );
-}
+const plural = (n: number, um: string, varios: string) => `${numero(n)} ${n === 1 ? um : varios}`;
 
-const plural = (n: number, um: string, varios: string) => `${numeroCurto(n)} ${n === 1 ? um : varios}`;
+const classeCard =
+  "group flex h-full flex-col gap-4 rounded-[20px] bg-superficie p-5 shadow-padrao transition-[transform,box-shadow] duration-[240ms] ease-saida outline-none hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_44px_-22px_rgb(28_24_18/0.4)] focus-visible:ring-2 focus-visible:ring-texto/30";
 
-/** Para onde a vaga leva e a frase do estágio (um número, no máximo: o resto fica dentro da vaga). */
-function estadoDa(v: Linha): { href: string; situacao: ReactNode } {
+/** O atalho do card: leva direto para onde a vaga pede atenção. */
+function acaoDa(v: Linha): { href: string; texto: string } {
   const f = v.funil;
-  const base = `/vagas/vaga?id=${encodeURIComponent(v.id)}`;
-  const faltam = Math.max(0, f.convidados - f.concluiram);
-  if (v.estagio === "resultados")
-    return {
-      href: `${base}&etapa=escores`,
-      situacao:
-        f.novos > 0 ? (
-          <span className="font-medium text-texto">{plural(f.novos, "relatório novo", "relatórios novos")}</span>
+  const novos = novosDa(v);
+  if (v.estagio === "encerrada") return { href: hrefVaga(v.id, "escores"), texto: "Ver resultados" };
+  // O número já está no alerta ao lado: aqui só o verbo.
+  if (novos > 0) return { href: hrefVaga(v.id, "escores"), texto: novos === 1 ? "Ver e decidir" : `Ver os ${numero(novos)}` };
+  if (f.emAndamento > 0) return { href: hrefVaga(v.id, "entrevistas"), texto: "Ver entrevistas em andamento" };
+  if (f.concluiram > 0) return { href: hrefVaga(v.id, "escores"), texto: "Ver relatórios" };
+  return { href: hrefVaga(v.id, "entrevistas"), texto: "Ver candidatos" };
+}
+
+function Tag({ children }: { children: ReactNode }) {
+  return <span className="rounded-full bg-superficie-2/80 px-2 py-0.5 text-[11.5px] text-texto-suave">{children}</span>;
+}
+
+function CartaoVaga({ v, indice }: { v: Linha; indice: number }) {
+  const f = v.funil;
+  const novos = novosDa(v);
+  const acao = acaoDa(v);
+  const alto = f.inscritos >= ALTO_VOLUME;
+  const meta = [v.time, v.responsavel].filter((x) => x && x !== "—").join(" · ");
+  const aberta = v.estagio === "encerrada" ? `Encerrada ${quandoFoi(v.encerradaHaDias ?? 0)}` : `Aberta ${quandoFoi(v.abertaHaDias)}`;
+
+  // Micro-funil dos convidados: entrevistados (tinta cheia), fazendo agora (meia tinta) e esperando a vez (traço leve).
+  const aguardando = Math.max(0, f.convidados - f.concluiram - f.emAndamento);
+  const fatia = (n: number) => (f.convidados ? (n / f.convidados) * 100 : 0);
+  const atraso = 0.1 + Math.min(indice, 8) * 0.04;
+
+  return (
+    <motion.li {...entradaCard(indice)} className="h-full">
+      <Link href={acao.href} className={classeCard}>
+        <span className="flex items-start justify-between gap-3">
+          <span className="flex flex-wrap gap-1">
+            <Tag>{NOME_SENIORIDADE_VAGA[v.senioridade]}</Tag>
+            <Tag>{NOME_AREA_VAGA[v.area]}</Tag>
+            {v.resumo && <Tag>{NOME_FORMATO_CURTO[v.resumo.formato]}</Tag>}
+          </span>
+          <span
+            className={`numero shrink-0 rounded-full px-2.5 py-1 text-[12.5px] font-medium whitespace-nowrap ${
+              alto ? "bg-texto text-texto-claro" : "bg-superficie-2 text-texto"
+            }`}
+          >
+            {plural(f.inscritos, "inscrito", "inscritos")}
+          </span>
+        </span>
+
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="font-display line-clamp-2 text-[18px] leading-snug font-semibold tracking-[-0.015em] text-texto" title={v.cargo}>
+            {v.cargo}
+          </span>
+          <span className="truncate text-[12.5px] text-texto-suave">{[meta, aberta].filter(Boolean).join(" · ")}</span>
+        </span>
+
+        {f.inscritos === 0 ? (
+          <span className="text-[12.5px] text-texto-suave">Link pronto · nenhum inscrito ainda</span>
+        ) : f.convidados > 0 ? (
+          <span className="flex flex-col gap-1.5">
+            <span aria-hidden className="flex h-[5px] overflow-hidden rounded-full bg-superficie-2">
+              <motion.span
+                className="h-full bg-texto"
+                initial={{ width: 0 }}
+                animate={{ width: `${fatia(f.concluiram)}%` }}
+                transition={{ duration: 0.9, delay: atraso, ease: curvaSaida }}
+              />
+              <motion.span
+                className="h-full bg-texto/45"
+                initial={{ width: 0 }}
+                animate={{ width: `${fatia(f.emAndamento)}%` }}
+                transition={{ duration: 0.9, delay: atraso + 0.05, ease: curvaSaida }}
+              />
+              <motion.span
+                className="h-full bg-texto/15"
+                initial={{ width: 0 }}
+                animate={{ width: `${fatia(aguardando)}%` }}
+                transition={{ duration: 0.9, delay: atraso + 0.1, ease: curvaSaida }}
+              />
+            </span>
+            <span className="numero flex flex-wrap gap-x-3 text-[12px] text-texto-suave">
+              <span>
+                <span className="text-texto">{numero(f.concluiram)}</span> triados
+              </span>
+              {f.emAndamento > 0 && <span>{numero(f.emAndamento)} agora</span>}
+              {aguardando > 0 && <span>{numero(aguardando)} aguardando entrevista</span>}
+            </span>
+          </span>
         ) : (
-          plural(f.concluiram, "relatório", "relatórios")
-        ),
-    };
-  if (v.estagio === "encerrada") return { href: `${base}&etapa=escores`, situacao: "Encerrada" };
-  return {
-    href: `${base}&etapa=entrevistas`,
-    situacao: faltam > 0 ? plural(faltam, "entrevista por fazer", "entrevistas por fazer") : "Esperando os candidatos",
-  };
-}
+          <span className="text-[12.5px] text-texto-suave">Convites saindo para os inscritos</span>
+        )}
 
-function LinhaVaga({ v, indice, mostrarEstagio }: { v: Linha; indice: number; mostrarEstagio: boolean }) {
-  const meta = [v.time, NOME_SENIORIDADE_VAGA[v.senioridade]].filter((x) => x && x !== "—").join(" · ");
-  const sub = mostrarEstagio ? (
-    <span className="flex items-center gap-2">
-      <Selo estagio={v.estagio} />
-      {meta && <span className="truncate">· {meta}</span>}
-    </span>
-  ) : (
-    meta || `Aberta ${quandoFoi(v.abertaHaDias)}`
-  );
-  const porEstagio = estadoDa(v);
-  // O quanto das entrevistas convidadas já foi feito: a barra cresce ao entrar na lista (900ms, chegar).
-  const pct = v.funil.convidados > 0 ? Math.min(100, Math.round((v.funil.concluiram / v.funil.convidados) * 100)) : 0;
-
-  return (
-    <motion.li {...entradaLinha(indice)} className="linha-lista mx-2">
-      <Grade href={porEstagio.href} titulo={v.cargo} sub={sub} situacao={porEstagio.situacao} />
-      {v.estagio !== "encerrada" && v.funil.convidados > 0 && (
-        <div className="-mt-1.5 mb-3 px-3" aria-hidden>
-          <div className="h-[5px] overflow-hidden rounded-full bg-superficie-2">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${pct}%` }}
-              transition={{ duration: 0.9, delay: 0.1 + Math.min(indice, 8) * 0.04, ease: curvaSaida }}
-              className="h-full rounded-full bg-texto"
-            />
-          </div>
-        </div>
-      )}
-    </motion.li>
-  );
-}
-
-/** Um escopo ainda com o Totti: leva de volta para a conversa. O X, no fim da linha, descarta. */
-function LinhaEscopo({ r, indice, mostrarEstagio }: { r: RascunhoVaga; indice: number; mostrarEstagio: boolean }) {
-  return (
-    <motion.li {...entradaLinha(indice)} className="linha-lista group/linha mx-2">
-      <Grade
-        href={`/vagas/nova?rascunho=${encodeURIComponent(r.id)}`}
-        titulo={r.cargo}
-        sub={
-          mostrarEstagio ? (
-            <span className="flex items-center gap-2">
-              <Selo estagio="escopo" /> · {situacaoDoRascunho(r)}
+        <span className="mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          {novos > 0 ? (
+            <span className="flex items-center gap-1.5 text-[13px] font-medium text-texto">
+              <span aria-hidden className="size-1.5 rounded-full bg-texto" />
+              {plural(novos, "relatório pronto", "relatórios prontos")} para decidir
             </span>
           ) : (
-            `${situacaoDoRascunho(r)} · criada ${quandoFoi(diasDoRascunho(r))}`
-          )
-        }
-        situacao={<span className="font-medium text-texto">{r.sessaoId ? "Continuar com o Totti" : "Começar com o Totti"}</span>}
-        lateral={
-          <button
-            onClick={() => descartarRascunho(r.id)}
-            aria-label={`Descartar o escopo ${r.cargo}`}
-            title="Descartar escopo"
-            className="flex size-7 items-center justify-center rounded-full text-texto-suave opacity-0 transition-[opacity,color,background-color] group-hover/linha:opacity-100 hover:bg-superficie-2 hover:text-perigo focus-visible:opacity-100"
-          >
-            <X size={13} />
-          </button>
-        }
-      />
+            <span />
+          )}
+          <span className="flex items-center gap-1 text-[13.5px] font-medium text-texto">
+            <span className="sublinha">{acao.texto}</span>
+            <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </span>
+      </Link>
     </motion.li>
   );
 }
 
-/** Um botão "Filtros" que abre um painel com área, time, responsável e ordem, todos em pílulas. */
-function Filtros({
+/** Um escopo ainda com o Totti: leva de volta para a conversa. O X, no canto, descarta. */
+function CartaoEscopo({ r, indice }: { r: RascunhoVaga; indice: number }) {
+  return (
+    <motion.li {...entradaCard(indice)} className="group/escopo relative h-full">
+      <Link href={hrefRascunho(r.id)} className={classeCard}>
+        <span className="flex flex-wrap gap-1 pr-8">
+          <span className="rotulo-destaque">Em definição</span>
+        </span>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="font-display line-clamp-2 text-[18px] leading-snug font-semibold tracking-[-0.015em] text-texto" title={r.cargo}>
+            {r.cargo}
+          </span>
+          <span className="truncate text-[12.5px] text-texto-suave">
+            {situacaoDoRascunho(r)} · criada {quandoFoi(diasDoRascunho(r))}
+          </span>
+        </span>
+        <span className="mt-auto flex items-center justify-end gap-1 text-[13.5px] font-medium text-texto">
+          <span className="sublinha">{r.sessaoId ? "Continuar com o Totti" : "Começar com o Totti"}</span>
+          <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </Link>
+      <button
+        onClick={() => descartarRascunho(r.id)}
+        aria-label={`Descartar o escopo ${r.cargo}`}
+        title="Descartar escopo"
+        className="absolute top-4 right-4 flex size-7 items-center justify-center rounded-full text-texto-suave opacity-0 transition-[opacity,color,background-color] group-hover/escopo:opacity-100 hover:bg-superficie-2 hover:text-perigo focus-visible:opacity-100"
+      >
+        <X size={13} />
+      </button>
+    </motion.li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Gaveta de filtros
+// ---------------------------------------------------------------------------
+
+/** O botão "Filtros" (com o número de filtros ligados) e o painel: ordem, área, senioridade, time e responsável. */
+function Gaveta({
   area,
+  senioridade,
   time,
   responsavel,
   ordem,
   times,
   responsaveis,
   onArea,
+  onSenioridade,
   onTime,
   onResponsavel,
   onOrdem,
+  onLimpar,
 }: {
   area: Area | "";
+  senioridade: Senioridade | "";
   time: string;
   responsavel: string;
-  ordem: Ordem;
+  ordem: OrdemVagas;
   times: string[];
   responsaveis: string[];
   onArea: (v: Area | "") => void;
+  onSenioridade: (v: Senioridade | "") => void;
   onTime: (v: string) => void;
   onResponsavel: (v: string) => void;
-  onOrdem: (v: Ordem) => void;
+  onOrdem: (v: OrdemVagas) => void;
+  onLimpar: () => void;
 }) {
   const [aberto, setAberto] = useState(false);
-  const caixa = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!aberto) return;
-    const fora = (e: MouseEvent) => !caixa.current?.contains(e.target as Node) && setAberto(false);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setAberto(false);
-    document.addEventListener("mousedown", fora);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", fora);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [aberto]);
-  const ativos = [area, time, responsavel].filter(Boolean).length;
+  const fechar = useCallback(() => setAberto(false), []);
+  const ativos = [area, senioridade, time, responsavel].filter(Boolean).length;
 
   return (
-    <div ref={caixa} className="relative">
-      <button
-        onClick={() => setAberto((a) => !a)}
-        aria-expanded={aberto}
-        className={`flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] transition-colors ${
-          ativos ? "bg-texto text-texto-claro" : "bg-superficie-2/70 text-texto hover:bg-superficie-2"
-        }`}
-      >
-        <SlidersHorizontal size={13} />
-        Filtros
-        {ativos > 0 && <span className="numero rounded-full bg-texto-claro/20 px-1.5 text-[11.5px]">{ativos}</span>}
-      </button>
-      <AnimatePresence>
-        {aberto && (
-          <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-            transition={{ duration: 0.16, ease: curvaSuave }}
-            className="absolute top-10 right-0 z-30 flex max-h-[70vh] w-[min(92vw,380px)] overflow-y-auto origin-top-right flex-col gap-4 rounded-[18px] bg-superficie p-4 shadow-flutuante"
-          >
-            <Grupo titulo="Ordenar por">
-              {(
-                [
-                  ["recentes", "O que pede atenção"],
-                  ["inscritos", "Mais inscritos"],
-                  ["az", "Nome (A–Z)"],
-                ] as [Ordem, string][]
-              ).map(([v, nome]) => (
-                <Pilula key={v} ativa={ordem === v} onClick={() => onOrdem(v)}>
-                  {nome}
-                </Pilula>
-              ))}
-            </Grupo>
-            <Grupo titulo="Área">
-              {(Object.keys(NOME_AREA_VAGA) as Area[]).map((a) => (
-                <Pilula key={a} ativa={area === a} onClick={() => onArea(area === a ? "" : a)}>
-                  {NOME_AREA_VAGA[a]}
-                </Pilula>
-              ))}
-            </Grupo>
-            <Grupo titulo="Time">
-              {times.map((t) => (
-                <Pilula key={t} ativa={time === t} onClick={() => onTime(time === t ? "" : t)}>
-                  {t}
-                </Pilula>
-              ))}
-            </Grupo>
-            <Grupo titulo="Responsável">
-              {responsaveis.map((t) => (
-                <Pilula key={t} ativa={responsavel === t} onClick={() => onResponsavel(responsavel === t ? "" : t)}>
-                  {t}
-                </Pilula>
-              ))}
-            </Grupo>
-            {ativos > 0 && (
-              <button
-                onClick={() => (onArea(""), onTime(""), onResponsavel(""))}
-                className="self-start text-[12.5px] text-texto-suave underline underline-offset-4 hover:text-texto"
-              >
-                Limpar filtros
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function Grupo({ titulo, children }: { titulo: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="rotulo text-texto-suave">{titulo}</span>
-      <div className="flex flex-wrap gap-1.5">{children}</div>
-    </div>
-  );
-}
-
-function Pilula({ ativa, onClick, children }: { ativa: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={ativa}
-      className={`flex h-7 items-center gap-1 rounded-full px-3 text-[12.5px] transition-colors ${
-        ativa ? "bg-texto text-texto-claro" : "bg-superficie-2/70 text-texto hover:bg-superficie-2"
-      }`}
+    <Popover
+      aberto={aberto}
+      onFechar={fechar}
+      gatilho={
+        <button
+          onClick={() => setAberto((a) => !a)}
+          aria-expanded={aberto}
+          className={`flex h-9 items-center gap-1.5 rounded-full px-4 text-[13.5px] transition-colors ${
+            ativos ? "bg-texto text-texto-claro" : "bg-superficie-2/70 text-texto hover:bg-superficie-2"
+          }`}
+        >
+          <SlidersHorizontal size={14} strokeWidth={1.75} />
+          Filtros e ordem
+          {ativos > 0 && <span className="numero rounded-full bg-texto-claro/20 px-1.5 text-[11.5px]">{ativos}</span>}
+        </button>
+      }
     >
-      {ativa && <Check size={12} />}
-      {children}
-    </button>
+      <Grupo titulo="Ordenar por">
+        {ORDENS.map((o) => (
+          <Pilula key={o} ativa={ordem === o} onClick={() => onOrdem(o)}>
+            {NOME_ORDEM[o]}
+          </Pilula>
+        ))}
+      </Grupo>
+      <Grupo titulo="Área">
+        {(Object.keys(NOME_AREA_VAGA) as Area[]).map((a) => (
+          <Pilula key={a} ativa={area === a} onClick={() => onArea(area === a ? "" : a)}>
+            {NOME_AREA_VAGA[a]}
+          </Pilula>
+        ))}
+      </Grupo>
+      <Grupo titulo="Senioridade">
+        {(Object.keys(NOME_SENIORIDADE_VAGA) as Senioridade[]).map((s) => (
+          <Pilula key={s} ativa={senioridade === s} onClick={() => onSenioridade(senioridade === s ? "" : s)}>
+            {NOME_SENIORIDADE_VAGA[s]}
+          </Pilula>
+        ))}
+      </Grupo>
+      <Grupo titulo="Time">
+        {times.map((t) => (
+          <Pilula key={t} ativa={time === t} onClick={() => onTime(time === t ? "" : t)}>
+            {t}
+          </Pilula>
+        ))}
+      </Grupo>
+      <Grupo titulo="Responsável">
+        {responsaveis.map((t) => (
+          <Pilula key={t} ativa={responsavel === t} onClick={() => onResponsavel(responsavel === t ? "" : t)}>
+            {t}
+          </Pilula>
+        ))}
+      </Grupo>
+      {ativos > 0 && (
+        <button
+          onClick={onLimpar}
+          className="self-start text-[12.5px] text-texto-suave underline underline-offset-4 hover:text-texto"
+        >
+          Limpar filtros ({ativos})
+        </button>
+      )}
+    </Popover>
   );
 }

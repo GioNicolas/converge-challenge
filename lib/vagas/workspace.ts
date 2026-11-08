@@ -633,3 +633,126 @@ export function estagioDa(v: VagaEmpresa): Exclude<Estagio, "escopo"> | "encerra
   if (f.emAndamento === 0 && f.concluiram >= f.convidados) return "resultados";
   return "aguardando";
 }
+
+// ---------------------------------------------------------------------------
+// Painel executivo da tela inicial: os grandes números somados das vagas abertas,
+// os recortes rápidos da lista (com contagem) e a ordenação.
+// ---------------------------------------------------------------------------
+
+/** Quanto de entrevista humana cada triagem feita pelo Totti poupa (estimativa do painel). */
+export const MINUTOS_POR_TRIAGEM = 30;
+/** A partir de quantos inscritos a vaga conta como de alto volume. */
+export const ALTO_VOLUME = 1_000;
+
+/** Nome curto do formato, para etiquetas e filtros (o produto é de tecnologia). */
+export const NOME_FORMATO_CURTO: Record<InterviewConfig["mode"], string> = {
+  system_design: "System design",
+  live_coding: "Live coding",
+};
+
+export type Totais = {
+  /** Vagas abertas (encerradas ficam fora da soma). */
+  vagas: number;
+  inscritos: number;
+  convidados: number;
+  /** Entrevistas concluídas com o Totti. */
+  entrevistados: number;
+  emAndamento: number;
+  /** Relatórios prontos esperando o parecer da recrutadora. */
+  pendentes: number;
+  vagasComPendentes: number;
+  horasPoupadas: number;
+};
+
+/** Soma o funil das vagas abertas. */
+export function totaisDas(vagas: VagaEmpresa[]): Totais {
+  const abertas = vagas.filter((v) => v.etapa !== "encerrada");
+  const soma = (f: (v: VagaEmpresa) => number) => abertas.reduce((t, v) => t + f(v), 0);
+  const entrevistados = soma((v) => v.funil.concluiram);
+  return {
+    vagas: abertas.length,
+    inscritos: soma((v) => v.funil.inscritos),
+    convidados: soma((v) => v.funil.convidados),
+    entrevistados,
+    emAndamento: soma((v) => v.funil.emAndamento),
+    pendentes: soma(novosDa),
+    vagasComPendentes: abertas.filter((v) => novosDa(v) > 0).length,
+    horasPoupadas: Math.round((entrevistados * MINUTOS_POR_TRIAGEM) / 60),
+  };
+}
+
+/** Porcentagem para ler de relance: uma casa abaixo de 10% ("0,4%"), inteira acima ("31%"). */
+export function porcento(parte: number, todo: number): string {
+  if (!todo || !parte) return "0%";
+  const p = (parte / todo) * 100;
+  if (p < 0.1) return "<0,1%";
+  return `${p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 1 : 0 })}%`;
+}
+
+/** Os atalhos da lista, na ordem dos chips. */
+export const RECORTES_RAPIDOS = ["todas", "pendentes", "em_entrevista", "alto_volume", "live_coding", "system_design", "escopo"] as const;
+/** Além dos chips: "com_relatorios" vem do funil e "encerradas" do link no fim da lista. */
+export type Recorte = (typeof RECORTES_RAPIDOS)[number] | "com_relatorios" | "encerradas";
+
+export const NOME_RECORTE: Record<Recorte, string> = {
+  todas: "Todas",
+  pendentes: "Com decisão pendente",
+  em_entrevista: "Em entrevista",
+  alto_volume: `Alto volume (+${numero(ALTO_VOLUME)})`,
+  live_coding: NOME_FORMATO_CURTO.live_coding,
+  system_design: NOME_FORMATO_CURTO.system_design,
+  escopo: "Com o Totti",
+  com_relatorios: "Com entrevistas feitas",
+  encerradas: "Encerradas",
+};
+
+/** Se a vaga entra no recorte. Escopos (rascunhos) não são vagas: o recorte "escopo" é tratado pela tela. */
+export function noRecorte(v: VagaEmpresa, r: Recorte): boolean {
+  if (r === "encerradas") return v.etapa === "encerrada";
+  if (v.etapa === "encerrada") return false;
+  switch (r) {
+    case "todas":
+      return true;
+    case "pendentes":
+      return novosDa(v) > 0;
+    case "em_entrevista":
+      return estagioDa(v) === "aguardando";
+    case "com_relatorios":
+      return v.funil.concluiram > 0;
+    case "alto_volume":
+      return v.funil.inscritos >= ALTO_VOLUME;
+    case "live_coding":
+    case "system_design":
+      return v.resumo?.formato === r;
+    case "escopo":
+      return false;
+  }
+}
+
+/** O estágio antigo da URL (?estagio=...) vira o recorte equivalente. */
+export function recorteDaUrl(valor: string | null): Recorte {
+  const antigos: Record<string, Recorte> = { escopo: "escopo", aguardando: "em_entrevista", resultados: "pendentes" };
+  if (!valor) return "todas";
+  if (valor in antigos) return antigos[valor];
+  return valor in NOME_RECORTE ? (valor as Recorte) : "todas";
+}
+
+export const ORDENS = ["inscritos", "pendentes", "recentes", "az"] as const;
+export type OrdemVagas = (typeof ORDENS)[number];
+
+export const NOME_ORDEM: Record<OrdemVagas, string> = {
+  inscritos: "Maior volume de inscritos",
+  pendentes: "Mais decisões pendentes",
+  recentes: "Mais recentes",
+  az: "Ordem alfabética (A–Z)",
+};
+
+/** Comparador da lista; o empate cai no volume de inscritos e depois no nome. */
+export function compararVagas(ordem: OrdemVagas): (a: VagaEmpresa, b: VagaEmpresa) => number {
+  const porNome = (a: VagaEmpresa, b: VagaEmpresa) => a.cargo.localeCompare(b.cargo, "pt-BR");
+  const porVolume = (a: VagaEmpresa, b: VagaEmpresa) => b.funil.inscritos - a.funil.inscritos || porNome(a, b);
+  if (ordem === "az") return porNome;
+  if (ordem === "recentes") return (a, b) => a.abertaHaDias - b.abertaHaDias || porVolume(a, b);
+  if (ordem === "pendentes") return (a, b) => novosDa(b) - novosDa(a) || porVolume(a, b);
+  return porVolume;
+}

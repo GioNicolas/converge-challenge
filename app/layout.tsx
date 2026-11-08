@@ -22,8 +22,17 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Totti — Entrevista técnica",
-  description: "Entrevista técnica com um agente de voz que desenha no quadro.",
+  title: {
+    default: "Totti — Entrevistas técnicas com IA",
+    template: "%s · Totti",
+  },
+  description: "Triagem e condução de entrevistas técnicas com IA em tempo real.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
