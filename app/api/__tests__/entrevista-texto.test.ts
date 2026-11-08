@@ -164,7 +164,7 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     // Cinco rodadas: clique, (análise durante a resposta é bloqueada), resposta, reanálise forçada.
     for (let n = 1; n <= 5; n++) {
       if (n > 1) {
-        relogio += 61_000; // passa o intervalo de 60 s
+        relogio += 61_000; // passa o intervalo entre perguntas
         const nova = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(sem mudanças)", n - 1);
         assert.equal(nova.status, "duvida", `rodada ${n}: plin liberado`);
       }
@@ -180,7 +180,7 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
       assert.equal(e.perguntasFeitas, n);
       assert.equal(e.perguntaAtiva, false);
       if (n < 5) {
-        // Reanálise forçada logo após a resposta: o intervalo de 60 s segura o plin.
+        // Reanálise forçada logo após a resposta: o intervalo entre perguntas segura o plin.
         const forcada = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(o candidato terminou de responder)", n);
         assert.equal(forcada.status, "ok");
         assert.equal(e.fase, "APROFUNDAMENTO");
