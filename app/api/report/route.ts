@@ -2,11 +2,14 @@
 // aqui só se consulta o resultado.
 import { NextRequest, NextResponse } from "next/server";
 import { candidatosPorSessao } from "@/lib/convites/store";
-import type { Report } from "@/lib/contracts";
 import { startEvaluation } from "@/lib/agents/evaluator";
+import { listarDoIndice } from "@/lib/agente/resultados";
 import { exemploHabilitado, relatorioExemplo } from "@/lib/session/relatorio-exemplo";
 import { findReport, listReports } from "@/lib/session/reports";
+import { cartaoDoRelatorio } from "@/lib/session/cartao";
 import { getSession, listSessions } from "@/lib/session/store";
+import { kvPadrao } from "@/lib/storage/kv";
+import type { CartaoDoResultado, FormatoDaEntrevista, RecomendacaoDoResultado } from "@/lib/vagas/cartao";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +23,13 @@ export interface ReportListItem {
   ended: boolean;
   state?: "running" | "done" | "error";
   overallScore?: number;
-  recommendation?: Report["recommendation"];
+  recommendation?: RecomendacaoDoResultado;
+  /** Live Coding ou System Design: cada um tem o seu relatório completo. */
+  formato: FormatoDaEntrevista;
+  /** Para onde "Relatório" leva. */
+  href: string;
+  /** O resumo completo (justificativas, pontos fortes e fracos) para o painel mostrar sem abrir o relatório. */
+  cartao?: CartaoDoResultado;
   /** Nome do candidato, quando a entrevista foi aberta pelo link do convite. */
   candidato?: string;
 }
@@ -45,6 +54,9 @@ export async function GET(request: NextRequest) {
       state: s.report?.state,
       overallScore: s.report?.report?.overallScore,
       recommendation: s.report?.report?.recommendation,
+      formato: "live_coding" as const,
+      href: `/report?sessionId=${encodeURIComponent(s.sessionId)}`,
+      cartao: s.report?.report ? cartaoDoRelatorio(s.report.report) : undefined,
     }));
     // Relatórios de sessões que já saíram da memória (o servidor reiniciou).
     const emMemoria = new Set(items.map((i) => i.sessionId));
@@ -59,6 +71,25 @@ export async function GET(request: NextRequest) {
         state: "done",
         overallScore: report.overallScore,
         recommendation: report.recommendation,
+        formato: "live_coding",
+        href: `/report?sessionId=${encodeURIComponent(report.sessionId)}`,
+        cartao: cartaoDoRelatorio(report),
+      });
+    }
+    // As entrevistas de System Design (quadro): vêm do índice, que guarda a vaga e o resultado.
+    for (const q of await listarDoIndice(kvPadrao())) {
+      items.push({
+        sessionId: q.sessionId,
+        configId: q.configId,
+        roleTitle: q.roleTitle,
+        startedAt: q.startedAt,
+        ended: q.ended,
+        state: q.state,
+        overallScore: q.overallScore,
+        recommendation: q.recommendation,
+        formato: "system_design",
+        href: `/relatorio/${encodeURIComponent(q.sessionId)}`,
+        cartao: q.cartao,
       });
     }
     const nomes = await candidatosPorSessao();

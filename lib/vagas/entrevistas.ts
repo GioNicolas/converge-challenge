@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ReportListItem } from "@/app/api/report/route";
 import type { Funil } from "./candidatos";
+import { NOME_RECOMENDACAO_DO_RESULTADO } from "./cartao";
 
 export type EntrevistaReal = ReportListItem;
 
@@ -23,11 +24,7 @@ export const NOME_ANDAMENTO: Record<Andamento, string> = {
   erro: "Falhou a avaliação",
 };
 
-export const NOME_RECOMENDACAO: Record<NonNullable<EntrevistaReal["recommendation"]>, string> = {
-  avancar: "Avançar",
-  talvez: "Talvez",
-  nao_avancar: "Não avançar",
-};
+export const NOME_RECOMENDACAO = NOME_RECOMENDACAO_DO_RESULTADO;
 
 /** Mais rápido enquanto alguém está fazendo ou o relatório está sendo gerado. */
 const POLL_ATIVO_MS = 4_000;
