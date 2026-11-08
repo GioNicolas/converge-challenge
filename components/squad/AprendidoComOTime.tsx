@@ -25,7 +25,10 @@ export default function AprendidoComOTime({ regras }: { regras?: RegraNoCriterio
           </li>
         ))}
       </ul>
-      <Link href="/vagas/aprendizado" className="self-start text-xs text-texto-suave underline-offset-4 hover:text-texto hover:underline">
+      <Link
+        href="/vagas/aprendizado"
+        className="self-start text-xs text-texto-suave underline-offset-4 hover:text-texto hover:underline"
+      >
         Ver o que o Totti aprendeu
       </Link>
     </div>
