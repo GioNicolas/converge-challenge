@@ -155,3 +155,43 @@ describe("blocoDoBriefing", () => {
     assert.match(bloco, /x{160}…/);
   });
 });
+
+describe("briefing por etapa", () => {
+  const emFase = (fase: EstadoSessao["fase"], observacoes: ObservacaoRegistrada[] = []): EstadoSessao => ({ ...comObservacoes(observacoes), fase });
+
+  it("cada etapa diz o seu objetivo", () => {
+    assert.match(blocoDoBriefing(kit, emFase("REQUISITOS"), INICIO + 3 * MIN), /Objetivo desta etapa: o candidato entende o problema/);
+    assert.match(blocoDoBriefing(kit, emFase("ALTO_NIVEL"), INICIO + 10 * MIN), /Objetivo desta etapa: ver a visão geral/);
+    assert.match(blocoDoBriefing(kit, emFase("APROFUNDAMENTO"), INICIO + 25 * MIN), /Objetivo desta etapa: reunir evidência/);
+    assert.match(blocoDoBriefing(kit, emFase("FECHAMENTO"), INICIO + 36 * MIN), /Objetivo desta etapa: fazer a última pergunta/);
+  });
+
+  it("antes do aprofundamento não há alvo, lista do que falta nem ritmo", () => {
+    for (const fase of ["REQUISITOS", "ALTO_NIVEL"] as const) {
+      const bloco = blocoDoBriefing(kit, emFase(fase), INICIO + 10 * MIN);
+      assert.doesNotMatch(bloco, /Próximo alvo/);
+      assert.doesNotMatch(bloco, /O que ainda falta/);
+      assert.doesNotMatch(bloco, /Ritmo:/);
+      assert.match(bloco, /O que já temos do candidato/);
+    }
+  });
+
+  it("no aprofundamento o alvo nunca é requisitos nem comunicação", () => {
+    const bloco = blocoDoBriefing(kit, emFase("APROFUNDAMENTO"), INICIO + 25 * MIN);
+    assert.match(bloco, /Próximo alvo, se houver gancho no desenho: Componentes e fluxo/);
+    const falta = bloco.split("O que ainda falta")[1];
+    assert.doesNotMatch(falta, /Requisitos e escopo/);
+    assert.doesNotMatch(falta, /Comunicação/);
+  });
+
+  it("comunicação não entra na cobertura, para não pesar contra o candidato sem poder ser perguntada", () => {
+    const r = resumoDaCobertura(kit.criterios, comObservacoes([]), INICIO + 10 * MIN);
+    assert.ok(!r.criterios.some((c) => c.id === "comunicacao"));
+    assert.equal(r.criterios.length, kit.criterios.length - 1);
+  });
+
+  it("no fechamento o alvo é o critério de maior peso ainda aberto", () => {
+    const e = { ...emFase("FECHAMENTO"), plano: plano([{ area: "escala_produto", peso: 0.9 }]) };
+    assert.match(blocoDoBriefing(kit, e, INICIO + 36 * MIN), /Próximo alvo, se houver gancho no desenho: Escalabilidade/);
+  });
+});
