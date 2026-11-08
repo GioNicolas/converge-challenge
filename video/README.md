@@ -4,11 +4,11 @@ Cada parte é um HTML autocontido, palco 1920×1080, exatamente 30 s.
 
 | Parte | Trecho | Arquivo |
 |---|---|---|
-| 3 | 1:00–1:30 | `parte-3.html` (pendente) |
+| 3 | 1:00–1:30 · decisão do time | `parte-3.html` |
 | 4 | 1:30–2:00 · retorno ao candidato e fecho | `parte-4.html` |
 
 ## Como ver
-- Prévia em tempo real: abrir `parte-4.html?play` no navegador (clique recomeça).
+- Prévia em tempo real: abrir `parte-3.html?play` ou `parte-4.html?play` no navegador (clique recomeça).
 - Ir direto a um instante: `parte-4.html?t=13.4`.
 
 ## Como renderizar quadro a quadro (30 fps)
