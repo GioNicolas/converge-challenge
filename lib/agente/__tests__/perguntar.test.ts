@@ -160,3 +160,36 @@ describe("foto e mudanças do quadro no /perguntar", () => {
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
   });
 });
+
+describe("briefing da entrevista no /perguntar", () => {
+  const comEvidencia = {
+    ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }),
+    fase: "APROFUNDAMENTO" as const,
+    faseIniciadaEm: AGORA,
+    cobertura: { ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }).cobertura, escalabilidade: { positivo: 1, negativo: 0, neutro: 0 } },
+    observacoes: [{ criterio: "escalabilidade", sinal: "positivo" as const, espontaneo: true, evidencia: "cache de leitura para o pico", em: AGORA, fase: "APROFUNDAMENTO" as const }],
+  };
+
+  it("o briefing vai no bloco dinâmico, com as evidências e o que falta", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), comEvidencia, { fase: "APROFUNDAMENTO", texto: "então, o cache fica na frente" }, AGORA);
+    const dinamico = llm.chamadas[0].sistema.dinamico ?? "";
+    assert.match(dinamico, /BRIEFING DA ENTREVISTA/);
+    assert.match(dinamico, /cache de leitura para o pico/);
+    assert.match(dinamico, /O que ainda falta/);
+  });
+
+  it("o bloco estático não muda com a evidência (continua igual para o mesmo kit)", async () => {
+    const a = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    const b = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(a), comEvidencia, { fase: "APROFUNDAMENTO", texto: "ok" }, AGORA);
+    await perguntar(deps(b), { ...comEvidencia, observacoes: [], cobertura: estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }).cobertura }, { fase: "APROFUNDAMENTO", texto: "ok" }, AGORA);
+    assert.equal(a.chamadas[0].sistema.estatico, b.chamadas[0].sistema.estatico);
+  });
+
+  it("o prompt estático manda usar o briefing sem cobrar o que já tem evidência", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "ok" }, AGORA);
+    assert.match(llm.chamadas[0].sistema.estatico, /BRIEFING DA ENTREVISTA mostra o que você já tem/);
+  });
+});
