@@ -469,7 +469,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               type="button"
               onClick={rodar}
               disabled={run.status === "running" || session.ended}
-              className="flex items-center gap-2 rounded-full bg-marca px-4 py-2 font-medium text-texto-claro shadow-cartao disabled:opacity-60"
+              className="flex items-center gap-2 rounded-full bg-marca px-4 py-2 font-medium text-sobre-marca shadow-cartao disabled:opacity-60"
             >
               <Play size={16} strokeWidth={1.75} />
               {run.status === "running" ? "Rodando…" : "Rodar"}

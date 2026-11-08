@@ -1,10 +1,11 @@
 import Link from "next/link";
 
-// A marca no topo do menu: só o nome, em semibold, sem cor nem brilho.
-export default function Marca() {
+// A marca: a pérola respirando e o nome em Bricolage 700. Sem cor, sem brilho além do movimento.
+export default function Marca({ href = "/vagas" }: { href?: string }) {
   return (
-    <Link href="/vagas" className="px-2 py-1 text-[17px] font-semibold tracking-[-0.025em] text-texto">
-      Totti
+    <Link href={href} className="flex items-center gap-2.5 px-2 py-1 text-texto">
+      <span aria-hidden className="perola size-[22px] rounded-full anim-respirar" />
+      <span className="font-display text-[20px] leading-none font-bold tracking-[-0.02em]">totti</span>
     </Link>
   );
 }

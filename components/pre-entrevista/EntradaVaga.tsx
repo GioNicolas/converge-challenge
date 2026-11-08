@@ -248,7 +248,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
               type="submit"
               disabled={!pronto}
               title={falta ?? undefined}
-              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-texto-claro transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-controle bg-marca px-4 py-2 text-[14px] font-medium text-sobre-marca transition-[filter,transform,opacity] duration-150 hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Começar com o Totti
               <ArrowRight size={15} strokeWidth={1.75} />

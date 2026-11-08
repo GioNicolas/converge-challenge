@@ -16,10 +16,10 @@ const RAIO = 34;
 const PONTOS = 180;
 
 type Cor = [number, number, number];
-const BRANCO: Cor = [255, 255, 255];
-const AZUL: Cor = [64, 156, 255];
-const BRILHO_CLARO: Cor = [120, 180, 255];
-const BRILHO_AZUL: Cor = [10, 132, 255];
+const BRANCO: Cor = [245, 240, 232]; // pérola
+const AZUL: Cor = [255, 252, 246]; // pérola acesa (sem azul: estado se diz no ritmo)
+const BRILHO_CLARO: Cor = [217, 209, 196];
+const BRILHO_AZUL: Cor = [245, 240, 232];
 
 /** Como cada estado se mexe: velocidade das ondas, quanto a energia abre o anel e a cor. */
 const JEITO: Record<EstadoAgente, { velocidade: number; amplitude: number; cor: Cor; brilho: Cor }> = {

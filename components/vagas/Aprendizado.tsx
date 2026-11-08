@@ -11,6 +11,8 @@ import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-
 import type { ConcordanciaVaga, EfeitoRegra, MotivoIgnorado, OrigemRegra, RegraSquad } from "@/lib/squad-memory/tipos";
 import type { VisaoMemoria } from "@/lib/squad-memory/visao";
 import { curvaSuave } from "@/lib/design/motion";
+import Perola from "@/components/totti/Perola";
+import { useRastro, Cursor } from "@/components/totti/Rastro";
 import Casca from "./Casca";
 
 const MODO_DEV = process.env.NODE_ENV !== "production";
@@ -34,6 +36,22 @@ function textoDaOrigem(o: OrigemRegra, vagas: Record<string, string>): string {
     case "resultado_90_dias":
       return `De ${o.candidato} aos 90 dias (${o.deuCerto ? "deu certo" : "não deu certo"})${onde}`;
   }
+}
+
+/** A voz da máquina: o que o Totti está fazendo com a memória do time agora. */
+function RastroDaMemoria({ ativas, carregando }: { ativas: number; carregando: boolean }) {
+  const { atual } = useRastro(
+    carregando
+      ? ["lendo as decisões do time"]
+      : [`${ativas} regra${ativas === 1 ? "" : "s"} ativa${ativas === 1 ? "" : "s"} nas próximas entrevistas`, "memória da squad"],
+    { pausa: 40 },
+  );
+  return (
+    <>
+      › {atual}
+      <Cursor />
+    </>
+  );
 }
 
 export default function Aprendizado() {
@@ -72,7 +90,12 @@ export default function Aprendizado() {
         className="mx-auto flex max-w-[1120px] flex-col gap-10"
       >
         <header className="flex flex-col gap-2">
-          <span className="rotulo text-texto-suave">Memória da squad</span>
+          <span className="flex items-center gap-3">
+            <Perola estado={memoria ? "ocioso" : "pensando"} tamanho={28} />
+            <span className="font-mono text-[12.5px] text-texto-suave">
+              <RastroDaMemoria ativas={ativas} carregando={!memoria && !erro} />
+            </span>
+          </span>
           <h1 className="titulo-display text-[34px] text-texto sm:text-[40px]">O que o Totti aprendeu</h1>
           <p className="max-w-[640px] text-[15px] leading-relaxed text-texto-suave">
             Cada vez que o Tech Lead aprova ou reprova alguém, o Totti aprende um critério técnico deste time e usa na

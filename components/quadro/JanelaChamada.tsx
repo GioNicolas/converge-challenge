@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/quadro/Icone";
-import OndaDeVoz from "@/components/quadro/OndaDeVoz";
+import Perola from "@/components/totti/Perola";
 import type { EstadoAgente } from "@/lib/presenca/energia";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 
@@ -190,7 +190,7 @@ export default function JanelaChamada({
               className="flex h-11 cursor-pointer items-center gap-2.5 pr-4 pl-2 text-sm"
             >
               {/* O agente continua "vivo" na pílula: o mesmo anel, pequeno */}
-              <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={32} />
+              <span className="mx-0.5 flex size-8 items-center justify-center"><Perola estado={estadoAgente} tamanho={24} /></span>
               <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
               {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
               <span className={midia.microfoneLigado ? "text-texto-claro/70" : "text-perigo"}>
@@ -226,7 +226,7 @@ export default function JanelaChamada({
                     temDuvida ? "cursor-pointer" : "cursor-default"
                   }`}
                 >
-                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={124} />
+                  <Perola estado={estadoAgente} tamanho={84} brilho />
                 </button>
 
                 <AnimatePresence>
@@ -252,7 +252,7 @@ export default function JanelaChamada({
                     </div>
                   )}
                   {!midia.microfoneLigado && midia.stream && (
-                    <span className="absolute top-1 right-1 rounded-full bg-perigo p-0.5 text-white">
+                    <span className="absolute top-1 right-1 rounded-full bg-perigo p-0.5 text-sobre-marca">
                       <Icone nome="microfoneDesligado" tamanho={10} />
                     </span>
                   )}
@@ -293,7 +293,7 @@ export default function JanelaChamada({
                   <button
                     onClick={onEncerrar}
                     aria-label="Encerrar entrevista"
-                    className="ml-auto flex h-9 items-center gap-1.5 rounded-full bg-perigo px-4 text-sm font-medium text-white transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-95"
+                    className="ml-auto flex h-9 items-center gap-1.5 rounded-full bg-perigo px-4 text-sm font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-95"
                   >
                     <Icone nome="desligar" tamanho={16} />
                     Encerrar
@@ -378,7 +378,7 @@ function BotaoRedondo({
       aria-label={rotulo}
       title={rotulo}
       className={`flex size-9 items-center justify-center rounded-full transition-[background-color,transform] duration-150 ease-suave active:scale-90 ${
-        desligado ? "bg-perigo text-white hover:bg-perigo/90" : "bg-texto-claro/12 hover:bg-texto-claro/20"
+        desligado ? "bg-perigo text-sobre-marca hover:bg-perigo/90" : "bg-texto-claro/12 hover:bg-texto-claro/20"
       }`}
     >
       {children}

@@ -16,10 +16,10 @@ const RAIO = 34;
 const PONTOS = 180;
 
 type Cor = [number, number, number];
-const BRANCO: Cor = [255, 255, 255];
-const AZUL: Cor = [64, 156, 255];
-const BRILHO_CLARO: Cor = [120, 180, 255];
-const BRILHO_AZUL: Cor = [10, 132, 255];
+const BRANCO: Cor = [245, 240, 232]; // pérola
+const AZUL: Cor = [255, 252, 246]; // pérola acesa (sem azul: estado se diz no ritmo)
+const BRILHO_CLARO: Cor = [217, 209, 196];
+const BRILHO_AZUL: Cor = [245, 240, 232];
 
 type Jeito = Record<EstadoAgente, { velocidade: number; amplitude: number; cor: Cor; brilho: Cor }>;
 
@@ -33,8 +33,8 @@ const JEITO: Jeito = {
 
 /** Fundo claro (papel): o anel vira grafite, como traço de caneta; falando, a tinta fica mais escura e
  *  o brilho é uma sombra quente bem leve. Sem azul: no papel o estado aparece no ritmo, não na cor. */
-const GRAFITE: Cor = [40, 38, 34];
-const TINTA: Cor = [17, 17, 17];
+const GRAFITE: Cor = [92, 84, 72];
+const TINTA: Cor = [28, 24, 18];
 const SOMBRA_PAPEL: Cor = [190, 182, 168];
 const JEITO_CLARO: Jeito = {
   ouvindo: { ...JEITO.ouvindo, cor: GRAFITE, brilho: SOMBRA_PAPEL },
@@ -135,7 +135,7 @@ export default function OndaDeVoz({
         const inicio = t * 3;
         ctx.beginPath();
         ctx.arc(c, c, RAIO, inicio, inicio + 1.1);
-        ctx.strokeStyle = fundo === "claro" ? "rgba(27,29,31,1)" : "rgba(255,255,255,1)";
+        ctx.strokeStyle = fundo === "claro" ? "rgba(28,24,18,1)" : "rgba(255,255,255,1)";
         ctx.lineWidth = 3;
         ctx.shadowBlur = 18;
         ctx.stroke();

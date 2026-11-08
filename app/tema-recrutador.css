@@ -1,95 +1,67 @@
 /*
- * Tema do lado do recrutador (workspace de vagas e pré-entrevista): papel e tinta.
- * Fundo osso, texto quase preto, ação em preto. Nenhuma cor de destaque além da tinta: o que está
- * ativo ganha peso (preto cheio, traço, sublinhado), não cor. Tipografia da Apple: SF Pro (Inter de
- * reserva fora do Mac), títulos em semibold com tracking apertado.
- * Só redefine os tokens dentro de .tema-recrutador: os componentes continuam usando as mesmas classes.
+ * Tema do lado da recrutadora: PAPEL. Os tokens (cores, raios, sombras, fontes) vivem em globals.css,
+ * sob `.tema-recrutador`. Aqui ficam só as classes de composição do papel: cartão, rótulo e selos.
+ * Off-white e preto fazem tudo: o que está ativo ganha peso (tinta cheia, traço), não cor.
  */
 .tema-recrutador {
-  color-scheme: light;
-  --fundo: #f4f1ea;
-  --superficie: #fdfcf9;
-  --superficie-2: #ece8df;
-  --vidro: #fbf9f4;
-  --borda: rgb(17 17 17 / 0.1);
-  --texto: #111111;
-  --texto-suave: #6b675f;
-  --texto-claro: #f4f1ea;
-  --marca: #111111;
-  --marca-suave: rgb(17 17 17 / 0.06);
-  --destaque: var(--marca);
-  --sucesso: #3f6b4a;
-  --perigo: #a33a2b;
-  --raio-padrao: 6px;
-  --raio-controle: 4px;
-  --sombra-cartao: none;
-  --sombra-flutuante: 0 24px 80px rgb(17 17 17 / 0.14);
-
   background: var(--fundo);
   color: var(--texto);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Inter", system-ui, sans-serif;
-  font-feature-settings: "cv11", "ss03"; /* Inter mais próxima da SF (a de um andar, dígitos abertos) */
-  letter-spacing: -0.006em;
+  font-family: var(--font-sans);
+  letter-spacing: -0.003em;
   -webkit-font-smoothing: antialiased;
-}
-
-/* Títulos e números grandes: SF Display (Inter Display de reserva), semibold e apertado */
-.tema-recrutador .titulo-display {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", var(--font-inter), "Inter", system-ui, sans-serif;
-  font-weight: 600;
-  letter-spacing: -0.032em;
-  line-height: 1.04;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Rótulo: texto pequeno em cinza, sem caixa alta nem monoespaçada (cabeçalhos de coluna, seções) */
 .tema-recrutador .rotulo {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
-  letter-spacing: -0.003em;
   line-height: 1.4;
 }
 
-/* O mesmo rótulo em tinta cheia (o que está ativo ou confirmado) */
-/* Selos (destaque e neutro): sempre pílula com o texto centrado, sem esticar com a linha. */
+/* Rótulo "de máquina": ids, tempos, estado do agente */
+.tema-recrutador .rotulo-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--texto-suave);
+}
+
+/* Selos: sempre pílula com o texto centrado, sem esticar com a linha. */
 .tema-recrutador .rotulo-destaque,
 .tema-recrutador .rotulo-neutro {
   display: inline-flex;
   align-items: center;
   align-self: center;
   justify-content: center;
-  height: 22px;
-  padding: 0 9px;
+  height: 24px;
+  padding: 0 10px;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
   vertical-align: middle;
 }
 
+/* Tinta cheia: o que é seu, o que está ativo */
 .tema-recrutador .rotulo-destaque {
   background: var(--texto);
   color: var(--texto-claro);
 }
 
-/* Rótulo apagado (ex.: "SUGERIDO") */
+/* Areia: o que é do Totti, o que está apagado */
 .tema-recrutador .rotulo-neutro {
-  box-shadow: inset 0 0 0 1px rgb(17 17 17 / 0.18);
-  color: var(--texto-suave);
+  background: var(--superficie-2);
+  color: var(--texto);
 }
 
-.tema-recrutador ::selection {
-  background: rgb(17 17 17 / 0.12);
-}
-
-/* Cartão: a superfície que separa os blocos no lugar dos traços */
+/* Cartão: superfície branca, raio 20, sombra longa e suave no lugar dos traços */
 .tema-recrutador .cartao {
   background: var(--superficie);
-  border-radius: 18px;
-  box-shadow: 0 1px 2px rgb(17 17 17 / 0.04), 0 0 0 1px rgb(17 17 17 / 0.035);
+  border-radius: 20px;
+  box-shadow: var(--sombra);
 }
 
 /* Separador interno de lista, recuado das bordas do cartão */
 .tema-recrutador .linha-lista + .linha-lista {
-  box-shadow: inset 0 1px 0 rgb(17 17 17 / 0.06);
+  box-shadow: inset 0 1px 0 rgb(28 24 18 / 0.06);
 }

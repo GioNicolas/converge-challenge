@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/Icone";
-import OndaDeVoz from "@/components/agente/OndaDeVoz";
+import Perola from "@/components/totti/Perola";
 import type { EstadoAgente } from "@/lib/presenca/energia";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 
@@ -135,7 +135,7 @@ export default function JanelaChamada({ pergunta, oculta, encerrada, iniciadaEm,
         aria-label="Chamada com o entrevistador"
         className="flex h-11 cursor-grab items-center gap-2.5 rounded-full bg-vidro-escuro pr-1.5 pl-2 text-sm text-texto-claro shadow-flutuante backdrop-blur-xl active:cursor-grabbing"
       >
-        <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho={32} />
+        <span className="mx-0.5 flex size-8 items-center justify-center"><Perola estado={estadoAgente} tamanho={24} /></span>
         <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
         {agenteFalando && !duvidaPendente && <span className="text-texto-claro/60">Falando…</span>}
         <button
@@ -145,7 +145,7 @@ export default function JanelaChamada({ pergunta, oculta, encerrada, iniciadaEm,
           aria-label={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
           title={midia.microfoneLigado ? "Desligar microfone" : "Ligar microfone"}
           className={`flex size-8 items-center justify-center rounded-full transition-[background-color,transform] duration-150 ease-suave active:scale-90 disabled:opacity-40 ${
-            midia.microfoneLigado ? "bg-texto-claro/12 hover:bg-texto-claro/20" : "bg-perigo text-white hover:bg-perigo/90"
+            midia.microfoneLigado ? "bg-texto-claro/12 hover:bg-texto-claro/20" : "bg-perigo text-sobre-marca hover:bg-perigo/90"
           }`}
         >
           <Icone nome={midia.microfoneLigado ? "microfone" : "microfoneDesligado"} tamanho={16} />

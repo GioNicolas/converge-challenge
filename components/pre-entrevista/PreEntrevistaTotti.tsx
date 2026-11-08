@@ -22,6 +22,7 @@ import EntradaVaga from "./EntradaVaga";
 import LeituraDaVaga from "./LeituraDaVaga";
 import ConversaTotti from "./ConversaTotti";
 import RevisaoPlano from "./RevisaoPlano";
+import PlanoSeMontando from "./PlanoSeMontando";
 import EntrevistaPronta from "./EntrevistaPronta";
 import Passos from "./Passos";
 
@@ -273,8 +274,8 @@ export default function PreEntrevistaTotti({
                     transition={{ type: "spring", stiffness: 260, damping: 30 }}
                     className={`rounded-full px-4 py-2.5 text-[14px] font-medium transition-colors duration-200 disabled:cursor-wait ${
                       fechada
-                        ? "bg-superficie text-texto-suave shadow-[0_0_0_1px_rgb(17_17_17/0.08)]"
-                        : "bg-superficie text-texto shadow-[0_0_0_1px_rgb(17_17_17/0.12)] hover:bg-texto hover:text-texto-claro disabled:opacity-50"
+                        ? "bg-superficie text-texto-suave shadow-[0_0_0_1px_rgb(28_24_18/0.08)]"
+                        : "bg-texto text-texto-claro hover:opacity-90 disabled:opacity-50"
                     }`}
                   >
                     <motion.span layout="position" className="flex items-center gap-2">
@@ -294,16 +295,37 @@ export default function PreEntrevistaTotti({
             </header>
 
             {etapa === "conversa" ? (
-              <div className="relative mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col [&>section]:flex-1">
-                <ConversaTotti transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
+              <div
+                className={`mx-auto grid min-h-0 w-full flex-1 gap-4 transition-[max-width] duration-[900ms] ease-saida [grid-template-rows:minmax(0,1fr)] ${
+                  fechada ? "max-w-[1360px] lg:[grid-template-columns:minmax(0,1.3fr)_minmax(360px,1fr)]" : "max-w-[760px]"
+                }`}
+              >
+                {/* A conversa fica limpa: só o palco do Totti. O plano sobe quando ela termina. */}
+                <div className="relative flex min-h-0 flex-col [&>section]:min-h-0 [&>section]:flex-1">
+                  <ConversaTotti transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
+                  <AnimatePresence>
+                    {fechada && (
+                      <ConversaConcluida
+                        pronto={planoPronto}
+                        combinados={combinados}
+                        onRevisar={() => setEtapa("plano")}
+                        onContinuar={() => setSeguirConversando(true)}
+                      />
+                    )}
+                  </AnimatePresence>
+                </div>
                 <AnimatePresence>
                   {fechada && (
-                    <ConversaConcluida
-                      pronto={planoPronto}
-                      combinados={combinados}
-                      onRevisar={() => setEtapa("plano")}
-                      onContinuar={() => setSeguirConversando(true)}
-                    />
+                    <motion.div
+                      key="plano-sobe"
+                      initial={{ opacity: 0, y: 56 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 24 }}
+                      transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+                      className="hidden min-h-0 lg:flex lg:flex-col [&>aside]:flex-1"
+                    >
+                      <PlanoSeMontando rascunho={estado.rascunho} combinados={combinados} total={total} />
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </div>

@@ -4,13 +4,14 @@
 // No desktop o menu recolhe para um trilho só com ícones (botão no topo ou ⌘B / Ctrl+B) e lembra a
 // escolha. A largura anima e o conteúdo acompanha; os textos somem antes de o trilho fechar, para não
 // aparecerem cortados. No celular o menu vira uma gaveta, aberta pelo botão do topo.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { Brain, LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { useVagas, type EtapaVaga } from "@/lib/vagas/workspace";
 import { curvaSuave } from "@/lib/design/motion";
+import { RastroDoTotti } from "@/components/totti/Rastro";
 import Marca from "./Marca";
 import MenuVagas from "./MenuVagas";
 
@@ -57,6 +58,18 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
   const { recolhido, animar, alternar } = useRecolhido();
 
   const totalVagas = vagas && rascunhos ? vagas.filter((v) => v.etapa !== "encerrada").length + rascunhos.length : undefined;
+
+  // O rastro do Totti: o que ele está fazendo, lido do que existe de verdade no painel.
+  const linhasRastro = useMemo(() => {
+    const curto = (s: string) => (s.length > 34 ? `${s.slice(0, 33)}…` : s);
+    const abertas = (vagas ?? []).filter((v) => v.etapa !== "encerrada");
+    const linhas = [
+      ...abertas.filter((v) => v.funil.emAndamento > 0).map((v) => `${v.funil.emAndamento} entrevista(s) em andamento · ${curto(v.cargo)}`),
+      ...abertas.filter((v) => v.funil.novos > 0).map((v) => `${v.funil.novos} relatório(s) novo(s) · ${curto(v.cargo)}`),
+      ...(rascunhos ?? []).map((r) => `plano de ${curto(r.cargo)} esperando você`),
+    ].slice(0, 5);
+    return linhas.length ? linhas : ["acompanhando as vagas abertas", "pronto para ler uma nova vaga"];
+  }, [vagas, rascunhos]);
 
   const lateral = (compacto: boolean, noCelular = false) => (
     <div className="flex h-full flex-col gap-6 overflow-hidden px-3 py-5">
@@ -138,6 +151,16 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
           />
         )}
       </motion.div>
+
+      {/* Recolhido, o rastro some (não há espaço para ler); aberto, ele digita a linha do momento. */}
+      <motion.div
+        animate={{ opacity: compacto ? 0 : 1, height: compacto ? 0 : "auto" }}
+        transition={{ duration: compacto ? 0.12 : 0.24, delay: compacto ? 0 : 0.14 }}
+        className="w-[240px] shrink-0 overflow-hidden"
+        aria-hidden={compacto}
+      >
+        <RastroDoTotti linhas={linhasRastro} />
+      </motion.div>
     </div>
   );
 
@@ -147,7 +170,7 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
         initial={false}
         animate={{ width: recolhido ? LARGURA.recolhida : LARGURA.aberta }}
         transition={animar ? ABRIR_FECHAR : { duration: 0 }}
-        className="sticky top-0 hidden h-dvh shrink-0 border-r border-borda md:block"
+        className="sticky top-0 hidden h-dvh shrink-0 md:block"
       >
         {lateral(recolhido)}
       </motion.aside>
@@ -237,7 +260,7 @@ function ItemMenu({
       aria-label={compacto ? `${children}${n !== undefined ? ` (${n})` : ""}` : undefined}
       title={compacto ? children : undefined}
       className={`relative flex h-9 items-center gap-2.5 overflow-hidden rounded-xl pr-2.5 pl-[15px] text-[13.5px] whitespace-nowrap transition-colors ${
-        atual ? "bg-superficie-2 font-medium text-texto" : "text-texto/80 hover:bg-superficie-2/60"
+        atual ? "bg-superficie font-medium text-texto shadow-padrao" : "text-texto-suave hover:translate-x-0.5 hover:bg-superficie-2/60 hover:text-texto"
       }`}
     >
       <span className="shrink-0">{icone}</span>

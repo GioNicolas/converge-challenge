@@ -34,10 +34,10 @@ const ICONE: Record<TipoAcontecimento, LucideIcon> = {
 
 /** Cor do ícone: vermelho para o que pesa contra, verde para o que conta a favor, tinta no resto. */
 const TOM: Record<TipoAcontecimento, string> = {
-  travou: "bg-perigo text-white",
+  travou: "bg-perigo text-sobre-marca",
   dica: "bg-texto text-texto-claro",
   mudanca: "bg-texto text-texto-claro",
-  adaptou: "bg-sucesso text-white",
+  adaptou: "bg-sucesso text-sobre-marca",
   colagem: "bg-texto text-texto-claro",
 };
 

@@ -10,7 +10,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode 
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
-import { Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import {
   DICA_ESTAGIO,
   ESTAGIOS,
@@ -20,6 +20,7 @@ import {
   descartarRascunho,
   diasDoRascunho,
   estagioDa,
+  novosDa,
   numeroCurto,
   quandoFoi,
   situacaoDoRascunho,
@@ -31,7 +32,9 @@ import {
 } from "@/lib/vagas/workspace";
 import { buscaNormalizada, comConvites, useConvitesFeitos } from "@/lib/vagas/candidatos";
 import { comReais, useEntrevistasReais } from "@/lib/vagas/entrevistas";
-import { curvaSuave } from "@/lib/design/motion";
+import { curvaSaida, curvaSuave } from "@/lib/design/motion";
+import { BarrasDeVoz } from "@/components/totti/Perola";
+import { useContar } from "@/components/totti/useContar";
 import Casca from "./Casca";
 import { Busca, Paginacao } from "./controles";
 
@@ -59,6 +62,13 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         return { ...comFunil, estagio: estagioDa(comFunil) };
       }),
     [vagas, convites, reais],
+  );
+
+  // O que está acontecendo de verdade: entrevistas em andamento e relatórios que esperam decisão.
+  const aoVivo = useMemo(() => linhas.filter((v) => v.estagio !== "encerrada" && v.funil.emAndamento > 0), [linhas]);
+  const comNovos = useMemo(
+    () => linhas.filter((v) => novosDa(v) > 0).sort((a, b) => novosDa(b) - novosDa(a)),
+    [linhas],
   );
 
   const params = useSearchParams();
@@ -183,8 +193,11 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
         transition={{ duration: 0.4, ease: curvaSuave }}
         className="mx-auto flex max-w-[1120px] flex-col gap-8"
       >
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="titulo-display text-[40px] text-texto">Vagas</h1>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[15px] text-texto-suave first-letter:uppercase">{dataDeHoje()}</span>
+            <h1 className="titulo-display text-[40px] text-texto">{saudacao()}</h1>
+          </div>
           <div className="flex items-center gap-2">
             <Busca valor={busca} onMudar={(v) => (setBusca(v), setPagina(0))} placeholder="Buscar vaga, time ou responsável" />
             <Filtros
@@ -201,6 +214,9 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
             />
           </div>
         </header>
+
+        <AoVivo linhas={aoVivo} />
+        <Atencao novos={comNovos} rascunho={rascunhos[0]} />
 
         {/* Os estágios, em ordem. Clicado, o card abre a lista das vagas dele logo abaixo. */}
         <nav aria-label="Estágios das vagas" className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -266,8 +282,8 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
 const chave = (it: Item) => (it.tipo === "vaga" ? it.v.id : `escopo-${it.r.id}`);
 
 /**
- * Um estágio da pipeline: o passo, o nome, quantas vagas estão nele (em destaque) e o que acontece ali.
- * O escolhido fica em tinta cheia.
+ * Um estágio da pipeline: o passo, o nome, quantas vagas estão nele (em destaque, contando do zero ao chegar)
+ * e o que acontece ali. O escolhido fica em tinta cheia.
  */
 function CardEstagio({
   passo,
@@ -282,28 +298,29 @@ function CardEstagio({
   ativo: boolean;
   onClick: () => void;
 }) {
+  const contado = Math.round(useContar(n));
   return (
     <motion.button
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{
-        duration: 0.4,
+        duration: 0.48,
         delay: (passo - 1) * 0.06,
-        ease: curvaSuave,
+        ease: curvaSaida,
       }}
       onClick={onClick}
       aria-pressed={ativo}
-      className={`group flex flex-col gap-5 rounded-[18px] p-5 text-left transition-[background-color,box-shadow,transform] duration-200 outline-none focus-visible:ring-2 focus-visible:ring-texto/30 active:scale-[0.99] ${
+      className={`group flex flex-col gap-5 rounded-[22px] p-5 text-left transition-[background-color,box-shadow,transform] duration-[240ms] outline-none focus-visible:ring-2 focus-visible:ring-texto/30 active:scale-[0.99] ${
         ativo
-          ? "bg-texto text-texto-claro"
-          : "bg-superficie text-texto shadow-[0_1px_2px_rgb(17_17_17/0.04),0_0_0_1px_rgb(17_17_17/0.035)] hover:-translate-y-px hover:shadow-[0_0_0_1px_rgb(17_17_17/0.1),0_8px_20px_-10px_rgb(17_17_17/0.2)]"
+          ? "bg-[#1c1812] text-[#f5f0e8] shadow-[0_24px_44px_-22px_rgb(28_24_18/0.55)]"
+          : "bg-superficie text-texto shadow-padrao hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_44px_-22px_rgb(28_24_18/0.4)]"
       }`}
     >
       <span className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-2.5">
           <span
-            className={`numero flex size-6 items-center justify-center rounded-full text-[11.5px] ${
-              ativo ? "bg-texto-claro/15 text-texto-claro" : "bg-superficie-2 text-texto-suave"
+            className={`font-mono flex size-6 items-center justify-center rounded-full text-[11.5px] ${
+              ativo ? "bg-[#f5f0e8]/15 text-[#f5f0e8]" : "bg-superficie-2 text-texto-suave"
             }`}
           >
             {passo}
@@ -312,16 +329,107 @@ function CardEstagio({
         </span>
         <ChevronRight
           size={16}
-          className={`shrink-0 transition-transform duration-200 ${ativo ? "rotate-90 text-texto-claro/70" : "text-texto-suave group-hover:translate-x-0.5"}`}
+          className={`shrink-0 transition-transform duration-[240ms] ${ativo ? "rotate-90 text-[#f5f0e8]/70" : "text-texto-suave group-hover:translate-x-0.5"}`}
         />
       </span>
       <span className="flex flex-col gap-1">
-        <span className="titulo-display text-[44px]">{n}</span>
-        <span className={`text-[13.5px] ${ativo ? "text-texto-claro/65" : "text-texto-suave"}`}>{DICA_ESTAGIO[estagio]}</span>
+        <span className="titulo-display text-[52px]">{contado}</span>
+        <span className={`text-[13.5px] ${ativo ? "text-[#f5f0e8]/70" : "text-texto-suave"}`}>{DICA_ESTAGIO[estagio]}</span>
       </span>
     </motion.button>
   );
 }
+
+/**
+ * Entrevistas acontecendo agora, lidas do funil (`emAndamento`): um palco escuro por vaga, com o ponto
+ * pulsando e as barras de voz. Sem entrevista em andamento, a faixa não aparece.
+ */
+function AoVivo({ linhas }: { linhas: Linha[] }) {
+  if (linhas.length === 0) return null;
+  return (
+    <section aria-label="Entrevistas ao vivo" className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+      {linhas.slice(0, 3).map((v, i) => (
+        <motion.div
+          key={v.id}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.48, delay: i * 0.06, ease: curvaSaida }}
+        >
+          <Link
+            href={`/vagas/vaga?id=${encodeURIComponent(v.id)}&etapa=entrevistas`}
+            className="flex flex-col gap-3.5 rounded-[22px] bg-[#13110e] p-[18px] text-[#f5f0e8] transition-transform duration-[240ms] hover:-translate-y-0.5"
+          >
+            <span className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-[13px] whitespace-nowrap text-[#f5f0e8]/70">
+                <span aria-hidden className="size-2 rounded-full bg-[#f5f0e8] anim-pulso" style={{ animationDelay: `${i * 0.5}s` }} />
+                Ao vivo
+              </span>
+              <span className="font-mono text-[13px] whitespace-nowrap">{v.funil.emAndamento} em andamento</span>
+            </span>
+            <span className="flex flex-col">
+              <span className="font-semibold">{v.cargo}</span>
+              <span className="text-[13px] text-[#f5f0e8]/70">
+                {[v.time, NOME_SENIORIDADE_VAGA[v.senioridade]].filter((x) => x && x !== "—").join(" · ")}
+              </span>
+            </span>
+            <BarrasDeVoz n={9} altura={22} largura={3} className="text-[#f5f0e8]" />
+          </Link>
+        </motion.div>
+      ))}
+    </section>
+  );
+}
+
+/** "O que pede atenção": só o que existe de verdade. Relatórios novos e um plano ainda em definição. */
+function Atencao({ novos, rascunho }: { novos: Linha[]; rascunho?: RascunhoVaga }) {
+  const totalNovos = novos.reduce((soma, v) => soma + novosDa(v), 0);
+  if (totalNovos === 0 && !rascunho) return null;
+  const carta = "anim-subir flex flex-col gap-2 rounded-[20px] bg-superficie p-[18px] shadow-padrao transition-[transform,box-shadow] duration-[240ms] ease-saida hover:-translate-y-0.5 hover:shadow-[0_1px_2px_rgb(28_24_18/0.06),0_24px_44px_-22px_rgb(28_24_18/0.4)]";
+  const acao = "group/acao flex items-center gap-1 text-[14px] font-medium text-texto";
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="atencao">
+      <h2 id="atencao" className="font-display text-[22px] leading-none font-semibold tracking-[-0.02em]">
+        O que pede atenção
+      </h2>
+      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
+        {totalNovos > 0 && (
+          <div className={carta}>
+            <span className="font-semibold"><Contado n={totalNovos} /> {totalNovos === 1 ? "relatório esperando decisão" : "relatórios esperando decisão"}</span>
+            <span className="text-[13.5px] text-texto-suave">
+              {novos[0].cargo}
+              {novos.length > 1 ? ` e mais ${novos.length - 1} vaga${novos.length > 2 ? "s" : ""}` : ""}.
+            </span>
+            <Link href={`/vagas/vaga?id=${encodeURIComponent(novos[0].id)}&etapa=escores`} className={acao}>
+              Decidir agora <ArrowRight size={14} className="transition-transform group-hover/acao:translate-x-0.5" />
+            </Link>
+          </div>
+        )}
+        {rascunho && (
+          <div className={carta} style={{ animationDelay: "0.08s" }}>
+            <span className="font-semibold">Plano em definição</span>
+            <span className="text-[13.5px] text-texto-suave">
+              {rascunho.cargo} — {situacaoDoRascunho(rascunho)}.
+            </span>
+            <Link href={`/vagas/nova?rascunho=${encodeURIComponent(rascunho.id)}`} className={acao}>
+              Continuar com o Totti <ArrowRight size={14} className="transition-transform group-hover/acao:translate-x-0.5" />
+            </Link>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Número que conta do zero ao chegar. */
+function Contado({ n }: { n: number }) {
+  return <span className="numero">{numeroCurto(Math.round(useContar(n)))}</span>;
+}
+
+const saudacao = () => {
+  const h = new Date().getHours();
+  return h < 12 ? "Bom dia." : h < 18 ? "Boa tarde." : "Boa noite.";
+};
+const dataDeHoje = () => new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
 
 /** O ponto do estágio: cheio pede ação, vazado está esperando. */
 function Ponto({ estagio }: { estagio: Estagio | "encerrada" }) {
@@ -478,10 +586,24 @@ function LinhaVaga({ v, indice, mostrarEstagio }: { v: Linha; indice: number; mo
     meta || `Aberta ${quandoFoi(v.abertaHaDias)}`
   );
   const porEstagio = estadoDa(v);
+  // O quanto das entrevistas convidadas já foi feito: a barra cresce ao entrar na lista (900ms, chegar).
+  const pct = v.funil.convidados > 0 ? Math.min(100, Math.round((v.funil.concluiram / v.funil.convidados) * 100)) : 0;
 
   return (
     <motion.li {...entradaLinha(indice)} className="linha-lista mx-2">
       <Grade href={porEstagio.href} titulo={v.cargo} sub={sub} situacao={porEstagio.situacao} />
+      {v.estagio !== "encerrada" && v.funil.convidados > 0 && (
+        <div className="-mt-1.5 mb-3 px-3" aria-hidden>
+          <div className="h-[5px] overflow-hidden rounded-full bg-superficie-2">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.9, delay: 0.1 + Math.min(indice, 8) * 0.04, ease: curvaSaida }}
+              className="h-full rounded-full bg-texto"
+            />
+          </div>
+        </div>
+      )}
     </motion.li>
   );
 }

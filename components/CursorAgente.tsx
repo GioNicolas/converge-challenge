@@ -51,13 +51,13 @@ export default function CursorAgente({ onPronto }: { onPronto: (c: ControleCurso
         <path
           d="M2 2 L2 17.5 L6.4 13.4 L9.3 20 L12.2 18.7 L9.4 12.3 L15.5 12.3 Z"
           fill="var(--agente)"
-          stroke="white"
+          stroke="var(--superficie)"
           strokeWidth="1.5"
           strokeLinejoin="round"
         />
       </svg>
-      <span className="absolute top-[18px] left-[14px] rounded-full bg-agente px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-white shadow-padrao">
-        Entrevistador
+      <span className="absolute top-[18px] left-[14px] rounded-full bg-agente px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap text-sobre-marca shadow-padrao">
+        Totti
       </span>
     </div>
   );

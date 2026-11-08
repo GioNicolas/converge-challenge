@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import Perola from "@/components/totti/Perola";
 
 const CURVA = [0.32, 0.72, 0, 1] as const;
 
@@ -60,9 +61,12 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
         transition={{ duration: 0.48, ease: CURVA }}
         className="flex w-full max-w-md flex-col gap-6 rounded-padrao bg-superficie p-8 shadow-flutuante"
       >
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium tracking-wide text-texto-suave uppercase">Entrevista de {area}</p>
-          <h1 className="text-2xl font-semibold tracking-tight">{problema}</h1>
+        <div className="flex items-center gap-4">
+          <Perola estado={erro ? "ocioso" : "pensando"} tamanho={44} />
+          <div className="flex flex-col gap-1">
+            <p className="font-mono text-[12.5px] text-texto-suave">gerando relatório · entrevista de {area}</p>
+            <h1 className="titulo-display text-[26px]">{problema}</h1>
+          </div>
         </div>
 
         {erro ? (
@@ -70,7 +74,7 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
             <p className="leading-relaxed text-texto-suave">{erro}</p>
             <button
               onClick={() => void gerar()}
-              className="w-fit rounded-full bg-marca px-5 py-2.5 font-medium text-white outline-none transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 focus-visible:ring-2 focus-visible:ring-marca focus-visible:ring-offset-2 active:scale-[0.98]"
+              className="w-fit rounded-full bg-marca px-5 py-2.5 font-medium text-sobre-marca outline-none transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 focus-visible:ring-2 focus-visible:ring-marca focus-visible:ring-offset-2 active:scale-[0.98]"
             >
               Tentar de novo
             </button>

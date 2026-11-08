@@ -1,8 +1,10 @@
 "use client";
 
-// Legenda ao vivo, centralizada embaixo: a fala do agente aparecendo no ritmo da voz.
-// O que já foi falado fica claro; o resto, apagado. Falas longas andam em blocos de até ~2 linhas.
+// Legenda ao vivo, centralizada embaixo (sala do candidato): a fala aparece no ritmo da voz, com o nome
+// de quem fala e as barras de voz ao lado. O que já foi falado fica claro; o resto, apagado.
+// Falas longas andam em blocos de até ~2 linhas.
 import { AnimatePresence, motion } from "motion/react";
+import { BarrasDeVoz } from "@/components/totti/Perola";
 
 /** Fala em andamento: `ate` = quantos caracteres já foram falados (a parte clara da legenda). */
 export type FalaNaTela = { quem: "agente" | "candidato"; texto: string; ate: number };
@@ -41,6 +43,7 @@ export default function Legenda({ fala }: { fala: FalaNaTela | null }) {
   const bloco = lista[indice];
   const falado = fala && bloco ? fala.texto.slice(bloco.inicio, Math.max(bloco.inicio, Math.min(fala.ate, bloco.fim))) : "";
   const resto = fala && bloco ? fala.texto.slice(bloco.inicio + falado.length, bloco.fim) : "";
+  const falando = !!fala && fala.ate < fala.texto.length;
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-[76px] z-10 flex justify-center px-4">
@@ -48,14 +51,18 @@ export default function Legenda({ fala }: { fala: FalaNaTela | null }) {
         {fala && bloco && (
           <motion.p
             key={`${fala.texto}-${indice}`}
-            initial={{ opacity: 0, y: 8, filter: "blur(4px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -4, filter: "blur(4px)" }}
-            transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-            className="max-w-[640px] rounded-[14px] bg-vidro-escuro px-4 py-2.5 text-center text-[15px] leading-snug text-texto-claro shadow-flutuante backdrop-blur-xl"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.48, ease: [0.16, 1, 0.3, 1] }}
+            className="flex w-[min(860px,100%)] items-center gap-3.5 rounded-[20px] bg-vidro-escuro px-5 py-3 text-left text-[16px] leading-[1.45] text-texto-claro shadow-flutuante backdrop-blur-xl ring-1 ring-texto-claro/10"
           >
-            <span className="transition-colors duration-150">{falado}</span>
-            <span className="text-texto-claro/35">{resto}</span>
+            <BarrasDeVoz ativo={falando} n={5} altura={20} largura={3} className="shrink-0 text-texto-claro" />
+            <span>
+              <b className="mr-1.5">{fala.quem === "agente" ? "Totti" : "Você"}</b>
+              <span className="transition-colors duration-150">{falado}</span>
+              <span className="text-texto-claro/40">{resto}</span>
+            </span>
           </motion.p>
         )}
       </AnimatePresence>
