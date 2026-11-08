@@ -230,3 +230,20 @@ test("sem a voz do ElevenLabs, antesDeTocar não é chamado e a fala fica no tex
   );
   assert.deepEqual(ordem, []);
 });
+
+test("o fetch padrão é chamado com o this do navegador (sem Illegal invocation)", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let pedidos = 0;
+  // Como o fetch nativo do Chrome: chamado como método de outro objeto, ele recusa a chamada.
+  globalThis.fetch = function (this: unknown) {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    pedidos++;
+    return Promise.resolve(Response.json(dadosVoz));
+  } as typeof fetch;
+  let tocou = false;
+  const falar = criarVoz({ tocar: async () => { tocou = true; } });
+  await falar("oi", new AbortController().signal, eventos());
+  assert.equal(pedidos, 1);
+  assert.equal(tocou, true);
+});

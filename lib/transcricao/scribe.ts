@@ -17,6 +17,9 @@ export async function iniciarScribe({ token, stream, signal, eventos }: {
     sampleRate: 16000,
     commitStrategy: CommitStrategy.VAD,
     vadSilenceThresholdSecs: 1,
+    // Sem isso o Scribe transcreve hesitações ao pé da letra ("ca-- s--", "ééé", "hã"). Testado com o
+    // scribe_v2_realtime: "Eu tô querendo ca-- ééé, contratar, hã..." vira "Eu tô querendo contratar...".
+    noVerbatim: true,
   });
   let encerrada = false;
   let parando = false;

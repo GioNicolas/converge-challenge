@@ -42,6 +42,8 @@ export type ArgsGerarKit = {
   llm: LlmCliente;
   vaga: JobPosting;
   plano?: InterviewPlan;
+  /** Bloco extra para a mensagem (ver `montarMensagemVaga`). */
+  contexto?: string;
   modelo?: string;
   sinal?: AbortSignal;
   timeoutMs?: number;
@@ -87,7 +89,7 @@ export async function gerarKitDetalhado(args: ArgsGerarKit): Promise<ResultadoGe
   const inicio = Date.now();
   const uso: UsoGeracao = { entrada: 0, saida: 0 };
   const mensagens: { role: "user" | "assistant"; content: string }[] = [
-    { role: "user", content: montarMensagemVaga(vaga, plano) },
+    { role: "user", content: montarMensagemVaga(vaga, plano, args.contexto) },
   ];
   let errosPrimeira: string[] = [];
   let ultimosErros: string[] = [];

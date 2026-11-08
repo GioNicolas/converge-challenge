@@ -26,6 +26,9 @@ const MARCA = "\n\n[Documento anexado: ";
 /** Quanto tempo depois do envio os três pontinhos aparecem. */
 const ATRASO_DIGITANDO = 650;
 
+/** No modo voz, quanto esperar depois de um trecho confirmado (o VAD já esperou 1 s de silêncio) para enviar. */
+const ESPERA_ENVIO_NA_PAUSA = 800;
+
 export function montarMensagem(texto: string, documentos: Documento[]) {
   return texto + documentos.map((d) => `${MARCA}${d.nome}]\n${d.texto}`).join("");
 }
@@ -50,9 +53,16 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
   const [anexos, setAnexos] = useState<Documento[]>([]);
   const [erroAnexo, setErroAnexo] = useState<string | null>(null);
   const [lendo, setLendo] = useState(false);
+  // O texto também fica num ref: o envio automático acontece depois de um await (fim do ditado), quando o estado
+  // do render ainda não tem o último trecho transcrito.
+  const textoRef = useRef("");
+  const mudarTexto = (valor: string) => { textoRef.current = valor; setTexto(valor); };
   const ditado = useTranscricao({
     bloqueada: pensando || lendo || bloqueada || pausarEntrada,
-    aoTexto: (fala) => setTexto((atual) => acrescentarFala(atual, fala)),
+    aoTexto: (fala) => {
+      mudarTexto(acrescentarFala(textoRef.current, fala));
+      if (modoVoz.current) agendarEnvioNaPausa();
+    },
   });
   const lista = useRef<HTMLDivElement>(null);
   const campo = useRef<HTMLTextAreaElement>(null);
@@ -96,17 +106,80 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
     setLendo(false);
   }
 
-  function enviar() {
-    const t = texto.trim() || (anexos.length ? "Segue o documento." : "");
-    if (!t || pensando || lendo || bloqueada || pausarEntrada || ditado.ativa) return;
+  // Lido pelo envio automático, que roda fora do render (timer e await).
+  const atual = useRef({ anexos, pensando, lendo, bloqueada, pausarEntrada, onEnviar, turnos: transcricao.length });
+  atual.current = { anexos, pensando, lendo, bloqueada, pausarEntrada, onEnviar, turnos: transcricao.length };
+
+  // Modo voz: ligar o mic pelo botão entra no modo voz. A fala vai sozinha na pausa e o mic reabre quando o Totti
+  // termina de responder. Clicar no mic de novo, parar com Enter ou digitar sai do modo voz (texto fica para revisar).
+  const modoVoz = useRef(false);
+  const [emModoVoz, setEmModoVoz] = useState(false);
+  const mudarModoVoz = (ligado: boolean) => { modoVoz.current = ligado; setEmModoVoz(ligado); };
+  // Quantos turnos havia quando a pessoa enviou pela voz (null: nada esperando resposta para reabrir o mic).
+  const [turnosNoEnvio, setTurnosNoEnvio] = useState<number | null>(null);
+  const vozJaTocou = useRef(false);
+
+  /** `comDitado`: o envio automático já parou o ditado, mas o estado do hook ainda não foi re-renderizado. */
+  function enviar(comDitado = false) {
+    const a = atual.current;
+    const t = textoRef.current.trim() || (a.anexos.length ? "Segue o documento." : "");
+    if (!t || a.pensando || a.lendo || a.bloqueada || a.pausarEntrada || (!comDitado && ditado.ativa)) return;
     voz.parar();
-    onEnviar(montarMensagem(t, anexos));
-    setTexto("");
+    a.onEnviar(montarMensagem(t, a.anexos));
+    mudarTexto("");
     setAnexos([]);
+    vozJaTocou.current = false;
+    setTurnosNoEnvio(modoVoz.current ? a.turnos : null);
   }
 
-  // Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
-  const aoTeclar = useEnterDoDitado(ditado, enviar);
+  const timerPausa = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pararDitado = ditado.parar;
+  function agendarEnvioNaPausa() {
+    clearTimeout(timerPausa.current);
+    timerPausa.current = setTimeout(async () => {
+      if (!modoVoz.current || !textoRef.current.trim()) return;
+      await pararDitado();
+      if (modoVoz.current) enviar(true);
+    }, ESPERA_ENVIO_NA_PAUSA);
+  }
+  // Fala nova (parcial) depois do trecho confirmado: a pessoa continuou, então ainda não é a pausa.
+  useEffect(() => {
+    if (ditado.parcial) clearTimeout(timerPausa.current);
+  }, [ditado.parcial]);
+  useEffect(() => () => clearTimeout(timerPausa.current), []);
+  // Erro no microfone ou na transcrição: sai do modo voz em vez de tentar reabrir em laço.
+  useEffect(() => {
+    if (ditado.estado === "erro") { clearTimeout(timerPausa.current); mudarModoVoz(false); setTurnosNoEnvio(null); }
+  }, [ditado.estado]);
+
+  // Reabre o mic só depois que a resposta do Totti tocou (ou não tem como tocar): o mic corta a voz e a voz espera
+  // o mic soltar (lib/audio/foco), então abrir antes cortaria a resposta ou travaria os dois.
+  if (turnosNoEnvio !== null && voz.ativa) vozJaTocou.current = true;
+  const respostaChegou = turnosNoEnvio !== null && transcricao.length > turnosNoEnvio && ultima?.role === "agente";
+  const iniciarDitado = ditado.iniciar;
+  useEffect(() => {
+    if (!emModoVoz || !respostaChegou) return;
+    if (pensando || bloqueada || pausarEntrada || lendo || ditado.ativa || voz.ativa) return;
+    // Voz ligada e sem erro: espera ela tocar e terminar. Voz desligada ou com erro: reabre já.
+    if (!vozJaTocou.current && voz.habilitada && voz.estado !== "erro") return;
+    setTurnosNoEnvio(null);
+    void iniciarDitado();
+  }, [emModoVoz, respostaChegou, pensando, bloqueada, pausarEntrada, lendo, ditado.ativa, voz.ativa, voz.habilitada, voz.estado, iniciarDitado]);
+
+  // O botão do mic e o Enter passam por aqui para ligar e desligar o modo voz.
+  const ditadoComModoVoz: typeof ditado = {
+    ...ditado,
+    iniciar: () => { mudarModoVoz(true); return ditado.iniciar(); },
+    parar: () => {
+      clearTimeout(timerPausa.current);
+      mudarModoVoz(false);
+      setTurnosNoEnvio(null);
+      return ditado.parar();
+    },
+  };
+
+  // Fora do modo voz: Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
+  const aoTeclar = useEnterDoDitado(ditadoComModoVoz, () => enviar());
 
   // O palco: a pérola do Totti no centro, no estado do momento (pensando, falando, ouvindo você).
   const estadoPerola: EstadoPerola =
@@ -194,7 +267,7 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
           <ListaDocumentos documentos={anexos} onRemover={(id) => setAnexos((l) => l.filter((d) => d.id !== id))} compacto />
         )}
         {erroAnexo && <p className="text-[13px] text-alerta-texto">{erroAnexo}</p>}
-        <EstadoDitado transcricao={ditado} dica={DICA_DITADO_ENTER} />
+        <EstadoDitado transcricao={ditado} dica={emModoVoz ? "Ouvindo… envio quando você fizer uma pausa." : DICA_DITADO_ENTER} />
         <div className="flex items-end gap-1.5 rounded-[24px] bg-superficie p-1.5 shadow-[inset_0_0_0_1px_rgb(245_240_232/0.1)] transition-shadow duration-[240ms] focus-within:shadow-[inset_0_0_0_1.5px_rgb(245_240_232/0.45)]">
           <button
             type="button"
@@ -220,16 +293,19 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
             ref={campo}
             value={texto}
             readOnly={ditado.ativa}
-            onChange={(e) => setTexto(e.target.value)}
+            onChange={(e) => {
+              if (modoVoz.current) { mudarModoVoz(false); setTurnosNoEnvio(null); }
+              mudarTexto(e.target.value);
+            }}
             onKeyDown={aoTeclar}
             rows={1}
             placeholder={lendo ? "Lendo o documento…" : "Escreva para o Totti…"}
             aria-label="Mensagem para o Totti"
             className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
-          <BotaoDitado transcricao={ditado} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} />
+          <BotaoDitado transcricao={ditadoComModoVoz} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} />
           <button
-            onClick={enviar}
+            onClick={() => enviar()}
             disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo || bloqueada || ditado.ativa}
             aria-label="Enviar"
             className="flex size-10 shrink-0 items-center justify-center rounded-full bg-marca text-sobre-marca transition-[opacity,transform] duration-[120ms] active:scale-90 disabled:opacity-25"

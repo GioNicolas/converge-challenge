@@ -17,7 +17,7 @@ const TIME = [
   { nome: "Giorgio Nícolas", email: "163905946+gionicolas@users.noreply.github.com" },
 ];
 
-const RECEBEM_EMAIL = new Set(["ltodarosouza@gmail.com"]);
+const RECEBEM_EMAIL = new Set(["ltodarosouza@gmail.com", "nicolaskukica@gmail.com"]);
 
 /** Formato: "Nome Sobrenome <email>; Outro Nome <email2>". Entradas inválidas são ignoradas. Vazio: o `TIME`. */
 export function candidatosTeste(): { nome: string; email: string }[] {
