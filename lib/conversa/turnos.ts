@@ -1,4 +1,5 @@
 /** Regras de turno da conversa ao vivo, comuns ao quadro e ao live coding. */
+import { devolveAVez } from "../agente/guardas";
 
 /**
  * Silêncio que fecha a fala da pessoa, contado depois do trecho final da transcrição. O Scribe só fecha um trecho
@@ -36,4 +37,14 @@ export function deveAguardarParaFalar(opcoes: {
   const esperando = opcoes.agora - opcoes.esperandoDesde;
   if (opcoes.falaParcial) return esperando < 12_000;
   return opcoes.agora - opcoes.ultimaFalaEm < 900 && esperando < 4_000;
+}
+
+/**
+ * Depois de responder ao candidato, o quadro analisa o desenho na hora para o Totti seguir a conversa. Mas uma
+ * fala que já devolveu a vez (numa pergunta ou num convite como "Pode seguir com o desenho.") deixa a bola com
+ * ele: analisar logo em seguida soltava outra pergunta poucos segundos depois, e ele recebia duas seguidas.
+ * Nesse caso a análise espera a pausa de sempre (ou o fim da próxima resposta dele).
+ */
+export function deveAnalisarLogoAposResposta(texto: string, concluiu?: boolean): boolean {
+  return !concluiu && texto.trim() !== "" && !devolveAVez(texto);
 }

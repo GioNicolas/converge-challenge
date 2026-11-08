@@ -141,7 +141,7 @@ export async function analisar(
     }
   }
 
-  const filtrada = filtrarResposta(estado, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras);
+  const filtrada = filtrarResposta(estado, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS: pedido.parado_ha_s });
   if (resposta.status !== "ok" && filtrada.status === "ok") ajustes.push("rebaixada_pela_politica");
 
   const t = transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta: filtrada }, agora, regras);

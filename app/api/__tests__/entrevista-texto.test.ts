@@ -84,7 +84,7 @@ async function eventos(id: string, lista: { tipo: string; dados: unknown }[]) {
   assert.equal(r.status, 200);
 }
 
-async function analisar(id: string, fase: string, grafo: string, mudancas: string, perguntas: number) {
+async function analisar(id: string, fase: string, grafo: string, mudancas: string, perguntas: number, paradoHaS?: number) {
   const r = await ler(
     await analisarPost(
       post(`/api/sessoes/${id}/analisar`, {
@@ -95,6 +95,7 @@ async function analisar(id: string, fase: string, grafo: string, mudancas: strin
         conversa_recente: [{ quem: "agente", texto: "Projete um serviço." }],
         perguntas_feitas: perguntas,
         imagem_url: null,
+        ...(paradoHaS !== undefined ? { parado_ha_s: paradoHaS } : {}),
       }),
       params(id),
     ),
@@ -104,6 +105,28 @@ async function analisar(id: string, fase: string, grafo: string, mudancas: strin
 }
 
 const estado = async (id: string) => (await ler(await estadoGet(get(`/api/dev/sessoes/${id}/estado`), params(id)))).corpo;
+
+describe("pergunta nova logo depois de uma fala solta do agente", () => {
+  it("a bola fica com o candidato até ele agir; depois ou num silêncio de verdade a pergunta sai", async () => {
+    definirContextoParaTestes({ repositorio: repo, llm: llmVariado(), agora: () => relogio, fake: true });
+    const { id } = await novaSessao();
+    await eventos(id, [{ tipo: "fase", dados: { fase: "REQUISITOS" } }]);
+    const p = await ler(await perguntarPost(post(`/api/sessoes/${id}/perguntar`, { sessao_id: id, fase: "REQUISITOS", texto: "Qual a escala de acessos?" }), params(id)));
+    assert.equal(p.corpo.responder, true);
+
+    const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
+    await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    // O agente acabou de responder e o candidato não fez nada depois (parado há 30 s, antes da resposta).
+    const logo = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 30);
+    assert.equal(logo.status, "ok", "com a bola no candidato a pergunta é rebaixada");
+    assert.equal((await estado(id)).plinPendente, false);
+
+    // Ele desenhou logo depois da resposta (parado há 1 s): agora a pergunta pode sair.
+    relogio += 3_000;
+    const depois = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 1);
+    assert.equal(depois.status, "duvida", "depois de uma ação dele a pergunta pode sair");
+  });
+});
 
 describe("entrevista completa por texto (handlers + LLM falso)", () => {
   it("percorre todas as fases, respeita os limites do plin, não vaza segredos e gera o scorecard", async () => {

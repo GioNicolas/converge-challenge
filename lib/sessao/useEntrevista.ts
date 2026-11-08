@@ -11,7 +11,7 @@ import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
-import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
+import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {
@@ -164,14 +164,21 @@ export function useEntrevista(
     void (atual.tarefa ?? Promise.resolve()).then(() => atual.quadro.agente.apagarGrupo(atual.grupo));
   }, []);
 
+  /** O que o agente estava dizendo (ou ia dizer) na última fala: para saber o que uma fala nova cortou. */
+  const textoDaUltimaFala = useRef("");
   const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[]) => {
+    // Uma fala nova corta a que está tocando (falarComMarcas chama calar()). Registra o que foi cortado, para a
+    // linha do tempo da sessão mostrar quando o Totti fala por cima de si mesmo.
+    const cortou = agenteFalandoRef.current ? textoDaUltimaFala.current : "";
+    if (cortou) console.warn("[fala] uma fala nova cortou a que estava tocando", { cortada: cortou, nova: texto });
+    textoDaUltimaFala.current = texto;
     const versao = ++versaoDaFala.current;
     ultimaFalaDoAgenteEm.current = Date.now();
     if (fimDaLegenda.current) clearTimeout(fimDaLegenda.current);
     setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(false);
     agenteFalandoRef.current = false;
-    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto });
+    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto, ...(cortou ? { cortouFala: cortou } : {}) });
     if (!vozHabilitadaRef.current) {
       setPreparandoVoz(false);
       preparandoVozRef.current = false;
@@ -844,8 +851,9 @@ export function useEntrevista(
           setTimeout(() => gatilho.current?.dispararAgora(), 0);
         }
       }
-      // Resposta sem pergunta de volta: o Totti analisa o desenho logo depois, para seguir com a socrática.
-      if (r.responder && r.texto && !r.texto.includes("?") && !r.concluiu) {
+      // Resposta que não devolveu a vez: o Totti analisa o desenho logo depois, para seguir com a socrática.
+      // Se ela já devolveu (pergunta ou convite), a bola está com o candidato: a análise espera a pausa dele.
+      if (r.responder && deveAnalisarLogoAposResposta(r.texto, r.concluiu)) {
         setTimeout(() => gatilho.current?.dispararAgora(), 0);
       }
       return { requisito: r.responder ? r.requisito : null };
