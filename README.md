@@ -12,6 +12,14 @@ Converge Challenge powered by Tako · Porto Digital · Recife · novembro de 202
 
 ---
 
+## Um programa, 100 mil inscritos
+
+A última edição do Programa Trainee do Itaú Unibanco recebeu **mais de 100 mil inscrições** ([TI Inside, agosto de 2026](https://tiinside.com.br/27/08/2026/programa-trainee-do-itau-unibanco-entra-na-reta-final-de-inscricoes-com-salario-de-r-93-mil-e-formacao-em-ia/)). No meio delas há gente de altíssimo nível. A pergunta é: **como encontrar essas pessoas?**
+
+Faça a conta. Uma entrevista de uma hora com cada inscrito dá **100 mil horas** de entrevistador: mais de 600 pessoas fazendo só isso durante um mês inteiro. Mesmo entrevistando um em cada dez, são **10 mil horas** tiradas do time, e cada uma delas é paga e deixa de virar entrega. Por isso a maioria fica pelo caminho sem nunca ter sido realmente avaliada.
+
+Apesar do tamanho desse desafio, uma resposta basta: **Totti.**
+
 ## Dois ganhos num produto só
 
 ### 1. A entrevista técnica sai do calendário do time
