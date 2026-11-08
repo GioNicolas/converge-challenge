@@ -121,6 +121,18 @@ export async function perguntar(sessaoId: string, fase: string, texto: string, c
   return validar(rota, dados, EsquemaPergunta);
 }
 
+const EsquemaEmpecilho = z.object({
+  empecilho: z.object({ fala: z.string().min(1), requisito: z.string().min(1) }).nullable(),
+  motivo: z.string().nullable(),
+});
+export type RespostaEmpecilho = z.infer<typeof EsquemaEmpecilho>;
+
+/** Pede a mudança no problema. O servidor decide se é a hora (ou solta já, com `forcar`, fora de produção). */
+export async function pedirEmpecilho(sessaoId: string, dados: { fase: string; grafo?: string; forcar?: boolean }): Promise<RespostaEmpecilho> {
+  const rota = rotaDaSessao(sessaoId, "empecilho");
+  return validar(rota, await lerJson(rota, jsonPost({ sessao_id: sessaoId, ...dados })), EsquemaEmpecilho);
+}
+
 export async function sintetizarFala(texto: string, sinal?: AbortSignal): Promise<{ audio: Blob; alinhamento: Alinhamento }> {
   const rota = "/api/falar";
   const dados = validar(rota, await lerJson(rota, jsonPost({ texto }, sinal)), EsquemaFala);

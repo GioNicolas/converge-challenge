@@ -4,6 +4,15 @@ import type { Kit, Problema } from "../kits/tipos";
 
 export const NOME_SCHEMA_SCORECARD = "scorecard_entrevista";
 
+/** Escala fixa da adaptação à mudança no problema (como a rubrica: dá consistência e explica a nota). */
+export const NIVEIS_ADAPTACAO: Record<1 | 2 | 3 | 4, string> = {
+  1: "Ignorou a mudança ou seguiu com o desenho como estava, sem dizer o que ela afeta",
+  2: "Reconheceu a mudança, mas só citou ajustes soltos, sem ligar ao próprio desenho",
+  3: "Achou onde a mudança pega no desenho, ajustou essa parte e explicou o impacto",
+  4: "Ajustou com critério: mediu o impacto, revisou as escolhas anteriores e disse o que deixa de valer",
+};
+
+
 export function montarSistemaEstaticoScorecard(kit: Kit, problema: Problema): string {
   const rubrica = kit.criterios
     .map(
@@ -39,7 +48,8 @@ REGRAS
 10. Sessão curta ou encerrada no primeiro minuto não prova incapacidade nem competência. Registre limites de cobertura e o que falta investigar. Pontos fortes, lacunas, justificativas e briefing também precisam se limitar às provas aceitas; não faça alegações pessoais sem apoio.
 11. Em justificativa, pontos_fortes, pontos_a_aprofundar e briefing_para_proxima_etapa, use NOMES legíveis dos critérios e dos elementos. Nunca escreva ids técnicos como componentes_fluxo, dados_consistencia ou e1 nesses textos. IDs pertencem exclusivamente aos campos estruturados criterio e elementos. Citações literais de fala são preservadas como foram ditas.
 12. O horario da observação registra quando o entrevistador analisou; o horario dentro de desenho registra a mudança real do quadro. Para prova visual, use este último; não atribua ao candidato o horário de uma reanálise. Observação sem desenho ancorado não autoriza prova visual.
-13. Responda só com o JSON no formato pedido.`;
+13. "adaptacao": SÓ quando os dados trazem "mudanca" (o entrevistador mudou o problema no meio da entrevista); sem ela, adaptacao = null. Avalie como o candidato lidou com a mudança DEPOIS do horário dela, com esta escala: 1 = ${NIVEIS_ADAPTACAO[1]}; 2 = ${NIVEIS_ADAPTACAO[2]}; 3 = ${NIVEIS_ADAPTACAO[3]}; 4 = ${NIVEIS_ADAPTACAO[4]}. "evidencias" são trechos copiados LITERALMENTE de falas do CANDIDATO posteriores à mudança (com o horário ISO da fala). Sem fala posterior que mostre a reação, nota null. Use o que a mudança pede só para entender o que observar; não exija uma solução única. Essa nota não entra em "nota_geral" nem muda a recomendação.
+14. Responda só com o JSON no formato pedido.`;
 }
 
 export type EntradaPromptScorecard = {
@@ -50,6 +60,8 @@ export type EntradaPromptScorecard = {
   imagens: string;
   /** Critérios aprendidos com o Tech Lead desta squad (ver `lib/squad-memory/prompt.ts`). */
   regrasDaSquad?: string;
+  /** Mudança no problema trazida pelo entrevistador (horário ISO, o que ele falou e o que ela pede). */
+  mudanca?: { horario: string; fala: string; exige: string };
 };
 
 export function montarSistemaDinamicoScorecard(e: EntradaPromptScorecard): string {
