@@ -72,7 +72,7 @@ test("dados públicos têm só titulo e enunciado", () => {
   for (const k of kits)
     for (const p of k.problemas) {
       const pub = dadosPublicosDoProblema(p);
-      assert.deepEqual(Object.keys(pub).sort(), ["enunciado", "titulo"]);
+      assert.deepEqual(Object.keys(pub).filter((c) => c !== "fala_do_desafio").sort(), ["enunciado", "titulo"]);
       assert.equal(pub.enunciado, p.enunciado);
       const json = JSON.stringify(pub);
       assert.ok(!json.includes(p.ficha[0].resposta));

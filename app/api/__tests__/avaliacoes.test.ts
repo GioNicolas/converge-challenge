@@ -178,7 +178,7 @@ describe("POST /api/sessoes com avaliação gerada", () => {
     const ok = await sessao(id);
     assert.equal(ok.status, 200);
     const c = await ok.json();
-    assert.deepEqual(Object.keys(c.problema).sort(), ["enunciado", "titulo"]);
+    assert.deepEqual(Object.keys(c.problema).filter((k) => k !== "fala_do_desafio").sort(), ["enunciado", "titulo"]);
     assert.match(c.area, /Staff/);
     // nada da ficha vaza
     assert.doesNotMatch(JSON.stringify(c), /Resposta oficial/);

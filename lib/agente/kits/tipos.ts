@@ -21,6 +21,12 @@ export const Problema = z.object({
   titulo: z.string(),
   /** Vago de propósito: perguntar antes de desenhar é o primeiro sinal avaliado. */
   enunciado: z.string(),
+  /**
+   * O que o entrevistador FALA ao abrir a sessão: uma apresentação natural do tema, em pt-BR falado
+   * (não a leitura do enunciado). Público como o enunciado: sem números da ficha. Opcional: sem ele
+   * o quadro monta uma fala simples a partir do título e do enunciado.
+   */
+  falaDoDesafio: z.string().optional(),
   ficha: z.array(ItemFicha),
   sinaisEsperados: z.array(z.string()),
   /** O que uma solução fraca costuma ter; vira pergunta. */

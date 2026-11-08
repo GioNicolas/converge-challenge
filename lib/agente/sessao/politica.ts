@@ -1,6 +1,7 @@
 // Política do "portão de entrada": funções puras que decidem SE a análise pode rodar e SE uma
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
+import { SILENCIO_INICIAL_S, SILENCIO_S } from "../../contracts";
 import type { EstadoSessao } from "./estado";
 import type { Fase, RespostaAnalise, StatusAnalise } from "./tipos";
 
@@ -15,12 +16,12 @@ export type Regras = {
  * Silêncio total do candidato (sem mexer no desenho nem falar) a partir do qual o agente pode quebrá-lo.
  * Provisório, para os testes. O quadro usa o mesmo valor em `useEntrevista.ts` (SILENCIO_MS).
  */
-export const LIMITE_SILENCIO_S = 8;
+export const LIMITE_SILENCIO_S = SILENCIO_S;
 /**
  * Idem para o começo (fase REQUISITOS): sem falar, sem escrever na conversa e sem desenhar nada.
  * Provisório. O quadro usa o mesmo valor em `useEntrevista.ts` (SILENCIO_INICIAL_MS).
  */
-export const LIMITE_SILENCIO_INICIAL_S = 15;
+export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
   intervaloEntrePerguntasMs: 60_000,
@@ -88,6 +89,8 @@ export function motivoBloqueioPlin(
 ): MotivoBloqueioPlin | null {
   const base = motivoBloqueio(estado);
   if (base) return base;
+  // REQUISITOS aceita um único convite (o silêncio inicial): não gasta a cota de 5, mas não se repete.
+  if (estado.fase === "REQUISITOS" && estado.conviteFeito) return "LIMITE_DE_PERGUNTAS";
   if (estado.fase === "FECHAMENTO") {
     if (estado.perguntaFinalFeita) return "LIMITE_DE_PERGUNTAS";
   } else if (estado.perguntasFeitas >= regras.maxPerguntas) {

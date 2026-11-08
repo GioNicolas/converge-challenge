@@ -27,6 +27,8 @@ type Props = {
   onEnviar?: (texto: string) => Promise<void>;
   /** Dica mostrada quando o campo está desabilitado. */
   dicaSemCampo?: string;
+  /** Chamado a cada tecla no campo: digitar conta como atividade (o agente não quebra o silêncio no meio da escrita). */
+  onDigitando?: () => void;
 };
 
 const CURVA = [0.32, 0.72, 0, 1] as const; // --curva-suave
@@ -43,6 +45,7 @@ export default function PainelConversa({
   onVerNoQuadro,
   onEnviar,
   dicaSemCampo = "Digitar fica disponível quando a entrevista está conectada ao servidor.",
+  onDigitando,
 }: Props) {
   const reduzir = useReducedMotion() ?? false;
   const titulo = useId();
@@ -220,7 +223,10 @@ export default function PainelConversa({
                   id={idCampo}
                   ref={campo}
                   value={rascunho}
-                  onChange={(e) => setRascunho(e.target.value)}
+                  onChange={(e) => {
+                    setRascunho(e.target.value);
+                    onDigitando?.();
+                  }}
                   onKeyDown={aoTeclar}
                   disabled={!onEnviar}
                   readOnly={enviando}

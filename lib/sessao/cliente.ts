@@ -20,7 +20,8 @@ export type Sessao = {
   sessao_id: string;
   /** Nome da área do kit de avaliação (ex.: "system design", "marketing"). */
   area: string;
-  problema: { titulo: string; enunciado: string };
+  /** `fala_do_desafio`: o que o agente fala ao apresentar o desafio (natural); sem ela, a fala é montada do título e do enunciado. */
+  problema: { titulo: string; enunciado: string; fala_do_desafio?: string };
   /** Duração de cada fase, em segundos. */
   tempos: Partial<Record<Fase, number>>;
   /** Fala de abertura, escrita pelo cérebro. Ausente/null: o agente vai direto ao desafio. */

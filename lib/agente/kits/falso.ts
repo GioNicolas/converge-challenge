@@ -37,6 +37,8 @@ export function kitFalso(titulo = "a vaga"): Kit {
         id: "problema_falso",
         titulo: `Desafio de ${titulo}`,
         enunciado: "Desenhe como você organizaria o trabalho principal desta função.",
+        falaDoDesafio:
+          "Hoje a ideia é você desenhar como organizaria o trabalho principal da função. Pergunte o que quiser antes de começar e vá pensando em voz alta.",
         ficha: Array.from({ length: 8 }, (_, i) => ({
           pergunta: `Pergunta provável ${i + 1}?`,
           resposta: `Resposta oficial ${i + 1}: valor ${(i + 3) * 7}.`,

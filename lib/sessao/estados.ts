@@ -22,6 +22,8 @@ export type EstadoEntrevista = {
   perguntasFeitas: number;
   /** A pergunta de encerramento (do FECHAMENTO) já foi feita? Ela é única. */
   perguntaFinalFeita: boolean;
+  /** O convite único de REQUISITOS (silêncio inicial) já foi feito? Não conta na cota de perguntas. */
+  conviteFeito: boolean;
   /** Quando o candidato terminou a última resposta (o intervalo entre perguntas conta daqui). */
   ultimaRespostaEm: number | null;
 };
@@ -82,6 +84,7 @@ export function estadoInicial(): EstadoEntrevista {
     perguntaAtiva: null,
     perguntasFeitas: 0,
     perguntaFinalFeita: false,
+    conviteFeito: false,
     ultimaRespostaEm: null,
   };
 }
@@ -104,6 +107,8 @@ export function aceitaPlin(
   if (estado.plin === "PERGUNTA_ATIVA") return false;
   // A pergunta de encerramento fica fora do limite de 5 e do intervalo de 60s, mas é uma só.
   if (estado.fase === "FECHAMENTO") return !estado.perguntaFinalFeita;
+  // REQUISITOS aceita um único convite: não gasta a cota de 5, mas não se repete.
+  if (estado.fase === "REQUISITOS" && estado.conviteFeito) return false;
   if (estado.perguntasFeitas >= regras.maxPerguntas) return false;
   if (
     estado.ultimaRespostaEm !== null &&
@@ -180,15 +185,17 @@ export function transicionar(
 
     case "PLIN_CLICADO": {
       if (estado.plin !== "PLIN_PENDENTE" || !estado.perguntaPendente) return estado;
-      const numero = estado.perguntasFeitas + 1;
+      // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
+      const numero = estado.perguntasFeitas + (estado.conviteFeito ? 1 : 0) + 1;
       return {
         ...estado,
         plin: "PERGUNTA_ATIVA",
         perguntaAtiva: { ...estado.perguntaPendente, numero },
         perguntaPendente: null,
         // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
-        perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : numero,
+        perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
         perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
+        conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
       };
     }
 

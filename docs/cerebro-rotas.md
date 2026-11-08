@@ -52,3 +52,15 @@ Voz (`/api/falar`, `/api/stt-token`, 501; o quadro cai na voz do navegador e no 
 ## Testes
 
 `npm run test:rotas` (handlers chamados direto, LLM falso, sem rede) e `npm run test:agente`.
+
+## Campos acrescentados ao contrato (opcionais; o quadro aceita a ausência de todos)
+
+| Rota | Campo | O que é |
+|---|---|---|
+| `POST /api/sessoes` | `problema.fala_do_desafio` | O que o agente FALA ao apresentar o desafio (natural, não a leitura do enunciado). O enunciado continua sendo o que se escreve no quadro. Sem ele, o quadro monta uma fala do título e do enunciado. |
+| `POST /api/sessoes` | `apresentacao`, `despedida` | Saudação inicial e despedida escritas pelo modelo (uma chamada por kit+problema, guardada em memória). `null` sem LLM ou em erro. |
+| `POST /analisar` (pedido) | `parado_ha_s`, `requisitos` | Segundos de silêncio do candidato (desenho, digitação ou fala) e requisitos já combinados. |
+| `POST /analisar` (resposta) | `avancar_fase` | O cérebro acha que o alto nível está feito. Só vale em `ALTO_NIVEL`; o quadro avança para `APROFUNDAMENTO` (com mínimo de 30 s na fase). |
+| `POST /perguntar` | `concluiu` | O candidato disse que terminou (no alto nível leva ao aprofundamento). |
+
+Regras de plin relacionadas: em `REQUISITOS` só cabe **um** convite (silêncio inicial); ele não gasta a cota de 5, mas ocupa um número, então a primeira pergunta da cota é a 2. Os tempos de silêncio (`SILENCIO_S`, `SILENCIO_INICIAL_S`, `SILENCIO_REPETIR_S`) vivem em `lib/contracts.ts`, usados pelo quadro e pelo cérebro.

@@ -11,6 +11,7 @@ export const MIN_ARMADILHAS = 3;
 export const MIN_PERGUNTAS = 3;
 export const MIN_TIPOS_PERGUNTA = 4;
 export const MAX_ENUNCIADO = 500;
+export const MAX_FALA_DO_DESAFIO = 600;
 
 /** Id seguro para URL, log e chave de mapa: minúsculas, dígitos e "_", começando por letra. */
 export const RE_SLUG = /^[a-z][a-z0-9_]{1,63}$/;
@@ -110,6 +111,16 @@ export function validarKit(bruto: unknown): ResultadoValidacao {
     const vazados = [...numerosDe(p.enunciado)].filter((n) => numerosFicha.has(n));
     if (vazados.length) {
       erros.push(`enunciado vaza números da ficha (${vazados.join(", ")}); o enunciado deve ser vago de propósito`);
+    }
+    // A fala do desafio também é pública (o agente a fala no início): mesmas regras do enunciado.
+    if (p.falaDoDesafio !== undefined) {
+      if (p.falaDoDesafio.length > MAX_FALA_DO_DESAFIO) {
+        erros.push(`falaDoDesafio com ${p.falaDoDesafio.length} caracteres; o máximo é ${MAX_FALA_DO_DESAFIO}`);
+      }
+      const vazadosFala = [...numerosDe(p.falaDoDesafio)].filter((n) => numerosFicha.has(n));
+      if (vazadosFala.length) {
+        erros.push(`falaDoDesafio vaza números da ficha (${vazadosFala.join(", ")})`);
+      }
     }
   }
 
