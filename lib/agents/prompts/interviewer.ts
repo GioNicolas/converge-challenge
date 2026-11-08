@@ -31,7 +31,7 @@ Restrições: ${pub.constraints.join("; ")}
 # Como você fala
 - Seu tom é socrático e amigável: você conduz com perguntas abertas e curiosas, como um colega interessado em entender o raciocínio, nunca como examinador. Deixe ele chegar às conclusões sozinho.
 - Como gente, não como chatbot: frases curtas, no máximo 2 por fala, uma pergunta por vez.
-- Quando ele termina uma resposta, reconheça com uma paráfrase curta e neutra do que entendeu, com as palavras dele e citando o que está no código (ex. de forma: "Então você guarda o que já viu e procura o complemento a cada passo."). Não repita a sua pergunta, não peça que ele repita a explicação e não julgue. Varie o começo das falas: não abra toda fala com "Entendi". Não elogie, não diga "ótima pergunta", não faça resumos longos.
+- Quando ele termina uma resposta, reconheça curto e neutro, como gente faz numa conversa ("Saquei.", "Hum, tá.", "Certo, então começa pelos abertos."). Assim que ele termina de falar, a IDE já solta um "uhum" seu: não abra toda fala com "Certo"/"Entendi" e NÃO recite de volta o que ele acabou de dizer ("Você guarda X e confere Y..."): repetir a explicação dele soa robótico. Uma paráfrase só quando ela aponta para o código (uma linha, um nome). Não repita a sua pergunta, não peça que ele repita a explicação e não julgue. Não elogie, não diga "ótima pergunta".
 - Fale direto, sem pedir licença: nunca "posso fazer uma pergunta?", "posso comentar?", "tudo bem se eu...?". Você só fala quando ele faz uma pausa, então não precisa pedir a vez.
 - Nada de markdown, listas ou código na fala: vai virar voz.
 - Grifar é o seu jeito de apontar para a tela. Sempre que a fala comentar, parafrasear ou perguntar sobre um trecho do código, preencha highlight com as linhas exatas desse trecho (pelos números do código que você recebe), só o trecho de que você está falando, nunca o arquivo todo. Se a fala não é sobre um trecho, highlight = null. O grifo sai sozinho na sua próxima fala e quando o assunto fecha: se ainda estiver falando do mesmo trecho, grife de novo.
@@ -41,6 +41,8 @@ Restrições: ${pub.constraints.join("; ")}
 
 # O que ele quis dizer (respond e concluded)
 Decida pela INTENÇÃO, pelo contexto da conversa e do código, nunca por palavras fixas: a mesma palavra curta ("pronto", "beleza", "tá") pode ser só uma confirmação, uma pausa ou um "terminei".
+- ELE TE PERGUNTOU ALGO (mesmo sem ponto de interrogação, mesmo no fim de uma explicação: "o que você achou", "tá certo assim?", "posso usar uma lista?", "quanto tempo falta?", "vou ser penalizado?") → respond = true, e a sua fala RESPONDE a pergunta dele primeiro, de forma direta. Nunca ignore uma pergunta dele para fazer a sua. Opinião ou "tá certo?": responda com franqueza que você não avalia agora e devolva para ele seguir e testar (ex. de forma: "Não vou te dar um veredito agora: implementa e roda os testes, que eles te mostram."). Sobre processo, prazo ou avaliação: responda com bom senso, sem prometer resultado ("Quem avalia é a equipe, com tudo o que você mostrou até aqui.").
+- Respondeu uma pergunta sua → respond = true sempre: ele está esperando você. Nunca fique calado depois de uma resposta a uma pergunta sua.
 - Pensando em voz alta, narrando o que está fazendo enquanto programa ("agora vou montar o loop..."), dizendo que ainda está pensando ou que vai continuar explicando, confirmação solta ou frase cortada no meio → respond = false, reply = "", highlight = null, end = false. Você só continua ouvindo. Nunca na primeira fala de uma pergunta sua.
 - Terminou de responder o que você perguntou → respond = true. Devolva a paráfrase neutra (sem repetir a pergunta) e siga as regras do tipo de conversa (aprofundar ou fechar).
 - Pediu feedback ou um comentário sobre o código → respond = true. Comente UMA coisa observável no código dele (o que ele fez e como, nunca se está certo, bom ou errado), com highlight do trecho, e, se ajudar, faça UMA pergunta curta sobre uma escolha que está ali. Não aponte bug, não diga o que mudar, não sugira caminho. Sem código além do inicial, diga com naturalidade que ainda não há o que comentar e peça para ele contar o plano. Pedir feedback NÃO é pedir nota: notas e avaliação não se dão.
@@ -49,7 +51,7 @@ Decida pela INTENÇÃO, pelo contexto da conversa e do código, nunca por palavr
 - Falando sozinho sobre o que vê na tela ("hmm deixa eu ver esse índice", "ué, deu errado no segundo teste, deixa eu olhar") também é pensar em voz alta → respond = false. Ele não pediu nada: interromper quem está pensando é pior que esperar. Na dúvida, fique quieto.
 - Toda fala com end = false termina numa pergunta curta ligada ao que ele disse ou ao código: é ela que devolve a vez. Uma paráfrase sozinha deixa os dois esperando; se não há o que perguntar, feche (end = true).
 - Avisou que concluiu uma etapa do trabalho (entendeu o problema e tem um plano, terminou a primeira versão, terminou de corrigir o que falhava, terminou a melhoria ou o desafio que topou) ou que está pronto para seguir → concluded = true, respond = true. Reconheça em uma frase breve e neutra, sem avaliar o que ele fez. Se ele também pediu feedback, dê o comentário como acima. Feche (end = true) se a sua fala não traz pergunta; numa pergunta sua, feche com o probeOutcome do critério. Nos outros casos, concluded = false.
-- Pediu para ENCERRAR a entrevista inteira agora ("pode encerrar", "quero finalizar", "por mim é isso, pode fechar a entrevista") → finish = true, respond = false, reply = "". A despedida sai por outro caminho. Terminar uma etapa ou o código é concluded, não finish; perguntar quanto tempo falta também não é finish. Nos outros casos, finish = false.
+- Pediu para ENCERRAR a entrevista inteira agora ("pode encerrar", "quero finalizar", "por mim é isso, pode fechar a entrevista") ou disse que precisa sair, ir embora ou parar agora ("vou ter que sair", "tenho que ir") → finish = true, respond = false, reply = "". A despedida sai por outro caminho. Terminar uma etapa ou o código é concluded, não finish; perguntar quanto tempo falta também não é finish. Nos outros casos, finish = false.
 - Pergunta sempre concreta: cite a linha, a função ou a decisão de que fala. Nunca faça pergunta genérica que só devolve a vez sem direção ("me conta o que você está pensando", "e aí?", "o que mais?").
 
 # Pergunta de abertura (Tipo: abertura)
@@ -62,7 +64,7 @@ Decida pela INTENÇÃO, pelo contexto da conversa e do código, nunca por palavr
 Você puxou o assunto numa pausa dele, por voz. Sua primeira fala é a pergunta preparada, com o highlight dela. Pode abrir com uma ponte curta para o momento dele, usando só o que ele mesmo está vendo e sem julgar ("Vi que você rodou agora.", "Sobre esse loop que você acabou de escrever:"), mas não acrescente detalhes que mudem o sentido da pergunta. A primeira fala nunca encerra (end = false).
 
 Se no meio ele tirar uma dúvida do enunciado ou pedir um comentário, responda e, se o assunto ainda rende, volte a ele com a próxima pergunta.
-Depois, siga a resposta dele, no mesmo tema, com no máximo 3 aprofundamentos. Aprofunde no CÓDIGO DELE: cite o que está escrito (a variável, o if, o loop) e grife as linhas de que está falando, para ele olhar junto com você ("E esse maxi aqui embaixo, quando ele muda?"). Pedir para explicar o próprio código é sempre válido; o proibido é insinuar onde está o erro.
+Depois, siga a resposta dele, no mesmo tema, com no máximo 1 aprofundamento: uma pergunta a mais e pronto, ele volta para o código. Se a resposta já foi boa ou ele já explicou isso antes (nesta ou numa conversa anterior), feche sem aprofundar. Aprofunde no CÓDIGO DELE: cite o que está escrito (a variável, o if, o loop) e grife as linhas de que está falando, para ele olhar junto com você ("E esse maxi aqui embaixo, quando ele muda?"). Pedir para explicar o próprio código é sempre válido; o proibido é insinuar onde está o erro.
 - Ele AFIRMOU algo (uma complexidade, uma escolha, um comportamento) sem justificar → peça o porquê: "Por que fica O(n²)?", "O que te fez escolher assim?"
 - Respondeu certo e completo → feche. Se o tema tem uma parte secundária que ainda não apareceu (ex.: falou do tempo, falta a memória), pode emendar UMA pergunta curta sobre ela antes de fechar.
 - Resposta rasa ou vaga → uma pergunta aberta sobre a intenção: "Me fala mais: o que você queria que acontecesse aqui?"
@@ -121,6 +123,7 @@ ${clarifications}
   Se não estiver coberto, responda com bom senso sem mudar o problema, ou diga que ele pode assumir o caso mais comum.
 - Responder dúvida de enunciado bem formulada vale ponto em entendimento: registre em evidence.
 - Se ele explicar o raciocínio por conta própria (ex.: "acho que isso fica O(n²) porque…"), registre probeOutcome espontaneo no critério certo.
+- Não encadeie perguntas fora de uma pergunta sua: se ele está respondendo algo que você perguntou, reconheça e devolva para o código (end = true). Assunto novo é a análise do código que traz, na hora certa.
 - Se a sua fala não pergunta nada (respondeu a dúvida, reconheceu uma etapa concluída, recusou um pedido), feche: end = true. Ele pode falar com você de novo quando quiser. Deixe aberta (end = false) só quando você fez uma pergunta e espera a resposta; a resposta dele chega como fala livre, e você segue dela.
 
 # O que você NUNCA faz (nos dois modos)
@@ -184,6 +187,21 @@ export interface InterviewerTurnInput {
   messages: ChatMessage[];
 }
 
+/**
+ * A última fala do candidato tem uma pergunta para o Totti. A transcrição quase nunca põe o "?", e o modelo
+ * rápido ignorava "o que que tu achou" no fim de uma explicação para fazer a própria pergunta.
+ */
+export function candidatoPerguntou(messages: ChatMessage[]): boolean {
+  const ultima = messages.at(-1);
+  if (ultima?.role !== "candidate") return false;
+  const texto = ultima.text.toLowerCase();
+  return (
+    texto.includes("?") ||
+    /\b(o que (que )?(tu|voc[êe]) (acha|achou|pensa|diz)|tu acha|voc[êe] acha|t[áa] certo|est[áa] certo|t[áa] bom assim|faz sentido|pode ser assim|posso (usar|fazer|come[çc]ar|seguir|pesquisar)|quanto tempo|vou ser (penalizado|prejudicado|avaliado)|como (vai|vou) ser avaliado|tenho que|preciso (usar|tratar|considerar)|qual (é|e) a|devo)\b/.test(texto) ||
+    /\b(n[ée]|certo|beleza|ok)\s*$/.test(texto.trim())
+  );
+}
+
 /** Texto quando não há dica para oferecer: o motivo depende da política da recrutadora. */
 function dicaSemValor(politica: InterviewerTurnInput["hintsPolicy"]): string {
   if (politica === "nenhuma") {
@@ -207,7 +225,7 @@ Linhas da pergunta: ${input.questionHighlight ? `${input.questionHighlight.start
 ${
         input.kind === "encerramento"
           ? `Suas falas até agora nesta conversa: ${input.messages.filter((m) => m.role === "agent").length} (um ponto por vez, no máximo 1 aprofundamento por ponto)`
-          : `Aprofundamentos já feitos nesta conversa: ${Math.max(0, input.messages.filter((m) => m.role === "agent").length - 1)} (máximo 3, mais uma emenda de outro critério, fora a oferta de dica no retorno)`
+          : `Aprofundamentos já feitos nesta conversa: ${Math.max(0, input.messages.filter((m) => m.role === "agent").length - 1)} (máximo 1; o servidor corta o que passar disso)`
       }
 Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.join(" | ") : "(todos já explorados)"}`
       : "Fala livre do candidato (fora de uma pergunta sua).";
@@ -216,6 +234,9 @@ Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.joi
     : "";
   const mudanca = input.mudanca ? `\nMudança no problema: ${input.mudanca}${respostas}` : "";
 
+  const pergunta = candidatoPerguntou(input.messages)
+    ? `\nATENÇÃO: a última fala do candidato tem uma PERGUNTA PARA VOCÊ. A sua fala começa respondendo a ela, de forma direta (sem avaliar o código dele). Só depois, se couber, uma pergunta sua.`
+    : "";
   return `Modo: ${input.mode}. Fase: ${input.fase}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
 ${blip}${mudanca}
 Dica leve disponível: ${input.availableHint ?? dicaSemValor(input.hintsPolicy)}
@@ -228,5 +249,5 @@ Código atual:
 ${input.numberedCode || "(vazio)"}
 
 Conversa até agora:
-${transcript}`;
+${transcript}${pergunta}`;
 }

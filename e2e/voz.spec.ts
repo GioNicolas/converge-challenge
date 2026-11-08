@@ -183,12 +183,12 @@ test("IDE: conversa só por voz, sem barra lateral; a pergunta sai na pausa e o 
   await expect.poll(() => grifos(page)).toBeGreaterThan(0);
   await expect.poll(() => ouvindo(page)).toBe(true);
 
-  // Pensando em voz alta dentro da pergunta: nada é dito e o assunto continua aberto (o grifo fica).
+  // Pensando em voz alta dentro da pergunta: só o "uhum" de quem ouviu, e o assunto continua aberto (o grifo fica).
   const antes = (await falas(page)).length;
   await emitir(page, "Hum, deixa eu pensar um pouco.");
   await expect.poll(() => pedidos.filter((p) => p.blipId).length, { timeout: 8000 }).toBe(2);
   await page.waitForTimeout(1200);
-  expect((await falas(page)).length).toBe(antes);
+  expect((await falas(page)).slice(antes).every((f) => ["Uhum.", "Certo.", "Entendi.", "Hum, tá."].includes(f))).toBe(true);
   expect(await grifos(page)).toBeGreaterThan(0);
 
   // Respondeu: a paráfrase sai por voz, o assunto fecha e o grifo some.

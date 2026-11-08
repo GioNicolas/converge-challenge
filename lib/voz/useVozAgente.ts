@@ -76,7 +76,12 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
 
   useEffect(() => { if (bloqueada) parar(); }, [bloqueada, parar]);
 
-  return { estado, habilitada, erro, aviso, provedor, fala, falar, parar, alternar, ativa: estado === "preparando" || estado === "falando" };
+  /** Deixa falas curtas prontas (o "uhum" de quando o candidato termina de falar) para tocarem sem espera. */
+  const preparar = useCallback((textos: string[]) => {
+    if (habilitadaRef.current && !bloqueadaRef.current) reproduzirFala.preparar(textos);
+  }, []);
+
+  return { estado, habilitada, erro, aviso, provedor, fala, falar, parar, alternar, preparar, ativa: estado === "preparando" || estado === "falando" };
 }
 
 export type VozAgente = ReturnType<typeof useVozAgente>;

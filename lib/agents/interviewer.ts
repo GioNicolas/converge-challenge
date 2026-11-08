@@ -135,7 +135,7 @@ export async function runInterviewerTurn(
   const prazo = Date.now() + PRAZO_TURNO_MS;
   const sobra = () => prazo - Date.now();
   try {
-    output = await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra()));
+    output = limitarPerguntas(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra())), question, req.messages, opening);
     // Pediu para encerrar a entrevista: quem se despede e fecha é a IDE (como no botão Finalizar).
     if (!opening && output.finish === true) {
       registrarEvidencia(session, output);
@@ -150,7 +150,9 @@ export async function runInterviewerTurn(
     if (opening && output.reply.trim() === "") output = { ...output, reply: found.question.question, highlight: found.question.highlight ?? null };
     // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
-    if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
+    // Fala curta que só reconhece e devolve a vez (sem pergunta) não tem o que entregar: vai sem o filtro, que
+    // custava mais de um segundo em cada resposta.
+    if (!(opening && isAboutTheSame(output.reply, found.question.question)) && !falaSoDeReconhecer(output.reply)) {
       const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
       session.analyst.costUsd += verdict.costUsd;
       if (!verdict.safe && sobra() < MIN_PARA_REGERAR_MS) {
@@ -169,7 +171,7 @@ export async function runInterviewerTurn(
           system,
           `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
           Math.min(PRAZO_GERACAO_MS, sobra() - PRAZO_FILTRO_MS / 2),
-        ).catch((err) => {
+        ).then((o) => limitarPerguntas(o, question, req.messages, opening)).catch((err) => {
           console.info("[interviewer] segunda geração falhou, indo de fala segura:", err instanceof Error ? err.message : err);
           return opening
             ? { ...barrada, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
@@ -306,6 +308,65 @@ function anunciarEmpecilho(session: SessionState, blipId: string): string {
     empecilhoId: empecilho.id,
   });
   return empecilho.announcement;
+}
+
+/** Fechamentos que devolvem a vez para o código, variados. */
+const DEVOLVER_PARA_O_CODIGO = ["Pode seguir.", "Segue no seu ritmo.", "Fica à vontade para continuar.", "Pode continuar no código."];
+
+/**
+ * Quantas perguntas o Totti já fez seguidas nesta conversa, sem devolver a vez (uma fala dele sem pergunta fecha
+ * a sequência). Os pedidos de licença não contam.
+ */
+export function perguntasSeguidas(messages: ChatMessage[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (m.role !== "agent") continue;
+    const texto = m.text.trim();
+    if (/posso (te )?(perguntar|interromper)/i.test(texto)) continue;
+    n = texto.endsWith("?") ? n + 1 : 0;
+  }
+  return n;
+}
+
+/**
+ * Quantas perguntas seguidas cabem numa conversa antes de o Totti devolver a vez. Uma resposta sempre ganha no
+ * máximo um aprofundamento: mais que isso virava interrogatório (pergunta, pergunta, pergunta) e ele não deixava o
+ * candidato voltar para o código. Fora de uma pergunta sua, uma pergunta só. O encerramento e a mudança no
+ * problema têm o próprio ritmo.
+ */
+export function limiteDePerguntas(question: { kind?: string; kickoff?: boolean } | undefined): number {
+  if (!question) return 1;
+  if (question.kind === "encerramento" || question.kind === "empecilho") return Number.POSITIVE_INFINITY;
+  if (question.kickoff) return 1;
+  if (question.kind === "retorno") return 3;
+  return 2;
+}
+
+/** Passou do limite de perguntas seguidas: reconhece, tira a pergunta e devolve a vez para o código. */
+export function limitarPerguntas(
+  output: InterviewerOutput,
+  question: { kind?: string; kickoff?: boolean } | undefined,
+  messages: ChatMessage[],
+  opening: boolean,
+): InterviewerOutput {
+  if (opening || output.respond === false || output.finish === true || !output.reply.trim().endsWith("?")) return output;
+  if (perguntasSeguidas(messages) + 1 <= limiteDePerguntas(question)) return output;
+  const jaDitas = messages.filter((m) => m.role === "agent").map((m) => m.text);
+  return { ...output, reply: semPerguntaNoFim(output.reply, falaNaoRepetida(DEVOLVER_PARA_O_CODIGO, jaDitas)), end: true, highlight: null };
+}
+
+/** Uma fala curta e sem pergunta: só reconhece e devolve a vez. */
+function falaSoDeReconhecer(reply: string): boolean {
+  const texto = reply.trim();
+  return !texto.includes("?") && texto.split(/\s+/).length <= 14;
+}
+
+/** Tira as perguntas do fim da fala e põe o fechamento no lugar (mantém a reação curta do começo, se houver). */
+function semPerguntaNoFim(reply: string, fechamento: string): string {
+  const frases = reply.trim().split(/(?<=[.!?])\s+/);
+  while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  // A fala é curta (no máximo 2 frases): o que sobrou é a reação ou a resposta ao que ele perguntou.
+  return [...frases.slice(0, 2), fechamento].join(" ");
 }
 
 /** O entrevistador já fez alguma pergunta nesta conversa livre (as falas que vieram no pedido). */

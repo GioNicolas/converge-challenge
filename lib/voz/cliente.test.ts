@@ -214,8 +214,26 @@ test("antesDeTocar espera a vez com o áudio já sintetizado e pode desistir da 
   assert.deepEqual(ordem, ["sintetizou", "vez", "tocou"]);
 
   ordem.length = 0;
-  await falar("oi", new AbortController().signal, eventos(), async () => { ordem.push("desistiu"); return false; });
+  await falar("olá", new AbortController().signal, eventos(), async () => { ordem.push("desistiu"); return false; });
   assert.deepEqual(ordem, ["sintetizou", "desistiu"]);
+});
+
+test("fala curta e repetida (o 'uhum') sintetiza uma vez só; preparar deixa ela pronta antes", async () => {
+  let sinteses = 0;
+  let tocadas = 0;
+  const falar = criarVoz({
+    fetch: async () => { sinteses++; return Response.json(dadosVoz); },
+    tocar: async () => { tocadas++; },
+  });
+  falar.preparar(["Uhum."]);
+  await falar("Uhum.", new AbortController().signal, eventos());
+  await falar("Uhum.", new AbortController().signal, eventos());
+  assert.equal(sinteses, 1);
+  assert.equal(tocadas, 2);
+  const longa = "Uma fala longa de resposta que não deve ficar guardada no cache.";
+  await falar(longa, new AbortController().signal, eventos());
+  await falar(longa, new AbortController().signal, eventos());
+  assert.equal(sinteses, 3);
 });
 
 test("sem a voz do ElevenLabs, antesDeTocar não é chamado e a fala fica no texto", async () => {

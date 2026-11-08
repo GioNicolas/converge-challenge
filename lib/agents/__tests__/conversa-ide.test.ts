@@ -51,3 +51,85 @@ test("pergunta de foco só no momento dela: pressão com falhas seguidas, escala
   appendEvent(s, { type: "run", sessionId: id, t: 90_000, result: { ...falhou, passed: 5, stderr: "" } });
   assert.equal(focoPendente(s, 91_000), "escala_produto", "funcionou: pressão sai, entra o próximo foco do momento");
 });
+
+test("perguntas seguidas: um aprofundamento por resposta e, fora de uma pergunta do Totti, nenhum encadeamento", async () => {
+  const { limitarPerguntas, perguntasSeguidas } = await import("@/lib/agents/interviewer");
+  const saida = (reply: string) => ({ respond: true, concluded: false, finish: false, reply, highlight: { startLine: 2, endLine: 2 }, end: false, gaveHint: false, evidence: null, challenge: null, probeOutcome: null });
+  const conversa = [
+    { role: "agent" as const, text: "Por que uma pilha?" },
+    { role: "candidate" as const, text: "porque o último aberto é o primeiro a fechar" },
+  ];
+  assert.equal(perguntasSeguidas(conversa), 1);
+  // Na pergunta da análise: cabe um aprofundamento.
+  assert.equal(limitarPerguntas(saida("Saquei. E a memória, como fica?"), { kind: "explicar" }, conversa, false).end, false);
+  // Já aprofundou uma vez: reconhece e devolve a vez para o código, sem grifo.
+  const depois = [...conversa, { role: "agent" as const, text: "E a memória, como fica?" }, { role: "candidate" as const, text: "no pior caso guarda tudo" }];
+  const fechou = limitarPerguntas(saida("Certo. E por que não usar um contador?"), { kind: "explicar" }, depois, false);
+  assert.equal(fechou.end, true);
+  assert.equal(fechou.highlight, null);
+  assert.ok(!fechou.reply.includes("?"), fechou.reply);
+  assert.ok(fechou.reply.startsWith("Certo."), fechou.reply);
+  // Fala livre respondendo uma pergunta que o Totti fez: não puxa outra.
+  assert.equal(limitarPerguntas(saida("Hum, tá. E o custo de tempo?"), undefined, conversa, false).end, true);
+  // A abertura nunca aprofunda.
+  assert.equal(limitarPerguntas(saida("Beleza. E por que pilha?"), { kickoff: true }, conversa, false).end, true);
+  // Pedido de licença não conta como pergunta.
+  assert.equal(perguntasSeguidas([{ role: "agent", text: "Ei, posso te perguntar uma coisa sobre o seu código?" }]), 0);
+});
+
+test("ritmo das perguntas: escreveu uma linha e falou há pouco, a próxima espera; pergunta que ele já respondeu falando sai", async () => {
+  const { decideBlip, lastBlipDecision } = await import("@/lib/agents/policy");
+  const { getOrCreateSession, appendEvent } = await import("@/lib/session/store");
+  const { DEFAULT_CONFIG } = await import("@/lib/config/default");
+  const s = getOrCreateSession(`ritmo-${Date.now()}`, DEFAULT_CONFIG);
+  const id = s.sessionId;
+  let agora = 0;
+  s.clock = () => agora;
+  const pergunta = (n: number, question: string, createdAt: number) =>
+    s.queue.push({ id: `q-${n}`, question, followUpTopic: "x", priority: 0.8, createdAt, status: "queued", kind: "explicar", fase: "implementando" } as never);
+  appendEvent(s, { type: "session_started", sessionId: id, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
+  appendEvent(s, { type: "snapshot", sessionId: id, t: 30_000, code: "def f(nums, target):\n    vistos = {}\n    pass\n", version: 1, language: "python" });
+  appendEvent(s, { type: "pause", sessionId: id, t: 40_000, idleMs: 10_000 });
+  pergunta(1, "O que você vai guardar no dicionário vistos?", 40_000);
+  agora = 60_000;
+  assert.equal(decideBlip(s, agora).blip?.id, "q-1");
+  appendEvent(s, { type: "blip_opened", sessionId: id, t: agora, blipId: "q-1" });
+  appendEvent(s, { type: "speech", sessionId: id, t: 62_000, role: "agent", text: "O que você vai guardar no dicionário vistos?", blipId: "q-1" });
+  appendEvent(s, { type: "speech", sessionId: id, t: 75_000, role: "candidate", text: "vou guardar cada número com o índice dele para achar o complemento depois", blipId: "q-1" });
+  appendEvent(s, { type: "blip_closed", sessionId: id, t: 80_000, blipId: "q-1", reason: "agent" });
+  // Pergunta nova da análise, mas ele não escreveu nada desde a última e acabaram de conversar.
+  pergunta(2, "Como você vai percorrer a lista nums?", 81_000);
+  agora = 100_000;
+  assert.equal(decideBlip(s, agora).blip, undefined);
+  assert.match(lastBlipDecision(s) ?? "", /desde (a última conversa|o último blip)/);
+  agora = 150_000;
+  assert.equal(decideBlip(s, agora).blip, undefined);
+  assert.match(lastBlipDecision(s) ?? "", /linha\(s\) nova\(s\)/);
+  appendEvent(s, { type: "snapshot", sessionId: id, t: 151_000, code: "def f(nums, target):\n    vistos = {}\n    for i, n in enumerate(nums):\n        falta = target - n\n        if falta in vistos:\n            return [vistos[falta], i]\n", version: 2, language: "python" });
+  appendEvent(s, { type: "pause", sessionId: id, t: 160_000, idleMs: 9_000 });
+  agora = 161_000;
+  assert.equal(decideBlip(s, agora).blip?.id, "q-2");
+
+  // Uma pergunta nascida antes de ele explicar falando sai: a análise seguinte decide de novo.
+  const s2 = getOrCreateSession(`ritmo2-${Date.now()}`, DEFAULT_CONFIG);
+  s2.clock = () => agora;
+  appendEvent(s2, { type: "session_started", sessionId: s2.sessionId, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
+  appendEvent(s2, { type: "snapshot", sessionId: s2.sessionId, t: 30_000, code: "def f(nums, target):\n    vistos = {}\n    pass\n", version: 1, language: "python" });
+  s2.queue.push({ id: "q-1", question: "O que você vai guardar em vistos?", followUpTopic: "x", priority: 0.8, createdAt: 35_000, status: "queued", kind: "explicar", fase: "implementando" } as never);
+  appendEvent(s2, { type: "speech", sessionId: s2.sessionId, t: 40_000, role: "candidate", text: "então a ideia é guardar em vistos cada número que eu já passei junto com o índice" });
+  appendEvent(s2, { type: "pause", sessionId: s2.sessionId, t: 90_000, idleMs: 10_000 });
+  agora = 91_000;
+  assert.equal(decideBlip(s2, agora).blip, undefined);
+  assert.equal(s2.queue[0].status, "stale");
+});
+
+test("pergunta do candidato sem '?': o Totti responde antes de perguntar", async () => {
+  const { candidatoPerguntou } = await import("@/lib/agents/prompts/interviewer");
+  const c = (text: string) => [{ role: "candidate" as const, text }];
+  for (const sim of ["criar uma pilha e conferir o topo o que que tu achou", "tá certo assim", "eu não vou ser penalizado né", "quanto tempo falta", "posso usar um dicionário"]) {
+    assert.equal(candidatoPerguntou(c(sim)), true, sim);
+  }
+  for (const nao of ["agora vou montar o loop", "porque a pilha é last in first out", "deixa eu ver esse índice"]) {
+    assert.equal(candidatoPerguntou(c(nao)), false, nao);
+  }
+});

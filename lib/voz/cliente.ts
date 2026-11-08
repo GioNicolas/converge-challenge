@@ -1,6 +1,7 @@
 import type { Alinhamento } from "../presenca/alinhamento";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
+type DadosVoz = import("zod").infer<typeof RespostaVoz>;
 export type ProvedorVoz = "elevenlabs";
 type EventosVoz = {
   aoIniciar: (provedor: ProvedorVoz) => void;
@@ -46,7 +47,29 @@ export function criarVoz(dependencias: { fetch?: typeof globalThis.fetch; tocar?
   const buscar = dependencias.fetch ?? ((entrada: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(entrada, init));
   const tocar = dependencias.tocar ?? tocarComAlinhamento;
   let servidorDisponivel = true;
-  return async (texto: string, sinal: AbortSignal, eventos: EventosVoz, antesDeTocar?: () => Promise<boolean>): Promise<void> => {
+  // Falas curtas e repetidas ("Uhum.", "Certo.") ficam guardadas: tocam na hora, sem esperar o ElevenLabs.
+  const guardadas = new Map<string, Promise<DadosVoz>>();
+  const sintetizar = async (texto: string, sinal: AbortSignal): Promise<DadosVoz> => {
+    const resposta = await buscar("/api/falar", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto }), signal: AbortSignal.any([sinal, AbortSignal.timeout(25000)]), cache: "no-store",
+    });
+    sinal.throwIfAborted();
+    if (resposta.status === 501) servidorDisponivel = false;
+    if (!resposta.ok) throw new Error(`Voz do servidor indisponível (HTTP ${resposta.status})`);
+    return RespostaVoz.parse(await resposta.json());
+  };
+  const audioDe = (texto: string, sinal: AbortSignal): Promise<DadosVoz> => {
+    if (texto.length > MAX_CHARS_GUARDADA) return sintetizar(texto, sinal);
+    let guardada = guardadas.get(texto);
+    if (!guardada) {
+      guardada = sintetizar(texto, new AbortController().signal);
+      guardadas.set(texto, guardada);
+      guardada.catch(() => guardadas.delete(texto));
+    }
+    return guardada;
+  };
+  const falar = async (texto: string, sinal: AbortSignal, eventos: EventosVoz, antesDeTocar?: () => Promise<boolean>): Promise<void> => {
     let liberada = !antesDeTocar;
     const aguardarVez = async () => {
       if (!liberada) liberada = await antesDeTocar!();
@@ -62,14 +85,7 @@ export function criarVoz(dependencias: { fetch?: typeof globalThis.fetch; tocar?
       let iniciou = false;
       for (let tentativa = 1; ; tentativa++) {
         try {
-          const resposta = await buscar("/api/falar", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ texto: parte.texto }), signal: AbortSignal.any([sinal, AbortSignal.timeout(25000)]), cache: "no-store",
-          });
-          sinal.throwIfAborted();
-          if (resposta.status === 501) servidorDisponivel = false;
-          if (!resposta.ok) throw new Error(`Voz do servidor indisponível (HTTP ${resposta.status})`);
-          const dados = RespostaVoz.parse(await resposta.json());
+          const dados = await audioDe(parte.texto, sinal);
           sinal.throwIfAborted();
           const bytes = Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0));
           if (!(await aguardarVez())) return;
@@ -102,6 +118,16 @@ export function criarVoz(dependencias: { fetch?: typeof globalThis.fetch; tocar?
       }
     }
   };
+  /** Sintetiza já (em segundo plano) falas curtas que vão tocar depois, para saírem sem espera. */
+  const preparar = (textos: string[]) => {
+    for (const texto of textos) if (servidorDisponivel) void audioDe(texto, new AbortController().signal).catch(() => {});
+  };
+  return Object.assign(falar, { preparar });
 }
 
+/** Falas até esse tamanho ficam guardadas depois da primeira síntese. */
+const MAX_CHARS_GUARDADA = 40;
+
 export const reproduzirFala = criarVoz();
+/** Toca uma fala (o que a fila de falas do agente usa). */
+export type ReproduzirFala = (texto: string, sinal: AbortSignal, eventos: EventosVoz, antesDeTocar?: () => Promise<boolean>) => Promise<void>;

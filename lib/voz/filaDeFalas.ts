@@ -1,5 +1,5 @@
 import type { FocoAudio } from "../audio/foco";
-import type { ProvedorVoz, reproduzirFala } from "./cliente";
+import type { ProvedorVoz, ReproduzirFala } from "./cliente";
 
 export type EstadoVoz = "inativa" | "preparando" | "falando" | "erro";
 export type LegendaAgente = { quem: "agente"; texto: string; ate: number };
@@ -56,7 +56,7 @@ function dormir(ms: number, sinal: AbortSignal): Promise<void> {
  * toque na tela) fica velha e é substituída pela nova. `parar` corta a que toca e descarta as da fila.
  */
 export function criarFilaDeFalas(dependencias: {
-  reproduzir: typeof reproduzirFala;
+  reproduzir: ReproduzirFala;
   foco: Pick<FocoAudio, "aguardarMicrofone" | "assumir">;
   tela: TelaVoz;
   pausaMs?: number;

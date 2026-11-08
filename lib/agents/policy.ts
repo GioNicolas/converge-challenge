@@ -6,6 +6,7 @@ import { isCovered, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoDaQuestao, empecilhoPublico, esperaDoEmpecilho, primeiraAdaptacao } from "@/lib/agents/empecilho";
 import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
+import { latestCode } from "@/lib/session/store";
 import type { QueuedQuestion, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
@@ -34,9 +35,18 @@ const BLIP_EXPIRY_MS = 80_000;
 /** Nenhum blip do Analyst nos primeiros 20 s da sessão. */
 const WARMUP_MS = 20_000;
 /** Intervalo mínimo entre o createdAt do último blip e o próximo. */
-const MIN_GAP_BETWEEN_BLIPS_MS = 22_000;
-/** Intervalo mínimo depois que a última conversa terminou (vale pra toda pergunta). */
-const MIN_GAP_AFTER_CONVERSATION_MS = 20_000;
+const MIN_GAP_BETWEEN_BLIPS_MS = 60_000;
+/**
+ * Intervalo mínimo depois da última conversa (a última fala de qualquer um dos dois, ou o fim do assunto). Com
+ * 20 s, uma resposta emendava na próxima pergunta e ele não voltava para o código.
+ */
+const MIN_GAP_AFTER_CONVERSATION_MS = 45_000;
+/** O mesmo intervalo para um momento-chave (o primeiro run verde, uma colagem): a hora dele passa rápido. */
+const KEY_MOMENT_GAP_AFTER_CONVERSATION_MS = 15_000;
+/** Escrevendo a primeira versão, a próxima pergunta espera ele escrever pelo menos isso de linhas novas. */
+const MIN_NEW_LINES_BETWEEN_QUESTIONS = 3;
+/** Uma fala dele com pelo menos tantas palavras depois de a pergunta nascer pode já ter respondido a ela. */
+const SPEECH_MAKES_STALE_WORDS = 12;
 /** Máximo de blips do Analyst por sessão (a abertura não conta). */
 const MAX_ANALYST_BLIPS = 10;
 /** Preferência da pergunta de foco da vaga na fila, para ela não ficar sempre atrás das perguntas sobre o código. */
@@ -451,10 +461,18 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
     return `esperando: ${elapsed} s desde o último blip (mín. ${MIN_GAP_BETWEEN_BLIPS_MS / 1000} s)`;
   }
 
-  const endedAt = session.lastConversationEndedAt;
-  if (endedAt !== undefined && t - endedAt < MIN_GAP_AFTER_CONVERSATION_MS) {
+  const endedAt = ultimaConversaEm(session);
+  const gap = q.keyMoment !== undefined || q.kind === "retorno" ? KEY_MOMENT_GAP_AFTER_CONVERSATION_MS : MIN_GAP_AFTER_CONVERSATION_MS;
+  if (endedAt !== undefined && t - endedAt < gap) {
     const elapsed = Math.floor((t - endedAt) / 1000);
-    return `esperando: ${elapsed} s desde o fim da última conversa (mín. ${MIN_GAP_AFTER_CONVERSATION_MS / 1000} s)`;
+    return `esperando: ${elapsed} s desde a última conversa (mín. ${gap / 1000} s)`;
+  }
+  // Escrevendo a primeira versão: escreveu uma linha e já vinha outra pergunta. Ele precisa avançar no código antes.
+  if (fase === "implementando" && !exempt && lastBlip) {
+    const novas = linhasNovasDesde(session, lastBlip.createdAt);
+    if (novas < MIN_NEW_LINES_BETWEEN_QUESTIONS) {
+      return `esperando: ${novas} linha(s) nova(s) desde a última pergunta (mín. ${MIN_NEW_LINES_BETWEEN_QUESTIONS})`;
+    }
   }
   return undefined;
 }
@@ -471,8 +489,51 @@ function isStale(session: SessionState, q: QueuedQuestion, t: number): boolean {
   if (!ageless) {
     const momentPassed = (q.fase === "depurando" || q.fase === "entendendo") && q.fase !== faseDaEntrevista(session);
     if (momentPassed || t - q.createdAt > QUESTION_MAX_AGE_MS) return true;
+    // Ele falou depois de a pergunta nascer: pode já ter explicado isso. A análise seguinte, que leu a fala, decide
+    // de novo (perguntar o que ele acabou de explicar era o "ele pergunta a mesma coisa de novo").
+    if (falouDepois(session, q.createdAt)) return true;
   }
+  if (q.kind !== "retorno" && q.kind !== "encerramento" && q.kind !== "empecilho" && jaFoiPerguntada(session, q)) return true;
   return linesChanged(session, q);
+}
+
+/** O candidato fez uma fala de verdade (não um "tá") depois de `t`. */
+function falouDepois(session: SessionState, t: number): boolean {
+  return session.events.some(
+    (e) => e.type === "speech" && e.role === "candidate" && e.t > t && e.text.split(/\s+/).filter(Boolean).length >= SPEECH_MAKES_STALE_WORDS,
+  );
+}
+
+const palavrasDe = (texto: string) => new Set(texto.toLowerCase().match(/[a-zà-ú0-9_]{4,}/g) ?? []);
+
+/** Uma pergunta quase igual já foi feita ao candidato (pela análise ou pelo entrevistador numa conversa). */
+function jaFoiPerguntada(session: SessionState, q: QueuedQuestion): boolean {
+  const nova = palavrasDe(q.question);
+  if (nova.size < 3) return false;
+  const feitas = session.events.flatMap((e) => (e.type === "speech" && e.role === "agent" && e.text.includes("?") ? [e.text] : []));
+  return feitas.some((f) => {
+    const antiga = palavrasDe(f);
+    const comuns = [...nova].filter((p) => antiga.has(p)).length;
+    return comuns / nova.size >= 0.6;
+  });
+}
+
+/** A última conversa: a última fala de qualquer um dos dois ou o fim do último assunto, o que vier depois. */
+function ultimaConversaEm(session: SessionState): number | undefined {
+  const fala = session.events.findLast((e) => e.type === "speech")?.t;
+  const fim = session.lastConversationEndedAt;
+  if (fala === undefined) return fim;
+  return fim === undefined ? fala : Math.max(fala, fim);
+}
+
+/** Linhas não vazias do código de agora que não existiam no código de `t`. */
+function linhasNovasDesde(session: SessionState, t: number): number {
+  const antes = session.codeHistory.filter((v) => v.t <= t).at(-1)?.code ?? "";
+  const vistas = new Set(antes.split("\n").map((l) => l.trim()));
+  return latestCode(session)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !vistas.has(l)).length;
 }
 
 /**

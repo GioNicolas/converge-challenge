@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { FocoAudio } from "../audio/foco";
-import type { reproduzirFala } from "./cliente";
+import type { ReproduzirFala } from "./cliente";
 import { criarFilaDeFalas, type EstadoVoz } from "./filaDeFalas";
 
 // Tempos curtos para o teste: o que importa é a ordem e a pausa, não os valores reais.
@@ -22,7 +22,7 @@ function montar(opcoes: { falhar?: string[]; duracao?: Record<string, number>; a
   let tocandoAgora = 0;
   let maximoSimultaneo = 0;
 
-  const reproduzir: typeof reproduzirFala = async (texto, sinal, eventos, antesDeTocar) => {
+  const reproduzir: ReproduzirFala = async (texto, sinal, eventos, antesDeTocar) => {
     await dormir(SINTESE);
     sinal.throwIfAborted();
     if (opcoes.falhar?.includes(texto)) throw new Error(`voz indisponível para ${texto}`);

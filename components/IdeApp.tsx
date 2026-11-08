@@ -23,7 +23,7 @@ import { deveAguardarParaFalar, PAUSA_FIM_DA_FALA_MS, podeTomarTurno } from "@/l
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import Legenda from "./Legenda";
 import { postEncerramento, postForcarEmpecilho } from "./ide/api";
-import { useConversa } from "./ide/useConversa";
+import { RECONHECIMENTOS, useConversa } from "./ide/useConversa";
 import { useCodeCapture } from "./ide/useCodeCapture";
 import { useSession } from "./ide/useSession";
 
@@ -177,6 +177,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     onFinishRequest: () => encerrarPelaVozRef.current(),
     onFioFechado: (blip) => fioFechadoRef.current(blip),
     onSemVoz: (texto) => setLegendaSemVoz({ quem: "agente", texto, ate: texto.length }),
+    falandoAgora: () => falaParcialRef.current || !!bufferFalaRef.current,
   });
 
   // Fala do candidato (Scribe, ou o navegador como reserva): vai para a conversa, que decide pela intenção se o
@@ -239,6 +240,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const dizer = conversa.dizer;
   const duracaoMin = vaga.durationMin;
   const cargo = vaga.roleTitle;
+  const prepararVoz = voz.preparar;
   useEffect(() => {
     if (!session.sessionId || session.ended || saudacaoFeitaRef.current) return;
     const desde = Date.now();
@@ -249,9 +251,11 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       saudacaoFeitaRef.current = true;
       clearInterval(id);
       void dizer(comoFuncionaLiveCoding(duracaoMin, cargo)).finally(() => { saudacaoTerminadaEmRef.current = Date.now(); });
+      // O "uhum" de quando ele termina de falar fica pronto durante a apresentação, para sair sem espera.
+      prepararVoz(RECONHECIMENTOS);
     }, 200);
     return () => clearInterval(id);
-  }, [session.sessionId, session.ended, dizer, duracaoMin, cargo]);
+  }, [session.sessionId, session.ended, dizer, duracaoMin, cargo, prepararVoz]);
 
   useEffect(() => warmUp(), []);
   const pedirMidia = midia.pedir;

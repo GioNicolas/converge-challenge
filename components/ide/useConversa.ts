@@ -45,10 +45,26 @@ export interface ConversaDeps {
   onFioFechado?: (blip: Blip) => void;
   /** A fala não saiu em voz (desligada ou bloqueada pelo navegador): vai para a legenda. */
   onSemVoz?: (texto: string) => void;
+  /** O candidato está falando agora (transcrição parcial aberta): a pergunta do Totti não fecha por silêncio. */
+  falandoAgora?: () => boolean;
 }
 
+/**
+ * O "uhum" do Totti assim que o candidato termina de falar, enquanto a resposta é preparada: ele sabe na hora que foi
+ * ouvido (a resposta de verdade leva alguns segundos). Curtos para o áudio ficar guardado (lib/voz/cliente.ts).
+ */
+export const RECONHECIMENTOS = ["Uhum.", "Certo.", "Entendi.", "Hum, tá."];
+/** Falas mais curtas que isso ("tá", "ok") já são um reconhecimento: o Totti não responde com outro. */
+const MIN_PALAVRAS_RECONHECER = 4;
+/** Fora de uma conversa, só falas com pelo menos isso de palavras ganham o "uhum". */
+const MIN_PALAVRAS_RECONHECER_FORA_DA_CONVERSA = 8;
+/** Uma conversa recente: o Totti falou há menos que isso. */
+const CONVERSA_RECENTE_MS = 60_000;
+/** Dois "uhum" seguidos (a fala chegou em pedaços) não: no máximo um nesse intervalo. */
+const ENTRE_RECONHECIMENTOS_MS = 8_000;
+
 /** Sem resposta à pergunta do Totti por tanto tempo (depois de ele terminar de perguntar): o assunto fecha. */
-const FIO_SEM_RESPOSTA_MS = 25_000;
+const FIO_SEM_RESPOSTA_MS = 35_000;
 /** Sem resposta ao pedido de licença: ele está concentrado, a pergunta fica para depois. */
 const LICENCA_SEM_RESPOSTA_MS = 10_000;
 /** Pedidos de licença, variados para não soar como gravação. */
@@ -100,6 +116,8 @@ export function useConversa(deps: ConversaDeps) {
   const licencasRef = useRef(0);
   /** A pergunta do fio já foi feita e ele ainda não respondeu: desde quando. */
   const semRespostaDesdeRef = useRef<number | null>(null);
+  const reconheceuEmRef = useRef(0);
+  const reconhecimentosRef = useRef(0);
 
   const listaAtual = () => fioRef.current?.falas ?? livresRef.current;
   const aparar = () => {
@@ -114,10 +132,15 @@ export function useConversa(deps: ConversaDeps) {
     setPensando(pedidosEmVooRef.current > 0);
   };
 
-  const fecharFio = useCallback((reason: "agent" | "button") => {
+  const fecharFio = useCallback((reason: "agent" | "button", porSilencio = false) => {
     const atual = fioRef.current;
     if (!atual) return;
     fioRef.current = null;
+    // Fechou porque ele demorou a responder: se a resposta vier agora, como fala livre, ela ainda tem a pergunta junto.
+    if (porSilencio) {
+      livresRef.current.push(...atual.falas);
+      aparar();
+    }
     semRespostaDesdeRef.current = null;
     setFio(null);
     void depsRef.current.sendEvent({ type: "blip_closed", blipId: atual.blip.id, reason });
@@ -245,8 +268,20 @@ export function useConversa(deps: ConversaDeps) {
       else adiarRef.current(licenca.blip, true);
       return;
     }
+    reconhecer(texto);
     filaRef.current?.adicionar(texto);
   }, []);
+
+  /** O "uhum" logo que ele termina de falar com o Totti (respondendo, perguntando, explicando). */
+  const reconhecer = (texto: string) => {
+    const n = palavras(texto);
+    const agora = Date.now();
+    const emConversa = fioRef.current !== null || agora - ultimaFalaDoAgenteEmRef.current < CONVERSA_RECENTE_MS;
+    if (n < MIN_PALAVRAS_RECONHECER || (!emConversa && n < MIN_PALAVRAS_RECONHECER_FORA_DA_CONVERSA)) return;
+    if (agora - reconheceuEmRef.current < ENTRE_RECONHECIMENTOS_MS || depsRef.current.vozTocando()) return;
+    reconheceuEmRef.current = agora;
+    void depsRef.current.falar(RECONHECIMENTOS[reconhecimentosRef.current++ % RECONHECIMENTOS.length]);
+  };
 
   /** A pergunta fica para depois (o servidor a devolve à fila por um tempo). `avisar`: ele pediu, o Totti confirma. */
   const adiar = useCallback((blip: Blip, avisar: boolean) => {
@@ -278,9 +313,11 @@ export function useConversa(deps: ConversaDeps) {
         adiarRef.current(licenca.blip, false);
       }
       const desde = semRespostaDesdeRef.current;
-      if (desde !== null && agora - desde >= FIO_SEM_RESPOSTA_MS && pedidosEmVooRef.current === 0 && !filaRef.current?.emAndamento) {
+      // Falando agora (a resposta está saindo): o relógio recomeça.
+      if (desde !== null && depsRef.current.falandoAgora?.()) semRespostaDesdeRef.current = agora;
+      else if (desde !== null && agora - desde >= FIO_SEM_RESPOSTA_MS && pedidosEmVooRef.current === 0 && !filaRef.current?.emAndamento) {
         semRespostaDesdeRef.current = null;
-        fecharFio("agent");
+        fecharFio("agent", true);
       }
     }, 1000);
     return () => clearInterval(id);
