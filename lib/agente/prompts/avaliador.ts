@@ -131,6 +131,19 @@ Acompanhe como o candidato se adapta: se ele revisa o desenho onde a mudança pe
 `;
 }
 
+/**
+ * Agenda (como no live coding): da segunda metade em diante, com critérios ainda sem evidência, a próxima
+ * pergunta deve cobrir um deles. As perguntas são poucas (no máximo 5): sem isso o agente gasta todas no mesmo
+ * assunto e o relatório fica sem prova do que a recrutadora pediu.
+ */
+function blocoDaAgenda(estado: EstadoSessao, pedido: PedidoAnalise, semEvidencia: string[]): string {
+  if (!semEvidencia.length || (estado.fase !== "APROFUNDAMENTO" && estado.fase !== "FECHAMENTO")) return "";
+  const restantes = Math.max(0, REGRAS_PADRAO.maxPerguntas - pedido.perguntas_feitas);
+  if (restantes === 0) return "";
+  return `AGENDA: restam ${restantes} pergunta(s) e ${semEvidencia.length} critério(s) sem evidência. Quando for perguntar, prefira um destes critérios (o mais ligado ao foco do plano), com uma pergunta ancorada no que já está no desenho. Se o desenho ainda não dá gancho para nenhum, siga o que estiver mais forte agora.
+`;
+}
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -166,7 +179,7 @@ Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: um plin NÃO pode ser levantado agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Um plin pode ser levantado agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
-
+${blocoDaAgenda(estado, pedido, semEvidencia)}
 Perguntas já feitas (não repita):
 ${feitas.length ? feitas.join("\n") : "(nenhuma)"}
 

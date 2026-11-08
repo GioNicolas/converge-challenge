@@ -149,12 +149,16 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const aberturaFeita = useRef(false);
   const falarRef = useRef(voz.falar);
   falarRef.current = voz.falar;
+  /** Já há conversa ou fala do agente: a apresentação não corta ninguém (fica para trás). */
+  const jaConversandoRef = useRef(false);
+  jaConversandoRef.current = chat.open || chat.busy || chat.livreBusy || voz.ativa;
   useEffect(() => {
     const sessionId = session.sessionId;
     if (!sessionId || session.ended) return;
     const id = setTimeout(() => {
       if (aberturaFeita.current) return;
       aberturaFeita.current = true;
+      if (jaConversandoRef.current) return;
       void falarRef.current(aberturaLiveCoding(problem.title, sessionId));
     }, 600);
     return () => clearTimeout(id);
