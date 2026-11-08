@@ -28,6 +28,7 @@ import {
   type Passo,
 } from "./planejador";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
+import { lerFormato } from "./formato";
 import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
@@ -260,6 +261,13 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
   const linguagens = lerLinguagens(texto);
   if (linguagens) sessao.preferencias = { ...sessao.preferencias, linguagens };
   await atualizarCobertura(sessao);
+  // Formato pedido com as palavras da tela ("vamos de quadro", "no Excalidraw", "código ao vivo") vale como pedido,
+  // mesmo quando o classificador não reconhece: sem isso o plano ficava no formato errado depois de ela confirmar.
+  const formato = lerFormato(texto);
+  if (formato) {
+    sessao.plano = { ...sessao.plano, sinais: { ...sessao.plano.sinais,
+      pediu_system_design: formato === "system_design" ? 1 : 0, pediu_live_coding: formato === "live_coding" ? 1 : 0 } };
+  }
   resolverTradeoff(sessao);
   resolverPedidoDeFormato(sessao);
   atualizarNaoAvaliado(sessao);

@@ -20,24 +20,23 @@ const TEMPERATURA = 0.2;
 const MAX_TOKENS_EXTRATOR = 12000;
 
 /**
- * Alvos do extrator, em ordem: Featherless (principal) e, se configurado, OpenRouter (plano B).
- * O GLM vai com o raciocínio desligado: sem isso uma chamada levava ~170 s.
- * Se o Featherless passar de 15 s, a chamada cai para a OpenRouter.
+ * Alvos do extrator, em ordem: OpenRouter (rápido, ~3 s) primeiro e o GLM na Featherless de reserva. Com o GLM na
+ * frente, cada extração podia levar até 15 s (mais as esperas de 503) antes de cair para a OpenRouter, e o
+ * "Montando o plano…" esperava por ela. O GLM vai com o raciocínio desligado: sem isso uma chamada levava ~170 s.
  */
 export function alvosDoExtrator(): Alvo[] {
-  const alvos: Alvo[] = [
+  const rapido = process.env.EXTRACTOR_FALLBACK_MODEL || "google/gemini-2.5-flash-lite";
+  return [
+    { provedor: "openrouter", model: rapido, timeoutMs: 15000 },
     {
       provedor: "featherless",
       model: process.env.EXTRACTOR_MODEL || "zai-org/GLM-5.2",
       extraBody: { chat_template_kwargs: { enable_thinking: false } },
       timeoutMs: 15000,
     },
+    // Terceiro alvo: outro modelo na Featherless, para quando a OpenRouter e o GLM falham.
+    { provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 20000 },
   ];
-  const fallback = process.env.EXTRACTOR_FALLBACK_MODEL || "google/gemini-2.5-flash-lite";
-  alvos.push({ provedor: "openrouter", model: fallback });
-  // Terceiro alvo: outro modelo na Featherless, com mais tempo, para quando o GLM e a OpenRouter falham.
-  alvos.push({ provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 20000 });
-  return alvos;
 }
 
 const ConfirmadoParcial = Rascunho.shape.confirmado.partial();
@@ -97,7 +96,7 @@ Regras:
 9. problemId: só se ela pediu um problema específico. Caso contrário, não envie.
 
 Áreas válidas: tecnico, pressao, escala_produto, uso_ia.
-Modos válidos: live_coding, system_design.
+Modos válidos: live_coding (código ao vivo, codar, programar, construir um algoritmo, IDE), system_design (quadro, Excalidraw, desenhar a arquitetura ou o sistema).
 Senioridades válidas: junior, pleno, senior.
 
 Dentro dos textos (description, eliminatorios, contexto), não use aspas duplas: se precisar citar, use aspas simples.
