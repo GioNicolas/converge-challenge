@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "a entrevista ainda estÃ¡ em andamento" }, { status: 409 });
   }
 
-  // Avaliação começada por outra instância (a cópia restaurada diz "gerando"): espera, a menos que tenha se perdido.
+  // AvaliaÃ§Ã£o comeÃ§ada por outra instÃ¢ncia (a cÃ³pia restaurada diz "gerando"): espera, a menos que tenha se perdido.
   if (session.report?.state === "running" && !avaliacaoLocal(session)) {
     if (Date.now() - session.report.startedAt < AVALIACAO_PERDIDA_MS) return NextResponse.json({ status: "gerando" }, { status: 202 });
     session.report = undefined;
