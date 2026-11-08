@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Totti · Parte 4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=block" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+:root{
+  --papel:#f5f2ec; --sup:#ffffff; --sup2:#ede8e0; --vidro:#fbf9f4;
+  --borda:rgba(28,24,18,.10); --tinta:#1c1812; --suave:#5c5448; --pedra:#8a8277; --claro:#f5f0e8;
+  --sh-card:0 1px 2px rgba(28,24,18,.06),0 14px 30px -18px rgba(28,24,18,.25);
+  --sh-float:0 2px 6px rgba(28,24,18,.08),0 24px 50px -24px rgba(28,24,18,.4);
+}
+html,body{margin:0;height:100%;background:var(--papel);overflow:hidden}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;background:var(--papel);overflow:hidden;
+  transform-origin:0 0;font-family:Inter,system-ui,sans-serif;color:var(--tinta);
+  -webkit-font-smoothing:antialiased;text-rendering:geometricPrecision}
+#stage *{box-sizing:border-box}
+.rot{font:600 13px/1 Inter,sans-serif;letter-spacing:.12em;color:var(--suave)}
+.brand{display:flex;align-items:center;gap:8px;font:700 20px/1 Fraunces,serif;letter-spacing:-.02em;color:var(--tinta)}
+.brand canvas{display:block}
+.ck-i{width:.82em;height:.82em;display:inline-block;vertical-align:-.06em}
+
+/* ── decisão (primeiro quadro) ── */
+#dec{position:absolute;left:50%;top:50%;width:760px;padding:32px;background:var(--sup);border-radius:22px;
+  box-shadow:var(--sh-float);filter:blur(0px)}
+.dec-row{display:flex;align-items:center;gap:14px}
+.pill-ink{display:inline-block;background:var(--tinta);color:var(--claro);font:600 15px/1 Inter;padding:8px 16px;border-radius:999px}
+.dec-date{font:400 16px/1 Inter;color:var(--suave)}
+.dec-title{margin-top:20px;font:600 20px/1.3 Inter}
+.dec-text{margin-top:6px;font:400 17px/1.45 Inter;color:var(--suave)}
+
+/* ── caixa de entrada ── */
+#inbox{position:absolute;left:580px;top:190px;width:1280px;height:780px;background:var(--sup);border:1px solid var(--borda);
+  border-radius:20px;box-shadow:var(--sh-float);overflow:hidden;opacity:0;transform-origin:0% 50%;filter:blur(0px)}
+.wbar{height:52px;display:flex;align-items:center;padding:0 24px;border-bottom:1px solid var(--borda);
+  font:400 14px/1 'JetBrains Mono',monospace;color:var(--suave)}
+.ibody{display:flex;height:726px}
+.ilist{position:relative;width:300px;flex:none;background:var(--papel);border-right:1px solid var(--borda);overflow:hidden}
+.iitem{position:absolute;left:10px;width:280px;height:96px;border-radius:14px;padding:14px 16px}
+.iitem.new{top:10px;background:var(--sup);opacity:0;box-shadow:0 1px 2px rgba(28,24,18,.05)}
+.iitem.o1{top:112px}.iitem.o2{top:214px}
+.itop{position:relative;display:flex;align-items:center;gap:8px}
+.idot{width:8px;height:8px;border-radius:50%;background:var(--tinta);flex:none}
+.ifrom{font:600 15px/1.2 Inter;white-space:nowrap}
+.iwhen{margin-left:auto;font:400 13px/1 Inter;color:var(--suave)}
+.isubj{position:relative;margin-top:7px;font:400 14px/1.35 Inter;color:var(--suave);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.iitem.new .isubj{color:var(--tinta)}
+.iitem.old .ifrom,.iitem.old .isubj,.iitem.old .iwhen{color:var(--pedra);font-weight:400}
+.isel{position:absolute;inset:0;border-radius:14px;box-shadow:inset 0 0 0 2px var(--tinta);opacity:0}
+.iflash{position:absolute;inset:0;border-radius:14px;background:var(--sup2);opacity:0}
+.iread{flex:1;padding:32px 40px}
+#rdHead{opacity:0}
+.rd-subj{font:600 24px/1.3 Inter;letter-spacing:-.01em}
+.rd-from{margin-top:8px;font:400 15px/1.4 Inter;color:var(--suave)}
+#mail{margin-top:26px;background:var(--papel);border-radius:16px;padding:40px;opacity:0}
+#mail > *{opacity:0}
+.mail-h{margin-top:14px;font:500 40px/1.1 Fraunces,serif;letter-spacing:-.025em}
+#mail p{margin:16px 0 0;font:400 20px/1.55 Inter;max-width:780px}
+#mail p b{font-weight:600}
+.mail-sig{margin-top:22px;font:400 17px/1.4 Inter;color:var(--suave)}
+
+/* ── e-mail de quem não avança ── */
+#paula{position:absolute;left:1290px;top:650px;width:520px;padding:28px 30px;background:var(--sup);border:1px solid var(--borda);
+  border-radius:20px;box-shadow:var(--sh-float);opacity:0}
+#paula p{margin:14px 0 0;font:400 19px/1.5 Inter}
+
+/* ── O que o Totti aprendeu ── */
+#learn{position:absolute;left:580px;top:156px;width:1280px;height:884px;padding:34px 40px;background:var(--papel);
+  border:1px solid var(--borda);border-radius:20px;box-shadow:var(--sh-float);opacity:0;filter:blur(0px)}
+.lp-title{margin:16px 0 0;font:500 52px/1.08 Fraunces,serif;letter-spacing:-.025em}
+.lp-sub{margin-top:10px;font:400 19px/1.45 Inter;color:var(--suave)}
+.conc{margin-top:26px;height:180px;background:var(--sup);border:1px solid var(--borda);border-radius:20px;box-shadow:var(--sh-card);
+  padding:24px 32px;display:flex;justify-content:space-between;align-items:stretch}
+.conc-num{margin-top:6px;font:500 96px/.95 Fraunces,serif;letter-spacing:-.03em}
+.conc-txt{margin-top:6px;font:500 17px/1.3 Inter;color:var(--suave)}
+.bars{display:flex;gap:26px;align-items:flex-end;padding-right:8px}
+.bcol{display:flex;flex-direction:column;align-items:center;width:72px}
+.bv{font:500 14px/1 'JetBrains Mono',monospace;color:var(--suave);margin-bottom:6px;opacity:0}
+.bcol.atual .bv{color:var(--tinta)}
+.bar{width:44px;border-radius:10px 10px 4px 4px;background:#c8bfb2;transform-origin:50% 100%}
+.bcol.atual .bar{background:var(--tinta)}
+.bl{margin-top:8px;font:500 14px/1 Inter;color:var(--suave);white-space:nowrap}
+.crit-h{margin-top:26px;font:600 18px/1.2 Inter}
+.cnt{position:relative;display:inline-block;width:.62em;height:1.2em;overflow:hidden;vertical-align:bottom;text-align:center}
+.cnt span{position:absolute;left:0;right:0;top:0}
+.crit-list{position:relative;margin-top:14px}
+.rule{position:relative;background:var(--sup);border:1px solid var(--borda);border-radius:14px;box-shadow:var(--sh-card);
+  padding:18px 260px 18px 24px;margin-bottom:10px}
+.rule.new{height:146px;background:var(--sup2)}
+.rule.old{height:116px}
+.tags{display:flex;align-items:center;gap:10px}
+.pv{font:600 13px/1 Inter;padding:6px 12px;border-radius:999px;background:var(--tinta);color:var(--claro)}
+.pv.pen{background:transparent;color:var(--tinta);box-shadow:inset 0 0 0 1.5px var(--tinta)}
+.pesa{font:500 14px/1 Inter;color:var(--suave)}
+.rtx{margin-top:9px;font:500 17px/1.45 Inter}
+.ror{margin-top:6px;font:400 14px/1.3 Inter;color:var(--suave)}
+.ctl{position:absolute;right:24px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:16px}
+.tgl{font:500 14px/1 Inter;margin-right:-4px}
+.tg{position:relative;width:42px;height:24px;border-radius:999px;background:var(--tinta)}
+.tg i{position:absolute;right:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff}
+.tgf{position:absolute;inset:-5px;border-radius:999px;box-shadow:0 0 0 2px var(--tinta);opacity:0}
+.ico{width:20px;height:20px;display:block}
+
+/* ── fecho ── */
+#fring{position:absolute;left:850px;top:430px;width:220px;height:220px;opacity:0}
+#fring canvas{display:block}
+#ftitle{position:absolute;left:0;top:462px;width:1920px;text-align:center;font:500 84px/1.06 Fraunces,serif;letter-spacing:-.025em}
+#fbrand{position:absolute;left:0;top:690px;width:1920px;justify-content:center;opacity:0}
+#furl{position:absolute;left:0;top:734px;width:1920px;text-align:center;font:400 22px/1.2 Inter;color:var(--suave);opacity:0}
+#flab{position:absolute;left:0;top:780px;width:1920px;text-align:center;text-transform:uppercase;opacity:0}
+
+/* ── narração ── */
+#narr{position:absolute;left:56px;top:48px;width:900px;height:200px;pointer-events:none}
+.n-lab{position:absolute;left:0;top:0;opacity:0}
+.n-ph{position:absolute;left:0;top:26px;width:900px;font:500 40px/1.15 Fraunces,serif;letter-spacing:-.025em}
+.w{display:inline-block;overflow:hidden;vertical-align:top;padding:0 .06em .14em 0;margin:0 -.06em -.14em 0}
+.wi{display:inline-block}
+.wi.it{font-style:italic}
+
+/* ── rastro ── */
+#rastro{position:absolute;left:40px;top:876px;width:460px;height:164px;--py:18px;--px:22px;padding:var(--py) var(--px);
+  background:var(--vidro);border:1px solid var(--borda);border-radius:20px;box-shadow:var(--sh-float);overflow:hidden;
+  transform-origin:50% 0;filter:blur(0px);z-index:5}
+.rs-head{display:flex;align-items:center;gap:9px;height:18px}
+.rs-head canvas{display:block}
+.rs-body{position:relative;margin-top:12px}
+#rsLines{position:relative;height:96px;overflow:hidden}
+.rl{position:absolute;left:0;top:0;height:24px;font:400 15px/24px 'JetBrains Mono',monospace;white-space:nowrap}
+.rl .ck{display:inline-block;width:2ch;transform-origin:30% 55%}
+.rl.hum{color:var(--suave)}
+.cur{display:inline-block;width:.42em;height:1.08em;background:var(--tinta);vertical-align:-.2em;margin-left:1px}
+#rsSum{position:absolute;left:0;top:4px;width:656px}
+.sl{font:400 20px/32px 'JetBrains Mono',monospace;color:var(--tinta);white-space:nowrap;opacity:0}
+.sl .ck{display:inline-block;width:2ch}
+.ssep{height:1px;background:var(--borda);margin:14px 0;opacity:0}
+.sfoot{font:400 18px/30px 'JetBrains Mono',monospace;color:var(--suave);white-space:nowrap;opacity:0}
+
+/* ── envelope e cursor humano ── */
+#env{position:absolute;left:0;top:0;width:40px;height:40px;opacity:0;z-index:8;will-change:transform}
+#env svg{display:block;width:40px;height:40px}
+#hcur{position:absolute;left:0;top:0;width:26px;height:30px;opacity:0;z-index:9;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.3))}
+#hcur svg{display:block}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- Decisão (fim da Parte 3) -->
+  <div id="dec">
+    <div class="dec-row"><span class="pill-ink">Avançar</span><span class="dec-date">08/11/2026, 10:24</span></div>
+    <div class="dec-title">Decisão registrada com sucesso!</div>
+    <div class="dec-text">E-mail de retorno enviado e critério incorporado à Memória da Squad.</div>
+  </div>
+
+  <!-- Caixa de entrada neutra -->
+  <div id="inbox">
+    <div class="wbar">Caixa de entrada · gabriel.moreira94@gmail.com</div>
+    <div class="ibody">
+      <div class="ilist">
+        <div class="iitem new" id="ibNew">
+          <div class="iflash" id="ibFlash"></div>
+          <div class="isel" id="ibSel"></div>
+          <div class="itop"><span class="idot"></span><span class="ifrom">Time de Recrutamento</span><span class="iwhen">agora</span></div>
+          <div class="isubj">Sobre sua entrevista para Desenvolvedor(a) Backend Sênior — Links</div>
+        </div>
+        <div class="iitem old o1">
+          <div class="itop"><span class="ifrom">Newsletter de vagas</span><span class="iwhen">ontem</span></div>
+          <div class="isubj">As 10 vagas da semana em Recife</div>
+        </div>
+        <div class="iitem old o2">
+          <div class="itop"><span class="ifrom">Time de Recrutamento</span><span class="iwhen">5 nov</span></div>
+          <div class="isubj">Entrevista técnica: escolha seu horário</div>
+        </div>
+      </div>
+      <div class="iread">
+        <div id="rdHead">
+          <div class="rd-subj">Sobre sua entrevista para Desenvolvedor(a) Backend Sênior — Links</div>
+          <div class="rd-from">De: Time de Recrutamento &lt;entrevistas@…&gt; · para mim · agora</div>
+        </div>
+        <div id="mail">
+          <div class="rot">FEEDBACK DA ENTREVISTA</div>
+          <div class="mail-h">Oi, Gabriel</div>
+          <p>Obrigado por participar da entrevista pra <b>Desenvolvedor(a) Backend Sênior — Links</b>. Boas notícias: você passou pra próxima etapa do processo. Em breve nosso time entra em contato com os próximos passos.</p>
+          <div class="mail-sig">Time de Recrutamento</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Retorno de quem não avança -->
+  <div id="paula">
+    <div class="rot">PARA: Paula Machado</div>
+    <p>Depois de avaliar com calma, decidimos não seguir com sua candidatura pra essa vaga. Agradecemos o tempo e o esforço que você dedicou.</p>
+  </div>
+
+  <!-- O que o Totti aprendeu -->
+  <div id="learn">
+    <div class="brand"><canvas id="cvLB"></canvas><span>totti</span></div>
+    <h1 class="lp-title">O que o Totti aprendeu</h1>
+    <div class="lp-sub">Cada decisão do time vira regra e vale para as próximas entrevistas desta vaga. Edite ou apague à vontade.</div>
+    <div class="conc">
+      <div>
+        <div class="rot">CONCORDÂNCIA ENTRE O TOTTI E O TECH LEAD</div>
+        <div class="conc-num"><span id="concN">80</span>%</div>
+        <div class="conc-txt">+25 pontos desde a primeira vaga</div>
+      </div>
+      <div class="bars">
+        <div class="bcol"><div class="bv">60%</div><div class="bar" style="height:72px"></div><div class="bl">1ª vaga</div></div>
+        <div class="bcol"><div class="bv">75%</div><div class="bar" style="height:90px"></div><div class="bl">2ª vaga</div></div>
+        <div class="bcol atual"><div class="bv">85%</div><div class="bar" style="height:102px"></div><div class="bl">esta vaga</div></div>
+      </div>
+    </div>
+    <div class="crit-h">Critérios aprendidos · <span class="cnt"><span id="cnt2">2</span><span id="cnt3">3</span></span> ligados</div>
+    <div class="crit-list">
+      <div class="rule new" id="ruleNew">
+        <div class="tags"><span class="pv">↑ Valoriza</span><span class="pesa">Pesa em Escala</span></div>
+        <div class="rtx">Valoriza quem reage bem a mudança de requisito: avançou quem apontou o gargalo e propôs réplicas quando o volume cresceu 10x</div>
+        <div class="ror">Da decisão sobre Gabriel Moreira · Backend Sênior — Links · agora</div>
+        <div class="ctl"><span class="tgl">Ligado</span><span class="tg" id="tgNew"><i></i><span class="tgf" id="tgFocus"></span></span>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5c5448" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5c5448" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+        </div>
+      </div>
+      <div class="rule old" id="ruleA">
+        <div class="tags"><span class="pv">↑ Valoriza</span><span class="pesa">Pesa em Componentes e fluxo</span></div>
+        <div class="rtx">Valoriza quem explica o custo da solução</div>
+        <div class="ror">Da decisão do time · Backend Sênior — Links · ontem</div>
+        <div class="ctl"><span class="tgl">Ligado</span><span class="tg"><i></i></span>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5c5448" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5c5448" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+        </div>
+      </div>
+      <div class="rule old" id="ruleB">
+        <div class="tags"><span class="pv pen">↓ Penaliza</span><span class="pesa">Pesa em Dados e consistência</span></div>
+        <div class="rtx">Penaliza quem não pensa em falha</div>
+        <div class="ror">Da decisão do time · Backend Sênior — Links · 06/11</div>
+        <div class="ctl"><span class="tgl">Ligado</span><span class="tg"><i></i></span>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5c5448" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="#5c5448" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fecho -->
+  <div id="fring"><canvas id="cvF"></canvas></div>
+  <div id="ftitle"><span class="w"><span class="wi">Cole</span></span> <span class="w"><span class="wi">a</span></span> <span class="w"><span class="wi">vaga.</span></span> <span class="w"><span class="wi">O</span></span> <span class="w"><span class="wi">Totti</span></span> <span class="w"><span class="wi">entrevista.</span></span><br><span class="w"><span class="wi it">Você</span></span> <span class="w"><span class="wi it">decide.</span></span></div>
+  <div id="fbrand" class="brand"><canvas id="cvFB"></canvas><span>totti</span></div>
+  <div id="furl">converge-challenge.vercel.app</div>
+  <div id="flab" class="rot">Converge Challenge · powered by Tako</div>
+
+  <!-- Narração -->
+  <div id="narr">
+    <div class="n-lab rot" id="labA">04 · CANDIDATO</div>
+    <div class="n-lab rot" id="labB">04 · O CICLO</div>
+    <div class="n-ph" id="p1">Ninguém fica sem resposta.</div>
+    <div class="n-ph" id="p2">Aprovado ou não, o retorno vai pra todo mundo.</div>
+    <div class="n-ph" id="p3">E cada decisão deixa o agente melhor pra próxima vaga.</div>
+  </div>
+
+  <!-- Rastro do Totti -->
+  <div id="rastro">
+    <div class="rs-head"><canvas id="cvR"></canvas><span class="rot">TOTTI · AGORA</span></div>
+    <div class="rs-body">
+      <div id="rsLines"></div>
+      <div id="rsSum"></div>
+    </div>
+  </div>
+
+  <!-- Envelope -->
+  <div id="env"><svg viewBox="0 0 40 40"><rect x="4" y="9" width="32" height="22" rx="3" fill="#fff" stroke="#1c1812" stroke-width="2"/><path d="M5.5 11 L20 21.5 L34.5 11" fill="none" stroke="#1c1812" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+  <!-- Cursor humano (padrão do sistema) -->
+  <div id="hcur"><svg width="26" height="30" viewBox="0 0 18 22"><path d="M1.5 1 L1.5 17 L5.4 13.4 L8.1 19.6 L10.7 18.5 L8.1 12.4 L13.4 12.4 Z" fill="#fff" stroke="#000" stroke-width="1.1" stroke-linejoin="round"/></svg></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const DUR = 30;
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+/* ── curvas do produto ── */
+function bez(x1,y1,x2,y2){
+  const cx=3*x1,bx=3*(x2-x1)-cx,ax=1-cx-bx,cy=3*y1,by=3*(y2-y1)-cy,ay=1-cy-by;
+  const sx=t=>((ax*t+bx)*t+cx)*t, sy=t=>((ay*t+by)*t+cy)*t, dx=t=>(3*ax*t+2*bx)*t+cx;
+  return p=>{
+    if(p<=0) return 0; if(p>=1) return 1;
+    let t=p;
+    for(let i=0;i<8;i++){const x=sx(t)-p, d=dx(t); if(Math.abs(x)<1e-7||Math.abs(d)<1e-6) break; t-=x/d;}
+    if(!(t>=0&&t<=1)||Math.abs(sx(t)-p)>1e-5){let lo=0,hi=1;t=p;for(let i=0;i<40;i++){if(sx(t)<p)lo=t;else hi=t;t=(lo+hi)/2;}}
+    return sy(t);
+  };
+}
+const E={suave:bez(.32,.72,0,1),saida:bez(.16,1,.3,1),viagem:bez(.65,0,.35,1),mola:bez(.34,1.56,.64,1)};
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const lerp=(a,b,p)=>a+(b-a)*p;
+const prog=(t,s,d,e=E.suave)=>e(clamp((t-s)/d));
+const mix=(c1,c2,p)=>`rgb(${Math.round(lerp(c1[0],c2[0],p))},${Math.round(lerp(c1[1],c2[1],p))},${Math.round(lerp(c1[2],c2[2],p))})`;
+const INK=[28,24,18], PEDRA=[138,130,119];
+const CHECK='<svg class="ck-i" viewBox="0 0 14 14"><path d="M2.2 7.6 L5.6 10.8 L11.8 3.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/* ── o anel de voz (algoritmo do produto, versão papel) ── */
+const DPR=2;
+const ST={ouvindo:{v:.28,a:.55,arc:0}, pensando:{v:.45,a:.60,arc:1}};
+function stateAt(sched,t){
+  let c={...ST[sched[0][1]]};
+  for(let k=1;k<sched.length;k++){
+    const [ti,n]=sched[k]; if(t<=ti) break;
+    const p=clamp((t-ti)/.25), s=p*p*(3-2*p), g=ST[n];
+    c={v:lerp(c.v,g.v,s),a:lerp(c.a,g.a,s),arc:lerp(c.arc,g.arc,s)};
+  }
+  return c;
+}
+function mkPhase(sched,off){
+  const R=240,N=DUR*R+2,ph=new Float64Array(N); ph[0]=off;
+  for(let i=1;i<N;i++) ph[i]=ph[i-1]+stateAt(sched,(i-.5)/R).v/R;
+  return t=>{const x=clamp(t,0,DUR)*R,i=Math.floor(x),f=x-i;return ph[i]+(ph[Math.min(i+1,N-1)]-ph[i])*f;};
+}
+function ondulacao(a,fase,desl){
+  return Math.sin(4*a+fase*3.1+desl)*0.55+Math.sin(7*a-fase*2.3+desl*2)*0.30+Math.sin(11*a+fase*4.2)*0.15;
+}
+function mkRing(cv,css,sched,off){
+  cv.width=cv.height=css*DPR; cv.style.width=cv.style.height=css+'px';
+  return {ctx:cv.getContext('2d'),css,sched,phase:mkPhase(sched,off)};
+}
+function ringPath(ctx,fase,desl,esc,e,a0,a1,n){
+  ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const a=a0+(a1-a0)*i/n;
+    const r=34*esc*(1+e*0.1)+ondulacao(a,fase,desl)*(1+e*9);
+    const x=66+Math.cos(a)*r, y=66+Math.sin(a)*r;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+}
+function drawRing(R,t){
+  const st=stateAt(R.sched,t), fase=R.phase(t);
+  const energia=0.12+0.04*Math.sin(t*1.2), e=energia*st.a;
+  const ctx=R.ctx, px=R.css*DPR, S=px/132, u=DPR/S; // u = 1 px css em unidades do desenho
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,px,px);
+  ctx.setTransform(S,0,0,S,0,0);
+  const ga=0.08+e*0.22, gr=ctx.createRadialGradient(66,66,0,66,66,66);
+  gr.addColorStop(0,`rgba(190,182,168,${ga})`); gr.addColorStop(.55,`rgba(190,182,168,${ga*.55})`); gr.addColorStop(1,'rgba(190,182,168,0)');
+  ctx.fillStyle=gr; ctx.fillRect(0,0,132,132);
+  ctx.shadowColor='rgb(190,182,168)'; ctx.shadowBlur=(10+e*14)*S;
+  ctx.lineJoin='round'; ctx.lineCap='round';
+  // anel irmão
+  ringPath(ctx,fase,1.7,1.12,e,0,Math.PI*2,180); ctx.closePath();
+  ctx.strokeStyle=`rgba(92,84,72,${0.22+e*0.2})`; ctx.lineWidth=Math.max(1,0.7*u); ctx.stroke();
+  // anel principal
+  ringPath(ctx,fase,0,1,e,0,Math.PI*2,180); ctx.closePath();
+  ctx.strokeStyle='rgba(92,84,72,.95)'; ctx.lineWidth=Math.max(1.8,1.1*u); ctx.stroke();
+  // arco de "pensando": 1,1 rad de tinta percorrendo o anel a 1,8 rad/s
+  if(st.arc>0.005){
+    const a0=1.8*t-Math.PI/2;
+    ringPath(ctx,fase,0,1,e,a0,a0+1.1,40);
+    ctx.strokeStyle=`rgba(28,24,18,${st.arc})`; ctx.lineWidth=Math.max(3,1.5*u); ctx.stroke();
+  }
+}
+const OUV=[[0,'ouvindo']];
+const rings=[
+  mkRing($('#cvR'),16,[[0,'pensando'],[0.3,'ouvindo'],[6.6,'pensando'],[8.6,'ouvindo'],[13.2,'pensando'],[15.0,'ouvindo'],[21.2,'pensando'],[24.0,'ouvindo']],0.8),
+  mkRing($('#cvLB'),20,OUV,2.1),
+  mkRing($('#cvF'),220,[[0,'ouvindo'],[21.2,'pensando'],[24.0,'ouvindo']],3.7),
+  mkRing($('#cvFB'),20,OUV,5.3),
+];
+
+/* ── rastro ── */
+const RL=[
+  {tx:'escreveu o relatório · 9 provas',s:-10,d:-9},
+  {tx:'aplicou o que o time ensinou',s:-10,d:-9},
+  {tx:'você · decidiu: avançar',s:-10,d:-9,hum:true},
+  {tx:'avisando o candidato',s:-10,d:0.3},
+  {tx:'retorno enviado · 10 de 10 candidatos',s:6.6,d:8.6},
+  {tx:'nova regra: vale nas próximas entrevistas',s:13.2,d:15.0},
+];
+const rsLines=$('#rsLines');
+RL.forEach(L=>{
+  const el=document.createElement('div'); el.className='rl'+(L.hum?' hum':'');
+  el.innerHTML=`<span class="ck">${L.hum?'':CHECK}</span><span class="tx"></span><span class="cur"></span>`;
+  rsLines.appendChild(el);
+  L.el=el; L.ck=el.querySelector('.ck'); L.txEl=el.querySelector('.tx'); L.cur=el.querySelector('.cur'); L.last=null;
+});
+const SUM=['leu a vaga e montou o plano','conversou por voz com a recrutadora','enviou 10 convites e agendou',
+  'entrevistou por voz, no quadro, ao vivo','trouxe uma mudança e viu como ele se adapta','escreveu o scorecard com 9 provas',
+  'deu retorno a 10 de 10 candidatos','aprendeu com a decisão do time'];
+$('#rsSum').innerHTML=SUM.map(s=>`<div class="sl"><span class="ck">${CHECK}</span>${s}</div>`).join('')
+  +'<div class="ssep"></div><div class="sfoot">você · colou a vaga · respondeu 1 pergunta · decidiu</div>';
+
+function renderRastro(t){
+  const off=prog(t,6.6,.48,E.viagem)+prog(t,13.2,.48,E.viagem);
+  for(let i=0;i<RL.length;i++){
+    const L=RL[i], y=(i-off)*24;
+    let op=1; if(y<0) op=clamp(1+y/24); if(y>72) op=clamp(1-(y-72)/24); if(t<L.s) op=0;
+    L.el.style.transform=`translateY(${y.toFixed(3)}px)`; L.el.style.opacity=op.toFixed(4);
+    const n=clamp(Math.floor((t-L.s)*35+1e-9),0,L.tx.length), txt=L.tx.slice(0,n);
+    if(txt!==L.last){L.txEl.textContent=txt; L.last=txt;}
+    const ativa=t>=L.s&&t<L.d;
+    L.cur.style.display=ativa?'inline-block':'none';
+    L.cur.style.visibility=(t%1)<0.5?'visible':'hidden';
+    if(!L.hum){
+      const pd=t>=L.d?prog(t,L.d,.24):0;
+      L.el.style.color=mix(INK,PEDRA,pd);
+      const k=t>=L.d?E.mola(clamp((t-L.d)/.24)):0;
+      L.ck.style.transform=`scale(${k.toFixed(4)})`; L.ck.style.opacity=t>=L.d?1:0;
+    }
+  }
+}
+
+/* ── envelope: sai do cartão, faz um arco pela direita e pousa no item novo ── */
+const env=$('#env');
+const P=[[1000,580],[1310,500],[1180,160],[730,300]];
+function cubic(p){const q=1-p;return [0,1].map(k=>q*q*q*P[0][k]+3*q*q*p*P[1][k]+3*q*p*p*P[2][k]+p*p*p*P[3][k]);}
+function renderEnvelope(t){
+  if(t<0.5||t>2){env.style.opacity=0;return;}
+  const pop=prog(t,.5,.22,E.saida), pf=prog(t,.5,1.0,E.viagem), dis=prog(t,1.5,.4,E.suave);
+  const [x,y]=cubic(pf);
+  const sc=lerp(.6,1,pop)*lerp(1,.78,pf)*lerp(1,.5,dis), rot=12*Math.sin(Math.PI*pf);
+  env.style.opacity=(pop*(1-dis)).toFixed(4);
+  env.style.transform=`translate(${(x-20).toFixed(2)}px,${(y-20-8*pop*(1-pf)).toFixed(2)}px) rotate(${rot.toFixed(2)}deg) scale(${sc.toFixed(4)})`;
+  env.style.filter=`drop-shadow(0 6px 10px rgba(28,24,18,${(.22*(1-dis)).toFixed(3)})) blur(${(3*dis).toFixed(2)}px)`;
+}
+
+/* ── cursor humano: passa no interruptor da regra nova, sem clicar ── */
+const hcur=$('#hcur'), stage=$('#stage'), tgNew=$('#tgNew');
+function stagePos(el){let x=0,y=0,n=el;while(n&&n!==stage){x+=n.offsetLeft;y+=n.offsetTop;n=n.offsetParent;}return [x+el.offsetWidth/2,y+el.offsetHeight/2];}
+function renderCursor(t){
+  if(t<14.6||t>17.3){hcur.style.opacity=0;return;}
+  const [tx,ty]=stagePos(tgNew);
+  const p1=prog(t,14.6,.9,E.viagem), p2=prog(t,16.3,.7,E.suave);
+  let x=lerp(1890,tx-2,p1)+Math.sin(Math.PI*p1)*-30, y=lerp(1070,ty-2,p1)+Math.sin(Math.PI*p1)*-24;
+  x=lerp(x,tx+170,p2); y=lerp(y,ty+210,p2);
+  const op=clamp((t-14.6)/.15)*(1-clamp((t-16.95)/.3));
+  hcur.style.opacity=op.toFixed(4);
+  hcur.style.transform=`translate(${(x-2).toFixed(2)}px,${(y-1.5).toFixed(2)}px)`;
+}
+
+/* ── contagem 80% → 85% ── */
+const concN=$('#concN');
+function renderCounter(t){concN.textContent=String(Math.round(80+5*prog(t,12.6,1.0,E.suave)));}
+
+/* ── palavras da narração e do título ── */
+function split(el){
+  const ws=el.textContent.trim().split(/\s+/);
+  el.innerHTML=ws.map(w=>`<span class="w"><span class="wi">${w}</span></span>`).join(' ');
+  return Array.from(el.querySelectorAll('.wi'));
+}
+const W1=split($('#p1')), W2=split($('#p2')), W3=split($('#p3')), WT=$$('#ftitle .wi');
+
+/* ── timeline mestre ── */
+gsap.set('#dec',{xPercent:-50,yPercent:-50});
+gsap.set([...W1,...W2,...W3,...WT],{yPercent:105,opacity:.2});
+gsap.set('.iitem.old',{y:-102});
+gsap.set(['#ruleA','#ruleB'],{y:-156});
+gsap.set('#ruleNew',{opacity:0,y:-24,scale:.98});
+gsap.set('.bar',{scaleY:0});
+gsap.set('#cnt3',{yPercent:100});
+gsap.set('.sl,.ssep,.sfoot',{opacity:0,y:6});
+
+const tl=gsap.timeline({paused:true,defaults:{immediateRender:false,lazy:false}});
+const F=(el,a,b,at)=>tl.fromTo(el,a,b,at);
+const surgir=(el,at,d=.48)=>F(el,{opacity:0,y:6,scale:.97},{opacity:1,y:0,scale:1,duration:d,ease:E.saida},at);
+const palavras=(ws,at)=>F(ws,{yPercent:105,opacity:.2},{yPercent:0,opacity:1,duration:.5,ease:E.saida,stagger:.06},at);
+const fade=(el,at,d=.4)=>F(el,{opacity:1},{opacity:0,duration:d,ease:E.suave},at);
+
+// Cena A · o e-mail chega
+F('#dec',{opacity:1,scale:1,filter:'blur(0px)'},{opacity:0,scale:.96,filter:'blur(6px)',duration:.5,ease:E.suave},.55);
+F('#inbox',{opacity:0,y:30,scale:.98,filter:'blur(6px)'},{opacity:1,y:0,scale:1,filter:'blur(0px)',duration:.6,ease:E.saida},.65);
+F('#ibNew',{opacity:0,y:-40},{opacity:1,y:0,duration:.48,ease:E.saida},1.15);
+F('.iitem.old',{y:-102},{y:0,duration:.48,ease:E.saida},1.15);
+F('#ibFlash',{opacity:0},{opacity:1,duration:.12,ease:E.suave},1.42);
+F('#ibFlash',{opacity:1},{opacity:0,duration:.8,ease:E.suave},1.54);
+F('#ibSel',{opacity:0},{opacity:1,duration:.24,ease:E.suave},2.5);
+surgir('#rdHead',2.5);
+surgir('#mail',2.62);
+['#mail .rot','#mail .mail-h','#mail p','#mail .mail-sig'].forEach((s,i)=>surgir(s,2.75+i*.3));
+F('#labA',{opacity:0,y:8},{opacity:1,y:0,duration:.4,ease:E.saida},3.0);
+palavras(W1,3.0);
+F('#paula',{opacity:0,y:24,scale:.97,rotation:3},{opacity:1,y:0,scale:1,rotation:3,duration:.48,ease:E.saida},6.5);
+F('#p1',{opacity:1},{opacity:0,duration:.4,ease:E.suave},6.7);
+palavras(W2,7.0);
+F('#paula',{opacity:1,y:0},{opacity:0,y:-8,duration:.4,ease:E.suave},9.0);
+fade(['#labA','#p2'],11.0);
+F('#inbox',{opacity:1,x:0,scale:1,filter:'blur(0px)'},{opacity:0,x:-160,scale:.9,filter:'blur(8px)',duration:1.1,ease:E.suave},10.8);
+
+// Cena B · o que o agente aprendeu
+F('#learn',{opacity:0,y:40,scale:.98,filter:'blur(6px)'},{opacity:1,y:0,scale:1,filter:'blur(0px)',duration:.7,ease:E.saida},11.55);
+F('.bar',{scaleY:0},{scaleY:1,duration:.6,ease:E.saida,stagger:.15},12.45);
+F('.bv',{opacity:0},{opacity:1,duration:.24,ease:E.suave,stagger:.15},12.75);
+F(['#ruleA','#ruleB'],{y:-156},{y:0,duration:.48,ease:E.viagem},13.0);
+F('#ruleNew',{y:-24,scale:.98},{y:0,scale:1,duration:.6,ease:E.mola},13.0);
+F('#ruleNew',{opacity:0},{opacity:1,duration:.3,ease:E.saida},13.0);
+F('#ruleNew',{backgroundColor:'#ede8e0'},{backgroundColor:'#ffffff',duration:.48,ease:E.suave},14.5);
+F('#cnt2',{yPercent:0},{yPercent:-100,duration:.24,ease:E.suave},13.05);
+F('#cnt3',{yPercent:100},{yPercent:0,duration:.24,ease:E.suave},13.05);
+F('#labB',{opacity:0,y:8},{opacity:1,y:0,duration:.4,ease:E.saida},13.5);
+palavras(W3,13.55);
+F('#tgFocus',{opacity:0},{opacity:1,duration:.12,ease:E.suave},15.5);
+F('#tgFocus',{opacity:1},{opacity:0,duration:.24,ease:E.suave},16.3);
+
+// Cena C · o fecho
+F('#learn',{opacity:1,y:0,scale:1,filter:'blur(0px)'},{opacity:0,y:-10,scale:.97,filter:'blur(8px)',duration:.6,ease:E.suave},20.0);
+fade(['#labB','#p3'],20.0);
+F('#fring',{opacity:0,scale:.9},{opacity:1,scale:1,duration:.6,ease:E.saida},20.2);
+F('#fring',{y:0},{y:-240,duration:1.0,ease:E.viagem},20.8);
+F('#rastro',{left:40,top:876,width:460,height:164,'--py':'18px','--px':'22px'},
+            {left:600,top:430,width:720,height:401,'--py':'26px','--px':'32px',duration:1.0,ease:E.viagem},20.8);
+F('#rsLines',{opacity:1},{opacity:0,duration:.25,ease:E.suave},20.8);
+F('.sl',{opacity:0,y:6},{opacity:1,y:0,duration:.24,ease:E.saida,stagger:.35},21.2);
+F('.ssep,.sfoot',{opacity:0,y:6},{opacity:1,y:0,duration:.24,ease:E.saida},21.2+8*.35);
+F('#rastro',{opacity:1,y:0,scale:1,filter:'blur(0px)'},{opacity:0,y:-70,scale:.85,filter:'blur(4px)',duration:.6,ease:E.suave},24.5);
+F('#fring',{y:-240},{y:-200,duration:.9,ease:E.viagem},24.5);
+palavras(WT,24.85);
+surgir('#fbrand',26.5); surgir('#furl',26.62); surgir('#flab',26.74);
+tl.set({},{},DUR); // fixa a duração em 30 s
+
+/* ── seek determinístico ── */
+let cur=0;
+function seek(t){
+  t=clamp(+t||0,0,DUR); cur=t;
+  tl.seek(t,true);
+  renderRastro(t); renderEnvelope(t); renderCursor(t); renderCounter(t);
+  for(const R of rings) drawRing(R,t);
+}
+window.seek=seek;
+window.duration=DUR;
+window.ready=document.fonts.ready.then(()=>{seek(cur);return true;});
+
+/* ── encaixe na janela (só para prévia) ── */
+function fit(){
+  const s=Math.min(innerWidth/1920,innerHeight/1080);
+  stage.style.transform=(s===1)?'none':`translate(${(innerWidth-1920*s)/2}px,${(innerHeight-1080*s)/2}px) scale(${s})`;
+}
+addEventListener('resize',fit); fit();
+
+const q=new URLSearchParams(location.search);
+seek(q.has('t')?parseFloat(q.get('t')):0);
+if(q.has('play')){
+  let t0=null, raf=0;
+  const loop=ts=>{if(t0===null)t0=ts;const t=(ts-t0)/1000;seek(t);if(t<DUR)raf=requestAnimationFrame(loop);};
+  const start=()=>{cancelAnimationFrame(raf);t0=null;raf=requestAnimationFrame(loop);};
+  window.ready.then(start);
+  addEventListener('click',start);
+}
+})();
+</script>
+</body>
+</html>
