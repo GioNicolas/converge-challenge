@@ -21,11 +21,12 @@ const FALLBACK_REPLIES = [
   "Opa, não peguei essa. Fala de novo?",
   "Perdi o fio aqui, pode repetir pra mim?",
 ];
-/** Fala barrada duas vezes pelo filtro: reconhece e fecha, sem arriscar (e sem repetir a mesma frase). */
+/** Fala barrada duas vezes pelo filtro: uma pergunta aberta que não entrega nada (e sem repetir a mesma frase).
+ * Não fecha a conversa: a barra não some na cara do candidato. */
 const SAFE_CLOSE_REPLIES = [
-  "Entendi. Beleza, pode seguir.",
-  "Combinado, fica à vontade pra continuar.",
-  "Beleza, segue no seu ritmo.",
+  "Entendi. Me conta como você pensou nessa parte?",
+  "Certo. E qual seria o seu próximo passo aí?",
+  "Faz sentido. Que caso você testaria primeiro?",
 ];
 
 /** Orçamento de um turno: o candidato está esperando a voz. Passou disso, sai a fala de reserva. */
@@ -110,6 +111,7 @@ export async function runInterviewerTurn(
       }),
     hintsPolicy: session.config.hints,
     analystNotes: analystNotesOf(session),
+    hypothesis: session.analyst.insights?.candidateThinking?.trim() || undefined,
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(
       // Fora de balão, as falas recentes já vêm em `messages` (a conversa livre do fase.ts duplicaria).
@@ -144,7 +146,7 @@ export async function runInterviewerTurn(
         console.info(`[interviewer] fala barrada (${verdict.reason}) sem tempo para outra: ${output.reply}`);
         output = opening
           ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-          : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: true, gaveHint: false, challenge: null };
+          : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
       } else if (!verdict.safe) {
         console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
         output = await generate(
@@ -157,10 +159,10 @@ export async function runInterviewerTurn(
         session.analyst.costUsd += second.costUsd;
         if (!second.safe) {
           console.info(`[interviewer] fala barrada de novo (${second.reason}): ${output.reply}`);
-          // Na abertura, a pergunta preparada (já filtrada); depois, reconhece e fecha.
+          // Na abertura, a pergunta preparada (já filtrada); depois, uma pergunta aberta segura, sem fechar.
           output = opening
             ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-            : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: true, gaveHint: false, challenge: null };
+            : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: false, gaveHint: false, challenge: null };
         }
       }
     }

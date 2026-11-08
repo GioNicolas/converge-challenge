@@ -31,6 +31,17 @@ import { useSession } from "./ide/useSession";
 
 /** Margem esquerda do editor: o painel do problema (360) mais o respiro. */
 const MARGEM_PROBLEMA = 392;
+/** Margem esquerda com o painel recolhido (só a pílula, que fica em cima do editor). */
+const MARGEM_RECOLHIDO = 12;
+/** Espaço em cima do editor com o painel recolhido: pílula e botões numa fileira só. */
+const TOPO_RECOLHIDO = 104;
+/** Silêncio real depois da última frase final antes de a fala ir para o Totti (evita cortar no meio da frase). */
+const FALA_SILENCIO_MS = 750;
+/** Teto da espera acima: ruído constante no microfone não segura a fala para sempre. */
+const FALA_ESPERA_MAX_MS = 4000;
+/** Barge-in: volume do microfone e tempo contínuo acima dele para o Totti calar e ouvir o candidato. */
+const VOLUME_BARGE_IN = 0.2;
+const TEMPO_BARGE_IN_MS = 380;
 
 /**
  * A IDE não tem inteligência: mostra, captura e obedece (docs/contexto-pessoa-a-ide.md).
@@ -95,6 +106,11 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const midia = useMidiaLocal();
   const voz = useVozAgente({ bloqueada: session.ended });
   const [parcial, setParcial] = useState("");
+  // Atalhos de desenvolvimento só com ?debug=1 (lido no cliente, depois da hidratação).
+  const [debug, setDebug] = useState(false);
+  useEffect(() => {
+    setDebug(new URLSearchParams(window.location.search).get("debug") === "1");
+  }, []);
 
   // Turnos (as mesmas regras do quadro, lib/sessao/turnos.ts): o agente fala sem pedir licença, mas só numa
   // pausa de quem está falando. Uma transcrição parcial ou som no microfone seguram a vez dele.
@@ -150,6 +166,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     applyCommands,
     onAgentReply: falarNaVez,
     onCancelReply: voz.parar,
+    getLiveCode: capture.getLiveCode,
   });
 
   // Fala do candidato (Scribe, ou o navegador como reserva): numa conversa vira a resposta dele; fora dela vai
@@ -186,7 +203,44 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       ouvirSolta(pendente);
     }
   });
-  const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
+  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de 750 ms de
+  // silêncio real. Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
+  const bufferFalaRef = useRef("");
+  const bufferDesdeRef = useRef(0);
+  const bufferTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const aoFalar = useCallback((texto: string) => {
+    const limpo = texto.trim();
+    if (!limpo) return;
+    if (!bufferFalaRef.current) bufferDesdeRef.current = Date.now();
+    bufferFalaRef.current = [bufferFalaRef.current, limpo].filter(Boolean).join(" ");
+    clearTimeout(bufferTimerRef.current);
+    const checar = () => {
+      const agora = Date.now();
+      const falando = falaParcialRef.current || agora - ultimaFalaEmRef.current < FALA_SILENCIO_MS;
+      if (falando && agora - bufferDesdeRef.current < FALA_ESPERA_MAX_MS) {
+        bufferTimerRef.current = setTimeout(checar, 150);
+        return;
+      }
+      const pronto = bufferFalaRef.current;
+      bufferFalaRef.current = "";
+      if (pronto) falaRef.current(pronto);
+    };
+    bufferTimerRef.current = setTimeout(checar, FALA_SILENCIO_MS);
+  }, []);
+  useEffect(() => () => clearTimeout(bufferTimerRef.current), []);
+
+  // Barge-in: o candidato fala por cima do Totti (volume alto e contínuo): o Totti cala e ouve.
+  const vozParar = voz.parar;
+  const volumeRef = useRef(0);
+  volumeRef.current = midia.volume;
+  const passouDoLimite = midia.microfoneLigado && midia.volume > VOLUME_BARGE_IN;
+  useEffect(() => {
+    if (voz.estado !== "falando" || !passouDoLimite) return;
+    const id = setTimeout(() => {
+      if (volumeRef.current > VOLUME_BARGE_IN) vozParar();
+    }, TEMPO_BARGE_IN_MS);
+    return () => clearTimeout(id);
+  }, [voz.estado, passouDoLimite, vozParar]);
   const escuta = useTranscricao({
     stream: midia.stream,
     // A escuta só para enquanto a voz do agente toca (preparando, ela ainda ouve: o candidato pode continuar falando).
@@ -306,6 +360,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     setFinalizando(true);
     session.setIncomingBlip(null);
     try {
+      // O último código chega ao servidor antes do encerramento olhar para ele.
+      await capture.flushSnapshot().catch(() => {});
       const res = await postEncerramento(session.sessionId);
       if (res.blip) {
         void chat.openBlip(res.blip);
@@ -389,8 +445,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         {/* O editor começa depois do painel do problema, para não ficar escondido */}
         {/* Coluna do editor: editor e testes. Com a conversa aberta, abre espaço à direita para a barra lateral. */}
         <div
-          className="flex h-full flex-col pr-3 pb-3 transition-[margin] duration-300 ease-suave"
-          style={{ marginLeft: MARGEM_PROBLEMA, marginRight: chat.open ? LARGURA_PAINEL + 12 : 0 }}
+          className="flex h-full flex-col pr-3 pb-3 transition-[margin,padding] duration-300 ease-suave"
+          style={{
+            marginLeft: problemaAberto ? MARGEM_PROBLEMA : MARGEM_RECOLHIDO,
+            paddingTop: problemaAberto ? 0 : TOPO_RECOLHIDO,
+            marginRight: chat.open ? LARGURA_PAINEL + 12 : 0,
+          }}
         >
           <div className="min-h-0 flex-1">
             <CodeEditor
@@ -412,7 +472,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         </div>
 
         {/* Coluna da questão: o painel do problema e, logo abaixo dele, os botões */}
-        <div className="absolute top-4 left-4 z-10 flex w-[360px] flex-col gap-3">
+        <div className={`absolute top-4 left-4 z-10 flex flex-col gap-3 ${problemaAberto ? "w-[360px]" : "max-w-[calc(100%-2rem)] items-start"}`}>
           <ProblemPanel
             problem={problem}
             elapsedMs={session.elapsedMs}
@@ -468,7 +528,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             </button>
           </div>
           {/* Atalhos de desenvolvimento: no fluxo da coluna, nunca por cima dos botões */}
-          {process.env.NODE_ENV !== "production" && (
+          {debug && process.env.NODE_ENV !== "production" && (
             <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
@@ -516,6 +576,14 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         />
 
         <Legenda fala={voz.fala ?? legendaSemVoz} />
+        {/* Com a conversa fechada, o que o candidato está dizendo aparece numa legenda discreta */}
+        {parcial.trim() && !chat.open && !session.ended && (
+          <div className="pointer-events-none absolute right-4 bottom-[124px] left-4 z-10 flex justify-center md:left-[392px]">
+            <p role="status" className="vidro max-w-[560px] truncate rounded-full px-4 py-1.5 text-[13px] italic text-texto-suave shadow-cartao">
+              {parcial}
+            </p>
+          </div>
+        )}
         <PainelConversa
           aberto={chat.open}
           assunto={chat.blip?.preview ?? (chat.livre ? ASSUNTO_LIVRE : undefined)}

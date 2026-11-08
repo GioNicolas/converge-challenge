@@ -20,19 +20,19 @@ const KICKOFF_TOPIC_LABEL = "seu plano de ataque";
 /** Prioridade da abertura (alta, mas ela tem regras próprias). */
 const KICKOFF_PRIORITY = 0.95;
 /** Tempo pra ler o enunciado antes de a abertura aparecer. */
-const KICKOFF_READING_MS = 40_000;
+const KICKOFF_READING_MS = 14_000;
 /** Se o candidato já escreveu esse tanto de linhas além do código inicial, ele escolheu codar primeiro: a abertura é descartada. */
-const KICKOFF_SKIP_IF_LINES_WRITTEN = 3;
+const KICKOFF_SKIP_IF_LINES_WRITTEN = 12;
 /** Prioridade mínima, já com o boost de momento, pra uma pergunta virar blip. */
 const BLIP_THRESHOLD = 0.6;
 /** Perguntas com prioridade a partir daqui pulam a regra de 60 s entre blips (não as outras). */
 const HIGH_PRIORITY = 0.9;
 /** Balão nunca aberto some sozinho depois desse tempo (a pergunta vira "ignorada"). */
 const BLIP_EXPIRY_MS = 80_000;
-/** Nenhum blip do Analyst nos primeiros 45 s da sessão. */
-const WARMUP_MS = 45_000;
+/** Nenhum blip do Analyst nos primeiros 20 s da sessão. */
+const WARMUP_MS = 20_000;
 /** Intervalo mínimo entre o createdAt do último blip e o próximo. */
-const MIN_GAP_BETWEEN_BLIPS_MS = 45_000;
+const MIN_GAP_BETWEEN_BLIPS_MS = 22_000;
 /** Intervalo mínimo depois que a última conversa terminou (vale pra toda pergunta). */
 const MIN_GAP_AFTER_CONVERSATION_MS = 20_000;
 /** Máximo de blips do Analyst por sessão (a abertura não conta). */
@@ -66,7 +66,7 @@ const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_cl
 /** Depois desse tempo sem evento novo, o candidato também conta como parado. */
 const IDLE_AFTER_MS = 8000;
 /** Escrevendo a primeira versão, só interrompe quem parou de mexer no código há esse tempo (provável travada). */
-const IMPLEMENTING_IDLE_MS = 20_000;
+const IMPLEMENTING_IDLE_MS = 14_000;
 /** Mexendo para melhorar uma solução que já funciona: só interrompe depois desse tempo sem mexer. */
 const OPTIMIZING_IDLE_MS = 45_000;
 /** Pergunta que não virou balão nesse tempo fica velha: o candidato já está pensando em outra coisa. */
