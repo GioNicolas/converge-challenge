@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CONCEITOS_EMPECILHO, Report } from "@/lib/contracts";
@@ -96,6 +96,7 @@ function SessionReport({ id }: { id: string }) {
       </section>
 
       {report.adaptation && <Adaptacao a={report.adaptation} />}
+      {report.learning && <Aprendizado l={report.learning} />}
 
       <section className="grid gap-4 sm:grid-cols-3">
         <List title="Pontos fortes" items={report.strengths} />
@@ -143,6 +144,128 @@ function Adaptacao({ a }: { a: NonNullable<Report["adaptation"]> }) {
             <span className="numero">{formatMs(e.t)}</span> — {e.text}
           </p>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function plural(n: number, um: string, varios: string): string {
+  return `${n} ${n === 1 ? um : varios}`;
+}
+
+interface Momento {
+  t: number;
+  titulo: string;
+  texto: ReactNode;
+}
+
+/** Dicas, travamentos e a mudança numa linha do tempo só. Tudo medido pelos eventos da sessão. */
+function momentosDoAprendizado(l: NonNullable<Report["learning"]>): Momento[] {
+  const momentos: Momento[] = [];
+  for (const s of l.stuck) {
+    const como = s.cause === "falhas_seguidas" ? "execuções seguidas falhando sem passar em mais testes" : "parado sem mexer no código, com ele falhando";
+    const ajuda = s.hintLevels.length ? `com a dica ${s.hintLevels.join(" e ")}` : "sem dica";
+    momentos.push({
+      t: s.startedAt,
+      titulo: "Travou",
+      texto: (
+        <>
+          {como} ·{" "}
+          {s.unstuckAt === null ? (
+            `não destravou até o fim (${ajuda})`
+          ) : (
+            <>
+              destravou <span className="numero">{formatMs(s.unstuckAt - s.startedAt)}</span> depois, {ajuda}
+            </>
+          )}
+        </>
+      ),
+    });
+  }
+  for (const h of l.hints) {
+    momentos.push({
+      t: h.t,
+      titulo: `Dica ${h.level} de ${l.hintsAvailable}`,
+      texto: (
+        <>
+          “{h.text}” ·{" "}
+          {h.codePassing ? (
+            "veio com o código já passando nos testes"
+          ) : h.unstuckAt === null ? (
+            "não passou em mais testes depois dela"
+          ) : (
+            <>
+              passou em mais testes <span className="numero">{formatMs(h.unstuckAt - h.t)}</span> depois (
+              {plural(h.runsAfter, "execução", "execuções")})
+            </>
+          )}
+        </>
+      ),
+    });
+  }
+  if (l.change) {
+    const c = l.change;
+    momentos.push({
+      t: c.announcedAt,
+      titulo: "Mudança",
+      texto: (
+        <>
+          exige {CONCEITOS_EMPECILHO[c.concept]} ·{" "}
+          {c.adaptedAt === null ? (
+            "não passou nos testes dela"
+          ) : (
+            <>
+              adaptou <span className="numero">{formatMs(c.adaptedAt - c.announcedAt)}</span> depois
+            </>
+          )}{" "}
+          · {plural(c.failedAttempts, "tentativa", "tentativas")} sem passar ·{" "}
+          {c.hintsUsed === 0 ? "sem dica" : plural(c.hintsUsed, "dica", "dicas")} ·{" "}
+          {c.conversationTurns === 0 ? "não falou na conversa da mudança" : `falou ${plural(c.conversationTurns, "vez", "vezes")} na conversa`}
+        </>
+      ),
+    });
+  }
+  return momentos.sort((a, b) => a.t - b.t);
+}
+
+/** Como ele pensa e aprende: que dica precisou, quanto levou para destravar e como reagiu à mudança. Fora da nota geral. */
+function Aprendizado({ l }: { l: NonNullable<Report["learning"]> }) {
+  const momentos = momentosDoAprendizado(l);
+  return (
+    <section className="space-y-3">
+      <h2 className="titulo">Aprendizado</h2>
+      <div className="rounded-padrao bg-superficie p-4 shadow-cartao">
+        <p className="flex justify-between font-medium">
+          Como destravou e usou a ajuda
+          <span className="numero">{l.score === null ? "Sem nota" : `${l.score}/4`}</span>
+        </p>
+        <p className="label-pequena">
+          {l.hints.length} de {plural(l.hintsAvailable, "dica permitida", "dicas permitidas")} ·{" "}
+          {plural(l.stuck.length, "travamento", "travamentos")} · fora da nota geral
+        </p>
+        {momentos.length === 0 ? (
+          <p className="mt-2 text-corpo">Não travou nem precisou de dica nesta entrevista.</p>
+        ) : (
+          <ul className="mt-2 space-y-1 text-corpo">
+            {momentos.map((m, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="numero shrink-0 text-texto-suave">{formatMs(m.t)}</span>
+                <span>
+                  <span className="font-medium">{m.titulo}</span> — {m.texto}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {l.evidence.length > 0 && (
+          <div className="mt-3 space-y-1 border-t border-borda pt-3">
+            {l.evidence.map((e, i) => (
+              <p key={i} className="text-corpo text-texto-suave">
+                <span className="numero">{formatMs(e.t)}</span> — {e.text}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

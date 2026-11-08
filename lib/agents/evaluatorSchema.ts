@@ -18,6 +18,13 @@ export const EvaluatorOutput = z.object({
       evidence: z.array(z.object({ at: z.string(), text: z.string() })).max(3),
     })
     .nullish(),
+  /** Só quando houve dica, travamento ou mudança: como ele destravou e usou a ajuda. Fica fora da nota geral. */
+  learning: z
+    .object({
+      score: z.number().int().min(1).max(4).nullable(),
+      evidence: z.array(z.object({ at: z.string(), text: z.string() })).max(3),
+    })
+    .nullish(),
   summary: z.string(),
   strengths: z.array(z.string()).max(4),
   concerns: z.array(z.string()).max(4),
