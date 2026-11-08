@@ -23,9 +23,10 @@ import {
   type RespostaAnalise,
 } from "../sessao/tipos";
 import { kvPadrao } from "@/lib/storage/kv";
+import { contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
 import { registrarNoIndice } from "../resultados";
 import { contexto } from "./contexto";
-import { finalizarEmSegundoPlano } from "./scorecard";
+import { devHabilitado, finalizarEmSegundoPlano } from "./scorecard";
 import { criarLimitador, erro, ipDe, json, lerJsonValidado, type ParamsId } from "./http";
 
 export const PRAZO_ANALISE_MS = 8000;
@@ -63,7 +64,8 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
 
   // O plano da vaga (se vier) escolhe o kit e calibra a entrevista; config desconhecida cai na entrevista padrão.
   const encontrada = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
-  // Regras ativas da squad no começo da sessão: o entrevistador e o scorecard usam (ver `lib/squad-memory/`).
+  // Regras ativas da vaga no começo da sessão (só as aprendidas nesta vaga): o entrevistador e o scorecard
+  // usam (ver `lib/squad-memory/config.ts`).
   const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
   const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;
@@ -291,6 +293,80 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder });
 
   return json(resposta);
+}
+
+// ---------------------------------------------------------------------------------------------
+// POST /api/sessoes/[id]/empecilho
+// ---------------------------------------------------------------------------------------------
+
+const EsquemaEmpecilho = z.object({
+  sessao_id: z.string().min(1).max(80),
+  fase: EsquemaFase,
+  grafo: z.string().max(60_000).optional(),
+  /** Demo: solta a mudança agora, sem esperar a hora certa. Só fora de produção. */
+  forcar: z.boolean().optional(),
+});
+
+/** Por que a mudança não pode sair agora (null = pode). */
+function motivoDoEmpecilho(estado: EstadoSessao, grafo: string, forcar: boolean, agora: number): string | null {
+  const jaAnunciado = !!estado.empecilho;
+  if (forcar) return esperaDoEmpecilhoForcado({ fase: estado.fase, jaAnunciado });
+  const ultimaDoAgente = estado.conversa.findLast((f) => f.quem === "agente");
+  return esperaDoEmpecilho({
+    agora,
+    fase: estado.fase,
+    faseIniciadaEm: estado.faseIniciadaEm,
+    duracaoDaFaseS: estado.tempos[estado.fase],
+    jaAnunciado,
+    respondendoPergunta: estado.plin === "PERGUNTA_ATIVA",
+    componentes: contarComponentes(grafo),
+    ultimaFalaDoAgenteEm: ultimaDoAgente?.em ?? null,
+  });
+}
+
+/**
+ * O quadro pede a mudança no problema quando acha que é a hora (pausa do candidato, meio da entrevista).
+ * O servidor confere de novo, entrega o texto pronto do kit (nunca gerado pelo modelo), guarda no estado
+ * e registra o evento `empecilho` na linha do tempo. Resposta: { empecilho: { fala, requisito } | null, motivo }.
+ */
+export async function empecilhoHandler(req: Request, { params }: ParamsId): Promise<Response> {
+  const { id } = await params;
+  const corpo = await lerJsonValidado(req, EsquemaEmpecilho, MAX_CORPO_ANALISE);
+  if (!corpo.ok) return corpo.resposta;
+  const forcar = corpo.dados.forcar === true;
+  if (forcar && !devHabilitado()) return erro(404, "indisponível");
+  if (!eIdPlausivel(id)) return notFound();
+  if (corpo.dados.sessao_id !== id) return erro(400, "sessao_id do corpo diferente da rota");
+
+  const ctx = contexto();
+  const sessao = await ctx.repositorio.obter(id);
+  if (!sessao) return notFound();
+  const alvo = await resolverAvaliacao(sessao.avaliacaoId);
+  if (!alvo) return erro(500, "avaliação da sessão indisponível");
+  const empecilho = alvo.problema.empecilho;
+  if (!empecilho) return json({ empecilho: null, motivo: "problema sem mudança prevista" });
+
+  const agora = ctx.agora();
+  const estado = sincronizarFase(sessao.estado, corpo.dados.fase, agora);
+  const motivo = motivoDoEmpecilho(estado, corpo.dados.grafo ?? "", forcar, agora);
+  if (motivo) {
+    // A fase avançou com este pedido: guarda, para o tempo da fase não recomeçar no próximo.
+    if (estado !== sessao.estado) await ctx.repositorio.salvarEstado(id, estado);
+    return json({ empecilho: null, motivo });
+  }
+
+  const novo = transicionar(estado, {
+    tipo: "EMPECILHO_ANUNCIADO",
+    empecilho: { id: empecilho.id, fala: empecilho.fala, requisito: empecilho.requisito, exige: empecilho.exige, forcado: forcar },
+  }, agora).estado;
+  await ctx.repositorio.salvarEstado(id, novo);
+  await ctx.repositorio.anexarEventos(id, [{
+    horario: new Date(agora).toISOString(),
+    tipo: "empecilho",
+    dados: { id: empecilho.id, tipo: empecilho.tipo, fala: empecilho.fala, requisito: empecilho.requisito, forcado: forcar },
+  }]);
+  console.warn("[agente] empecilho_anunciado", { sessao_id: id, fase: estado.fase, empecilho: empecilho.id, forcado: forcar });
+  return json({ empecilho: { fala: empecilho.fala, requisito: empecilho.requisito }, motivo: null });
 }
 
 // ---------------------------------------------------------------------------------------------

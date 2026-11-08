@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { InterviewConfig } from "@/lib/contracts";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import type { EventoLog, TipoEvento } from "@/lib/pre-entrevista/log";
@@ -8,6 +8,7 @@ import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
 import type { Origem } from "@/lib/pre-entrevista/rascunho";
 import { useTranscricao } from "@/lib/transcricao/useTranscricao";
 import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { DICA_DITADO_ENTER, useEnterDoDitado } from "@/lib/transcricao/enterDoDitado";
 import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import ControleVoz from "@/components/voz/ControleVoz";
@@ -100,6 +101,7 @@ export default function PaginaPreEntrevista() {
   const [fala, setFala] = useState("");
   const [enviando, setEnviando] = useState(false);
   const listaConversaRef = useRef<HTMLDivElement>(null);
+  const campoFalaRef = useRef<HTMLTextAreaElement>(null);
 
   // Logs
   const [filtro, setFiltro] = useState<"todos" | TipoEvento>("todos");
@@ -222,12 +224,8 @@ export default function PaginaPreEntrevista() {
     }
   }
 
-  function teclaNaFala(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void enviarFala();
-    }
-  }
+  // Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
+  const teclaNaFala = useEnterDoDitado(ditado, () => void enviarFala());
 
   function abrirRevisao() {
     if (!estado) return;
@@ -394,6 +392,7 @@ export default function PaginaPreEntrevista() {
           <ControleVoz voz={voz} texto={ultimaFala?.role === "agente" ? ultimaFala.text : undefined} disabled={enviando || revisando || finalizando || !!final} />
           <div className="mt-3 flex gap-2">
             <textarea
+              ref={campoFalaRef}
               value={fala}
               readOnly={ditado.ativa}
               onChange={(e) => setFala(e.target.value)}
@@ -403,7 +402,7 @@ export default function PaginaPreEntrevista() {
               placeholder="Responda ao Totti (Enter envia, Shift+Enter quebra linha)"
               className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm disabled:bg-neutral-100"
             />
-            <BotaoDitado transcricao={ditado} disabled={enviando} />
+            <BotaoDitado transcricao={ditado} campo={campoFalaRef} disabled={enviando} />
             <button
               onClick={() => void enviarFala()}
               disabled={enviando || !fala.trim() || ditado.ativa}
@@ -412,7 +411,7 @@ export default function PaginaPreEntrevista() {
               Enviar
             </button>
           </div>
-          <EstadoDitado transcricao={ditado} />
+          <EstadoDitado transcricao={ditado} dica={DICA_DITADO_ENTER} />
         </Bloco>
 
         {/* Coluna 2: rascunho ao vivo */}

@@ -26,6 +26,14 @@ function withProblem(config: InterviewConfig, problemId: string): InterviewConfi
 
 // A conversa conta como gatilho quando termina (blip_closed), não a cada fala.
 const ANALYZED_TRIGGERS = new Set<SessionEvent["type"]>(["pause", "run", "paste", "blip_closed"]);
+/** Fala solta (fora de balão) longa o bastante para mudar a leitura do Analyst: ele explicou o raciocínio. */
+const PALAVRAS_PARA_ANALISAR = 12;
+
+function disparaAnalise(event: SessionEvent): boolean {
+  if (ANALYZED_TRIGGERS.has(event.type)) return true;
+  return event.type === "speech" && event.role === "candidate" && event.blipId === undefined
+    && event.text.trim().split(/\s+/).length >= PALAVRAS_PARA_ANALISAR;
+}
 
 export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
@@ -35,7 +43,8 @@ export async function POST(request: Request) {
   }
   const event = parsed.data;
 
-  // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started.
+  // A sessão nasce com a config da vaga (saída da pré-entrevista), achada pelo configId do session_started,
+  // e com as regras ativas aprendidas nesta vaga (não as de outras vagas da empresa).
   const config = event.type === "session_started" ? comRegrasDaSquad(withProblem(await resolveConfig(event.configId), event.problemId)) : undefined;
   // Outra instância pode ter a sessão (Vercel): restaura antes de criar uma nova por cima.
   if (event.type !== "session_started") await sessaoViva(event.sessionId);
@@ -53,7 +62,7 @@ export async function POST(request: Request) {
     // Na Vercel, o que roda depois da resposta é interrompido a menos que a plataforma saiba que ainda há trabalho.
     after(() => waitForEvaluation(session).then(() => guardarSessao(session)));
   }
-  if (ANALYZED_TRIGGERS.has(event.type)) {
+  if (disparaAnalise(event)) {
     try {
       await runAnalyst(session, event);
     } catch (err) {

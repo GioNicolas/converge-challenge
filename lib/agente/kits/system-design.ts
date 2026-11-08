@@ -89,6 +89,15 @@ export const KIT_SYSTEM_DESIGN: Kit = {
         "Onde está o gargalo com leitura 100x maior?",
         "Se o cache cair, o que acontece?",
       ],
+      empecilho: {
+        id: "encurtador_volume_10x",
+        tipo: "requisito_muda",
+        fala:
+          "Uma mudança no problema: a empresa fechou com um parceiro grande e o volume de links novos cresceu dez vezes, então agora são um bilhão por mês, e os acessos cresceram na mesma proporção. Olhando o que você já desenhou, onde isso pega primeiro?",
+        requisito: "Mudança: volume 10x (1 bilhão de URLs/mês)",
+        exige:
+          "Rever gargalos com 10x mais escrita e leitura: geração de código sem colisão em escala, particionamento ou réplicas do banco, cache e o espaço do código curto (7 caracteres ainda bastam?).",
+      },
     },
     {
       id: "chat_tempo_real",
@@ -129,6 +138,15 @@ export const KIT_SYSTEM_DESIGN: Kit = {
         "Como você garante a ordem dentro de uma conversa?",
         "Como fica um grupo de 256 pessoas?",
       ],
+      empecilho: {
+        id: "chat_grupos_grandes",
+        tipo: "requisito_muda",
+        fala:
+          "Uma mudança no problema: o produto decidiu liberar grupos de até cem mil pessoas, tipo canais de comunidade, e eles devem continuar recebendo as mensagens na hora. Pensando no caminho de uma mensagem que você desenhou, o que muda com um grupo desse tamanho?",
+        requisito: "Mudança: grupos de até 100 mil pessoas",
+        exige:
+          "Rever o fan-out: entregar uma mensagem para 100 mil membros sem travar quem envia (fila e fan-out assíncrono, ou leitura sob demanda para grupos grandes), push em massa e o custo de guardar uma cópia por membro.",
+      },
     },
     {
       id: "pagamentos_instantaneos",
@@ -168,6 +186,15 @@ export const KIT_SYSTEM_DESIGN: Kit = {
         "Como você prova para a auditoria o que aconteceu com uma transferência?",
         "Débito feito e crédito falhou: e agora?",
       ],
+      empecilho: {
+        id: "pagamentos_externo_fora",
+        tipo: "parte_cai",
+        fala:
+          "Uma mudança no problema: o sistema central dos outros bancos passou a ficar fora do ar por até dez minutos algumas vezes por dia, sem aviso, e o cliente não pode ser cobrado duas vezes nem perder dinheiro. No fluxo que você desenhou, o que acontece com uma transferência para outro banco nesse intervalo?",
+        requisito: "Mudança: sistema externo cai até 10 min",
+        exige:
+          "Tratar a indisponibilidade do sistema externo: fila com nova tentativa e idempotência, estado pendente visível para o cliente, timeout, estorno ou compensação se não concluir e reconciliação depois.",
+      },
     },
   ],
 };

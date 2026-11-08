@@ -10,8 +10,11 @@ import type { Criterio, Kit, Problema } from "./kits/tipos";
 import {
   montarSistemaDinamicoScorecard,
   montarSistemaEstaticoScorecard,
+  NIVEIS_ADAPTACAO,
   NOME_SCHEMA_SCORECARD,
 } from "./prompts/scorecard";
+
+export { NIVEIS_ADAPTACAO };
 import type { EstadoSessao } from "./sessao/estado";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { SquadRule } from "../contracts";
@@ -56,6 +59,13 @@ export const EsquemaSaidaScorecardLlm = z.object({
   pontos_fortes: z.array(z.string()),
   pontos_a_aprofundar: z.array(z.string()),
   briefing_para_proxima_etapa: z.string(),
+  /** Como o candidato reagiu à mudança no problema. null quando não houve mudança. Fora da nota geral. */
+  adaptacao: z.object({
+    nota: z.number().nullable(),
+    justificativa: z.string(),
+    /** Só falas do candidato depois da mudança, copiadas literalmente. */
+    evidencias: z.array(z.object({ horario: z.string(), texto: z.string() })),
+  }).nullable().optional(),
 });
 export type SaidaScorecardLlm = z.infer<typeof EsquemaSaidaScorecardLlm>;
 
@@ -76,6 +86,20 @@ export type CriterioAvaliado = {
   regras_squad?: SquadRule[];
 };
 
+/** A mudança no problema e como o candidato se adaptou. Não entra na nota geral. */
+export type AdaptacaoAvaliada = {
+  /** O requisito novo, como foi escrito no quadro. */
+  mudanca: string;
+  anunciada_em: string;
+  forcada: boolean;
+  nota: number | null;
+  justificativa: string;
+  evidencias: Evidencia[];
+  /** Fatos medidos pela linha do tempo, sem o modelo. */
+  desenhos_depois: number;
+  falas_depois: number;
+};
+
 export type Recomendacao = "avancar" | "avancar_com_ressalvas" | "nao_avancar" | "evidencia_insuficiente";
 
 export type Scorecard = {
@@ -91,6 +115,8 @@ export type Scorecard = {
   origem: "llm" | "fake";
   /** O que as guardas corrigiram (para o recrutador/dev; vazio = nada). */
   ajustes: string[];
+  /** Presente quando o entrevistador trouxe a mudança no problema. */
+  adaptacao?: AdaptacaoAvaliada;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -389,6 +415,60 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
   };
 }
 
+/**
+ * Adaptação à mudança: só existe se a mudança foi anunciada. Prova só com falas do candidato DEPOIS do
+ * anúncio, que existam de verdade; nota sem prova vira null. Os números (desenhos e falas depois) vêm
+ * da linha do tempo, não do modelo.
+ */
+export function avaliarAdaptacao(saida: SaidaScorecardLlm["adaptacao"], estado: EstadoSessao, fontes: FontesDeProva): { adaptacao?: AdaptacaoAvaliada; ajustes: string[] } {
+  const e = estado.empecilho;
+  if (!e) return { ajustes: saida ? ["adaptação ignorada: não houve mudança no problema"] : [] };
+  const ajustes: string[] = [];
+  const depois = (horario: string) => Date.parse(horario) >= e.anunciadoEm;
+  // A mesma fala pode vir da linha do tempo e da conversa do estado: conta uma vez.
+  const falasDepois = [...new Map(fontes.falas.filter((f) => depois(f.horario)).map((f) => [f.texto.trim(), f])).values()];
+  const evidencias: Evidencia[] = [];
+  for (const ev of saida?.evidencias ?? []) {
+    const r = citacaoExiste(ev.texto, falasDepois);
+    if (!r.ok) {
+      ajustes.push("evidência de adaptação descartada: citação não encontrada depois da mudança");
+      continue;
+    }
+    evidencias.push({ tipo: "fala", horario: falasDepois[r.indice].horario, texto: ev.texto });
+  }
+  const bruta = saida?.nota ?? null;
+  let nota = bruta !== null && Number.isInteger(bruta) && bruta >= 1 && bruta <= 4 ? bruta : null;
+  if (bruta !== null && nota === null) ajustes.push("nota de adaptação removida: deve ser inteira entre 1 e 4");
+  if (nota !== null && evidencias.length === 0) {
+    ajustes.push("nota de adaptação removida: sem fala do candidato depois da mudança");
+    nota = null;
+  }
+  const desenhosDepois = new Set(fontes.desenhos.filter((d) => depois(d.horario)).map((d) => d.grafo)).size;
+  const justificativa = nota === null
+    ? falasDepois.length === 0 && desenhosDepois === 0
+      ? "O candidato não falou nem mexeu no desenho depois da mudança."
+      : "Sem fala do candidato que mostre como ele lidou com a mudança."
+    : saida?.justificativa.trim() || NIVEIS_ADAPTACAO[nota as 1 | 2 | 3 | 4];
+  return {
+    adaptacao: {
+      mudanca: e.requisito,
+      anunciada_em: new Date(e.anunciadoEm).toISOString(),
+      forcada: e.forcado,
+      nota,
+      justificativa,
+      evidencias,
+      desenhos_depois: desenhosDepois,
+      falas_depois: falasDepois.length,
+    },
+    ajustes,
+  };
+}
+
+function comAdaptacao(scorecard: Scorecard, saida: SaidaScorecardLlm["adaptacao"], estado: EstadoSessao, fontes: FontesDeProva): Scorecard {
+  const { adaptacao, ajustes } = avaliarAdaptacao(saida, estado, fontes);
+  return { ...scorecard, ajustes: [...scorecard.ajustes, ...ajustes], ...(adaptacao ? { adaptacao } : {}) };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Entrada, prompt e geração
 // ---------------------------------------------------------------------------------------------
@@ -419,6 +499,8 @@ function resumoDoEvento(e: EventoArmazenado): string {
       return `candidato clicou no plin: ${cortar(String(d.pergunta ?? ""), 300)}`;
     case "fase":
       return `fase=${String(d.fase ?? "")}`;
+    case "empecilho":
+      return `o entrevistador trouxe uma mudança no problema: ${cortar(String(d.fala ?? ""), 600)} (escrito no quadro: ${cortar(String(d.requisito ?? ""), 100)})`;
     default:
       return "";
   }
@@ -440,7 +522,10 @@ export function montarEntradaDoPrompt(entrada: EntradaScorecard, fontes: FontesD
     .join("\n");
   const imagens = entrada.imagens.map((i) => `- imagem ${i.numero} (${i.horario})`).join("\n");
   const regrasDaSquad = blocoDasRegras(entrada.estado.plano?.regrasSquad, "observar");
-  return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(fontes.grafoFinal, 20_000), imagens, ...(regrasDaSquad ? { regrasDaSquad } : {}) };
+  const e = entrada.estado.empecilho;
+  const mudanca = e ? { horario: new Date(e.anunciadoEm).toISOString(), fala: e.fala, exige: e.exige } : undefined;
+  return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(fontes.grafoFinal, 20_000), imagens,
+    ...(regrasDaSquad ? { regrasDaSquad } : {}), ...(mudanca ? { mudanca } : {}) };
 }
 
 export type DepsScorecard = {
@@ -474,7 +559,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       timeoutMs,
       sinal: controle.signal,
     })]);
-    return marcarRegrasDaSquad(aplicarGuardas(r.dados, {
+    return comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(r.dados, {
       sessaoId: entrada.sessaoId,
       candidatoId: entrada.candidatoId,
       problemaId: deps.problema.id,
@@ -482,7 +567,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       fontes,
       origem: "llm",
       agora: deps.agora,
-    }), entrada.estado);
+    }), entrada.estado), r.dados.adaptacao, entrada.estado, fontes);
   } finally {
     clearTimeout(timer);
   }
@@ -516,7 +601,8 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     pontos_a_aprofundar: criterios.filter(c => c.nota !== null && c.nota < 3).map(c => c.justificativa).slice(0, 3),
     briefing_para_proxima_etapa: "[fake] Scorecard determinístico construído do livro de observações.",
   };
-  return marcarRegrasDaSquad(aplicarGuardas(saida, {
+  // Sem modelo não há julgamento da adaptação: só os números medidos pela linha do tempo.
+  return comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(saida, {
     sessaoId: entrada.sessaoId,
     candidatoId: entrada.candidatoId,
     problemaId: deps.problema.id,
@@ -524,7 +610,7 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     fontes,
     origem: "fake",
     agora: deps.agora,
-  }), entrada.estado);
+  }), entrada.estado), null, entrada.estado, fontes);
 }
 
 /** Critério com nota que uma regra da squad afeta ganha a marca "aprendido com o time". */

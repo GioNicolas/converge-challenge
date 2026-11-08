@@ -6,7 +6,7 @@ import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
-import { conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
+import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
 import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
@@ -27,6 +27,14 @@ const SAFE_CLOSE_REPLIES = [
   "Combinado, fica à vontade pra continuar.",
   "Beleza, segue no seu ritmo.",
 ];
+
+/** Orçamento de um turno: o candidato está esperando a voz. Passou disso, sai a fala de reserva. */
+const PRAZO_TURNO_MS = 7_000;
+/** Cada geração tem no máximo isto; o filtro de fala, bem menos. */
+const PRAZO_GERACAO_MS = 4_500;
+const PRAZO_FILTRO_MS = 1_800;
+/** Só gera de novo (fala barrada) se ainda couber uma geração e um filtro no orçamento. */
+const MIN_PARA_REGERAR_MS = 3_000;
 
 /** A primeira das opções que o entrevistador ainda não disse nesta sessão (ou a menos recente, se já disse todas). */
 export function falaNaoRepetida(opcoes: string[], jaDitas: string[]): string {
@@ -104,7 +112,8 @@ export async function runInterviewerTurn(
     analystNotes: analystNotesOf(session),
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(
-      conversasFeitas(session).filter((c) => c.pergunta !== found?.question.question),
+      // Fora de balão, as falas recentes já vêm em `messages` (a conversa livre do fase.ts duplicaria).
+      conversasFeitas(session).filter((c) => c.pergunta !== found?.question.question && (found || c.pergunta !== CONVERSA_LIVRE)),
     ),
     messages: req.messages,
   };
@@ -114,8 +123,10 @@ export async function runInterviewerTurn(
   const candidateLines = req.messages.filter((m) => m.role === "candidate").slice(-3).map((m) => m.text);
   const opening = found !== undefined && req.messages.length === 0;
   let output: InterviewerOutput;
+  const prazo = Date.now() + PRAZO_TURNO_MS;
+  const sobra = () => prazo - Date.now();
   try {
-    output = await generate(session, system, user);
+    output = await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra()));
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
     if (!opening && (output.respond === false || output.reply.trim() === "")) {
@@ -126,16 +137,23 @@ export async function runInterviewerTurn(
     // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
     if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
-      const verdict = await checkReply(output.reply, candidateLines, permitido, code);
+      const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
       session.analyst.costUsd += verdict.costUsd;
-      if (!verdict.safe) {
+      if (!verdict.safe && sobra() < MIN_PARA_REGERAR_MS) {
+        // Sem tempo para outra geração: a reserva segura, sem arriscar a fala barrada.
+        console.info(`[interviewer] fala barrada (${verdict.reason}) sem tempo para outra: ${output.reply}`);
+        output = opening
+          ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
+          : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: true, gaveHint: false, challenge: null };
+      } else if (!verdict.safe) {
         console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
         output = await generate(
           session,
           system,
           `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
+          Math.min(PRAZO_GERACAO_MS, sobra() - PRAZO_FILTRO_MS / 2),
         );
-        const second = await checkReply(output.reply, candidateLines, permitido, code);
+        const second = await checkReply(output.reply, candidateLines, permitido, code, Math.max(500, Math.min(PRAZO_FILTRO_MS, sobra())));
         session.analyst.costUsd += second.costUsd;
         if (!second.safe) {
           console.info(`[interviewer] fala barrada de novo (${second.reason}): ${output.reply}`);
@@ -255,8 +273,16 @@ function anunciarEmpecilho(session: SessionState, blipId: string): string {
   return empecilho.announcement;
 }
 
-async function generate(session: SessionState, system: string, user: string): Promise<InterviewerOutput> {
-  const result = await completeJson({ role: "interviewer", system, user, schema: InterviewerOutput });
+/** Uma geração da fala no modelo de conversa (rápido, sem raciocínio), cancelada de verdade no prazo. */
+async function generate(session: SessionState, system: string, user: string, prazoMs: number): Promise<InterviewerOutput> {
+  const result = await completeJson({
+    role: "conversa",
+    system,
+    user,
+    schema: InterviewerOutput,
+    prazoMs,
+    signal: AbortSignal.timeout(Math.max(500, prazoMs)),
+  });
   session.analyst.costUsd += result.costUsd;
   return result.data;
 }

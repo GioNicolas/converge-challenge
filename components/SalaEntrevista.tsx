@@ -16,6 +16,7 @@ import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { useLiberarAudio } from "@/lib/presenca/useLiberarAudio";
 import { FilaFalas } from "@/lib/audio/filaFalas";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
@@ -114,6 +115,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const cursor = useRef<ControleCursor | null>(null);
   const entrevista = useEntrevista(quadro, cursor, { configId, convite });
   const midia = useMidiaLocal();
+  // A voz do agente chega depois de uma chamada assíncrona: libera o áudio no primeiro gesto (ex.: "Começar").
+  useLiberarAudio();
   const { estado, sessao } = entrevista;
   const liberarMidia = midia.liberar;
   useEffect(() => {
@@ -132,6 +135,12 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       );
     }
   }, [demo.requisitos, quadro]);
+  // A mudança no problema (empecilho) entra como um requisito novo, escrito do mesmo jeito que os outros.
+  const { combinar: combinarRequisito } = demo;
+  const requisitoDaMudanca = entrevista.empecilho?.requisito;
+  useEffect(() => {
+    if (requisitoDaMudanca) combinarRequisito(requisitoDaMudanca);
+  }, [requisitoDaMudanca, combinarRequisito]);
   const [conversaAberta, setConversaAberta] = useState(false);
   const [confirmandoFim, setConfirmandoFim] = useState(false);
   const cancelarFim = useCallback(() => setConfirmandoFim(false), []);
@@ -205,10 +214,13 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const [falaPendente, setFalaPendente] = useState<string | null>(null);
   const enviarVozRef = useRef(enviarDigitado);
   enviarVozRef.current = enviarDigitado;
+  const pedirParaRepetirRef = useRef(entrevista.pedirParaRepetir);
+  pedirParaRepetirRef.current = entrevista.pedirParaRepetir;
   const filaVoz = useRef<FilaFalas | null>(null);
   if (!filaVoz.current) filaVoz.current = new FilaFalas(
     async (texto) => { await enviarVozRef.current(texto); setFalaPendente(null); },
-    (texto) => setFalaPendente(texto),
+    // Falhou mesmo com a nova tentativa: o agente pede para repetir (a conversa segue) e o texto fica para reenviar.
+    (texto) => { setFalaPendente(texto); pedirParaRepetirRef.current(); },
   );
   useEffect(() => {
     if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
@@ -242,6 +254,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           iniciadaEm={entrevista.iniciadaEm}
           midia={midia}
           agenteFalando={entrevista.agenteFalando}
+          agentePensando={entrevista.aguardandoResposta}
           onClicarPlin={entrevista.clicarPlin}
           onTerminarResposta={entrevista.terminarResposta}
           onEncerrar={() => setConfirmandoFim(true)}
@@ -281,6 +294,17 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           >
             Demo: combinar requisito
           </button>
+          {/* Só fora de produção (o servidor também recusa): solta a mudança no problema na hora. */}
+          {(process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_E2E === "1") && usarServidor() && (
+            <button
+              type="button"
+              onClick={entrevista.forcarEmpecilho}
+              disabled={entrevista.empecilho !== null || entrevista.forcandoEmpecilho}
+              className="rounded-full border border-borda bg-vidro px-3.5 py-1.5 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[opacity,transform] duration-150 ease-suave outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95 disabled:opacity-40"
+            >
+              Forçar empecilho
+            </button>
+          )}
         </div>
       )}
 

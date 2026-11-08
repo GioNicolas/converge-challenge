@@ -3,7 +3,7 @@
 // de desenho à imagem do quadro daquele momento. Nada da ficha ou dos sinais esperados sai daqui.
 import type { EventoArmazenado, SessaoArmazenada } from "./armazenamento/repositorio";
 import type { Kit, Problema } from "./kits/tipos";
-import type { Recomendacao, Scorecard } from "./scorecard";
+import { NIVEIS_ADAPTACAO, type Recomendacao, type Scorecard } from "./scorecard";
 
 export type ProvaVista =
   | { tipo: "fala"; momento: string | null; texto: string }
@@ -28,6 +28,18 @@ export type CriterioVisto = {
   aprendidoComOTime?: { texto: string; efeito: "valoriza" | "penaliza" }[];
 };
 
+/** A mudança no problema que o entrevistador trouxe e como o candidato se adaptou (fora da nota geral). */
+export type AdaptacaoVista = {
+  mudanca: string;
+  momento: string | null;
+  nota: number | null;
+  significado: string | null;
+  justificativa: string;
+  provas: ProvaVista[];
+  desenhosDepois: number;
+  falasDepois: number;
+};
+
 export type RelatorioVisto = {
   sessaoId: string;
   candidatoId: string;
@@ -47,6 +59,7 @@ export type RelatorioVisto = {
   provasConferidas: number;
   ajustes: string[];
   demonstracao: boolean;
+  adaptacao: AdaptacaoVista | null;
 };
 
 /** "- [e1] Postgres (elipse)  dentro de [m1] ..." -> e1: "Postgres". Vale o nome mais recente. */
@@ -164,5 +177,15 @@ export function montarRelatorio(p: {
     provasConferidas: criterios.reduce((n, c) => n + c.provas.length, 0),
     ajustes: scorecard.ajustes,
     demonstracao: scorecard.origem === "fake",
+    adaptacao: scorecard.adaptacao ? {
+      mudanca: scorecard.adaptacao.mudanca,
+      momento: formatarMomento(scorecard.adaptacao.anunciada_em, inicio),
+      nota: scorecard.adaptacao.nota,
+      significado: scorecard.adaptacao.nota !== null ? NIVEIS_ADAPTACAO[scorecard.adaptacao.nota as 1 | 2 | 3 | 4] ?? null : null,
+      justificativa: scorecard.adaptacao.justificativa,
+      provas: scorecard.adaptacao.evidencias.map((e): ProvaVista => ({ tipo: "fala", momento: formatarMomento(e.horario, inicio), texto: e.texto ?? "" })),
+      desenhosDepois: scorecard.adaptacao.desenhos_depois,
+      falasDepois: scorecard.adaptacao.falas_depois,
+    } : null,
   };
 }

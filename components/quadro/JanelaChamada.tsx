@@ -50,6 +50,8 @@ type Props = {
   iniciadaEm: number | null;
   midia: ReturnType<typeof useMidiaLocal>;
   agenteFalando: boolean;
+  /** Uma resposta está sendo preparada (pedido em voo ou voz sendo sintetizada): o orbe mostra que pensa. */
+  agentePensando?: boolean;
   onClicarPlin: () => void;
   onTerminarResposta: () => void;
   onEncerrar: () => void;
@@ -64,6 +66,7 @@ export default function JanelaChamada({
   iniciadaEm,
   midia,
   agenteFalando,
+  agentePensando = false,
   onClicarPlin,
   onTerminarResposta,
   onEncerrar,
@@ -73,7 +76,13 @@ export default function JanelaChamada({
   const segundos = useCronometro(iniciadaEm, ativa);
   const temDuvida = duvidaPendente;
 
-  const estadoAgente: EstadoAgente = temDuvida ? "duvida" : agenteFalando ? "falando" : "ouvindo";
+  const estadoAgente: EstadoAgente = temDuvida
+    ? "duvida"
+    : agenteFalando
+      ? "falando"
+      : agentePensando
+        ? "pensando"
+        : "ouvindo";
 
   // --- Arrastar e encaixar no canto ---
   const caixa = useRef<HTMLDivElement>(null);
@@ -193,6 +202,7 @@ export default function JanelaChamada({
               <span className="mx-0.5 flex size-8 items-center justify-center"><Perola estado={estadoAgente} tamanho={24} /></span>
               <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
               {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
+              {estadoAgente === "pensando" && <span className="text-texto-claro/60">Pensando…</span>}
               <span className={midia.microfoneLigado ? "text-texto-claro/70" : "text-perigo"}>
                 <Icone nome={midia.microfoneLigado ? "microfone" : "microfoneDesligado"} tamanho={15} />
               </span>

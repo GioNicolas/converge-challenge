@@ -7,6 +7,7 @@ import type { z } from "zod";
 import { featherless } from "./featherless";
 import { openrouter } from "./openrouter";
 import {
+  abortError,
   chatJsonVia,
   isAbortError,
   LlmProviderError,
@@ -19,7 +20,10 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "evaluator" | "fast" | "interviewer";
+export type LlmRole = "analyst" | "conversa" | "evaluator" | "fast" | "filtro" | "interviewer";
+
+/** Papéis que respondem a uma fala ao vivo: passam na frente na fila e nunca esperam uma análise acabar. */
+const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "fast", "filtro", "interviewer"]);
 
 interface RoleConfig {
   featherlessEnv: string;
@@ -28,8 +32,14 @@ interface RoleConfig {
   openrouterDefault: string;
   maxTokens: number;
   reasoningEffort?: ReasoningEffort;
-  /** Ms até disparar o OpenRouter em paralelo. Sem valor: só fallback em erro. */
+  /** Só este provedor recebe `reasoningEffort` (quando os modelos dos dois são de famílias diferentes). */
+  raciocinioSo?: LlmProviderName;
+  /** Provedor que corre primeiro. Padrão: Featherless (o outro é a reserva, no hedge, no erro e no breaker). */
+  primario?: LlmProviderName;
+  /** Ms até disparar a reserva em paralelo. Sem valor: só fallback em erro. */
   hedgeMs?: number;
+  /** Temperatura (sem valor, a do provedor). */
+  temperatura?: number;
 }
 
 const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
@@ -60,6 +70,34 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // A recrutadora espera o relatório na tela: com a Featherless lenta, o OpenRouter entra em paralelo.
     hedgeMs: 30_000,
   },
+  conversa: {
+    // Responde à fala do candidato ao vivo (quadro e live coding). Medido com scripts/bench-conversa.ts:
+    // gemini-3.5-flash-lite acertou 27/27 casos com p50 1,6 s e p95 2,0 s; o GLM na Featherless acerta, mas
+    // tem p95 de ~8 s. Por isso aqui o OpenRouter é o primário e o GLM, a reserva.
+    primario: "openrouter",
+    openrouterEnv: "CONVERSA_AO_VIVO_MODEL",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
+    featherlessEnv: "CONVERSA_AO_VIVO_RESERVA_MODEL",
+    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    maxTokens: 1500,
+    reasoningEffort: "low",
+    raciocinioSo: "featherless",
+    hedgeMs: 2_500,
+    // Mais baixa que o padrão: as regras de fala (devolver a vez, recusar, ficar quieto) variavam entre rodadas.
+    temperatura: 0.3,
+  },
+  filtro: {
+    // Confere a fala do live coding antes de ela sair (spoiler, validação): fica no caminho de cada resposta.
+    // O gemma na Featherless passava de 1,8 s e o filtro era pulado; no OpenRouter fica abaixo de 1 s.
+    primario: "openrouter",
+    openrouterEnv: "FILTRO_MODEL",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
+    featherlessEnv: "FILTRO_RESERVA_MODEL",
+    featherlessDefault: "google/gemma-4-31B-it",
+    maxTokens: 300,
+    hedgeMs: 2_000,
+    temperatura: 0,
+  },
   interviewer: {
     featherlessEnv: "INTERVIEWER_MODEL",
     featherlessDefault: "zai-org/GLM-5.3-Flash",
@@ -74,7 +112,7 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
 
 const PROVIDERS: Record<LlmProviderName, ProviderConfig> = { featherless, openrouter };
 
-// Breaker: 2 derrotas seguidas da Featherless desviam o papel para o OpenRouter por 3 min.
+// Breaker: 2 derrotas seguidas do primário desviam o papel para a reserva por 3 min.
 const BREAKER_THRESHOLD = 2;
 const BREAKER_WINDOW_MS = 3 * 60_000;
 
@@ -117,7 +155,9 @@ const state: LlmState = (globalWithLlm.__llmState ??= {
   providers: { featherless: emptyProvider(), openrouter: emptyProvider() },
   roles: {
     analyst: { consecutiveSlow: 0 },
+    conversa: { consecutiveSlow: 0 },
     fast: { consecutiveSlow: 0 },
+    filtro: { consecutiveSlow: 0 },
     evaluator: { consecutiveSlow: 0 },
     interviewer: { consecutiveSlow: 0 },
   },
@@ -157,9 +197,15 @@ function providerSnapshot(p: ProviderStore): ProviderStatsSnapshot {
   };
 }
 
-function roleSnapshot(r: RoleStore, now: number): RoleStatsSnapshot {
-  if (!breakerActive(r, now) || r.directUntil === undefined) return { route: "featherless" };
-  return { route: "openrouter", directUntil: r.directUntil };
+function roleSnapshot(role: LlmRole, r: RoleStore, now: number): RoleStatsSnapshot {
+  const [primario, reserva] = ordem(role);
+  if (!breakerActive(r, now) || r.directUntil === undefined) return { route: primario };
+  return { route: reserva, directUntil: r.directUntil };
+}
+
+/** [primário, reserva] do papel. */
+function ordem(role: LlmRole): [LlmProviderName, LlmProviderName] {
+  return ROLE_CONFIG[role].primario === "openrouter" ? ["openrouter", "featherless"] : ["featherless", "openrouter"];
 }
 
 export function getLlmStats(): LlmStatsSnapshot {
@@ -170,10 +216,12 @@ export function getLlmStats(): LlmStatsSnapshot {
       openrouter: providerSnapshot(state.providers.openrouter),
     },
     roles: {
-      analyst: roleSnapshot(state.roles.analyst, now),
-      fast: roleSnapshot(state.roles.fast, now),
-      evaluator: roleSnapshot(state.roles.evaluator, now),
-      interviewer: roleSnapshot(state.roles.interviewer, now),
+      analyst: roleSnapshot("analyst", state.roles.analyst, now),
+      conversa: roleSnapshot("conversa", state.roles.conversa, now),
+      fast: roleSnapshot("fast", state.roles.fast, now),
+      filtro: roleSnapshot("filtro", state.roles.filtro, now),
+      evaluator: roleSnapshot("evaluator", state.roles.evaluator, now),
+      interviewer: roleSnapshot("interviewer", state.roles.interviewer, now),
     },
   };
 }
@@ -213,12 +261,13 @@ async function attempt<T>(provider: ProviderConfig, req: ChatRequest<T>): Promis
 // ---- Roteamento ----
 
 interface RoleCall<T> {
-  base: Omit<ChatRequest<T>, "model" | "signal">;
+  base: Omit<ChatRequest<T>, "model" | "signal" | "reasoningEffort">;
   models: Record<LlmProviderName, string>;
+  reasoning: Record<LlmProviderName, ReasoningEffort | undefined>;
 }
 
 function requestFor<T>(call: RoleCall<T>, name: LlmProviderName, signal?: AbortSignal): ChatRequest<T> {
-  return { ...call.base, model: call.models[name], signal };
+  return { ...call.base, model: call.models[name], reasoningEffort: call.reasoning[name], signal };
 }
 
 type Settled<T> = { ok: true; value: ChatJsonResult<T> } | { ok: false; error: string };
@@ -256,83 +305,103 @@ function breakerIsOpen(role: LlmRole): boolean {
   if (store.directUntil === undefined) return false;
   if (breakerActive(store, Date.now())) return true;
   store.directUntil = undefined;
-  console.info(`[llm] ${role}: rota direta encerrada, voltando à featherless`);
+  console.info(`[llm] ${role}: rota direta encerrada, voltando à ${ordem(role)[0]}`);
   return false;
 }
 
-function noteFeatherlessWon(role: LlmRole): void {
+function notePrimaryWon(role: LlmRole): void {
   state.roles[role].consecutiveSlow = 0;
 }
 
-function noteFeatherlessSlow(role: LlmRole): void {
+function notePrimarySlow(role: LlmRole): void {
   const store = state.roles[role];
   store.consecutiveSlow += 1;
   if (store.consecutiveSlow < BREAKER_THRESHOLD || breakerActive(store, Date.now())) return;
   store.directUntil = Date.now() + BREAKER_WINDOW_MS;
-  console.info(`[llm] ${role}: rota direta openrouter por ${BREAKER_WINDOW_MS / 60_000} min`);
+  console.info(`[llm] ${role}: rota direta ${ordem(role)[1]} por ${BREAKER_WINDOW_MS / 60_000} min`);
 }
 
-/** Featherless primeiro; se até hedgeMs não responder, o OpenRouter corre junto. O primeiro sucesso vence. */
-async function callHedged<T>(role: LlmRole, call: RoleCall<T>, hedgeMs: number): Promise<ChatJsonResult<T>> {
-  const flAbort = new AbortController();
-  const orAbort = new AbortController();
-  const fl = runSettled(call, "featherless", flAbort.signal);
+/** Um controlador que aborta junto com o sinal de quem chamou (se houver). */
+function filhoDe(signal: AbortSignal | undefined): AbortController {
+  const c = new AbortController();
+  if (signal?.aborted) c.abort();
+  else signal?.addEventListener("abort", () => c.abort(), { once: true });
+  return c;
+}
+
+/** Primário primeiro; se até hedgeMs não responder, a reserva corre junto. O primeiro sucesso vence. */
+async function callHedged<T>(
+  role: LlmRole,
+  call: RoleCall<T>,
+  hedgeMs: number,
+  signal?: AbortSignal,
+): Promise<ChatJsonResult<T>> {
+  if (signal?.aborted) throw abortError();
+  const [primario, reserva] = ordem(role);
+  const priAbort = filhoDe(signal);
+  const resAbort = filhoDe(signal);
+  const pri = runSettled(call, primario, priAbort.signal);
 
   let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
   const hedgeFired = new Promise<"hedge">((resolve) => {
     hedgeTimer = setTimeout(() => resolve("hedge"), hedgeMs);
   });
-  const early = await Promise.race([fl, hedgeFired]);
+  const early = await Promise.race([pri, hedgeFired]);
   clearTimeout(hedgeTimer);
+  if (signal?.aborted) throw abortError();
 
   if (early !== "hedge" && early.ok) {
-    recordWin("featherless");
-    noteFeatherlessWon(role);
+    recordWin(primario);
+    notePrimaryWon(role);
     return early.value;
   }
   console.info(
     early === "hedge"
-      ? `[llm] ${role}: featherless >${Math.round(hedgeMs / 1000)}s, disparando openrouter`
-      : `[llm] ${role}: ${early.error.slice(0, 160)}; disparando openrouter`,
+      ? `[llm] ${role}: ${primario} >${(hedgeMs / 1000).toFixed(1)}s, disparando ${reserva}`
+      : `[llm] ${role}: ${early.error.slice(0, 160)}; disparando ${reserva}`,
   );
 
-  const or = runSettled(call, "openrouter", orAbort.signal);
-  const winner = await firstSuccess([fl, or]);
+  const res = runSettled(call, reserva, resAbort.signal);
+  const winner = await firstSuccess([pri, res]);
+  if (signal?.aborted) throw abortError();
   if (!winner.ok) {
-    noteFeatherlessSlow(role);
+    notePrimarySlow(role);
     throw new Error(winner.error);
   }
   recordWin(winner.value.provider);
-  if (winner.value.provider === "featherless") {
-    orAbort.abort();
-    noteFeatherlessWon(role);
+  if (winner.value.provider === primario) {
+    resAbort.abort();
+    notePrimaryWon(role);
   } else {
-    flAbort.abort();
-    noteFeatherlessSlow(role);
+    priAbort.abort();
+    notePrimarySlow(role);
   }
   return winner.value;
 }
 
-/** Sem hedge (evaluator): Featherless; em erro, uma tentativa no OpenRouter. */
-async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>): Promise<ChatJsonResult<T>> {
-  const primary = await runSettled(call, "featherless");
+/** Sem hedge (evaluator): primário; em erro, uma tentativa na reserva. */
+async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
+  const [primario, reserva] = ordem(role);
+  const primary = await runSettled(call, primario, signal);
+  if (signal?.aborted) throw abortError();
   if (primary.ok) {
-    recordWin("featherless");
-    noteFeatherlessWon(role);
+    recordWin(primario);
+    notePrimaryWon(role);
     return primary.value;
   }
-  noteFeatherlessSlow(role);
-  console.info(`[llm] ${role}: ${primary.error.slice(0, 160)}; tentando openrouter`);
-  const backup = await runSettled(call, "openrouter");
+  notePrimarySlow(role);
+  console.info(`[llm] ${role}: ${primary.error.slice(0, 160)}; tentando ${reserva}`);
+  const backup = await runSettled(call, reserva, signal);
+  if (signal?.aborted) throw abortError();
   if (backup.ok) {
-    recordWin("openrouter");
+    recordWin(reserva);
     return backup.value;
   }
   throw new Error(`${primary.error} | ${backup.error}`);
 }
 
-async function callOnly<T>(call: RoleCall<T>, name: LlmProviderName): Promise<ChatJsonResult<T>> {
-  const result = await attempt(PROVIDERS[name], requestFor(call, name));
+async function callOnly<T>(call: RoleCall<T>, name: LlmProviderName, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
+  const result = await attempt(PROVIDERS[name], requestFor(call, name, signal));
   recordWin(name);
   return result;
 }
@@ -341,30 +410,44 @@ export async function completeJson<T>(opts: {
   role: LlmRole;
   system: string;
   user: string;
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   maxTokens?: number;
+  /**
+   * Cancela a chamada de verdade: aborta o fetch em voo, sai da fila e não faz retry. Sem isso, uma chamada
+   * que o chamador já desistiu de esperar segura a vaga do provedor e a próxima fala fica na fila.
+   */
+  signal?: AbortSignal;
+  /** Tempo total que quem chama vai esperar: retry e reparo de JSON só acontecem se couberem nele. */
+  prazoMs?: number;
 }): Promise<ChatJsonResult<T>> {
   const cfg = ROLE_CONFIG[opts.role];
+  const fala = PAPEIS_DE_FALA.has(opts.role);
   const call: RoleCall<T> = {
     base: {
       system: opts.system,
       user: opts.user,
       schema: opts.schema,
       maxTokens: opts.maxTokens ?? cfg.maxTokens,
-      reasoningEffort: cfg.reasoningEffort,
-      priorizarLatencia: opts.role === "interviewer" || opts.role === "fast",
+      ...(cfg.temperatura !== undefined ? { temperature: cfg.temperatura } : {}),
+      priorizarLatencia: fala,
+      prioridade: fala ? "fala" : "fundo",
+      ...(opts.prazoMs !== undefined ? { prazoAte: Date.now() + opts.prazoMs } : {}),
     },
     models: {
       featherless: process.env[cfg.featherlessEnv] || cfg.featherlessDefault,
       openrouter: process.env[cfg.openrouterEnv] || cfg.openrouterDefault,
     },
+    reasoning: {
+      featherless: !cfg.raciocinioSo || cfg.raciocinioSo === "featherless" ? cfg.reasoningEffort : undefined,
+      openrouter: !cfg.raciocinioSo || cfg.raciocinioSo === "openrouter" ? cfg.reasoningEffort : undefined,
+    },
   };
 
   // Sem chave do OpenRouter: comportamento de antes, só Featherless.
-  if (!process.env.OPENROUTER_API_KEY) return callOnly(call, "featherless");
-  if (breakerIsOpen(opts.role)) return callOnly(call, "openrouter");
-  if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call);
-  return callHedged(opts.role, call, cfg.hedgeMs);
+  if (!process.env.OPENROUTER_API_KEY) return callOnly(call, "featherless", opts.signal);
+  if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
+  if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
+  return callHedged(opts.role, call, cfg.hedgeMs, opts.signal);
 }
 
 function errMsg(err: unknown): string {

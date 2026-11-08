@@ -53,6 +53,18 @@ export type EvidenciaDoCriterio = { positivo: number; negativo: number; neutro: 
 
 export type FalaRegistrada = FalaRecente & { em: number };
 
+/** A mudança no problema que o entrevistador já anunciou (uma por sessão). Só servidor. */
+export type EmpecilhoAnunciado = {
+  id: string;
+  fala: string;
+  requisito: string;
+  /** O que a mudança pede do desenho (vai à análise e ao scorecard, nunca ao navegador). */
+  exige: string;
+  anunciadoEm: number;
+  fase: Fase;
+  forcado: boolean;
+};
+
 export type EstadoSessao = {
   fase: Fase;
   faseIniciadaEm: number | null;
@@ -82,6 +94,8 @@ export type EstadoSessao = {
   cobertura: Record<string, EvidenciaDoCriterio>;
   /** Registro da conversa, em ordem. */
   conversa: FalaRegistrada[];
+  /** Mudança no problema já anunciada. Ausente/null: ainda não (estados antigos não têm o campo). */
+  empecilho?: EmpecilhoAnunciado | null;
 };
 
 export type EventoSessao =
@@ -102,7 +116,9 @@ export type EventoSessao =
   | { tipo: "ELEMENTOS_ALTERADOS"; ids: string[] }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
-  | { tipo: "AGENTE_FALOU"; texto: string };
+  | { tipo: "AGENTE_FALOU"; texto: string }
+  /** O entrevistador trouxe a mudança no problema (só a primeira vale). */
+  | { tipo: "EMPECILHO_ANUNCIADO"; empecilho: Omit<EmpecilhoAnunciado, "anunciadoEm" | "fase"> };
 
 /** O que a rota precisa fazer depois da transição. */
 export type Efeito =
@@ -137,6 +153,7 @@ export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; p
       (opcoes.criterios ?? []).map((c) => [c, { positivo: 0, negativo: 0, neutro: 0 }]),
     ),
     conversa: [],
+    empecilho: null,
   };
 }
 
@@ -336,6 +353,17 @@ export function transicionar(
       }
       return { estado: livre, efeitos };
     }
+
+    case "EMPECILHO_ANUNCIADO":
+      if (estado.empecilho) return nada;
+      return {
+        estado: {
+          ...estado,
+          empecilho: { ...evento.empecilho, anunciadoEm: agora, fase: estado.fase },
+          conversa: [...estado.conversa, { quem: "agente", texto: evento.empecilho.fala, em: agora }],
+        },
+        efeitos: [],
+      };
 
     case "AGENTE_FALOU":
       return {

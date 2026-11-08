@@ -48,6 +48,12 @@ export type InterviewMode = z.infer<typeof InterviewMode>;
 
 export const InterviewConfig = z.object({
   id: z.string(),
+  /**
+   * Vaga a que a config pertence (id da vaga no workspace ou `jobPostingId` do Slack), quando é diferente do `id`.
+   * Sem valor: a config é a própria vaga, e o `id` vale como id da vaga. As regras da squad só valem na vaga de
+   * onde vieram (ver `vagaDaConfig` em `lib/squad-memory/config.ts`).
+   */
+  vagaId: z.string().optional(),
   mode: InterviewMode.default("live_coding"),
   roleTitle: z.string(),
   /** Descrição da vaga colada pela recrutadora na pré-entrevista. */

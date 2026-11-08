@@ -5,7 +5,7 @@
 // o texto vai para o Totti; na tela aparece só o cartão do documento.
 // Depois de a pessoa enviar, o Totti "lê" por um instante e só então aparecem os três pontinhos de quem
 // está digitando (ver ATRASO_DIGITANDO), como numa conversa de verdade.
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUp, FileText, Paperclip } from "lucide-react";
 import Perola, { BarrasDeVoz, type EstadoPerola } from "@/components/totti/Perola";
@@ -15,6 +15,7 @@ import { curvaSaida } from "@/lib/design/motion";
 import ListaDocumentos from "./ListaDocumentos";
 import { useTranscricao } from "@/lib/transcricao/useTranscricao";
 import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { DICA_DITADO_ENTER, useEnterDoDitado } from "@/lib/transcricao/enterDoDitado";
 import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import ControleVoz from "@/components/voz/ControleVoz";
@@ -104,12 +105,8 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
     setAnexos([]);
   }
 
-  function aoTeclar(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      enviar();
-    }
-  }
+  // Enter com o microfone ligado para de ouvir; o Enter seguinte envia o que foi transcrito.
+  const aoTeclar = useEnterDoDitado(ditado, enviar);
 
   // O palco: a pérola do Totti no centro, no estado do momento (pensando, falando, ouvindo você).
   const estadoPerola: EstadoPerola =
@@ -197,7 +194,7 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
           <ListaDocumentos documentos={anexos} onRemover={(id) => setAnexos((l) => l.filter((d) => d.id !== id))} compacto />
         )}
         {erroAnexo && <p className="text-[13px] text-alerta-texto">{erroAnexo}</p>}
-        <EstadoDitado transcricao={ditado} />
+        <EstadoDitado transcricao={ditado} dica={DICA_DITADO_ENTER} />
         <div className="flex items-end gap-1.5 rounded-[24px] bg-superficie p-1.5 shadow-[inset_0_0_0_1px_rgb(245_240_232/0.1)] transition-shadow duration-[240ms] focus-within:shadow-[inset_0_0_0_1.5px_rgb(245_240_232/0.45)]">
           <button
             type="button"
@@ -230,7 +227,7 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
             aria-label="Mensagem para o Totti"
             className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
-          <BotaoDitado transcricao={ditado} disabled={pensando || lendo || bloqueada || pausarEntrada} />
+          <BotaoDitado transcricao={ditado} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} />
           <button
             onClick={enviar}
             disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo || bloqueada || ditado.ativa}

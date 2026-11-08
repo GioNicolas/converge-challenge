@@ -22,18 +22,32 @@ export interface ChatRequest<T> {
   model: string;
   system: string;
   user: string;
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   maxTokens: number;
   reasoningEffort?: ReasoningEffort;
   priorizarLatencia?: boolean;
+  /**
+   * "fala": resposta ao vivo, passa na frente na fila do provedor. "fundo" (análise, relatório) nunca ocupa a
+   * última vaga livre, para uma fala nunca esperar uma análise acabar. Padrão: "fundo".
+   */
+  prioridade?: Prioridade;
+  /** Epoch ms até quando quem chama espera: o timeout do fetch, o retry e o reparo respeitam esse prazo. */
+  prazoAte?: number;
+  /** Temperatura da amostragem; sem valor, a do provedor. */
+  temperature?: number;
   /** Cancela a chamada: para de esperar, aborta o fetch em voo e não faz retry. */
   signal?: AbortSignal;
 }
+
+export type Prioridade = "fala" | "fundo";
 
 export interface ExtraBodyOpts {
   reasoningEffort?: ReasoningEffort;
   priorizarLatencia?: boolean;
 }
+
+/** Abaixo disto não vale começar um retry ou um reparo de JSON: não daria tempo de responder. */
+const MIN_PARA_NOVA_TENTATIVA_MS = 1_500;
 
 export interface ProviderConfig {
   name: LlmProviderName;
@@ -90,61 +104,109 @@ type Parsed<T> = { ok: true; data: T } | { ok: false; error: string };
 // Retriable failure (network, timeout, 429, 5xx). Anything else is thrown as a plain Error.
 class RetryableError extends Error {}
 
-// One FIFO semaphore per provider, on globalThis so Next dev hot reload doesn't duplicate it.
+// One semaphore per provider, on globalThis so Next dev hot reload doesn't duplicate it.
+// Live replies ("fala") are served before background work ("fundo"), and background work never takes the
+// last free slot: an analysis can make a reply wait for a slot, but never for another analysis to finish.
+interface Espera {
+  prioridade: Prioridade;
+  grant: () => void;
+}
 interface Semaphore {
   active: number;
-  queue: Array<() => void>;
+  fundo: number;
+  queue: Espera[];
 }
 const globalWithSems = globalThis as typeof globalThis & {
-  __llmSemaphores?: Map<LlmProviderName, Semaphore>;
+  __llmSemaphores2?: Map<LlmProviderName, Semaphore>;
 };
-const semaphores = (globalWithSems.__llmSemaphores ??= new Map<LlmProviderName, Semaphore>());
+const semaphores = (globalWithSems.__llmSemaphores2 ??= new Map<LlmProviderName, Semaphore>());
 
 function semaphoreFor(name: LlmProviderName): Semaphore {
   let sem = semaphores.get(name);
   if (!sem) {
-    sem = { active: 0, queue: [] };
+    sem = { active: 0, fundo: 0, queue: [] };
     semaphores.set(name, sem);
   }
   return sem;
 }
 
-// Takes a slot, or waits in FIFO order. A waiter that gets aborted leaves the queue.
-function acquire(sem: Semaphore, limit: number, signal: AbortSignal | undefined): Promise<void> {
+function cabe(sem: Semaphore, limit: number, prioridade: Prioridade): boolean {
+  if (sem.active >= limit) return false;
+  return prioridade === "fala" || limit <= 1 || sem.fundo < limit - 1;
+}
+
+function ocupar(sem: Semaphore, prioridade: Prioridade): void {
+  sem.active++;
+  if (prioridade === "fundo") sem.fundo++;
+}
+
+/** Entrega as vagas livres: falas primeiro (em ordem de chegada), depois o fundo. */
+function distribuir(sem: Semaphore, limit: number): void {
+  for (const prioridade of ["fala", "fundo"] as const) {
+    for (let i = 0; i < sem.queue.length; ) {
+      const espera = sem.queue[i];
+      if (espera.prioridade !== prioridade || !cabe(sem, limit, prioridade)) {
+        i++;
+        continue;
+      }
+      sem.queue.splice(i, 1);
+      ocupar(sem, prioridade);
+      espera.grant();
+    }
+  }
+}
+
+/** Situação da fila de um provedor (para log e testes). */
+export function filaDoProvedor(name: LlmProviderName): { ativas: number; fundo: number; esperando: number } {
+  const sem = semaphoreFor(name);
+  return { ativas: sem.active, fundo: sem.fundo, esperando: sem.queue.length };
+}
+
+// Takes a slot, or waits. A waiter that gets aborted leaves the queue.
+function acquire(
+  sem: Semaphore,
+  limit: number,
+  prioridade: Prioridade,
+  signal: AbortSignal | undefined,
+): Promise<void> {
   if (signal?.aborted) return Promise.reject(abortError());
-  if (sem.active < limit && sem.queue.length === 0) {
-    sem.active++;
+  const ninguemNaFrente = !sem.queue.some((e) => prioridade === "fundo" || e.prioridade === "fala");
+  if (ninguemNaFrente && cabe(sem, limit, prioridade)) {
+    ocupar(sem, prioridade);
     return Promise.resolve();
   }
   return new Promise<void>((resolve, reject) => {
-    const grant = () => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
+    const espera: Espera = {
+      prioridade,
+      grant: () => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      },
     };
     const onAbort = () => {
-      const i = sem.queue.indexOf(grant);
+      const i = sem.queue.indexOf(espera);
       if (i >= 0) sem.queue.splice(i, 1);
       reject(abortError());
     };
-    sem.queue.push(grant);
+    sem.queue.push(espera);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
 async function withSlot<R>(
   provider: ProviderConfig,
+  prioridade: Prioridade,
   signal: AbortSignal | undefined,
   fn: () => Promise<R>,
 ): Promise<R> {
   const sem = semaphoreFor(provider.name);
-  await acquire(sem, provider.concurrency, signal);
+  await acquire(sem, provider.concurrency, prioridade, signal);
   try {
     return await fn();
   } finally {
-    // Hand the slot straight to the next waiter (active count unchanged), or free it.
-    const next = sem.queue.shift();
-    if (next) next();
-    else sem.active--;
+    sem.active--;
+    if (prioridade === "fundo") sem.fundo--;
+    distribuir(sem, provider.concurrency);
   }
 }
 
@@ -205,16 +267,25 @@ interface PostResult {
   upstream?: string;
 }
 
-async function postOnce(
-  provider: ProviderConfig,
-  body: Record<string, unknown>,
-  apiKey: string,
-  totals: Totals,
-  signal: AbortSignal | undefined,
-): Promise<PostResult> {
+interface Chamada {
+  provider: ProviderConfig;
+  apiKey: string;
+  totals: Totals;
+  prioridade: Prioridade;
+  prazoAte?: number;
+  signal: AbortSignal | undefined;
+}
+
+function restante(prazoAte: number | undefined): number {
+  return prazoAte === undefined ? Number.POSITIVE_INFINITY : prazoAte - Date.now();
+}
+
+async function postOnce(c: Chamada, body: Record<string, unknown>): Promise<PostResult> {
+  const { provider, apiKey, totals, signal } = c;
   // Timeout and external cancel both abort the fetch; only the timeout is retriable.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timeoutMs = Math.max(1, Math.min(TIMEOUT_MS, restante(c.prazoAte)));
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onExternalAbort = () => controller.abort();
   signal?.addEventListener("abort", onExternalAbort, { once: true });
   try {
@@ -245,7 +316,7 @@ async function postOnce(
     if (signal?.aborted) throw abortError();
     if (err instanceof RetryableError) throw err;
     if (err instanceof Error && err.name === "AbortError") {
-      throw new RetryableError(`timeout após ${TIMEOUT_MS / 1000}s`);
+      throw new RetryableError(`timeout após ${Math.round(timeoutMs / 100) / 10}s`);
     }
     if (err instanceof TypeError) {
       // fetch() rejects with TypeError on network failure
@@ -259,20 +330,17 @@ async function postOnce(
 }
 
 // Sends one logical request, retrying retriable failures with backoff.
-async function callApi(
-  provider: ProviderConfig,
-  body: Record<string, unknown>,
-  apiKey: string,
-  totals: Totals,
-  signal: AbortSignal | undefined,
-): Promise<PostResult> {
+async function callApi(c: Chamada, body: Record<string, unknown>): Promise<PostResult> {
+  const { provider, signal } = c;
   const model = String(body.model);
   for (let attempt = 1; ; attempt++) {
     try {
-      return await withSlot(provider, signal, () => postOnce(provider, body, apiKey, totals, signal));
+      return await withSlot(provider, c.prioridade, signal, () => postOnce(c, body));
     } catch (err) {
       if (!(err instanceof RetryableError) || attempt >= MAX_ATTEMPTS) throw err;
       const wait = BACKOFF_MS[attempt - 1];
+      // Sem tempo para outra tentativa dentro do prazo de quem chama: falha já, e o hedge/fallback assume.
+      if (restante(c.prazoAte) < wait + MIN_PARA_NOVA_TENTATIVA_MS) throw err;
       console.warn(
         `[${provider.name}] ${model} tentativa ${attempt}/${MAX_ATTEMPTS} falhou (${err.message}); nova tentativa em ${wait}ms`,
       );
@@ -281,7 +349,7 @@ async function callApi(
   }
 }
 
-function parseContent<T>(c: Completion, schema: z.ZodType<T>): Parsed<T> {
+function parseContent<T>(c: Completion, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Parsed<T> {
   if (c.content.trim() === "" && c.finishReason === "length") {
     throw new Error("resposta vazia: modelo gastou os tokens raciocinando (aumente maxTokens)");
   }
@@ -308,7 +376,13 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
   const apiKey = process.env[provider.apiKeyEnv];
   if (!apiKey) throw new Error(`${provider.apiKeyEnv} não definida (confira .env.local)`);
   const extra = provider.buildExtraBody({ reasoningEffort: req.reasoningEffort, priorizarLatencia: req.priorizarLatencia });
-  const baseBody = { model: req.model, max_tokens: req.maxTokens, ...extra };
+  const prioridade: Prioridade = req.prioridade ?? "fundo";
+  const baseBody = {
+    model: req.model,
+    max_tokens: req.maxTokens,
+    ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+    ...extra,
+  };
 
   const started = Date.now();
   const totals: Totals = { cost: 0, prompt: 0, completion: 0 };
@@ -319,7 +393,10 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
 
   let upstream: string | undefined;
   const call = async (msgs: ChatMessage[]): Promise<Completion> => {
-    const result = await callApi(provider, { ...baseBody, messages: msgs }, apiKey, totals, req.signal);
+    const result = await callApi(
+      { provider, apiKey, totals, prioridade, prazoAte: req.prazoAte, signal: req.signal },
+      { ...baseBody, messages: msgs },
+    );
     upstream = result.upstream ?? upstream;
     return result.completion;
   };
@@ -328,6 +405,9 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
     const first = await call(messages);
     let parsed = parseContent(first, req.schema);
 
+    if (!parsed.ok && restante(req.prazoAte) < MIN_PARA_NOVA_TENTATIVA_MS) {
+      throw new Error(`resposta inválida e sem tempo para reparo: ${parsed.error.slice(0, 200)}`);
+    }
     if (!parsed.ok) {
       // One repair attempt: show the model its bad answer and the error.
       const error = parsed.error.slice(0, 300);

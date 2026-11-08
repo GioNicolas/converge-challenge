@@ -54,6 +54,8 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
   const [arrastando, setArrastando] = useState(false);
   const [erroArquivo, setErroArquivo] = useState<string | null>(null);
   const seletor = useRef<HTMLInputElement>(null);
+  const campoDescricao = useRef<HTMLTextAreaElement>(null);
+  const campoContexto = useRef<HTMLTextAreaElement>(null);
   const ditadoDescricao = useTranscricao({
     bloqueada: lendo > 0,
     aoTexto: (texto) => setDescricao((atual) => acrescentarFala(atual, texto)),
@@ -169,6 +171,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
             className={`relative ${moldura} ${arrastando ? "border-marca bg-marca-suave" : ""}`}
           >
             <textarea
+              ref={campoDescricao}
               value={descricao}
               readOnly={ditadoDescricao.ativa}
               onChange={(e) => setDescricao(e.target.value)}
@@ -178,7 +181,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
               required
             />
             <div className="flex items-center justify-between gap-3 border-t border-borda px-1.5 py-1.5">
-              <BotaoDitado transcricao={ditadoDescricao} disabled={lendo > 0 || ditadoContexto.ativa} />
+              <BotaoDitado transcricao={ditadoDescricao} campo={campoDescricao} disabled={lendo > 0 || ditadoContexto.ativa} />
               <button
                 type="button"
                 onClick={() => seletor.current?.click()}
@@ -217,6 +220,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
         <Linha n="03" titulo="Contexto" opcional dica="O que não está na descrição: empresa, time, momento da contratação.">
           <div className={moldura}>
             <textarea
+              ref={campoContexto}
               value={contexto}
               readOnly={ditadoContexto.ativa}
               onChange={(e) => setContexto(e.target.value)}
@@ -225,7 +229,7 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
               className={`${campo} block resize-y leading-relaxed`}
             />
             <div className="flex justify-end border-t border-borda p-1.5">
-              <BotaoDitado transcricao={ditadoContexto} disabled={lendo > 0 || ditadoDescricao.ativa} />
+              <BotaoDitado transcricao={ditadoContexto} campo={campoContexto} disabled={lendo > 0 || ditadoDescricao.ativa} />
             </div>
           </div>
           <EstadoDitado transcricao={ditadoContexto} />
