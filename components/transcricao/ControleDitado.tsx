@@ -5,9 +5,10 @@ import { LoaderCircle, Mic, Square } from "lucide-react";
 import type { Transcricao } from "@/lib/transcricao/useTranscricao";
 import { deveFocarCampo } from "@/lib/transcricao/focoDoDitado";
 
-export function BotaoDitado({ transcricao: t, disabled = false, campo }: {
+export function BotaoDitado({ transcricao: t, disabled = false, campo, className = "" }: {
   transcricao: Transcricao;
   disabled?: boolean;
+  className?: string;
   /** Campo que recebe o foco depois do clique (exceto em toque), para o Enter seguinte agir no campo e não no botão. */
   campo?: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
 }) {
@@ -27,7 +28,7 @@ export function BotaoDitado({ transcricao: t, disabled = false, campo }: {
       aria-label={rotulo}
       title={rotulo}
       aria-pressed={t.ativa}
-      className={`flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${t.ativa ? "bg-red-100 text-red-700" : "text-inherit hover:bg-black/5"}`}
+      className={`flex size-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${t.ativa ? "bg-red-100 text-red-700" : "text-inherit hover:bg-black/5"} ${className}`}
     >
       {ocupado ? <LoaderCircle size={16} className="animate-spin" /> : t.ativa ? <Square size={14} fill="currentColor" /> : <Mic size={16} />}
     </button>

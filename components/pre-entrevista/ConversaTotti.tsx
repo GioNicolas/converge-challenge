@@ -227,7 +227,8 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
             aria-label="Mensagem para o Totti"
             className="max-h-[140px] flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] text-texto outline-none placeholder:text-texto-suave/60"
           />
-          <BotaoDitado transcricao={ditado} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} />
+          {/* mb-1: o mic (32px) fica no meio da linha dos botões de 40px, mesmo com o campo em várias linhas */}
+          <BotaoDitado transcricao={ditado} campo={campo} disabled={pensando || lendo || bloqueada || pausarEntrada} className="mb-1" />
           <button
             onClick={enviar}
             disabled={(!texto.trim() && anexos.length === 0) || pensando || lendo || bloqueada || ditado.ativa}
