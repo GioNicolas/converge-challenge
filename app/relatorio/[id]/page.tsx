@@ -1,7 +1,9 @@
 // Relatório da entrevista (visão da recrutadora). Lido direto do armazenamento, no servidor.
-// O scorecard não é do candidato: fora do ambiente de desenvolvimento, só abre com ?chave=AVALIACOES_API_SECRET.
+// O scorecard não é do candidato: fora do ambiente de desenvolvimento, só abre com ?chave=AVALIACOES_API_SECRET
+// ou para quem passou pela senha do painel (PAINEL_SENHA; o middleware põe o cabeçalho, nunca o navegador).
 import { timingSafeEqual } from "node:crypto";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import GerandoRelatorio from "@/components/relatorio/GerandoRelatorio";
 import Relatorio from "@/components/relatorio/Relatorio";
@@ -10,6 +12,7 @@ import { montarRelatorio } from "@/lib/agente/relatorio";
 import { RELATORIO_EXEMPLO } from "@/lib/agente/relatorio-exemplo";
 import { contexto } from "@/lib/agente/rotas/contexto";
 import { devHabilitado } from "@/lib/agente/rotas/scorecard";
+import { CABECALHO_AUTENTICADO } from "@/lib/painel/acesso";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Relatório da entrevista", robots: { index: false } };
@@ -35,8 +38,9 @@ export default function Page(props: Props) {
 }
 
 async function Conteudo({ params, searchParams }: Props) {
-  const [{ id }, { chave }] = await Promise.all([params, searchParams]);
-  if (!podeVer(chave) || id.length > 80) notFound();
+  const [{ id }, { chave }, cabecalhos] = await Promise.all([params, searchParams, headers()]);
+  const pelaSenhaDoPainel = cabecalhos.get(CABECALHO_AUTENTICADO) === "1";
+  if (!(pelaSenhaDoPainel || podeVer(chave)) || id.length > 80) notFound();
   if (id === "exemplo" && devHabilitado()) return <Relatorio r={RELATORIO_EXEMPLO} />;
 
   const { repositorio } = contexto();

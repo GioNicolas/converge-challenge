@@ -12,7 +12,7 @@ import type { DecisaoRegistrada, DecisaoTechLead, MotivoIgnorado, RecomendacaoTo
 /** A vaga de Pagamentos do workspace (`lib/vagas/workspace.ts`): encerrada, com as contratações de 90 dias atrás (F5). */
 const VAGA_A = { vagaId: "backend-pagamentos", vagaTitulo: "Backend Pleno · Pagamentos" };
 const VAGA_B = { vagaId: "dados-pleno-set", vagaTitulo: "Engenharia de Dados Pleno" };
-/** A vaga do card de demo do Slack (`/api/slack/demo`) e da config padrão (`DEFAULT_CONFIG.vagaId`). */
+/** A vaga da demonstração e da config padrão (`DEFAULT_CONFIG.vagaId`). */
 const VAGA_C = { vagaId: "demo-backend-pleno", vagaTitulo: "Backend Pleno" };
 
 type Linha = [candidato: string, totti: RecomendacaoTotti, techLead: DecisaoTechLead, dia: string];

@@ -5,11 +5,15 @@
 // O scorecard é do recrutador, não do candidato: em produção só sai com o header x-api-key
 // (AVALIACOES_API_SECRET). Em dev (NODE_ENV != production ou AGENTE_DEV=1) sai direto, para a página de teste.
 import { timingSafeEqual } from "node:crypto";
+import { after } from "next/server";
+import { kvPadrao, type Kv } from "@/lib/storage/kv";
 import { ErroLlm } from "../llm/cliente";
 import { resolverAvaliacao } from "../kits";
+import type { SessaoArmazenada } from "../armazenamento";
+import { atualizarNoIndice, cartaoDoScorecard } from "../resultados";
 import { gerarScorecard, gerarScorecardFalso, type Scorecard } from "../scorecard";
 import { criteriosSemEvidencia, transicionar } from "../sessao/estado";
-import { contexto } from "./contexto";
+import { contexto, type Contexto } from "./contexto";
 import { erro, json, type ParamsId } from "./http";
 
 export function devHabilitado(): boolean {
@@ -33,6 +37,23 @@ type Falha = { falha: string; status: number };
 /** Geração em andamento por sessão: duas chamadas simultâneas não pagam duas vezes o modelo final. */
 const emAndamento = new Map<string, Promise<Scorecard | Falha>>();
 
+type Avaliacao = NonNullable<Awaited<ReturnType<typeof resolverAvaliacao>>>;
+
+/** Se outra instância já gera o scorecard, espera por ele em vez de pagar o modelo de novo; passado isso, assume a geração. */
+const PRAZO_DA_GERACAO_ALHEIA_MS = 5 * 60_000;
+const INTERVALO_DE_ESPERA_MS = 2_000;
+
+const dormir = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** O índice do painel é auxiliar: falhar nele nunca derruba a geração do scorecard. */
+async function noIndice(kv: Kv, id: string, mudanca: Parameters<typeof atualizarNoIndice>[2]): Promise<void> {
+  try {
+    await atualizarNoIndice(kv, id, mudanca);
+  } catch (e) {
+    console.warn("[agente] indice_nao_atualizado", { sessao_id: id, erro: e instanceof Error ? e.name : "desconhecido" });
+  }
+}
+
 export async function finalizarHandler(req: Request, { params }: ParamsId): Promise<Response> {
   const { id } = await params;
   if (!eIdPlausivel(id)) return erro(404, "sessão não encontrada");
@@ -51,43 +72,112 @@ export async function finalizarHandler(req: Request, { params }: ParamsId): Prom
   const alvo = await resolverAvaliacao(sessao.avaliacaoId);
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
 
+  const r = await garantirScorecard(ctx, id, sessao, alvo);
+  if ("falha" in r) return erro(r.status, r.falha);
+  return resposta(r);
+}
+
+/**
+ * Gera (uma vez) e guarda o scorecard da sessão. Duas chamadas simultâneas na mesma instância compartilham o
+ * mesmo trabalho; entre instâncias, uma reivindicação no kv faz a segunda esperar o resultado da primeira.
+ */
+export function garantirScorecard(ctx: Contexto, id: string, sessao: SessaoArmazenada, alvo: Avaliacao): Promise<Scorecard | Falha> {
   let tarefa = emAndamento.get(id);
   if (!tarefa) {
-    tarefa = (async (): Promise<Scorecard | Falha> => {
-      // Encerra a sessão (idempotente: depois de ENCERRADA o reducer ignora tudo).
-      const atual = (await ctx.repositorio.obter(id)) ?? sessao;
-      const estado = transicionar(atual.estado, { tipo: "ENCERRAR" }, ctx.agora()).estado;
-      await ctx.repositorio.salvarEstado(id, estado);
-      const entrada = {
-        sessaoId: id,
-        candidatoId: sessao.candidatoId,
-        estado,
-        eventos: await ctx.repositorio.listarEventos(id),
-        imagens: await ctx.repositorio.listarImagens(id),
-      };
-      const agora = () => new Date(ctx.agora());
-      try {
-        const sc =
-          ctx.fake || !ctx.llm
-            ? gerarScorecardFalso({ kit: alvo.kit, problema: alvo.problema, agora }, entrada)
-            : await gerarScorecard({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema, agora }, entrada);
-        await ctx.repositorio.salvarScorecard(id, sc);
-        return sc;
-      } catch (e) {
-        // Só o nome do erro vai ao log: nada de prompt, conversa ou chave.
-        console.warn("[agente] scorecard_falhou", { sessao_id: id, erro: e instanceof Error ? e.name : "desconhecido" });
-        return { falha: e instanceof ErroLlm && e.codigo === "timeout"
-          ? "O scorecard excedeu o prazo de geração. Nenhum relatório foi salvo; tente finalizar novamente."
-          : "Não foi possível gerar o scorecard agora. Tente de novo em instantes.", status: 502 };
-      }
-    })().finally(() => {
+    tarefa = gerarEGuardar(ctx, id, sessao, alvo).finally(() => {
       emAndamento.delete(id);
     });
     emAndamento.set(id, tarefa);
   }
-  const r = await tarefa;
-  if ("falha" in r) return erro(r.status, r.falha);
-  return resposta(r);
+  return tarefa;
+}
+
+async function gerarEGuardar(ctx: Contexto, id: string, sessao: SessaoArmazenada, alvo: Avaliacao): Promise<Scorecard | Falha> {
+  const kv = kvPadrao();
+  const reivindicou = await kv.setIfAbsent("scorecard-job", id, { em: ctx.agora() });
+  if (!reivindicou) {
+    const job = await kv.get<{ em: number }>("scorecard-job", id);
+    if (job && ctx.agora() - job.em < PRAZO_DA_GERACAO_ALHEIA_MS) {
+      // Outra instância está gerando: espera o scorecard aparecer.
+      const limite = Date.now() + (PRAZO_DA_GERACAO_ALHEIA_MS - (ctx.agora() - job.em));
+      while (Date.now() < limite) {
+        const feito = await ctx.repositorio.obterScorecard(id);
+        if (feito) return feito;
+        await dormir(INTERVALO_DE_ESPERA_MS);
+      }
+    }
+    // Quem reivindicou sumiu (ou passou do prazo): esta chamada assume.
+    await kv.set("scorecard-job", id, { em: ctx.agora() });
+  }
+
+  try {
+    // Encerra a sessão (idempotente: depois de ENCERRADA o reducer ignora tudo).
+    const atual = (await ctx.repositorio.obter(id)) ?? sessao;
+    const estado = transicionar(atual.estado, { tipo: "ENCERRAR" }, ctx.agora()).estado;
+    await ctx.repositorio.salvarEstado(id, estado);
+    await noIndice(kv, id, { ended: true, state: "running" });
+    const entrada = {
+      sessaoId: id,
+      candidatoId: sessao.candidatoId,
+      estado,
+      eventos: await ctx.repositorio.listarEventos(id),
+      imagens: await ctx.repositorio.listarImagens(id),
+    };
+    const agora = () => new Date(ctx.agora());
+    try {
+      const sc =
+        ctx.fake || !ctx.llm
+          ? gerarScorecardFalso({ kit: alvo.kit, problema: alvo.problema, agora }, entrada)
+          : await gerarScorecard({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema, agora }, entrada);
+      await ctx.repositorio.salvarScorecard(id, sc);
+      await noIndice(kv, id, {
+        state: "done",
+        overallScore: sc.nota_geral ?? undefined,
+        recommendation: sc.recomendacao,
+        cartao: cartaoDoScorecard(sc, alvo.kit),
+      });
+      return sc;
+    } catch (e) {
+      // Só o nome do erro vai ao log: nada de prompt, conversa ou chave.
+      console.warn("[agente] scorecard_falhou", { sessao_id: id, erro: e instanceof Error ? e.name : "desconhecido" });
+      await noIndice(kv, id, { state: "error" });
+      return {
+        falha:
+          e instanceof ErroLlm && e.codigo === "timeout"
+            ? "O scorecard excedeu o prazo de geração. Nenhum relatório foi salvo; tente finalizar novamente."
+            : "Não foi possível gerar o scorecard agora. Tente de novo em instantes.",
+        status: 502,
+      };
+    }
+  } finally {
+    // Libera a reivindicação: um scorecard pronto se acha pelo repositório; uma falha deixa tentar de novo.
+    await kv.delete("scorecard-job", id).catch(() => {});
+  }
+}
+
+/**
+ * Gera o scorecard depois que a resposta já saiu (fim da entrevista): o relatório fica pronto no painel sem
+ * ninguém abrir a página. Na Vercel o `after` mantém a função viva até terminar; fora de uma requisição
+ * (testes, scripts) cai no segundo plano comum.
+ */
+export function finalizarEmSegundoPlano(id: string): void {
+  const rodar = async () => {
+    try {
+      const ctx = contexto();
+      const sessao = await ctx.repositorio.obter(id);
+      if (!sessao || (await ctx.repositorio.obterScorecard(id))) return;
+      if (!ctx.fake && !ctx.llm) return;
+      const alvo = await resolverAvaliacao(sessao.avaliacaoId);
+      if (alvo) await garantirScorecard(ctx, id, sessao, alvo);
+    } catch (e) {
+      console.warn("[agente] scorecard_em_segundo_plano_falhou", { sessao_id: id, erro: e instanceof Error ? e.name : "desconhecido" });
+    }
+  };
+  try {
+    after(rodar);
+  } catch {
+    void rodar();
+  }
 }
 
 export async function scorecardGetHandler(req: Request, { params }: ParamsId): Promise<Response> {

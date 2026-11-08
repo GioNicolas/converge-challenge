@@ -1,12 +1,12 @@
-// Só desenvolvimento: simula o Tech Lead decidindo no Slack (Aprovar/Reprovar com motivo), pelo mesmo caminho
+// Só desenvolvimento: simula o Tech Lead decidindo (Aprovar/Reprovar com motivo), pelo mesmo caminho
 // do clique de verdade (decisão registrada, extrator e regras guardadas). A tela /vagas/aprendizado usa no modo dev.
 //   curl -X POST localhost:3000/api/squad-memory/simular -H "content-type: application/json" \
 //     -d '{"decisao":"reprovado","motivo":"propôs Kafka sem necessidade para esse volume"}'
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Report } from "@/lib/contracts";
-import { aprenderDaDecisao } from "@/lib/slack/squad";
-import type { DecisionRecord } from "@/lib/slack/types";
+import { aprenderComDecisao } from "@/lib/squad-memory/aprender";
+import { empresaAtual } from "@/lib/squad-memory/store";
 import { visaoDaMemoria } from "@/lib/squad-memory/visao";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,7 @@ const Pedido = z.object({
   vagaTitulo: z.string().trim().min(1).max(120).optional(),
 });
 
-/** O candidato do card de demo do Slack: o Totti recomendou avançar (ainda não conhecia o time). */
+/** O candidato da demonstração: o Totti recomendou avançar (ainda não conhecia o time). */
 const REPORT: Report = {
   sessionId: "demo-squad",
   configId: "demo-config",
@@ -49,20 +49,15 @@ export async function POST(req: Request) {
   const vagaId = parsed.data.vagaId ?? "demo-backend-pleno";
   const vagaTitulo = parsed.data.vagaTitulo ?? "Backend Pleno";
 
-  const record: DecisionRecord = {
-    id: `simulado-${Date.now()}`,
-    candidateId: "demo-c01",
-    candidateName: candidato || "Rafael Moura",
-    candidateEmail: "demo@exemplo.com",
-    roleTitle: vagaTitulo,
+  const report = { ...REPORT, roleTitle: vagaTitulo, recommendation: recomendacao ?? REPORT.recommendation };
+  const aprendizado = await aprenderComDecisao({
+    empresaId: empresaAtual(),
     vagaId,
-    report: { ...REPORT, roleTitle: vagaTitulo, recommendation: recomendacao ?? REPORT.recommendation },
-    status: decisao,
-    decidedBy: "tech-lead-demo",
-    reason: motivo?.trim() || undefined,
-    // Sem `ts`: não há card de verdade no Slack, então não há thread para responder.
-    channel: process.env.SLACK_CHANNEL_ID || undefined,
-  };
-  const aprendizado = await aprenderDaDecisao(record);
+    vagaTitulo,
+    candidato: candidato || "Rafael Moura",
+    decisao,
+    motivo: motivo?.trim() || undefined,
+    report,
+  });
   return NextResponse.json({ aprendizado, memoria: visaoDaMemoria() });
 }

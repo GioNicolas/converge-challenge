@@ -28,6 +28,8 @@ type Props = {
   onVoltar: () => void;
   /** Texto do botão de sair da conversa (padrão "Voltar a programar"; no encerramento, "Encerrar agora"). */
   rotuloVoltar?: string;
+  /** Conversa que o candidato puxou: ele pode escrever primeiro, antes de qualquer fala do entrevistador. */
+  livre?: boolean;
   rodape?: ReactNode;
 };
 
@@ -50,6 +52,7 @@ export default function PainelConversa({
   onTentarDeNovo,
   onVoltar,
   rotuloVoltar = "Voltar a programar",
+  livre = false,
   rodape,
 }: Props) {
   const reduzir = useReducedMotion() ?? false;
@@ -70,7 +73,7 @@ export default function PainelConversa({
   }, [falas.length, digitando, aberto, reduzir]);
 
   // Quando o entrevistador termina de escrever, o foco vai para a resposta.
-  const podeResponder = aberto && !digitando && !encerrada && falas.length > 0;
+  const podeResponder = aberto && !digitando && !encerrada && (falas.length > 0 || livre);
   useEffect(() => {
     if (podeResponder) campo.current?.focus({ preventScroll: true });
   }, [podeResponder]);
@@ -172,7 +175,7 @@ export default function PainelConversa({
                     onKeyDown={aoTeclar}
                     rows={2}
                     disabled={!podeResponder}
-                    placeholder={podeResponder ? "Sua resposta…" : "Aguarde o entrevistador…"}
+                    placeholder={podeResponder ? (falas.length > 0 ? "Sua resposta…" : "Escreva para o entrevistador…") : "Aguarde o entrevistador…"}
                     aria-label="Sua resposta ao entrevistador"
                     className="max-h-40 min-h-[44px] min-w-0 flex-1 resize-none bg-transparent py-1 text-[15px] leading-relaxed text-texto outline-none placeholder:text-texto-suave disabled:opacity-60"
                   />

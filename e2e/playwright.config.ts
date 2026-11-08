@@ -35,14 +35,16 @@ function audioSilencioso() {
 }
 
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: ".",
+  // Saídas na raiz, como antes de a config vir para e2e/ (o .gitignore já ignora essas pastas).
+  outputDir: "../test-results",
   // O fluxo é longo (escrita à mão do agente, pausa da análise): 3 rodadas seguidas na mesma página.
   timeout: 150_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }]],
   use: {
     baseURL: `http://localhost:${PORTA}`,
     viewport: { width: 1440, height: 900 },

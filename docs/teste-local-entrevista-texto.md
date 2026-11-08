@@ -97,7 +97,7 @@ A duração curta não impõe nota 1 nem reprovação automática: o que decide 
 
 O prompt é específico do kit (inclusive `demo-produto`), mantém os dados da sessão na mensagem de usuário como JSON e trata instruções no grafo, conversa e observações como dados não confiáveis. A linha do tempo preserva o começo e prioriza o fim ao atingir 40 mil caracteres. As guardas verificam proveniência e consistência estrutural; a pertinência semântica da nota e da interpretação da observação ainda requer avaliação do modelo e revisão humana.
 
-Prazo da geração: `AGENTE_TIMEOUT_SCORECARD_MS`, padrão `45000`, valores inteiros entre `1` e `50000`; inválidos voltam ao padrão. A rota reserva `maxDuration = 60`. Timeout devolve 502 explícito, aborta a chamada e não salva relatório; repetir `/finalizar` tenta novamente na mesma sessão encerrada. Relatório já salvo continua idempotente.
+Prazo da geração: `AGENTE_TIMEOUT_SCORECARD_MS`, padrão `120000`, valores inteiros entre `1` e `240000`; inválidos voltam ao padrão. A rota tem `maxDuration = 300`. Timeout devolve 502 explícito, aborta a chamada e não salva relatório; repetir `/finalizar` tenta novamente na mesma sessão encerrada. Relatório já salvo continua idempotente.
 
 ## Evals reproduzíveis do scorecard
 

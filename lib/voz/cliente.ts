@@ -91,10 +91,20 @@ export function falarNoNavegador(texto: string, sinal: AbortSignal, eventos: Eve
   });
 }
 
-/** Serviço compartilhado que usa o contrato e o player de áudio da Sofia. */
+/**
+ * Serviço compartilhado que usa o contrato e o player de áudio da Sofia.
+ * `antesDeTocar` (opcional) é chamado uma vez, com o áudio já pronto, logo antes de começar a tocar: quem chama
+ * espera ali a vez de falar (a pessoa fazer uma pausa). Devolver false desiste da fala sem erro.
+ */
 export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarComAlinhamento, navegador: falarNoNavegador }) {
   let servidorDisponivel = true;
-  return async (texto: string, sinal: AbortSignal, eventos: EventosVoz): Promise<void> => {
+  return async (texto: string, sinal: AbortSignal, eventos: EventosVoz, antesDeTocar?: () => Promise<boolean>): Promise<void> => {
+    let liberada = !antesDeTocar;
+    const aguardarVez = async () => {
+      if (!liberada) liberada = await antesDeTocar!();
+      sinal.throwIfAborted();
+      return liberada;
+    };
     for (const parte of dividirFala(texto)) {
       sinal.throwIfAborted();
       const progresso = (n: number) => {
@@ -113,6 +123,7 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           sinal.throwIfAborted();
           const bytes = Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0));
           let iniciou = false;
+          if (!(await aguardarVez())) return;
           await dependencias.tocar(new Blob([bytes], { type: "audio/mpeg" }), dados.alinhamento as Alinhamento, {
             sinal,
             aoProgresso: (n) => {
@@ -128,6 +139,7 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           sinal.throwIfAborted();
         }
       }
+      if (!(await aguardarVez())) return;
       await dependencias.navegador(parte.texto, sinal, { aoIniciar: eventos.aoIniciar, aoProgresso: progresso });
     }
   };
