@@ -24,9 +24,9 @@ Hoje cada entrevista técnica consome horas de um engenheiro sênior ou de um te
 
 Fazer a entrevista mais barata e mais rápida já paga o produto. Mas o erro mais caro de um processo seletivo não é a entrevista: **é contratar a pessoa errada.** E é aqui que o Totti vai além.
 
-Uma contratação errada numa vaga de backend pleno custa algo em torno de **R$ 50 mil**: três meses de salário e encargos até o fim da experiência, o processo refeito do zero e o onboarding e as entregas que se perdem no caminho (estimativa; a conta está em [docs/plano-diferencial.md](docs/plano-diferencial.md)). Esse erro continua acontecendo mesmo com as IAs de entrevista que já existem: elas deixam a entrevista mais barata e em massa, mas a contratação errada continua lá.
+Uma contratação errada numa vaga de backend pleno custa algo em torno de **R$ 50 mil**: três meses de salário e encargos até o fim da experiência, o processo refeito do zero e o onboarding e as entregas que se perdem no caminho (estimativa; a conta está em [docs/plano-diferencial.md](docs/plano-diferencial.md)).
 
-Ela acontece porque a entrevista mede a coisa errada. Ver se o código passou não diz como a pessoa vai agir quando o requisito mudar na sexta à tarde, quando travar num bug ou quando precisar de ajuda. **O Totti foi feito para medir exatamente isso**, e para aprender, contratação após contratação, o que dá certo no seu time.
+Ver se o código passou não diz como a pessoa vai agir quando o requisito mudar na sexta à tarde, quando travar num bug ou quando precisar de ajuda. **O Totti foi feito para medir exatamente isso**, e para aprender, contratação após contratação, o que dá certo no seu time.
 
 Os dois ganhos valem o mesmo: um corta o custo de cada entrevista, o outro evita o prejuízo de cada erro.
 
