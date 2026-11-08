@@ -320,6 +320,9 @@ function liberarParaCodar(reply: string): string {
   return [...frases, "Pode começar a codar quando quiser."].join(" ");
 }
 
+/** Mais linhas que isso já é o arquivo, não um trecho. */
+const MAX_LINHAS_GRIFO = 12;
+
 const PALAVRAS_DA_LINGUAGEM = new Set(["def", "for", "return", "not", "and", "pass", "else", "elif", "while", "len", "range", "true", "false", "none", "self", "class", "import", "from", "const", "let", "var", "function", "int", "string", "public", "static", "void", "new", "this", "null", "undefined"]);
 
 /**
@@ -329,6 +332,8 @@ const PALAVRAS_DA_LINGUAGEM = new Set(["def", "for", "return", "not", "and", "pa
  */
 export function grifoComProposito(reply: string, code: string, range: LineRange, starter: string): boolean {
   const linhasDoInicio = new Set(starter.split("\n").map((l) => l.trim()).filter(Boolean));
+  // Grifar a função inteira não aponta nada: o grifo é para um trecho.
+  if (range.endLine - range.startLine + 1 > MAX_LINHAS_GRIFO) return false;
   const linhas = code.split("\n").slice(Math.max(0, range.startLine - 1), range.endLine).map((l) => l.trim()).filter(Boolean);
   if (linhas.length === 0 || linhas.every((l) => linhasDoInicio.has(l) || l.startsWith("#") || l.startsWith("//"))) return false;
   const fala = reply.toLowerCase();

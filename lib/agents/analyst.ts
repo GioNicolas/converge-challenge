@@ -168,8 +168,8 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
       mudanca: mudancaParaPrompt(session, formatElapsed),
     });
 
-    // Em segundo plano: sem hedge (o OpenRouter só entra se a Featherless falhar).
-    const result = await completeJson({ role: "analyst", system, user, schema: AnalystOutput, semHedge: true });
+    // Papel "codigo": gemini-3.7-flash no OpenRouter, com o GLM da Featherless de reserva (ver lib/llm/index.ts).
+    const result = await completeJson({ role: "codigo", system, user, schema: AnalystOutput });
     const { questions, focusQuestion, ...insights } = result.data;
 
     // Cada análise substitui a fila, mas sobrevivem: pergunta adiada pelo candidato ("agora não") e
