@@ -1,0 +1,321 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  criteriosSemEvidencia,
+  estadoInicial,
+  transicionar,
+  type EstadoSessao,
+  type EventoSessao,
+} from "../estado";
+import type { Fase, RespostaAnalise } from "../tipos";
+
+const T0 = 1_000_000;
+const MIN = 60_000;
+
+function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
+  return {
+    status: "duvida",
+    pergunta: "Onde fica o gargalo?",
+    nota: "Gargalo?",
+    elementos: ["e1"],
+    degrau: null,
+    observacoes: [],
+    ...extra,
+  };
+}
+
+/** Aplica uma lista de eventos, cada um 1s depois do anterior (a menos que `em` seja dado). */
+function aplicar(estado: EstadoSessao, ...eventos: EventoSessao[]) {
+  let atual = estado;
+  let agora = T0;
+  for (const e of eventos) {
+    atual = transicionar(atual, e, agora).estado;
+    agora += 1000;
+  }
+  return atual;
+}
+
+function emFase(fase: Fase): EstadoSessao {
+  const caminho: Record<string, EventoSessao[]> = {
+    AGUARDANDO: [],
+    APRESENTACAO: [{ tipo: "COMECAR" }],
+    REQUISITOS: [{ tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" }],
+    ALTO_NIVEL: [{ tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" }, { tipo: "CANDIDATO_DESENHOU" }],
+    APROFUNDAMENTO: [
+      { tipo: "COMECAR" },
+      { tipo: "APRESENTACAO_TERMINOU" },
+      { tipo: "CANDIDATO_DESENHOU" },
+      { tipo: "APROFUNDAR" },
+    ],
+  };
+  if (fase === "FECHAMENTO") return transicionar(emFase("APROFUNDAMENTO"), { tipo: "TICK" }, T0 + 10_000 * MIN).estado;
+  if (fase === "ENCERRADA") return aplicar(emFase("APROFUNDAMENTO"), { tipo: "ENCERRAR" });
+  return aplicar(estadoInicial(), ...caminho[fase]);
+}
+
+describe("fases: eventos explícitos", () => {
+  it("segue a ordem AGUARDANDO até APROFUNDAMENTO", () => {
+    let e = estadoInicial();
+    assert.equal(e.fase, "AGUARDANDO");
+    e = aplicar(e, { tipo: "COMECAR" });
+    assert.equal(e.fase, "APRESENTACAO");
+    e = aplicar(e, { tipo: "APRESENTACAO_TERMINOU" });
+    assert.equal(e.fase, "REQUISITOS");
+    e = aplicar(e, { tipo: "CANDIDATO_DESENHOU" });
+    assert.equal(e.fase, "ALTO_NIVEL");
+    e = aplicar(e, { tipo: "APROFUNDAR" });
+    assert.equal(e.fase, "APROFUNDAMENTO");
+  });
+
+  it("eventos fora de hora são ignorados", () => {
+    assert.equal(aplicar(estadoInicial(), { tipo: "CANDIDATO_DESENHOU" }).fase, "AGUARDANDO");
+    assert.equal(aplicar(estadoInicial(), { tipo: "APROFUNDAR" }).fase, "AGUARDANDO");
+    assert.equal(aplicar(emFase("REQUISITOS"), { tipo: "APROFUNDAR" }).fase, "REQUISITOS");
+    assert.equal(aplicar(emFase("ALTO_NIVEL"), { tipo: "COMECAR" }).fase, "ALTO_NIVEL");
+  });
+
+  it("ENCERRAR vai para ENCERRADA, limpa o plin e emite os efeitos", () => {
+    const pendente = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    assert.equal(pendente.plin, "PLIN_PENDENTE");
+    const { estado, efeitos } = transicionar(pendente, { tipo: "ENCERRAR" }, T0 + 5000);
+    assert.equal(estado.fase, "ENCERRADA");
+    assert.equal(estado.plin, "LIVRE");
+    assert.equal(estado.perguntaPendente, null);
+    assert.deepEqual(efeitos.map((f) => f.tipo), ["FASE_MUDOU", "PLIN_CANCELADO", "SESSAO_ENCERRADA"]);
+  });
+
+  it("ENCERRADA ignora tudo", () => {
+    const fim = emFase("ENCERRADA");
+    const r = transicionar(fim, { tipo: "COMECAR" }, T0);
+    assert.equal(r.estado, fim);
+    assert.deepEqual(r.efeitos, []);
+  });
+});
+
+describe("fases: orçamento de tempo", () => {
+  const tempos = { REQUISITOS: 10, ALTO_NIVEL: 20, APROFUNDAMENTO: 30, FECHAMENTO: 5 };
+
+  it("TICK avança fase a fase quando o tempo estoura, até ENCERRADA", () => {
+    let e = aplicar(estadoInicial({ tempos }), { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" });
+    let t = e.faseIniciadaEm!;
+    const esperado: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO", "ENCERRADA"];
+    const duracoes = [10, 20, 30, 5];
+    esperado.forEach((fase, i) => {
+      // Um instante antes: nada acontece.
+      assert.equal(transicionar(e, { tipo: "TICK" }, t + duracoes[i] * 1000 - 1).estado.fase, e.fase);
+      t += duracoes[i] * 1000;
+      const r = transicionar(e, { tipo: "TICK" }, t);
+      assert.equal(r.estado.fase, fase);
+      assert.equal(r.estado.faseIniciadaEm, t);
+      e = r.estado;
+    });
+  });
+
+  it("fase sem tempo configurado não acaba sozinha", () => {
+    const e = emFase("APRESENTACAO");
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 99 * MIN).estado.fase, "APRESENTACAO");
+    assert.equal(transicionar(estadoInicial(), { tipo: "TICK" }, T0 + 99 * MIN).estado.fase, "AGUARDANDO");
+  });
+
+  it("fechar por tempo descarta a pendente que o FECHAMENTO não aceita", () => {
+    const pendente = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "dica" }) });
+    const r = transicionar(pendente, { tipo: "TICK" }, T0 + 10_000 * MIN);
+    assert.equal(r.estado.fase, "FECHAMENTO");
+    assert.equal(r.estado.perguntaPendente, null);
+    assert.ok(r.efeitos.some((f) => f.tipo === "PLIN_CANCELADO"));
+  });
+});
+
+describe("ciclo do plin", () => {
+  it("LIVRE → PLIN_PENDENTE → PERGUNTA_ATIVA → LIVRE", () => {
+    const e = emFase("APROFUNDAMENTO");
+    let r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN);
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.deepEqual(r.efeitos.map((f) => f.tipo), ["PLIN_PENDENTE"]);
+
+    r = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, T0 + MIN + 2000);
+    assert.equal(r.estado.plin, "PERGUNTA_ATIVA");
+    assert.equal(r.estado.perguntasFeitas, 1);
+    assert.equal(r.estado.perguntaAtiva?.numero, 1);
+    assert.equal(r.estado.ultimaPerguntaEm, T0 + MIN + 2000);
+    assert.deepEqual(r.estado.perguntas[0].elementos, ["e1"]);
+    assert.deepEqual(r.efeitos.map((f) => f.tipo), ["PERGUNTA_INICIADA"]);
+
+    r = transicionar(r.estado, { tipo: "CANDIDATO_FALOU", texto: "Uso cache.", fimDeResposta: true }, T0 + MIN + 30_000);
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.equal(r.estado.perguntaAtiva, null);
+    assert.equal(r.estado.ultimaRespostaEm, T0 + MIN + 30_000);
+    assert.deepEqual(r.efeitos.map((f) => f.tipo), ["RESPOSTA_ENCERRADA", "ANALISAR"]);
+  });
+
+  it("fala do candidato sem marca de fim não encerra a resposta, mas entra no log", () => {
+    let e = emFase("APROFUNDAMENTO");
+    e = aplicar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    e = transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "Hmm, deixa eu pensar", fimDeResposta: false }, T0 + MIN + 1).estado;
+    assert.equal(e.plin, "PERGUNTA_ATIVA");
+    assert.deepEqual(e.conversa.map((c) => c.quem), ["agente", "candidato"]);
+  });
+
+  it("dúvida nova substitui a pendente (uma por vez)", () => {
+    const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: "Primeira?" }) });
+    const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: "Segunda?" }) }, T0 + 5000);
+    assert.equal(r.estado.perguntaPendente?.pergunta, "Segunda?");
+    const efeito = r.efeitos[0];
+    assert.ok(efeito.tipo === "PLIN_PENDENTE" && efeito.substituiuAnterior);
+  });
+
+  it("ok cancela a pendente", () => {
+    const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+    const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000);
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.equal(r.estado.perguntaPendente, null);
+    assert.deepEqual(r.efeitos, [{ tipo: "PLIN_CANCELADO", motivo: "ok" }]);
+  });
+
+  it("pendente expira (e pede nova análise) se os elementos citados mudaram", () => {
+    const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ elementos: ["e1", "s2"] }) });
+    const r = transicionar(e, { tipo: "ELEMENTOS_ALTERADOS", ids: ["r9", "s2"] }, T0 + 5000);
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.equal(r.estado.perguntaPendente, null);
+    assert.deepEqual(r.efeitos.map((f) => f.tipo), ["PLIN_CANCELADO", "ANALISAR"]);
+  });
+
+  it("pendente continua se mudaram só outros elementos", () => {
+    const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    const r = transicionar(e, { tipo: "ELEMENTOS_ALTERADOS", ids: ["r9"] }, T0 + 5000);
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.deepEqual(r.efeitos, []);
+  });
+
+  it("clique sem pendente é ignorado", () => {
+    const e = emFase("APROFUNDAMENTO");
+    const r = transicionar(e, { tipo: "PLIN_CLICADO" }, T0);
+    assert.equal(r.estado, e);
+  });
+
+  it("análise durante a pergunta ativa não vira plin", () => {
+    let e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    e = transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado;
+    const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + 5 * MIN);
+    assert.equal(r.estado.plin, "PERGUNTA_ATIVA");
+    assert.equal(r.estado.perguntaPendente, null);
+  });
+
+  it("status que a fase não aceita não vira pendente", () => {
+    const e = aplicar(emFase("REQUISITOS"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "dica" }) });
+    assert.equal(e.plin, "LIVRE");
+    const ok = aplicar(emFase("ALTO_NIVEL"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ status: "duvida" }) });
+    assert.equal(ok.plin, "PLIN_PENDENTE");
+  });
+
+  it("5ª resposta no aprofundamento leva ao FECHAMENTO", () => {
+    let e: EstadoSessao = { ...emFase("APROFUNDAMENTO"), perguntasFeitas: 4, ultimaPerguntaEm: null };
+    e = aplicar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    e = transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado;
+    const r = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "Pronto.", fimDeResposta: true }, T0 + 2 * MIN);
+    assert.equal(r.estado.fase, "FECHAMENTO");
+    assert.ok(r.efeitos.some((f) => f.tipo === "FASE_MUDOU"));
+  });
+});
+
+describe("limite e intervalo", () => {
+  function pergunta(e: EstadoSessao, quando: number) {
+    const a = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, quando).estado;
+    const c = transicionar(a, { tipo: "PLIN_CLICADO" }, quando + 1).estado;
+    return transicionar(c, { tipo: "CANDIDATO_FALOU", texto: "ok", fimDeResposta: true }, quando + 2).estado;
+  }
+
+  it("não aceita plin antes de 60s da última pergunta", () => {
+    const e = pergunta(emFase("APROFUNDAMENTO"), T0 + MIN);
+    const cedo = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 1 + 59_000);
+    assert.equal(cedo.estado.plin, "LIVRE");
+    const ok = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 1 + 60_000);
+    assert.equal(ok.estado.plin, "PLIN_PENDENTE");
+  });
+
+  it("no máximo 5 perguntas", () => {
+    let e = emFase("APROFUNDAMENTO");
+    // Sobe o contador sem cair no FECHAMENTO automático: 4 perguntas por aqui.
+    for (let i = 0; i < 4; i++) e = pergunta(e, T0 + (i + 1) * 2 * MIN);
+    assert.equal(e.perguntasFeitas, 4);
+    assert.equal(e.fase, "APROFUNDAMENTO");
+    e = pergunta(e, T0 + 20 * MIN);
+    assert.equal(e.perguntasFeitas, 5);
+    assert.equal(e.fase, "FECHAMENTO");
+    assert.equal(e.perguntas.length, 5);
+  });
+});
+
+describe("fechamento", () => {
+  it("aceita uma única pergunta final", () => {
+    let e = emFase("FECHAMENTO");
+    e = aplicar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
+    assert.equal(e.plin, "PLIN_PENDENTE");
+    e = transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + 10 * MIN).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "Fim.", fimDeResposta: true }, T0 + 11 * MIN).estado;
+    assert.equal(e.perguntaFinalFeita, true);
+    const outra = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + 20 * MIN);
+    assert.equal(outra.estado.plin, "LIVRE");
+  });
+});
+
+describe("registros", () => {
+  it("guarda observações e cobertura da rubrica, mesmo sem plin", () => {
+    const base = estadoInicial({ criterios: ["escalabilidade", "dados", "trade-offs"] });
+    let e = aplicar(base, { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" }, { tipo: "CANDIDATO_DESENHOU" });
+    const ok: RespostaAnalise = {
+      status: "ok", pergunta: null, nota: null, elementos: [], degrau: null,
+      observacoes: [
+        { criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" },
+        { criterio: "cache", sinal: "positivo", espontaneo: true, evidencia: "citou Redis" },
+      ],
+    };
+    e = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000).estado;
+    assert.equal(e.observacoes.length, 2);
+    assert.equal(e.observacoes[0].fase, "ALTO_NIVEL");
+    assert.deepEqual(e.cobertura.escalabilidade, { positivo: 0, negativo: 1, neutro: 0 });
+    assert.deepEqual(e.cobertura.cache, { positivo: 1, negativo: 0, neutro: 0 });
+    assert.deepEqual(criteriosSemEvidencia(e), ["dados", "trade-offs"]);
+  });
+
+  it("registra a conversa em ordem", () => {
+    let e = estadoInicial();
+    e = transicionar(e, { tipo: "AGENTE_FALOU", texto: "Olá" }, T0).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "Oi", fimDeResposta: false }, T0 + 1).estado;
+    assert.deepEqual(e.conversa, [
+      { quem: "agente", texto: "Olá", em: T0 },
+      { quem: "candidato", texto: "Oi", em: T0 + 1 },
+    ]);
+  });
+});
+
+describe("serialização", () => {
+  it("o estado sobrevive a JSON.stringify/parse e a máquina continua de onde parou", () => {
+    let e = emFase("APROFUNDAMENTO");
+    e = aplicar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida({ observacoes: [{ criterio: "dados", sinal: "neutro", espontaneo: false, evidencia: "x" }] }) });
+    const viajou: EstadoSessao = JSON.parse(JSON.stringify(e));
+    assert.deepEqual(viajou, e);
+
+    const r = transicionar(viajou, { tipo: "PLIN_CLICADO" }, T0 + MIN);
+    assert.equal(r.estado.plin, "PERGUNTA_ATIVA");
+    const de2: EstadoSessao = JSON.parse(JSON.stringify(r.estado));
+    const fim = transicionar(de2, { tipo: "CANDIDATO_FALOU", texto: "Feito", fimDeResposta: true }, T0 + 2 * MIN);
+    assert.equal(fim.estado.plin, "LIVRE");
+    assert.equal(fim.estado.cobertura.dados.neutro, 1);
+  });
+});
+
+describe("SINCRONIZAR_FASE", () => {
+  it("avança para a fase do quadro e nunca volta", () => {
+    const base = estadoInicial();
+    const a = transicionar(base, { tipo: "SINCRONIZAR_FASE", fase: "APROFUNDAMENTO" }, T0);
+    assert.equal(a.estado.fase, "APROFUNDAMENTO");
+    assert.deepEqual(a.efeitos, [{ tipo: "FASE_MUDOU", de: "AGUARDANDO", para: "APROFUNDAMENTO" }]);
+    const b = transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "REQUISITOS" }, T0 + 1);
+    assert.equal(b.estado.fase, "APROFUNDAMENTO");
+    assert.deepEqual(b.efeitos, []);
+    assert.equal(transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "ENCERRADA" }, T0).estado.fase, "ENCERRADA");
+  });
+});
