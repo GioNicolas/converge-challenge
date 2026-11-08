@@ -262,10 +262,11 @@ describe("scorecard: regressões de proveniência", () => {
   it("timeout configurável valida o intervalo seguro e não aceita NaN ou negativos", () => {
     const anterior = process.env.AGENTE_TIMEOUT_SCORECARD_MS;
     try {
-      for (const valor of ["", "-1", "NaN", "120000", "1.5"]) {
-        process.env.AGENTE_TIMEOUT_SCORECARD_MS = valor; assert.equal(timeoutScorecardMs(), 45_000);
+      for (const valor of ["", "-1", "NaN", "240001", "1.5"]) {
+        process.env.AGENTE_TIMEOUT_SCORECARD_MS = valor; assert.equal(timeoutScorecardMs(), 120_000);
       }
       process.env.AGENTE_TIMEOUT_SCORECARD_MS = "30000"; assert.equal(timeoutScorecardMs(), 30_000);
+      process.env.AGENTE_TIMEOUT_SCORECARD_MS = "240000"; assert.equal(timeoutScorecardMs(), 240_000);
     } finally {
       if (anterior === undefined) delete process.env.AGENTE_TIMEOUT_SCORECARD_MS; else process.env.AGENTE_TIMEOUT_SCORECARD_MS = anterior;
     }
