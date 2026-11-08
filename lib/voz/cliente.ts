@@ -40,7 +40,11 @@ export function dividirFala(texto: string): { texto: string; inicio: number; fim
  * `antesDeTocar` (opcional) é chamado uma vez, com o áudio já pronto, logo antes de começar a tocar: quem chama
  * espera ali a vez de falar (a pessoa fazer uma pausa). Devolver false desiste da fala sem erro.
  */
-export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarComAlinhamento }) {
+export function criarVoz(dependencias: { fetch?: typeof globalThis.fetch; tocar?: typeof tocarComAlinhamento } = {}) {
+  // O fetch do navegador precisa ser chamado com this = window: `dependencias.fetch(...)` com o fetch nativo guardado
+  // no objeto dá "Illegal invocation" e a voz nunca sai do navegador. Por isso o padrão é um wrapper.
+  const buscar = dependencias.fetch ?? ((entrada: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(entrada, init));
+  const tocar = dependencias.tocar ?? tocarComAlinhamento;
   let servidorDisponivel = true;
   return async (texto: string, sinal: AbortSignal, eventos: EventosVoz, antesDeTocar?: () => Promise<boolean>): Promise<void> => {
     let liberada = !antesDeTocar;
@@ -58,7 +62,7 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
       let iniciou = false;
       for (let tentativa = 1; ; tentativa++) {
         try {
-          const resposta = await dependencias.fetch("/api/falar", {
+          const resposta = await buscar("/api/falar", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ texto: parte.texto }), signal: AbortSignal.any([sinal, AbortSignal.timeout(25000)]), cache: "no-store",
           });
@@ -69,7 +73,7 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           sinal.throwIfAborted();
           const bytes = Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0));
           if (!(await aguardarVez())) return;
-          await dependencias.tocar(new Blob([bytes], { type: "audio/mpeg" }), dados.alinhamento as Alinhamento, {
+          await tocar(new Blob([bytes], { type: "audio/mpeg" }), dados.alinhamento as Alinhamento, {
             sinal,
             aoAguardarGesto: eventos.aoAguardarGesto,
             aoProgresso: (n) => {
