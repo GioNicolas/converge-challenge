@@ -34,6 +34,9 @@ const MARGEM_PROBLEMA = 392;
 /** `vaga`: o que a IDE usa da config da vaga (padrão: DEFAULT_CONFIG). */
 export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" | "problemId" | "difficulty">;
 
+/** Frases finais com menos palavras que isso são descartadas. */
+const MIN_PALAVRAS_FALA = 2;
+
 export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId?: string; vaga?: VagaIDE }) {
   const DURATION_MS = vaga.durationMin * 60_000;
   const router = useRouter();
@@ -82,9 +85,14 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
   const falaRef = useRef<(texto: string) => void>(() => {});
   falaRef.current = (texto) => {
     const limpo = texto.trim();
-    if (!limpo) return;
+    // Murmúrio solto ("hum", "é") não vira resposta nem evento.
+    if (limpo.split(/\s+/).filter(Boolean).length < MIN_PALAVRAS_FALA) return;
     if (chat.open && !chat.busy && !chat.ended) chat.send(limpo);
-    else void session.sendEvent({ type: "speech", role: "candidate", text: limpo });
+    else {
+      session.sendEvent({ type: "speech", role: "candidate", text: limpo }).catch((err) => {
+        console.error("Falha ao registrar a fala do candidato", err);
+      });
+    }
   };
   const aoFalar = useCallback((texto: string) => falaRef.current(texto), []);
   useTranscricao({

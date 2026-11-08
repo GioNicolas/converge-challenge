@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { NextRequest } from "next/server";
+import { getOrCreateSession } from "@/lib/session/store";
 import { GET } from "../route";
 
 const fetchOriginal = globalThis.fetch;
@@ -9,6 +10,8 @@ afterEach(() => {
   delete process.env.ELEVENLABS_API_KEY;
 });
 const pedido = (query = "?sessao_id=s1") => new NextRequest(`http://localhost/api/stt-token${query}`);
+
+getOrCreateSession("s1");
 
 test("exige sessao_id", async () => {
   assert.equal((await GET(pedido(""))).status, 400);
@@ -36,4 +39,28 @@ test("falha do ElevenLabs vira 502", async () => {
   assert.equal((await GET(pedido())).status, 502);
   globalThis.fetch = (async () => { throw new Error("rede"); }) as typeof fetch;
   assert.equal((await GET(pedido())).status, 502);
+});
+
+test("sessão desconhecida responde 404 e não chama o ElevenLabs", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  let chamou = false;
+  globalThis.fetch = (async () => { chamou = true; return Response.json({ token: "tk" }); }) as typeof fetch;
+  assert.equal((await GET(pedido("?sessao_id=inexistente"))).status, 404);
+  assert.equal(chamou, false);
+});
+
+test("sessão encerrada responde 409", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  getOrCreateSession("s-fim").ended = true;
+  assert.equal((await GET(pedido("?sessao_id=s-fim"))).status, 409);
+});
+
+test("limita pedidos repetidos da mesma sessão (429)", async () => {
+  process.env.ELEVENLABS_API_KEY = "k";
+  getOrCreateSession("s-limite");
+  globalThis.fetch = (async () => Response.json({ token: "tk" })) as typeof fetch;
+  const status: number[] = [];
+  for (let i = 0; i < 21; i++) status.push((await GET(pedido("?sessao_id=s-limite"))).status);
+  assert.equal(status[19], 200);
+  assert.equal(status[20], 429);
 });
