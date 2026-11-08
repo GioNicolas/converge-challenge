@@ -41,6 +41,7 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
       significado: "Reconhece o gargalo quando provocado, mas a solução fica vaga.",
       justificativa:
         "O banco único só foi questionado depois da pergunta do entrevistador. A resposta trouxe um cache, sem dizer o que vai nele nem como é invalidado.",
+      aprendidoComOTime: [{ texto: "Penaliza quem escolhe o banco sem estimar o volume de escrita", efeito: "penaliza" }],
       provas: [
         { tipo: "desenho", momento: "12:05", elementos: ["Postgres"], imagem: null, observacao: "banco único, sem cache, recebendo toda a leitura" },
         { tipo: "fala", momento: "13:20", texto: "Dá para colocar um Redis na frente... guardando os mais acessados." },

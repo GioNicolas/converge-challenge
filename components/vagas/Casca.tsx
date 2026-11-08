@@ -6,9 +6,9 @@
 // aparecerem cortados. No celular o menu vira uma gaveta, aberta pelo botão do topo.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { LayoutList, Menu, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, X } from "lucide-react";
+import { Brain, LayoutList, Menu, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, X } from "lucide-react";
 import { useVagas, type EtapaVaga } from "@/lib/vagas/workspace";
 import { curvaSuave } from "@/lib/design/motion";
 import Marca from "./Marca";
@@ -52,6 +52,8 @@ function useRecolhido() {
 export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
   const { vagas, rascunhos } = useVagas();
   const params = useSearchParams();
+  const caminho = usePathname();
+  const naMemoria = caminho === "/vagas/aprendizado";
   const aba = params.get("estagio") ?? params.get("aba");
   const [gaveta, setGaveta] = useState(false);
   const { recolhido, animar, alternar } = useRecolhido();
@@ -104,7 +106,7 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
         <ItemMenu
           href="/vagas"
           icone={<LayoutList size={16} strokeWidth={1.75} />}
-          atual={!vagaAtual && aba !== "escopo"}
+          atual={!vagaAtual && !naMemoria && aba !== "escopo"}
           n={totalVagas}
           compacto={compacto}
           onClick={() => setGaveta(false)}
@@ -115,7 +117,7 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
           <ItemMenu
             href="/vagas?estagio=escopo"
             icone={<PencilLine size={16} strokeWidth={1.75} />}
-            atual={!vagaAtual && aba === "escopo"}
+            atual={!vagaAtual && !naMemoria && aba === "escopo"}
             n={rascunhos.length}
             compacto={compacto}
             aviso
@@ -124,6 +126,15 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
             Escopos em definição
           </ItemMenu>
         )}
+        <ItemMenu
+          href="/vagas/aprendizado"
+          icone={<Brain size={16} strokeWidth={1.75} />}
+          atual={naMemoria}
+          compacto={compacto}
+          onClick={() => setGaveta(false)}
+        >
+          O que o Totti aprendeu
+        </ItemMenu>
       </nav>
 
       <motion.div

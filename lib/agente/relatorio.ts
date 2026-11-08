@@ -24,6 +24,8 @@ export type CriterioVisto = {
   significado: string | null;
   justificativa: string;
   provas: ProvaVista[];
+  /** Regras da squad que pesaram neste critério ("critério aprendido com o time"). */
+  aprendidoComOTime?: { texto: string; efeito: "valoriza" | "penaliza" }[];
 };
 
 export type RelatorioVisto = {
@@ -123,6 +125,7 @@ export function montarRelatorio(p: {
       nota,
       significado: nota !== null && def ? def.niveis[nota as 1 | 2 | 3 | 4] ?? null : null,
       justificativa: c.justificativa,
+      aprendidoComOTime: (c.regras_squad ?? []).map((r) => ({ texto: r.text, efeito: r.effect })),
       provas: c.evidencias.map((e): ProvaVista =>
         e.tipo === "fala"
           ? { tipo: "fala", momento: formatarMomento(e.horario, inicio), texto: e.texto ?? "" }

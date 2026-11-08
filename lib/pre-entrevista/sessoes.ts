@@ -16,7 +16,7 @@
  */
 import { randomUUID } from "crypto";
 import { findConfig, saveConfig } from "@/lib/config/store";
-import { type InterviewConfig, type FocusArea } from "@/lib/contracts";
+import { type InterviewConfig, type FocusArea, type SquadRule } from "@/lib/contracts";
 import { classificacaoDoFormatoAtivo, type Classificacao, type Vaga } from "./classificador";
 import { aplicarCobertura, areasEmJogo, avaliarCobertura, mesclarCobertura, topicosDo, ultimaFalaDoAgente } from "./cobertura";
 import { type Competencia, type ResultadoCompetencias } from "./competencias";
@@ -62,6 +62,11 @@ export interface Sessao {
   logs: EventoLog[];
   status: { extraindo: boolean; versaoExtraida: number };
   configFinal?: InterviewConfig;
+  /**
+   * Critérios que o Totti aprendeu com o Tech Lead desta empresa (Memória Viva da Squad), ativos quando a
+   * conversa começou. O Totti cita na abertura ("da última vez vocês pediram X") e no resumo.
+   */
+  regrasSquad?: SquadRule[];
 }
 
 /** Estado completo que a tela recebe. */
@@ -142,7 +147,13 @@ export function liberar(id: string): void {
  * Cria a sessão com o rascunho inicial (tudo pendente) e grava os eventos iniciais: sessão, classificação
  * e competências (com o motivo, se a extração das competências falhou).
  */
-export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: number, competencias: ResultadoCompetencias): Sessao {
+export function criarSessao(
+  vaga: Vaga,
+  classificacao: Classificacao,
+  criadaEm: number,
+  competencias: ResultadoCompetencias,
+  regrasSquad: SquadRule[] = [],
+): Sessao {
   // Com cobertura vazia, todos os tópicos obrigatórios das áreas do foco entram em `pendencias`.
   // Com a trava desligada, formato indisponível vira live coding; a classificação original segue no log (ver `classificacaoDoFormatoAtivo`).
   const classificacaoUsada = classificacaoDoFormatoAtivo(classificacao);
@@ -165,6 +176,7 @@ export function criarSessao(vaga: Vaga, classificacao: Classificacao, criadaEm: 
     pesosDetalhe: [],
     logs: [],
     status: { extraindo: false, versaoExtraida: 0 },
+    ...(regrasSquad.length ? { regrasSquad } : {}),
   };
   store.sessoes.set(sessao.id, sessao);
 

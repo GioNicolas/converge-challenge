@@ -73,6 +73,7 @@ export async function POST() {
     candidateEmail: demoEmail,
     roleTitle: "Backend Pleno",
     report: REPORT,
+    vagaId: PLAN.jobPostingId,
   });
   return Response.json({ ok: true });
 }

@@ -61,7 +61,10 @@ export interface DecisionRecord {
   channel?: string;
   ts?: string;
   decidedBy?: string;
+  /** Motivo do Tech Lead: obrigatório no modal de Reprovar, opcional no de Aprovar ("o que te convenceu?"). */
   reason?: string;
+  /** Vaga da entrevista (id do plano). Sem valor: usa o `configId` do relatório. */
+  vagaId?: string;
 }
 
 /** Pontos de extensão: quem integra decide o que acontece depois do clique. */
@@ -88,5 +91,6 @@ export const ACTION = {
 
 export const MODAL = {
   planAdjust: "plan_adjust_modal",
+  candApprove: "cand_approve_modal",
   candReject: "cand_reject_modal",
 } as const;

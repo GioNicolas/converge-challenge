@@ -14,6 +14,8 @@ import {
 } from "./prompts/scorecard";
 import type { EstadoSessao } from "./sessao/estado";
 import { extrairIdsDoGrafo } from "./sessao/politica";
+import type { SquadRule } from "../contracts";
+import { blocoDasRegras, regrasDoCriterio } from "../squad-memory/prompt";
 
 export const MODELO_FINAL_PADRAO = "anthropic/claude-opus-5.5";
 export const TIMEOUT_SCORECARD_MS = 45_000;
@@ -67,6 +69,8 @@ export type CriterioAvaliado = {
   nota: number | null;
   justificativa: string;
   evidencias: Evidencia[];
+  /** Regras da squad que afetam este critério: a tela marca "critério aprendido com o time". */
+  regras_squad?: SquadRule[];
 };
 
 export type Recomendacao = "avancar" | "avancar_com_ressalvas" | "nao_avancar" | "evidencia_insuficiente";
@@ -432,7 +436,8 @@ export function montarEntradaDoPrompt(entrada: EntradaScorecard, fontes: FontesD
       desenho: o.desenho ? { horario: o.desenho.horario, elementos: [...extrairIdsDoGrafo(o.desenho.grafo)] } : null })}`)
     .join("\n");
   const imagens = entrada.imagens.map((i) => `- imagem ${i.numero} (${i.horario})`).join("\n");
-  return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(fontes.grafoFinal, 20_000), imagens };
+  const regrasDaSquad = blocoDasRegras(entrada.estado.plano?.regrasSquad, "observar");
+  return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(fontes.grafoFinal, 20_000), imagens, ...(regrasDaSquad ? { regrasDaSquad } : {}) };
 }
 
 export type DepsScorecard = {
@@ -466,7 +471,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       timeoutMs,
       sinal: controle.signal,
     })]);
-    return aplicarGuardas(r.dados, {
+    return marcarRegrasDaSquad(aplicarGuardas(r.dados, {
       sessaoId: entrada.sessaoId,
       candidatoId: entrada.candidatoId,
       problemaId: deps.problema.id,
@@ -474,7 +479,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       fontes,
       origem: "llm",
       agora: deps.agora,
-    });
+    }), entrada.estado);
   } finally {
     clearTimeout(timer);
   }
@@ -508,7 +513,7 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     pontos_a_aprofundar: criterios.filter(c => c.nota !== null && c.nota < 3).map(c => c.justificativa).slice(0, 3),
     briefing_para_proxima_etapa: "[fake] Scorecard determinístico construído do livro de observações.",
   };
-  return aplicarGuardas(saida, {
+  return marcarRegrasDaSquad(aplicarGuardas(saida, {
     sessaoId: entrada.sessaoId,
     candidatoId: entrada.candidatoId,
     problemaId: deps.problema.id,
@@ -516,5 +521,18 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     fontes,
     origem: "fake",
     agora: deps.agora,
-  });
+  }), entrada.estado);
+}
+
+/** Critério com nota que uma regra da squad afeta ganha a marca "aprendido com o time". */
+function marcarRegrasDaSquad(scorecard: Scorecard, estado: EstadoSessao): Scorecard {
+  const regras = estado.plano?.regrasSquad;
+  if (!regras?.length) return scorecard;
+  return {
+    ...scorecard,
+    criterios: scorecard.criterios.map((c) => {
+      const daSquad = c.nota === null ? [] : regrasDoCriterio(regras, c.criterio);
+      return daSquad.length ? { ...c, regras_squad: daSquad } : c;
+    }),
+  };
 }

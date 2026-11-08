@@ -4,6 +4,7 @@
  * em texto de prompt, então os três agentes personalizam a entrevista do mesmo jeito.
  */
 import type { FocusArea, InterviewConfig } from "@/lib/contracts";
+import { blocoDasRegras } from "@/lib/squad-memory/prompt";
 
 const FOCUS_LABELS: Record<FocusArea, string> = {
   tecnico: "domínio técnico (algoritmo, complexidade, corretude)",
@@ -78,6 +79,9 @@ export function buildVagaContext(config: InterviewConfig, { modo }: VagaContextO
   } else if (config.hints === "leves") {
     linhas.push("Dicas: no máximo uma dica leve, só se ele travar.");
   }
+  // Memória Viva da Squad: o que o Tech Lead deste time já ensinou ao Totti (ver `lib/squad-memory/`).
+  const squad = blocoDasRegras(config.squadRules, modo);
+  if (squad) linhas.push(squad);
   if (modo === "perguntar" && focus.length > 1) {
     linhas.push(`As perguntas sobre o código seguem o que o candidato escreveu e favorecem os focos de maior peso; os focos de processo (pressão, escala, uso de IA) ganham uma pergunta própria quando o sistema pedir.`);
   }

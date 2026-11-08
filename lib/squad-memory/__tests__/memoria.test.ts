@@ -1,0 +1,200 @@
+import { test, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { aprenderComAjuste, aprenderComDecisao } from "../aprender";
+import { comRegrasDaSquad } from "../config";
+import { regraAfeta } from "../criterios";
+import { extrairPorPalavrasChave, extrairRegras } from "../extrator";
+import { motivoNaoTecnico, triarMotivo } from "../guarda";
+import { blocoDasRegras, regrasDoCriterio } from "../prompt";
+import {
+  adicionarRegra,
+  alternarRegra,
+  apagarRegra,
+  concordancia,
+  editarRegra,
+  limparMemoria,
+  listarMotivosIgnorados,
+  listarRegras,
+  regrasAtivas,
+  registrarDecisao,
+} from "../store";
+import type { InterviewConfig } from "@/lib/contracts";
+
+const EMPRESA = "empresa-teste";
+const REPORT = { recommendation: "avancar" as const, overallScore: 3.1, criteria: [] };
+
+beforeEach(() => limparMemoria());
+
+test("guarda-corpo: idade, faculdade, sotaque e aparência não são técnicos", () => {
+  assert.ok(motivoNaoTecnico("ele é muito velho para o time"));
+  assert.ok(motivoNaoTecnico("não fez faculdade boa"));
+  assert.ok(motivoNaoTecnico("tem um sotaque forte"));
+  assert.ok(motivoNaoTecnico("a aparência não combina"));
+  assert.ok(motivoNaoTecnico("ela está grávida"));
+});
+
+test("guarda-corpo: termos técnicos parecidos passam", () => {
+  assert.equal(motivoNaoTecnico("propôs Kafka sem necessidade para esse volume"), undefined);
+  assert.equal(motivoNaoTecnico("não tratou entrada mal formada"), undefined);
+  assert.equal(motivoNaoTecnico("errou os nós filhos da árvore"), undefined);
+  assert.equal(motivoNaoTecnico("caso particular de lista vazia"), undefined);
+});
+
+test("triagem separa a parte técnica da não técnica no mesmo motivo", () => {
+  const t = triarMotivo("Propôs Kafka sem necessidade e é muito velho");
+  assert.deepEqual(t.aceitos, ["Propôs Kafka sem necessidade"]);
+  assert.equal(t.ignorados.length, 1);
+  assert.match(t.ignorados[0].porque, /idade/);
+});
+
+test("palavras-chave: Kafka na reprovação vira penaliza over-engineering em trade-offs", () => {
+  const regras = extrairPorPalavrasChave(
+    { motivo: "", origem: { tipo: "reprovacao", candidato: "Rafael", vagaId: "v1" } },
+    ["Reprovei porque propôs Kafka sem necessidade para esse volume"],
+  );
+  assert.equal(regras.length, 1);
+  assert.equal(regras[0].efeito, "penaliza");
+  assert.equal(regras[0].criterio, "tradeoffs");
+  assert.match(regras[0].texto, /^Penaliza over-engineering: reprovou quem propôs Kafka/);
+});
+
+test("ajuste de plano: 'mais modelagem de dados' valoriza, 'menos algoritmo' não vira regra", () => {
+  const regras = extrairPorPalavrasChave({ motivo: "", origem: { tipo: "ajuste_plano", vagaId: "v1" } }, [
+    "menos algoritmo",
+    "mais modelagem de dados",
+  ]);
+  assert.equal(regras.length, 1);
+  assert.equal(regras[0].efeito, "valoriza");
+  assert.equal(regras[0].criterio, "componentes");
+});
+
+test("extrator: motivo só não técnico não vira regra e é avisado", async () => {
+  const r = await extrairRegras({ motivo: "não gostei do sotaque dele", origem: { tipo: "reprovacao", candidato: "A", vagaId: "v" } });
+  assert.equal(r.regras.length, 0);
+  assert.equal(r.ignorados.length, 1);
+});
+
+test("extrator com modelo: descarta critério inventado e regra com termo não técnico", async () => {
+  const r = await extrairRegras(
+    { motivo: "propôs Kafka sem necessidade", origem: { tipo: "reprovacao", candidato: "A", vagaId: "v" } },
+    async () => ({
+      regras: [
+        { texto: "Penaliza over-engineering: reprovou quem propôs Kafka para volume baixo", efeito: "penaliza", criterio: "tradeoffs" },
+        { texto: "Penaliza quem não fez faculdade", efeito: "penaliza", criterio: "abordagem" },
+        { texto: "Valoriza algo", efeito: "valoriza", criterio: "criterio_inexistente" },
+      ],
+      naoTecnicos: [],
+    }),
+  );
+  assert.equal(r.via, "modelo");
+  assert.equal(r.regras.length, 1);
+  assert.equal(r.regras[0].criterio, "tradeoffs");
+  assert.equal(r.ignorados.length, 1);
+});
+
+test("extrator: modelo falhando cai nas palavras-chave", async () => {
+  const r = await extrairRegras(
+    { motivo: "propôs Kafka sem necessidade", origem: { tipo: "reprovacao", candidato: "A", vagaId: "v" } },
+    async () => {
+      throw new Error("sem rede");
+    },
+  );
+  assert.equal(r.via, "palavras-chave");
+  assert.equal(r.regras.length, 1);
+});
+
+test("store: adicionar, desligar, editar e apagar", () => {
+  const regra = adicionarRegra({
+    empresaId: EMPRESA,
+    texto: "Penaliza over-engineering",
+    efeito: "penaliza",
+    criterio: "tradeoffs",
+    origem: { tipo: "reprovacao", candidato: "A", vagaId: "v" },
+  });
+  assert.equal(regrasAtivas(EMPRESA).length, 1);
+  alternarRegra(regra.id);
+  assert.equal(regrasAtivas(EMPRESA).length, 0);
+  assert.equal(listarRegras(EMPRESA).length, 1);
+  editarRegra(regra.id, { texto: "Penaliza fila sem volume" });
+  assert.equal(listarRegras(EMPRESA)[0].texto, "Penaliza fila sem volume");
+  assert.equal(listarRegras(EMPRESA)[0].origem.tipo, "reprovacao");
+  assert.ok(apagarRegra(regra.id));
+  assert.equal(listarRegras(EMPRESA).length, 0);
+});
+
+test("concordância: por vaga em ordem de tempo, talvez fica de fora", () => {
+  const d = (vagaId: string, rec: "avancar" | "talvez" | "nao_avancar", dec: "aprovado" | "reprovado", dia: number) =>
+    registrarDecisao({
+      empresaId: EMPRESA,
+      vagaId,
+      candidato: `c${dia}`,
+      recomendacaoTotti: rec,
+      decisaoTechLead: dec,
+      decididaEm: new Date(2026, 8, dia).toISOString(),
+    });
+  d("v2", "avancar", "aprovado", 20);
+  d("v1", "avancar", "reprovado", 1);
+  d("v1", "nao_avancar", "reprovado", 2);
+  d("v1", "talvez", "aprovado", 3);
+  d("v2", "nao_avancar", "reprovado", 21);
+  const c = concordancia(EMPRESA);
+  assert.deepEqual(
+    c.porVaga.map((v) => [v.vagaId, v.pct, v.semPosicao]),
+    [
+      ["v1", 50, 1],
+      ["v2", 100, 0],
+    ],
+  );
+  assert.equal(c.geral.pct, 75);
+});
+
+test("aprender com a reprovação: registra a decisão, cria a regra e guarda o ignorado", async () => {
+  const a = await aprenderComDecisao(
+    {
+      empresaId: EMPRESA,
+      vagaId: "backend",
+      candidato: "Rafael",
+      decisao: "reprovado",
+      motivo: "propôs Kafka sem necessidade e é muito velho",
+      report: REPORT,
+    },
+    null,
+  );
+  assert.equal(a.regras.length, 1);
+  assert.equal(a.ignorados.length, 1);
+  assert.equal(listarMotivosIgnorados(EMPRESA).length, 1);
+  assert.equal(concordancia(EMPRESA).geral.total, 1);
+  assert.equal(concordancia(EMPRESA).geral.concordou, 0);
+});
+
+test("aprovação sem motivo: só conta na concordância", async () => {
+  const a = await aprenderComDecisao(
+    { empresaId: EMPRESA, vagaId: "backend", candidato: "Ana", decisao: "aprovado", report: REPORT },
+    null,
+  );
+  assert.equal(a.regras.length, 0);
+  assert.equal(concordancia(EMPRESA).geral.pct, 100);
+});
+
+test("ajuste no plano vira regra com origem ajuste_plano", async () => {
+  const a = await aprenderComAjuste({ empresaId: EMPRESA, vagaId: "backend", comentario: "mais modelagem de dados" }, null);
+  assert.equal(a.regras[0].origem.tipo, "ajuste_plano");
+});
+
+test("regras chegam à config, ao prompt e ao critério da rubrica", () => {
+  adicionarRegra({
+    empresaId: EMPRESA,
+    texto: "Penaliza over-engineering",
+    efeito: "penaliza",
+    criterio: "estimativa",
+    origem: { tipo: "reprovacao", candidato: "A", vagaId: "v" },
+  });
+  const config = comRegrasDaSquad({ id: "c" } as InterviewConfig, EMPRESA);
+  assert.equal(config.squadRules?.length, 1);
+  assert.match(blocoDasRegras(config.squadRules, "perguntar"), /Critérios aprendidos com o Tech Lead/);
+  assert.equal(blocoDasRegras([], "observar"), "");
+  // "estimativa" (pré-entrevista) equivale a "escalabilidade" (rubrica do cérebro de system design).
+  assert.equal(regrasDoCriterio(config.squadRules, "escalabilidade").length, 1);
+  assert.ok(regraAfeta({ criterio: "componentes" }, "dados_consistencia"));
+  assert.ok(!regraAfeta({ criterio: "tradeoffs" }, "bordas"));
+});

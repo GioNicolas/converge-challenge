@@ -7,7 +7,7 @@
  */
 import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
-import { COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
+import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import { normalizarTexto } from "./frases";
@@ -15,6 +15,7 @@ import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
 import { DURACAO_PADRAO, duracaoDoRascunho, listar, type Rascunho, type Turno } from "./rascunho";
 import type { Sessao } from "./sessoes";
+import { afirmacaoDaMemoria, pedidoDaRegra, perguntaDaMemoria, regrasDoFormato, resumoDaMemoria } from "@/lib/squad-memory/fala";
 
 const TEMPERATURA_CONVERSA = 0.5;
 const MAX_TOKENS_CONVERSA = 400;
@@ -201,8 +202,18 @@ function fraseSemMedicao(r: Rascunho): string | undefined {
  * o formato e o foco (ou o trade-off, se o formato não mede uma área de peso) e a pergunta final.
  * Nível não dito na vaga vira pergunta, não afirmação. Se o formato não está claro, a pergunta é o formato.
  */
+/** As regras da squad que valem no formato atual da conversa. */
+function memoriaDoFormato(sessao: Sessao) {
+  return regrasDoFormato(
+    sessao.regrasSquad,
+    CATALOGO[sessao.rascunho.mode].map((c) => c.id),
+  );
+}
+
 export function aberturaDoAgente(sessao: Sessao): string {
   const r = sessao.rascunho;
+  const memoria = memoriaDoFormato(sessao);
+  const afirmacao = afirmacaoDaMemoria(memoria);
   const frases = [`Oi! Sou Totti, vou montar a entrevista de ${r.roleTitle} com você.`];
   // O resumo entra no meio da frase: a primeira letra vai para minúscula, sem mexer em sigla (APIs, iOS).
   const resumo = sessao.resumoVaga?.replace(/^([A-ZÀ-Ú])(?=[a-zà-ú])/, (letra) => letra.toLowerCase());
@@ -215,6 +226,7 @@ export function aberturaDoAgente(sessao: Sessao): string {
 
   if (sessao.classificacao.confirmar.includes("mode")) {
     frases.push(incerto ? `Olhando principalmente ${focos}.` : `A vaga é de nível ${nivel}, olhando principalmente ${focos}.`);
+    if (afirmacao) frases.push(afirmacao);
     frases.push(
       incerto
         ? `Você prefere live coding ou system design, e qual o nível: ${perguntaNivel}`
@@ -225,6 +237,7 @@ export function aberturaDoAgente(sessao: Sessao): string {
   const oferta = tradeoffDaAbertura(sessao);
   if (oferta) {
     frases.push(fraseDoTradeoff(r, oferta, incerto ? undefined : nivel));
+    if (afirmacao) frases.push(afirmacao);
     frases.push(incerto ? `Qual faz mais sentido, e qual o nível: ${perguntaNivel}` : "Qual faz mais sentido?");
     return frases.join(" ");
   }
@@ -235,7 +248,13 @@ export function aberturaDoAgente(sessao: Sessao): string {
   );
   const semMedicao = fraseSemMedicao(r);
   if (semMedicao) frases.push(semMedicao);
-  frases.push(incerto ? `O nível não está claro na vaga: ${perguntaNivel}` : "É isso, ou quer focar em outra coisa?");
+  // Com memória da squad, a pergunta final confirma o plano e o que o time pediu da última vez, numa pergunta só.
+  if (incerto) {
+    if (afirmacao) frases.push(afirmacao);
+    frases.push(`O nível não está claro na vaga: ${perguntaNivel}`);
+  } else {
+    frases.push(perguntaDaMemoria(memoria) ?? "É isso, ou quer focar em outra coisa?");
+  }
   return frases.join(" ");
 }
 
@@ -268,6 +287,12 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
       : `- duração: não definida (padrão do formato: ${DURACAO_PADRAO[r.mode]} min)`,
   );
   if (r.recruiterNotes) linhas.push(`- notas da recrutadora: ${r.recruiterNotes}`);
+  const memoria = memoriaDoFormato(sessao);
+  if (memoria.length) {
+    linhas.push(
+      `- critérios que o time já ensinou ao Totti (já entram na entrevista; o código fala deles, não repita): ${listar(memoria.map((m) => pedidoDaRegra(m.text)))}`,
+    );
+  }
   return linhas.join("\n");
 }
 
@@ -702,6 +727,7 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     texto = [
       texto,
       fraseNaoAvaliado(naoAvaliadoParaFalar(sessao)),
+      resumoDaMemoria(memoriaDoFormato(sessao)),
       fraseLogistica(sessao.rascunho, sessao.preferencias, variante),
       fechamentoDoResumo(),
     ]
