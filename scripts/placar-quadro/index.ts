@@ -244,7 +244,10 @@ async function main() {
     em: new Date().toISOString(),
     versaoTotti: process.env.TOTTI_QUADRO || "v1",
     modelos: {
-      conversa: process.env.CONVERSA_AO_VIVO_MODEL || "google/gemini-3.5-flash-lite",
+      conversa:
+        process.env.TOTTI_QUADRO === "v2"
+          ? process.env.CONVERSA_QUADRO_MODEL || "google/gemini-3.5-flash-lite"
+          : process.env.CONVERSA_AO_VIVO_MODEL || "google/gemini-3.5-flash-lite",
       analise: process.env.ANALISE_QUADRO_MODEL || "google/gemini-3.7-flash",
       juiz: MODELO_JUIZ,
       candidato: MODELO_CANDIDATO,

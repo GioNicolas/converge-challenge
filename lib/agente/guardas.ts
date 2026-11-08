@@ -106,3 +106,15 @@ export function semPerguntaNoFim(texto: string): string {
   const convite = CONVITES[t.length % CONVITES.length];
   return [...frases, convite].join(" ");
 }
+
+/**
+ * Como `semPerguntaNoFim`, mas sem colar um convite pronto quando ainda sobra fala: "Tranquilo, seguimos." já
+ * devolve a vez. O convite fixo só entra se a fala era só a pergunta.
+ */
+export function semPerguntaNoFimV2(texto: string): string {
+  const t = texto.trim();
+  if (!t.endsWith("?")) return t;
+  const frases = frasesDe(t);
+  while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  return frases.length ? frases.join(" ") : CONVITES[t.length % CONVITES.length];
+}

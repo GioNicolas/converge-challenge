@@ -1,6 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
-import { limitarFrases, semPerguntaNoFim } from "./guardas";
+import { limitarFrases, semPerguntaNoFim, semPerguntaNoFimV2 } from "./guardas";
 import { mapearAcoesVisuais, type AcaoVisual } from "../presenca/acoesVisuais";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
@@ -11,6 +11,7 @@ import {
   montarSistemaEstaticoPerguntar,
   NOME_SCHEMA_PERGUNTAR,
 } from "./prompts/entrevistador";
+import { montarSistemaDinamicoPerguntarV2, montarSistemaEstaticoPerguntarV2, NOME_SCHEMA_PERGUNTAR_V2 } from "./prompts/entrevistador-v2";
 import { transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
 import type { Fase, FalaRecente } from "./sessao/tipos";
 import { logPadrao, type LogMeta } from "./analisar";
@@ -22,7 +23,16 @@ export type DepsPerguntar = {
   modelo?: string;
   maxTokens?: number;
   log?: LogMeta;
+  /** Versão do Totti no quadro; sem valor, a de TOTTI_QUADRO (padrão v1). */
+  versao?: VersaoTottiQuadro;
 };
+
+export type VersaoTottiQuadro = "v1" | "v2";
+
+/** Qual Totti responde no quadro: v1 (regras) ou v2 (objetivos, docs/totti-v2-conversa.md). */
+export function versaoTottiQuadro(): VersaoTottiQuadro {
+  return process.env.TOTTI_QUADRO === "v2" ? "v2" : "v1";
+}
 
 export type EntradaPerguntar = {
   fase: Fase;
@@ -74,16 +84,22 @@ export async function perguntar(
   ).estado;
   const mudo = (): ResultadoPerguntar => ({ responder: false, texto: "", requisito: null, concluiu: false, desfecho: null, estado: comFala });
 
+  const v2 = (deps.versao ?? versaoTottiQuadro()) === "v2";
   let saida;
   try {
     const r = await deps.llm.completarJson({
-      sistema: {
-        estatico: montarSistemaEstaticoPerguntar(deps.kit, deps.problema),
-        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64),
-      },
+      sistema: v2
+        ? {
+            estatico: montarSistemaEstaticoPerguntarV2(deps.kit, deps.problema),
+            dinamico: montarSistemaDinamicoPerguntarV2(estado, deps.kit, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64),
+          }
+        : {
+            estatico: montarSistemaEstaticoPerguntar(deps.kit, deps.problema),
+            dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64),
+          },
       mensagens: [{ role: "user", content: entrada.texto }],
       schema: EsquemaSaidaPerguntar,
-      nomeSchema: NOME_SCHEMA_PERGUNTAR,
+      nomeSchema: v2 ? NOME_SCHEMA_PERGUNTAR_V2 : NOME_SCHEMA_PERGUNTAR,
       modelo: deps.modelo,
       maxTokens: deps.maxTokens ?? 200,
       sinal,
@@ -111,7 +127,8 @@ export async function perguntar(
   // pergunta. Só a resposta vaga ganha um aprofundamento; o modelo marca qual é qual ("aprofundar"), porque a
   // regra só no prompt o modelo rápido não seguia (abria outro assunto depois de uma resposta justificada).
   const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && saida.aprofundar !== true);
-  const texto = semAprofundar ? semPerguntaNoFim(curto) : curto;
+  // v2: só tira a pergunta do fim; o convite enlatado entra apenas se não sobrar fala nenhuma.
+  const texto = semAprofundar ? (v2 ? semPerguntaNoFimV2(curto) : semPerguntaNoFim(curto)) : curto;
   if (!saida.responder || !texto) return mudoOuConcluiu();
   const requisito = saida.requisito?.trim()
     ? saida.requisito.trim().slice(0, MAX_CARACTERES_REQUISITO)

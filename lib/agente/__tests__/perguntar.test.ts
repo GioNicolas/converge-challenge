@@ -159,3 +159,27 @@ describe("foto e mudanças do quadro no /perguntar", () => {
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
   });
 });
+
+describe("Totti 2 no quadro (versao v2)", () => {
+  const ativa = { ...estado, fase: "APROFUNDAMENTO" as const };
+  const depsV2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ ...deps(llm), versao: "v2" as const });
+  it("usa o prompt de objetivos, o schema próprio (papel conversa_quadro) e mostra o que ainda não deu sinal", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "São 100 milhões por mês.", requisito: null }]);
+    const comCriterios = { ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }), fase: "REQUISITOS" as const, faseIniciadaEm: AGORA };
+    await perguntar(depsV2(llm), comCriterios, { fase: "REQUISITOS", texto: "Quantas URLs por mês?" }, AGORA);
+    const c = llm.chamadas[0];
+    assert.equal(c.nomeSchema, "resposta_entrevistador_v2");
+    assert.match(c.sistema.estatico, /PARA QUE SERVE ESTA ENTREVISTA/);
+    assert.match(c.sistema.dinamico ?? "", new RegExp(`Ainda sem nenhum sinal.*${kitDemo.criterios[0].nome}`));
+  });
+  it("não sei: tira a pergunta do fim sem colar convite pronto quando sobra fala", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, seguimos. Quer olhar outra parte?", requisito: null, desfecho: "nao_sabe" }]);
+    const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.equal(r.texto, "Tranquilo, seguimos.");
+  });
+  it("sem versao explícita vale o v1", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
+    assert.equal(llm.chamadas[0].nomeSchema, "resposta_entrevistador");
+  });
+});

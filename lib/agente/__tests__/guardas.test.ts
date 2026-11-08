@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { limitarFrases, semPerguntaNoFim, trocarIdsPorNomes } from "../guardas";
+import { limitarFrases, semPerguntaNoFim, semPerguntaNoFimV2, trocarIdsPorNomes } from "../guardas";
 
 describe("trocarIdsPorNomes", () => {
   const grafo = "COMPONENTES\n- [r5] Cache Redis (retângulo)\n- [e2] Réplica de leitura (elipse)\nCONEXÕES\n- [s5] Cache Redis → Réplica de leitura \"miss\"";
@@ -35,5 +35,15 @@ describe("limitarFrases", () => {
   });
   it("texto sem pontuação final fica inteiro", () => {
     assert.equal(limitarFrases("Saquei, continua daí", 2), "Saquei, continua daí");
+  });
+});
+
+describe("semPerguntaNoFimV2", () => {
+  it("tira a pergunta do fim e não acrescenta convite quando sobra fala", () => {
+    assert.equal(semPerguntaNoFimV2("Sem problema, seguimos. Quer olhar outra parte do desenho?"), "Sem problema, seguimos.");
+  });
+  it("fala só com pergunta vira um convite; fala sem pergunta não muda", () => {
+    assert.doesNotMatch(semPerguntaNoFimV2("O que mais você quer detalhar?"), /\?/);
+    assert.equal(semPerguntaNoFimV2("Tranquilo, continua daí."), "Tranquilo, continua daí.");
   });
 });
