@@ -227,12 +227,12 @@ describe("depois de uma fala solta do agente", () => {
     const depois = transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "São 20 mil por dia. Pode seguir com o desenho." }, AGORA).estado;
     assert.equal(depois.ultimaFalaDoAgenteEm, AGORA);
     assert.equal(motivoBloqueioPlin(depois, AGORA + 3_000), "AGENTE_ACABOU_DE_FALAR");
-    assert.equal(motivoBloqueioPlin(depois, AGORA + 14_999), "AGENTE_ACABOU_DE_FALAR");
+    assert.equal(motivoBloqueioPlin(depois, AGORA + 7_999), "AGENTE_ACABOU_DE_FALAR");
   });
 
   it("passado o intervalo a pergunta volta a poder sair", () => {
     const depois = transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "Certo." }, AGORA).estado;
-    assert.equal(motivoBloqueioPlin(depois, AGORA + 15_000), null);
+    assert.equal(motivoBloqueioPlin(depois, AGORA + 8_000), null);
   });
 
   it("estado guardado antes do campo não bloqueia nada", () => {
@@ -243,7 +243,7 @@ describe("depois de uma fala solta do agente", () => {
   it("o plin de uma análise logo depois da fala é rebaixado", () => {
     const depois = transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "Certo." }, AGORA).estado;
     assert.equal(podeLevantarPlin(depois, "duvida", AGORA + 2_000), false);
-    assert.equal(podeLevantarPlin(depois, "duvida", AGORA + 20_000), true);
+    assert.equal(podeLevantarPlin(depois, "duvida", AGORA + 12_000), true);
   });
 
   it("o intervalo entre perguntas continua valendo por conta própria", () => {

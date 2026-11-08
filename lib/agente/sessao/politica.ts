@@ -11,6 +11,8 @@ export type Regras = {
   /**
    * Depois de qualquer fala solta do agente (resposta, comentário, continuação), uma pergunta nova do Analista
    * espera este tempo. Sem isso, "Pode seguir com o desenho." vinha seguido de outra pergunta em segundos.
+   * É contado da hora em que o servidor registra a fala, não do fim do áudio: 8 s cobrem a síntese e a fala
+   * (uns 6 a 8 s), e o quadro ainda espera a pausa de 3 s do candidato antes de tomar a vez.
    */
   intervaloAposFalaDoAgenteMs?: number;
   maxPerguntas: number;
@@ -31,7 +33,7 @@ export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
   intervaloEntrePerguntasMs: 25_000,
-  intervaloAposFalaDoAgenteMs: 15_000,
+  intervaloAposFalaDoAgenteMs: 8_000,
   maxPerguntas: 5,
   maxCaracteresNota: 40,
 };
