@@ -235,3 +235,41 @@ Cada fase entrega algo que dá para testar sozinho. A ordem é sugestão; o Níc
 - **Eco no barge-in**: o mic aberto com a voz tocando precisa de `echoCancellation` e de um limiar; se não ficar limpo, a fase 4
   entra sem barge-in.
 - **Streaming quebra o pós-processamento**: qualquer limpeza passa a ser por frase, no buffer, antes do TTS.
+
+---
+
+## 8. Primeiro alvo: a entrevista no quadro
+
+O quadro já tem a forma Conversador + Pensador (`perguntar` responde à fala; `analisar` observa o desenho e decide as
+perguntas por iniciativa). Por isso o teste começa por ele: mudar só o Conversador e medir.
+
+**Placar** (`npm run placar:quadro -- --rotulo <nome>`, em `scripts/placar-quadro/`):
+- 18 casos fixos com checagem objetiva;
+- 3 entrevistas simuladas (um LLM faz o candidato: sênior claro, júnior nervoso, vago que testa atalhos);
+- um juiz (Sonnet 5.5) que dá nota a cada fala e marca violações;
+- latência p50/p95.
+`--comparar a.json b.json` mostra a diferença. Ainda não calibrado com notas humanas: serve para comparar versões.
+
+**Linha de base, v1** (`docs/placar-quadro/v1-base.md`):
+
+| Medida | v1 |
+|---|---|
+| Casos fixos ok | 17/18 |
+| Escuta / Pertinência / Naturalidade / Concisão | 3,95 / 3,67 / 3,29 / 4,65 |
+| Pareceu pessoa / Conduziu bem / Inteligência | 2,67 / 2,33 / 3,00 |
+| Violações (55 falas) | validou 13, enlatado 6, ensinou/dica 5, ignorou 3, vazou critério 2, repetiu 2, inventou fato 1 |
+| /perguntar p50 / p95 | 1055 / 1224 ms |
+
+O que o juiz viu: a fórmula "Saquei, ..." / "Ficou clara ...", que valida em vez de ouvir. Depois de uma resposta boa, abre
+outro assunto (interrogatório). Entrega os próximos tópicos ("como a geração do código ou a contagem de cliques") e
+inventou um prazo de retorno.
+
+**v2** (`TOTTI_QUADRO=v2`, `lib/agente/prompts/entrevistador-v2.ts`):
+- prompt de objetivos com o porquê, sem frases-modelo;
+- vê os critérios ainda sem sinal e as próprias últimas falas;
+- papel `conversa_quadro` (`CONVERSA_QUADRO_MODEL`);
+- convite enlatado só quando não sobra fala.
+
+A primeira rodada (flash-lite) saiu contaminada pelo limite de créditos da OpenRouter: um juiz e os casos sem nota.
+Sinal preliminar: validou caiu de 13 para 2, sem dica, sem vazamento e sem enlatado; repetiu pergunta subiu para 3. Falta
+refazer com crédito, e com Sonnet 5.5 no Conversador.
