@@ -11,6 +11,7 @@ import type { InterviewConfig } from "@/lib/contracts";
 import { LANGUAGE_LABELS } from "@/lib/ide-constants";
 import { DIFFICULTIES, difficultyForSeniority } from "@/lib/problems";
 import { curvaSuave } from "@/lib/design/motion";
+import Perola from "@/components/totti/Perola";
 
 type Passo = { titulo: string; texto: string };
 
@@ -53,7 +54,7 @@ export default function PreInterview({ vaga = DEFAULT_CONFIG, convite }: { vaga?
   return (
     <div className="tema-recrutador min-h-dvh">
       <header className="mx-auto flex w-full max-w-[560px] items-center gap-2.5 px-5 pt-6">
-        <span aria-hidden className="perola size-[22px] rounded-full anim-respirar" />
+        <Perola tamanho={20} />
         <span className="font-display text-[20px] leading-none font-bold tracking-[-0.02em] text-texto">totti</span>
       </header>
 

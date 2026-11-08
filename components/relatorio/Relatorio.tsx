@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Icone from "@/components/quadro/Icone";
 import { useContar } from "@/components/totti/useContar";
+import Perola from "@/components/totti/Perola";
 import VoltarLink from "@/components/VoltarLink";
 import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 import type { AdaptacaoVista, CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
@@ -323,7 +324,7 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
             <VoltarLink texto="Voltar aos resultados" />
           </div>
           <span className="flex items-center gap-2" aria-hidden>
-            <span className="perola size-[20px] rounded-full anim-respirar" />
+            <Perola tamanho={18} />
             <span className="font-display text-[18px] leading-none font-bold tracking-[-0.02em]">totti</span>
           </span>
           <div className="flex items-center gap-2">

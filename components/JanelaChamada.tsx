@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/Icone";
-import Perola from "@/components/totti/Perola";
+import OndaDeVoz from "@/components/agente/OndaDeVoz";
 import type { EstadoAgente } from "@/lib/presenca/energia";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 
@@ -143,7 +143,7 @@ export default function JanelaChamada({ pergunta, oculta, encerrada, iniciadaEm,
         aria-label="Chamada com o entrevistador"
         className="flex h-11 cursor-grab items-center gap-2.5 rounded-full bg-vidro-escuro pr-1.5 pl-2 text-sm text-texto-claro shadow-flutuante backdrop-blur-xl active:cursor-grabbing"
       >
-        <span className="mx-0.5 flex size-8 items-center justify-center"><Perola estado={estadoAgente} tamanho={24} /></span>
+        <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
         <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
         {agenteFalando && !duvidaPendente && <span className="text-texto-claro/60">Falando…</span>}
         <button

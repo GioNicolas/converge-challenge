@@ -103,6 +103,26 @@ Esfera com gradiente suave em azul, viva e discreta.
 | Falando | Pulsa no ritmo da voz |
 | Com dúvida (o plin) | Pulso mais forte e um halo azul crescendo, até o candidato clicar |
 
+#### Onda de voz e carregando: o mesmo anel em todo lugar
+O Totti aparece como um anel "desenhado à mão", com as mesmas imperfeições em qualquer tamanho. A forma mora em
+`lib/presenca/anel.ts` (`ondulacao`, `tracarAnel`); mudou ali, muda em todos.
+
+- **Na chamada / avatar:** `<OndaDeVoz estado={...} tamanho="md" />` (`components/agente/OndaDeVoz.tsx`). No "pensando",
+  o arco claro percorre o anel em cima das ondas, não num círculo perfeito. `fundo="claro"` no papel.
+- **Qualquer carregamento:** `<CarregandoTotti />` (`components/agente/CarregandoTotti.tsx`), no lugar de
+  `Loader2`/`LoaderCircle` + `animate-spin`. A cor vem do texto em volta (`currentColor`); `rotulo={false}` quando o lugar
+  já diz o que está acontecendo (botão "Enviando…"); `brilho` no fundo escuro.
+
+| Tamanho | px | Onde |
+|---|---|---|
+| `xs` | 16 | dentro de texto ou de botão |
+| `sm` | 24 | ao lado de um rótulo, linha de lista, chip |
+| `md` | 32 | avatar: pílula minimizada da chamada, bolha de conversa |
+| `lg` | 72 | destaque numa página ou cartão vazio ("lendo a vaga…") |
+| `xl` | 124 | quadro principal da chamada |
+
+Vitrine com todos os tamanhos, no papel e no escuro: `/dev/agente`.
+
 ### 8.4 A mão do agente (anotações no quadro)
 - **Cursor do agente:** seta azul com uma etiqueta pequena com o nome do agente, como um colaborador do Figma. Anda em curva, com aceleração e desaceleração.
 - **Desenhos e nota:** em azul `marca`, traço "à mão" (o próprio estilo do Excalidraw):

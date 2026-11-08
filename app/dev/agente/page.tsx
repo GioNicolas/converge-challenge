@@ -4,7 +4,9 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import VidroLiquido from "@/components/agente/VidroLiquido";
-import OndaDeVoz from "@/components/quadro/OndaDeVoz";
+import OndaDeVoz from "@/components/agente/OndaDeVoz";
+import CarregandoTotti from "@/components/agente/CarregandoTotti";
+import { TAMANHOS_TOTTI, type TamanhoTotti } from "@/lib/presenca/anel";
 import AvatarChamada from "@/components/agente/AvatarChamada";
 import OndaSiri from "@/components/agente/OndaSiri";
 import type { EstadoAgente } from "@/lib/presenca/energia";
@@ -22,6 +24,53 @@ const VERSOES = [
   { letra: "C", nome: "Avatar de chamada", descricao: "Participante de câmera desligada, como no Meet, com anéis de voz.", C: AvatarChamada },
   { letra: "D", nome: "Onda colorida", descricao: "Ondas de luz que se somam sobre uma linha, como a Siri.", C: OndaSiri },
 ];
+
+const NOMES_TAMANHO = Object.keys(TAMANHOS_TOTTI) as TamanhoTotti[];
+
+/** Vitrine do carregando: todos os tamanhos, no papel e no escuro, e o uso dentro de um botão. */
+function VitrineCarregando() {
+  return (
+    <section className="flex flex-col gap-4 rounded-padrao bg-superficie p-5 shadow-padrao">
+      <div>
+        <h2 className="font-semibold tracking-tight">Carregando do Totti</h2>
+        <p className="text-sm text-texto-suave">
+          O mesmo anel imperfeito, com o arco do “pensando”. Use <code>&lt;CarregandoTotti tamanho=&quot;md&quot; /&gt;</code>{" "}
+          no lugar de qualquer spinner. A cor vem do texto em volta.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {(["papel", "escuro"] as const).map((fundo) => (
+          <div
+            key={fundo}
+            className={`flex flex-wrap items-end justify-around gap-6 rounded-[14px] px-4 py-6 ${
+              fundo === "papel" ? "bg-fundo text-texto" : "bg-[#1c1c1e] text-white"
+            }`}
+          >
+            {NOMES_TAMANHO.map((nome) => (
+              <div key={nome} className="flex flex-col items-center gap-2">
+                <CarregandoTotti tamanho={nome} brilho={fundo === "escuro"} />
+                <span className="text-[11px] font-medium opacity-60">
+                  {nome} · {TAMANHOS_TOTTI[nome]}px
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button className="inline-flex items-center gap-2 rounded-full bg-texto px-4 py-2 text-sm font-medium text-white">
+          <CarregandoTotti tamanho="xs" rotulo={false} />
+          Enviando…
+        </button>
+        <span className="inline-flex items-center gap-2 text-sm text-texto-suave">
+          <CarregandoTotti tamanho="sm" rotulo={false} />O Totti está lendo a vaga
+        </span>
+      </div>
+    </section>
+  );
+}
 
 /** Volume do microfone (0 a 1), só quando ligado. */
 function useMicrofone(ligado: boolean) {
@@ -166,6 +215,8 @@ function ComparacaoAgenteInterno() {
             </section>
           ))}
         </div>
+
+        <VitrineCarregando />
       </div>
     </main>
   );

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useDragControls, useMotionValue } from "motion/react";
 import Icone from "@/components/quadro/Icone";
-import Perola from "@/components/totti/Perola";
+import OndaDeVoz from "@/components/agente/OndaDeVoz";
 import type { EstadoAgente } from "@/lib/presenca/energia";
 import type { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 
@@ -199,7 +199,7 @@ export default function JanelaChamada({
               className="flex h-11 cursor-pointer items-center gap-2.5 pr-4 pl-2 text-sm"
             >
               {/* O agente continua "vivo" na pílula: o mesmo anel, pequeno */}
-              <span className="mx-0.5 flex size-8 items-center justify-center"><Perola estado={estadoAgente} tamanho={24} /></span>
+              <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
               <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
               {agenteFalando && !temDuvida && <span className="text-texto-claro/60">Falando…</span>}
               {estadoAgente === "pensando" && <span className="text-texto-claro/60">Pensando…</span>}
@@ -236,7 +236,7 @@ export default function JanelaChamada({
                     temDuvida ? "cursor-pointer" : "cursor-default"
                   }`}
                 >
-                  <Perola estado={estadoAgente} tamanho={84} brilho />
+                  <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="xl" />
                 </button>
 
                 <AnimatePresence>

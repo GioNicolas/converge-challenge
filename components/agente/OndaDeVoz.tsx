@@ -3,21 +3,26 @@
 // O entrevistador na chamada: um anel fino de luz que ondula com a voz.
 //   ouvindo  → calmo e lento, branco, seguindo de leve o microfone do candidato
 //   falando  → mais vivo e rápido, azul (no fundo claro, tinta preta)
-//   pensando → branco, com um arco claro percorrendo o anel
+//   pensando → branco, com um arco claro percorrendo o anel (seguindo as mesmas ondas, não um círculo perfeito)
 //   duvida   → azul, calmo, chamando atenção sem agitar
 // Ritmo, amplitude e cor mudam aos poucos entre um estado e outro (nada "pula").
-// O desenho é feito num espaço de 132×132 e escalado para o `tamanho` pedido (ex.: 32 na pílula minimizada).
+// O desenho é feito num espaço de 132×132 e escalado para o `tamanho` pedido: um nome de TAMANHOS_TOTTI
+// ("md" na pílula minimizada, "xl" na chamada) ou um número em px.
+// Para "carregando" fora da chamada, use o CarregandoTotti (mesma forma, sem a voz).
 import { useRef } from "react";
 import { useReducedMotion } from "motion/react";
 import { useLacoDeEnergia, type EstadoAgente } from "@/lib/presenca/energia";
+import { emPixels, ondulacao, tracarAnel, type TamanhoTotti } from "@/lib/presenca/anel";
 
 const LADO = 132;
 const RAIO = 34;
-const PONTOS = 180;
+/** Pensando: o arco claro anda nesta velocidade (rad/s) e cobre este pedaço do anel (rad). */
+const GIRO_PENSANDO = 1.8;
+const ARCO_PENSANDO = 1.1;
 
 type Cor = [number, number, number];
 const BRANCO: Cor = [245, 240, 232]; // pérola
-const AZUL: Cor = [255, 252, 246]; // pérola acesa (sem azul: estado se diz no ritmo)
+const AZUL: Cor = [255, 252, 246]; // pérola acesa: sem azul, o estado se diz no ritmo
 const BRILHO_CLARO: Cor = [217, 209, 196];
 const BRILHO_AZUL: Cor = [245, 240, 232];
 
@@ -25,10 +30,10 @@ type Jeito = Record<EstadoAgente, { velocidade: number; amplitude: number; cor: 
 
 /** Como cada estado se mexe: velocidade das ondas, quanto a energia abre o anel e a cor (fundo escuro). */
 const JEITO: Jeito = {
-  ouvindo: { velocidade: 0.45, amplitude: 0.55, cor: BRANCO, brilho: BRILHO_CLARO },
-  falando: { velocidade: 1.25, amplitude: 1.15, cor: AZUL, brilho: BRILHO_AZUL },
-  pensando: { velocidade: 0.7, amplitude: 0.6, cor: BRANCO, brilho: BRILHO_CLARO },
-  duvida: { velocidade: 0.55, amplitude: 0.8, cor: AZUL, brilho: BRILHO_AZUL },
+  ouvindo: { velocidade: 0.28, amplitude: 0.55, cor: BRANCO, brilho: BRILHO_CLARO },
+  falando: { velocidade: 0.62, amplitude: 1.15, cor: AZUL, brilho: BRILHO_AZUL },
+  pensando: { velocidade: 0.45, amplitude: 0.6, cor: BRANCO, brilho: BRILHO_CLARO },
+  duvida: { velocidade: 0.35, amplitude: 0.8, cor: AZUL, brilho: BRILHO_AZUL },
 };
 
 /** Fundo claro (papel): o anel vira grafite, como traço de caneta; falando, a tinta fica mais escura e
@@ -49,15 +54,17 @@ const rgb = (c: Cor) => c.map((v) => Math.round(v)).join(",");
 export default function OndaDeVoz({
   estado,
   volume = 0,
-  tamanho = LADO,
+  tamanho: tamanhoPedido = LADO,
   fundo = "escuro",
 }: {
   estado: EstadoAgente;
   volume?: number;
-  tamanho?: number;
+  /** Nome de TAMANHOS_TOTTI ("xs" a "xl") ou px. */
+  tamanho?: TamanhoTotti | number;
   /** Cor do fundo onde o anel aparece. */
   fundo?: "escuro" | "claro";
 }) {
+  const tamanho = emPixels(tamanhoPedido);
   const jeitos = fundo === "claro" ? JEITO_CLARO : JEITO;
   const reduzido = useReducedMotion() ?? false;
   const tela = useRef<HTMLCanvasElement>(null);
@@ -107,20 +114,12 @@ export default function OndaDeVoz({
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, LADO, LADO);
 
+      // Raio de cada ângulo: o círculo base mais as ondas. O arco do "pensando" usa o mesmo raio do anel principal.
+      const raio = (deslocamento: number, escala: number) => (a: number) =>
+        RAIO * escala * (1 + e * 0.1) + ondulacao(a, f, deslocamento) * (1 + e * 9);
+
       const anel = (deslocamento: number, escala: number, alfa: number, largura: number) => {
-        ctx.beginPath();
-        for (let i = 0; i <= PONTOS; i++) {
-          const a = (i / PONTOS) * Math.PI * 2;
-          const onda =
-            Math.sin(4 * a + f * 3.1 + deslocamento) * 0.55 +
-            Math.sin(7 * a - f * 2.3 + deslocamento * 2) * 0.3 +
-            Math.sin(11 * a + f * 4.2) * 0.15;
-          const r = RAIO * escala * (1 + e * 0.1) + onda * (1 + e * 9);
-          const x = c + r * Math.cos(a);
-          const y = c + r * Math.sin(a);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
+        tracarAnel(ctx, c, raio(deslocamento, escala));
         ctx.strokeStyle = `rgba(${rgb(s.cor)},${alfa})`;
         ctx.lineWidth = Math.max(largura, 1.1 / k); // pelo menos ~1px na tela, mesmo pequeno
         ctx.shadowColor = `rgba(${rgb(s.brilho)},.85)`;
@@ -130,15 +129,16 @@ export default function OndaDeVoz({
       anel(1.7, 1.12, 0.22 + e * 0.2, 1);
       anel(0, 1, 0.95, 1.8);
 
-      // Pensando: um arco claro percorrendo o anel.
+      // Pensando: um arco claro percorrendo o anel, em cima das mesmas imperfeições (não um círculo perfeito).
       if (estado === "pensando") {
-        const inicio = t * 3;
-        ctx.beginPath();
-        ctx.arc(c, c, RAIO, inicio, inicio + 1.1);
-        ctx.strokeStyle = fundo === "claro" ? "rgba(28,24,18,1)" : "rgba(255,255,255,1)";
-        ctx.lineWidth = 3;
+        const inicio = t * GIRO_PENSANDO;
+        tracarAnel(ctx, c, raio(0, 1), inicio, inicio + ARCO_PENSANDO);
+        ctx.strokeStyle = fundo === "claro" ? "rgba(28,24,18,1)" : "rgba(245,240,232,1)";
+        ctx.lineWidth = Math.max(3, 1.6 / k);
+        ctx.lineCap = "round";
         ctx.shadowBlur = 18;
         ctx.stroke();
+        ctx.lineCap = "butt";
       }
       ctx.shadowBlur = 0;
     },

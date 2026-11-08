@@ -14,11 +14,11 @@ export function energiaAlvo(estado: EstadoAgente, t: number, volume: number): nu
       // Com voz real, segue o volume; sem, um ritmo de sílabas (dois senos que se cruzam).
       return volume > 0.02
         ? Math.min(1, 0.25 + volume)
-        : 0.3 + 0.38 * Math.abs(Math.sin(t * 7.3) * Math.sin(t * 2.9 + 0.7));
+        : 0.3 + 0.32 * Math.abs(Math.sin(t * 3.1) * Math.sin(t * 1.3 + 0.7));
     case "pensando":
       return 0.22 + 0.06 * Math.sin(t * 3.1);
     case "duvida":
-      return 0.28 + 0.22 * Math.max(0, Math.sin(t * 2.4));
+      return 0.28 + 0.22 * Math.max(0, Math.sin(t * 1.4));
   }
 }
 
