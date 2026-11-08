@@ -12,13 +12,23 @@ Converge Challenge powered by Tako · Porto Digital · Recife · novembro de 202
 
 ---
 
-## O problema que ninguém resolveu
+## Dois ganhos num produto só
 
-O erro mais caro de um processo seletivo não é a entrevista demorada. **É contratar a pessoa errada.**
+### 1. A entrevista técnica sai do calendário do time
 
-Uma contratação errada numa vaga de backend pleno custa algo em torno de **R$ 50 mil**: três meses de salário e encargos até o fim da experiência, o processo refeito do zero e o onboarding e as entregas que se perdem no caminho (estimativa; a conta está em [docs/plano-diferencial.md](docs/plano-diferencial.md)). E esse erro continua acontecendo mesmo com as IAs de entrevista que já existem: elas deixam a entrevista mais barata e em massa, mas a contratação errada continua lá.
+Hoje cada entrevista técnica consome horas de um engenheiro sênior ou de um tech lead: preparar o exercício, entrevistar, escrever o parecer. Multiplique por dezenas de candidatos por vaga, e o time para de entregar para contratar. Enquanto isso, a vaga fica aberta e o candidato bom aceita outra proposta.
 
-Ela acontece porque a entrevista mede a coisa errada. Ver se o código passou não diz como a pessoa vai agir quando o requisito mudar na sexta à tarde, quando travar num bug ou quando precisar de ajuda. **O Totti foi feito para medir exatamente isso.**
+**O Totti faz a entrevista no lugar dele.** O candidato escolhe o horário, o Totti conduz a sessão inteira por voz, com o mesmo critério para todos, e o relatório fica pronto minutos depois. O time só entra para conversar com os finalistas. **Menos custo por entrevista, vaga fechada mais rápido e nenhum candidato esperando semanas por retorno.**
+
+### 2. E, além disso, menos contratação errada
+
+Fazer a entrevista mais barata e mais rápida já paga o produto. Mas o erro mais caro de um processo seletivo não é a entrevista: **é contratar a pessoa errada.** E é aqui que o Totti vai além.
+
+Uma contratação errada numa vaga de backend pleno custa algo em torno de **R$ 50 mil**: três meses de salário e encargos até o fim da experiência, o processo refeito do zero e o onboarding e as entregas que se perdem no caminho (estimativa; a conta está em [docs/plano-diferencial.md](docs/plano-diferencial.md)). Esse erro continua acontecendo mesmo com as IAs de entrevista que já existem: elas deixam a entrevista mais barata e em massa, mas a contratação errada continua lá.
+
+Ela acontece porque a entrevista mede a coisa errada. Ver se o código passou não diz como a pessoa vai agir quando o requisito mudar na sexta à tarde, quando travar num bug ou quando precisar de ajuda. **O Totti foi feito para medir exatamente isso**, e para aprender, contratação após contratação, o que dá certo no seu time.
+
+Os dois ganhos valem o mesmo: um corta o custo de cada entrevista, o outro evita o prejuízo de cada erro.
 
 ## O que é o Totti
 
@@ -155,6 +165,8 @@ As outras ferramentas param na contratação. O Totti vai até os **90 dias**, o
 
 | | Processo de hoje | Com o Totti |
 |---|---|---|
+| **Quem entrevista** | Horas de engenheiro sênior por candidato | O Totti; o time só conversa com os finalistas |
+| **Tempo até o parecer** | Dias, esperando a agenda do entrevistador | Minutos depois da entrevista |
 | **Configurar a vaga** | Formulário, rubrica genérica, reunião com o tech lead | Uma conversa por voz; o Totti propõe formato, nível e pesos |
 | **O problema** | O mesmo exercício para qualquer vaga | Uma questão criada para a vaga, igual para todos os candidatos dela |
 | **A entrevista** | Prova parada ou entrevistador sem tempo | Conversa ao vivo que espera quem pensa, aponta no desenho e lê o código |
