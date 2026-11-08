@@ -463,7 +463,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
                     disabled={!pronto}
                     className="mt-2 rounded-full bg-marca px-5 py-2.5 font-medium text-sobre-marca transition-[opacity,transform] duration-150 ease-suave hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
                   >
-                    Começar
+                    {pronto ? "Começar" : "Preparando o desafio…"}
                   </button>
                 </>
               ) : (
