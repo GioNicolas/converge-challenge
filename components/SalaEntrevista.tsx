@@ -8,7 +8,7 @@ import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import JanelaChamada from "@/components/quadro/JanelaChamada";
 import Legenda from "@/components/quadro/Legenda";
-import PainelConversa, { type MensagemConversa } from "@/components/quadro/PainelConversa";
+import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
 import ConfirmarEncerrar from "@/components/quadro/ConfirmarEncerrar";
 import type { Quadro } from "@/components/Canvas";
@@ -20,7 +20,7 @@ import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { useLiberarAudio } from "@/lib/presenca/useLiberarAudio";
 import { FilaFalas } from "@/lib/audio/filaFalas";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
-import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
+import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
 
 /** Demonstração: o que o agente pergunta, o que o candidato responde e o requisito que fica combinado. */
@@ -150,10 +150,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   useEffect(() => {
     if (requisitoDaMudanca) combinarRequisito(requisitoDaMudanca);
   }, [requisitoDaMudanca, combinarRequisito]);
-  const [conversaAberta, setConversaAberta] = useState(false);
   const [confirmandoFim, setConfirmandoFim] = useState(false);
   const cancelarFim = useCallback(() => setConfirmandoFim(false), []);
-  const fecharConversa = useCallback(() => setConversaAberta(false), []);
 
   // A resposta a um plin termina sozinha quando o candidato fala e depois fica em silêncio.
   useFimPorSilencio({
@@ -186,23 +184,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   // o modal normal continua à espera do clique.
   const iniciouSozinho = useRef(false);
 
-  // A entrevista é só por voz: o painel Conversa é a transcrição, para reler uma pergunta. Demo e falas aparecem juntas, por horário.
-  const mensagensDaConversa = [...demo.mensagens, ...entrevista.mensagens].sort((a, b) => a.horario - b.horario);
-
-  // "ver no quadro": o que a fala marcou no desenho, ou o requisito que ela combinou e o agente escreveu.
-  const elementosDaFala = useCallback((m: MensagemConversa) => {
-    if (!quadro || (!m.alvos?.length && !m.requisito)) return [];
-    const alvos = new Set(m.alvos ?? []);
-    const requisito = m.requisito ? normalizar(m.requisito) : null;
-    return quadro.api.getSceneElements().filter((e) => alvos.has(e.id)
-      || (requisito !== null && e.type === "text" && /^agente-requisito-\d+$/.test(e.id) && normalizar(e.originalText) === requisito));
-  }, [quadro]);
-  const verNoQuadro = useCallback((m: MensagemConversa) => {
-    const elementos = elementosDaFala(m);
-    if (!quadro || !elementos.length) return;
-    quadro.api.scrollToContent(elementos, { fitToContent: false, animate: true, duration: 450 });
-    quadro.api.updateScene({ appState: { selectedElementIds: Object.fromEntries(elementos.map((e) => [e.id, true as const])) } });
-  }, [quadro, elementosDaFala]);
   const { enviarTexto } = entrevista;
   const { combinar } = demo;
   const enviarFala = useCallback(
@@ -381,36 +362,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
               Interromper voz
             </button>
           )}
-          <button
-            onClick={() => setConversaAberta(true)}
-            aria-label="Abrir conversa"
-            aria-haspopup="dialog"
-            aria-expanded={conversaAberta}
-            className="flex items-center gap-1.5 rounded-full border border-borda bg-vidro px-3.5 py-2 text-xs font-medium text-texto-suave shadow-padrao backdrop-blur-xl transition-[color,transform] duration-150 ease-suave outline-none hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95"
-          >
-            <svg
-              viewBox="0 0 16 16"
-              width={14}
-              height={14}
-              aria-hidden
-              className="fill-none stroke-current"
-              strokeWidth={1.5}
-              strokeLinejoin="round"
-            >
-              <path d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H7l-3 2.5v-2.5h0.5a2 2 0 0 1-2-2Z" />
-            </svg>
-            Conversa
-          </button>
         </div>
       )}
-
-      <PainelConversa
-        aberto={conversaAberta}
-        onFechar={fecharConversa}
-        mensagens={mensagensDaConversa}
-        onVerNoQuadro={verNoQuadro}
-        temNoQuadro={(m) => elementosDaFala(m).length > 0}
-      />
 
       <ConfirmarEncerrar
         aberto={confirmandoFim}
