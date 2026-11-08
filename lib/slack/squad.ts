@@ -2,7 +2,9 @@
  * Ponte entre as decisões do Tech Lead no Slack e a Memória Viva da Squad (`lib/squad-memory/`):
  * cada Aprovar, Reprovar e Pedir ajuste ensina o Totti, e ele responde na thread do card com o que aprendeu.
  */
+import { findConfig } from "@/lib/config/store";
 import { aprenderComAjuste, aprenderComDecisao, type Aprendizado } from "@/lib/squad-memory/aprender";
+import { vagaDaConfig } from "@/lib/squad-memory/config";
 import { empresaAtual } from "@/lib/squad-memory/store";
 import { aprendizadoBlocks } from "./blocks";
 import { slackApi } from "./client";
@@ -30,12 +32,21 @@ async function responderNaThread(channel: string | undefined, ts: string | undef
   });
 }
 
+/**
+ * A vaga do relatório quando o card não traz uma: a mesma que a entrevista usou para carregar as regras
+ * (`vagaDaConfig` da config da sessão), para a regra aprendida voltar à mesma vaga. Config sumida: o próprio id.
+ */
+async function vagaDoRelatorio(configId: string): Promise<string> {
+  const config = await findConfig(configId).catch(() => undefined);
+  return config ? vagaDaConfig(config) : configId;
+}
+
 /** Depois de Aprovar ou Reprovar: registra a decisão, aprende com o motivo e responde na thread. */
 export async function aprenderDaDecisao(r: DecisionRecord): Promise<Aprendizado | undefined> {
   if (r.status === "aguardando") return undefined;
   const aprendizado = await aprenderComDecisao({
     empresaId: empresaDo(r.channel),
-    vagaId: r.vagaId ?? r.report.configId,
+    vagaId: r.vagaId ?? (await vagaDoRelatorio(r.report.configId)),
     vagaTitulo: r.roleTitle,
     candidato: r.candidateName,
     decisao: r.status,

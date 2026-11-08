@@ -1,7 +1,7 @@
 "use client";
 
-// No Plano combinado de uma vaga aberta: o que o Totti já aprendeu com o time e vai usar nesta entrevista
-// (as regras ligadas da memória da squad que pesam em critérios deste formato). As que vieram dos 90 dias dizem o
+// No Plano combinado de uma vaga aberta: o que o Totti já aprendeu com o time nesta vaga e vai usar nesta entrevista
+// (as regras ligadas da memória da squad, vindas desta vaga, que pesam em critérios deste formato). As que vieram dos 90 dias dizem o
 // que o Totti passa a fazer na entrevista; as outras, o pedido do time. O que veio de uma contratação
 // aos 90 dias aparece marcado: é o ciclo fechando.
 import { useEffect, useState } from "react";
@@ -26,7 +26,11 @@ function oQueMuda(r: RegraSquad): string {
   return frase.charAt(0).toUpperCase() + frase.slice(1);
 }
 
-export default function AprendidoNoPlano({ formato }: { formato: InterviewMode }) {
+/**
+ * `vagaIds`: os ids com que esta vaga aparece na memória (o da vaga e o da config dela, ver `vagaDaConfig`).
+ * Uma regra só vale na vaga de onde veio, então só as desta vaga aparecem aqui.
+ */
+export default function AprendidoNoPlano({ formato, vagaIds }: { formato: InterviewMode; vagaIds: string[] }) {
   const [memoria, setMemoria] = useState<VisaoMemoria | null>(null);
 
   useEffect(() => {
@@ -42,7 +46,7 @@ export default function AprendidoNoPlano({ formato }: { formato: InterviewMode }
 
   if (!memoria) return null;
   const ids = new Set(CATALOGO[formato].map((c) => c.id));
-  const regras = memoria.regras.filter((r) => r.ativa && ids.has(r.criterio));
+  const regras = memoria.regras.filter((r) => r.ativa && ids.has(r.criterio) && vagaIds.includes(r.origem.vagaId));
   if (regras.length === 0) return null;
   const nome = (id: string) => memoria.criterios.find((c) => c.id === id)?.nome ?? id;
   // As dos 90 dias primeiro: são as mais recentes do ciclo e as que mais mudam a nota.

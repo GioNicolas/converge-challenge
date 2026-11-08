@@ -48,7 +48,7 @@ export async function postCandidateDecision(input: {
   candidateEmail: string;
   roleTitle: string;
   report: Report;
-  /** Id da vaga (do plano). Sem valor: o `configId` do relatório. */
+  /** Id da vaga (do plano). Sem valor: a vaga da config do relatório (`vagaDaConfig`). */
   vagaId?: string;
 }): Promise<DecisionRecord> {
   const record: DecisionRecord = {

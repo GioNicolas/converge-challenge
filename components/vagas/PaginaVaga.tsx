@@ -736,7 +736,7 @@ function Plano({ vaga }: { vaga: VagaEmpresa }) {
         ))}
       </section>
 
-      {vaga.etapa !== "encerrada" && <AprendidoNoPlano formato={r.formato} />}
+      {vaga.etapa !== "encerrada" && <AprendidoNoPlano formato={r.formato} vagaIds={[vaga.id, r.configId]} />}
 
       {vaga.etapa !== "encerrada" && (
         <section className="cartao flex flex-col gap-3 p-5">

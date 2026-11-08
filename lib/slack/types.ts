@@ -63,7 +63,7 @@ export interface DecisionRecord {
   decidedBy?: string;
   /** Motivo do Tech Lead: obrigatório no modal de Reprovar, opcional no de Aprovar ("o que te convenceu?"). */
   reason?: string;
-  /** Vaga da entrevista (id do plano). Sem valor: usa o `configId` do relatório. */
+  /** Vaga da entrevista (id do plano). Sem valor: a vaga da config do relatório (`vagaDaConfig`). */
   vagaId?: string;
 }
 

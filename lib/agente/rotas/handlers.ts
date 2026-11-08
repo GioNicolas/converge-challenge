@@ -60,7 +60,8 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
 
   // O plano da vaga (se vier) escolhe o kit e calibra a entrevista; config desconhecida cai na entrevista padrão.
   const encontrada = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
-  // Regras ativas da squad no começo da sessão: o entrevistador e o scorecard usam (ver `lib/squad-memory/`).
+  // Regras ativas da vaga no começo da sessão (só as aprendidas nesta vaga): o entrevistador e o scorecard
+  // usam (ver `lib/squad-memory/config.ts`).
   const config = encontrada ? comRegrasDaSquad(encontrada) : undefined;
   const plano = config ? planoDaConfig(config) : null;
   const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;

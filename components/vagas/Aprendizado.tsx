@@ -2,7 +2,8 @@
 
 // "O que o Totti aprendeu": a Memória Viva da Squad à vista do time.
 //   1. Concordância Totti × Tech Lead por vaga: o número da vaga atual e a série subindo.
-//   2. As regras que o Totti aprendeu, cada uma com a decisão de onde veio. Dá para editar, desligar e apagar.
+//   2. As regras que o Totti aprendeu, cada uma com a decisão e a vaga de onde veio (só vale nessa vaga).
+//      Dá para editar, desligar e apagar.
 //   3. O que o guarda-corpo ignorou: motivo não técnico nunca vira regra, mas fica visível.
 //   4. (só em desenvolvimento) Simular o Tech Lead decidindo no Slack, pelo mesmo caminho do clique de verdade.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -21,8 +22,9 @@ function dataCurta(iso: string): string {
   return `${d.getDate()} ${MESES[d.getMonth()]}`;
 }
 
-function textoDaOrigem(o: OrigemRegra, vagas: Record<string, string>): string {
-  const vaga = vagas[o.vagaId];
+/** De onde veio. `comVaga: false` quando a vaga já aparece em outro lugar da linha (nas regras, "vale em …"). */
+function textoDaOrigem(o: OrigemRegra, vagas: Record<string, string>, comVaga = true): string {
+  const vaga = comVaga ? vagas[o.vagaId] : undefined;
   const onde = vaga ? ` · ${vaga}` : "";
   switch (o.tipo) {
     case "reprovacao":
@@ -75,8 +77,8 @@ export default function Aprendizado() {
           <span className="rotulo text-texto-suave">Memória da squad</span>
           <h1 className="titulo-display text-[34px] text-texto sm:text-[40px]">O que o Totti aprendeu</h1>
           <p className="max-w-[640px] text-[15px] leading-relaxed text-texto-suave">
-            Cada vez que o Tech Lead aprova ou reprova alguém no Slack, o Totti aprende um critério técnico deste time e usa na
-            próxima entrevista. Nada fica escondido: edite, desligue ou apague o que quiser.
+            Cada vez que o Tech Lead aprova ou reprova alguém no Slack, o Totti aprende um critério técnico deste time e usa nas
+            próximas entrevistas daquela vaga. Nada fica escondido: edite, desligue ou apague o que quiser.
           </p>
         </header>
 
@@ -107,7 +109,7 @@ export default function Aprendizado() {
             <Secao
               titulo="Critérios aprendidos"
               detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
-              apoio="Os ligados entram no plano e na avaliação da próxima entrevista, marcados como critério aprendido com o time."
+              apoio="Cada critério vale só na vaga de onde veio. Os ligados entram no plano e na avaliação das próximas entrevistas dessa vaga, marcados como critério aprendido com o time."
             >
               {memoria.regras.length === 0 ? (
                 <div className="cartao p-6 text-[14px] text-texto-suave">
@@ -467,13 +469,21 @@ function LinhaRegra({
                 <SeloEfeito efeito={regra.efeito} />
                 <span className="text-[12.5px] text-texto-suave">
                   Pesa em <span className="text-texto">{nomeCriterio}</span>
+                  {" · "}
+                  {vagas[regra.origem.vagaId] ? (
+                    <>
+                      vale em <span className="text-texto">{vagas[regra.origem.vagaId]}</span>
+                    </>
+                  ) : (
+                    "vale só na vaga de origem"
+                  )}
                 </span>
                 {nova && <span className="rotulo-destaque">Acabou de aprender</span>}
                 {!regra.ativa && <span className="text-[12.5px] text-texto-suave">· desligado</span>}
               </div>
               <p className="text-[15px] leading-snug text-texto">{regra.texto}</p>
               <p className="text-[12.5px] text-texto-suave">
-                {textoDaOrigem(regra.origem, vagas)} · {dataCurta(regra.criadaEm)}
+                {textoDaOrigem(regra.origem, vagas, false)} · {dataCurta(regra.criadaEm)}
               </p>
               {falha && <p className="text-[12.5px] text-perigo">{falha}</p>}
             </div>
