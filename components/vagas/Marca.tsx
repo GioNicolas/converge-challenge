@@ -4,7 +4,7 @@ import Link from "next/link";
 export default function Marca() {
   return (
     <Link href="/vagas" className="px-2 py-1 text-[17px] font-semibold tracking-[-0.025em] text-texto">
-      Converge
+      Totti
     </Link>
   );
 }

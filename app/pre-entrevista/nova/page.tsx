@@ -3,7 +3,7 @@ import PreEntrevistaTotti from "@/components/pre-entrevista/PreEntrevistaTotti";
 import "../../tema-recrutador.css";
 
 export const metadata: Metadata = {
-  title: "Nova entrevista · Converge",
+  title: "Nova entrevista · Totti",
 };
 
 export default function Page() {

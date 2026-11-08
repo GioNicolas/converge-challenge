@@ -116,7 +116,7 @@ export default function Onboarding() {
             <span className="text-texto-suave">O Totti faz as entrevistas.</span>
           </h1>
           <p className="max-w-[560px] text-[16px] leading-[1.55] text-texto-suave">
-            O Totti é o entrevistador técnico da Converge. Ele monta o plano com você, conversa com cada candidato
+            O Totti é o seu entrevistador técnico. Ele monta o plano com você, conversa com cada candidato
             por voz e entrega um relatório pronto para decidir. Do seu lado, são só {DOS("voce").length} passos curtos.
           </p>
         </motion.section>
