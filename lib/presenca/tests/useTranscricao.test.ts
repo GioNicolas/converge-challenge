@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { criarEscutaTranscricao, type EstadoEscuta } from "../useTranscricao";
+import { ErroTokenTranscricao } from "../tokenTranscricao";
 import type { TrechoTranscrito } from "../transcricao";
 
 const andar = () => new Promise<void>((resolver) => setImmediate(resolver));
@@ -440,4 +441,32 @@ test("hipótese parcial retirada pelo navegador limpa a legenda sem criar final"
   n.resultado([]);
   assert.equal(m.trechos.at(-1)?.texto, "");
   assert.equal(m.trechos.filter((t) => t.final).length, 0);
+});
+
+test("erro permanente do token cai direto no navegador, sem retentativas", async (t) => {
+  let chamadas = 0;
+  const m = montar(t, { obterToken: async () => { chamadas++; throw new ErroTokenTranscricao("sem chave", true); } });
+  m.controle.ativar(true);
+  await andar();
+  assert.equal(chamadas, 1);
+  assert.equal(m.estado()?.motor, "navegador");
+});
+
+test("pausa longa fecha o socket e retomar pede token novo", async (t) => {
+  const m = montar(t);
+  let relogio = 0;
+  t.mock.method(performance, "now", () => relogio);
+  const avancar = (ms: number) => { relogio += ms; t.mock.timers.tick(ms); };
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  m.controle.ativar(false);
+  avancar(29000);
+  assert.equal(m.sockets[0].fechamentos, 0);
+  avancar(1400);
+  assert.equal(m.sockets[0].fechamentos, 1);
+  assert.equal(m.tokens(), 1);
+  m.controle.ativar(true);
+  await andar();
+  assert.equal(m.tokens(), 2);
 });

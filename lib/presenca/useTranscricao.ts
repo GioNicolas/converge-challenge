@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { tokenTranscricao } from "./tokenTranscricao";
+import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
 import {
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, reamostrar, urlDoScribe,
@@ -9,6 +9,9 @@ import {
 } from "./transcricao";
 
 export type { TrechoTranscrito } from "./transcricao";
+
+/** Tempo de pausa em que o socket ainda recebe silêncio antes de ser fechado. */
+const PAUSA_MAXIMA_MS = 30_000;
 
 export type EstadoEscuta = { motor: "elevenlabs" | "navegador" | "nenhum"; escutando: boolean; erro: string | null };
 
@@ -45,6 +48,7 @@ export function criarEscutaTranscricao(opcoes: {
   let texto = estadoInicialTranscricao();
   let ativo = false;
   let ouvindoAntes = false;
+  let pausadoDesde: number | null = null;
   let encerrado = false;
   let geracao = 0;
   let tentativas = 0;
@@ -176,7 +180,14 @@ export function criarEscutaTranscricao(opcoes: {
         return;
       }
       if (encerrado || atual !== geracao) return;
-      const token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
+      let token: string;
+      try {
+        token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
+      } catch (erro) {
+        // Sem chave, sessão inexistente ou encerrada: repetir não resolve, vai direto ao navegador.
+        if (!encerrado && atual === geracao) falharScribe(erro instanceof ErroTokenTranscricao && erro.permanente);
+        return;
+      }
       if (encerrado || atual !== geracao) return;
       const ws = new WebSocket(urlDoScribe(token));
       socket = ws;
@@ -296,6 +307,9 @@ export function criarEscutaTranscricao(opcoes: {
       }
     }
     ouvindoAntes = ouvir;
+    pausadoDesde = ouvir ? null : (pausadoDesde ?? performance.now());
+    // Pausa longa: o silêncio enviado ao Scribe é cobrado, então fecha o socket (retomar pede token novo).
+    if (!ouvir && socket && pausadoDesde !== null && performance.now() - pausadoDesde >= PAUSA_MAXIMA_MS) limparSocket();
     if (estado.motor === "elevenlabs") {
       publicar({ ...estado, escutando: ouvir && pronto });
       if (ouvir && !socket && !conectando && repetir === null) void conectarScribe();
@@ -342,7 +356,8 @@ export function useTranscricao(opcoes: {
   const [estado, setEstado] = useState<EstadoEscuta>({ motor: "nenhum", escutando: false, erro: null });
   const callbacks = useRef({ aoParcial, aoFinal });
   const escuta = useRef<ReturnType<typeof criarEscutaTranscricao> | null>(null);
-  const servidor = process.env.NEXT_PUBLIC_USAR_SERVIDOR === "1";
+  // Scribe por padrão; "0" (demonstração) usa só a transcrição do navegador.
+  const servidor = process.env.NEXT_PUBLIC_USAR_SERVIDOR !== "0";
   useEffect(() => { callbacks.current = { aoParcial, aoFinal }; }, [aoParcial, aoFinal]);
   useEffect(() => {
     if (!stream) {

@@ -9,7 +9,10 @@ afterEach(() => {
   globalThis.fetch = fetchOriginal;
   delete process.env.ELEVENLABS_API_KEY;
 });
-const pedido = (query = "?sessao_id=s1") => new NextRequest(`http://localhost/api/stt-token${query}`);
+// Cada teste usa um IP próprio: o limitador por IP é global ao módulo e um teste não pode consumir a cota de outro.
+let ipSeq = 0;
+const pedido = (query = "?sessao_id=s1", ip = `10.0.0.${++ipSeq}`) =>
+  new NextRequest(`http://localhost/api/stt-token${query}`, { headers: { "x-real-ip": ip } });
 
 getOrCreateSession("s1");
 
@@ -60,7 +63,8 @@ test("limita pedidos repetidos da mesma sessão (429)", async () => {
   getOrCreateSession("s-limite");
   globalThis.fetch = (async () => Response.json({ token: "tk" })) as typeof fetch;
   const status: number[] = [];
-  for (let i = 0; i < 21; i++) status.push((await GET(pedido("?sessao_id=s-limite"))).status);
+  const ip = "10.9.9.9";
+  for (let i = 0; i < 21; i++) status.push((await GET(pedido("?sessao_id=s-limite", ip))).status);
   assert.equal(status[19], 200);
   assert.equal(status[20], 429);
 });
