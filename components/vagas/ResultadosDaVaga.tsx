@@ -169,8 +169,8 @@ function LinhaDeResultado({ e, posicao }: { e: EntrevistaReal; posicao?: number 
           )}
           <span className="text-[12.5px] text-texto-suave">{textoDaSituacao(e, a)}</span>
           {e.ended && (
-            <Link href={e.href} className="inline-flex items-center gap-1 text-[12.5px] text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto">
-              Relatório <ArrowRight size={12} />
+            <Link href={`/vagas/resultado/${e.sessionId}`} className="inline-flex items-center gap-1 text-[12.5px] text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto">
+              Ver relatório <ArrowRight size={12} />
             </Link>
           )}
         </span>
@@ -196,10 +196,10 @@ function LinhaDeResultado({ e, posicao }: { e: EntrevistaReal; posicao?: number 
         <span className="hidden text-right @4xl:block">
           {e.ended && (
             <Link
-              href={e.href}
+              href={`/vagas/resultado/${e.sessionId}`}
               className="inline-flex items-center gap-1 text-[13px] text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto"
             >
-              Relatório <ArrowRight size={13} />
+              Ver relatório <ArrowRight size={13} />
             </Link>
           )}
         </span>
@@ -299,7 +299,17 @@ function CartaoFlutuante({
 // O conteúdo do cartão (o mesmo no flutuante e na linha aberta)
 // ---------------------------------------------------------------------------
 
-function CartaoCompleto({ e, cartao, flutuante = false }: { e: EntrevistaReal; cartao: CartaoDoResultado; flutuante?: boolean }) {
+export function CartaoCompleto({
+  e,
+  cartao,
+  flutuante = false,
+  comDecisao = false,
+}: {
+  e: EntrevistaReal;
+  cartao: CartaoDoResultado;
+  flutuante?: boolean;
+  comDecisao?: boolean;
+}) {
   const nome = e.candidato ?? `Candidato ${e.sessionId.slice(0, 6)}`;
   return (
     <div className="flex flex-col gap-5 text-[13.5px] leading-relaxed text-texto">
@@ -368,7 +378,7 @@ function CartaoCompleto({ e, cartao, flutuante = false }: { e: EntrevistaReal; c
         <ListaDePontos titulo="Para a próxima etapa" itens={cartao.proximosPassos} vazio="" marca="→" />
       )}
 
-      <BlocoDeDecisao e={e} />
+      {comDecisao && <BlocoDeDecisao e={e} />}
 
       <footer className="flex items-center justify-between border-t border-borda pt-3">
         <span className="numero text-[12px] text-texto-suave">{quando(e.startedAt)}</span>
@@ -433,7 +443,7 @@ const TEXTO_DO_EMAIL: Record<Registro["email"], string> = {
   falhou: "Decisão registrada, mas o e-mail de feedback falhou.",
 };
 
-function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
+export function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
   const [registro, setRegistro] = useState<Registro | undefined>(() => decisaoAtual(e));
   const [escolha, setEscolha] = useState<"avancar" | "nao_avancar" | null>(null);
   const [enviando, setEnviando] = useState(false);
