@@ -15,6 +15,7 @@ import { problems } from "@/lib/problems";
 import { hasProblem } from "@/problems";
 import { pastaDados } from "@/lib/dados";
 import { CATALOGO } from "@/lib/pre-entrevista/catalogo";
+import { VAGAS_DE_VITRINE } from "@/lib/vagas/vitrine";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -118,6 +119,32 @@ const CONFIGS_DE_VITRINE: Record<string, InterviewConfig> = Object.fromEntries(
     }),
   ].map((c) => [c.id, c]),
 );
+
+/** Desafios de system design com kit pronto (ver `AVALIACAO_POR_PROBLEMA` em lib/agente/plano.ts), um por vaga em rodízio. */
+const DESAFIOS_DE_QUADRO = ["encurtador-de-url", "chat-tempo-real", "pagamentos-instantaneos", "chatbot-atendimento-ia"];
+
+/**
+ * As outras vagas do painel (as geradas em `lib/vagas/workspace.ts`) ganham o plano tirado da própria vaga.
+ * Sem isso o link delas não achava config e caía na padrão, que é live coding: vaga de system design abria o IDE.
+ * O teste `lib/vagas/__tests__/link-do-formato.test.ts` garante que toda vaga do painel tem plano no mesmo formato.
+ */
+VAGAS_DE_VITRINE.forEach((v, i) => {
+  const r = v.resumo;
+  if (!r || CONFIGS_DE_VITRINE[r.configId]) return;
+  const junior = v.senioridade === "estagio" || v.senioridade === "junior";
+  CONFIGS_DE_VITRINE[r.configId] = configDeVitrine({
+    id: r.configId,
+    vagaId: v.id,
+    mode: r.formato,
+    roleTitle: v.cargo,
+    seniority: v.senioridade === "estagio" ? "junior" : v.senioridade,
+    focus: r.foco.map((f) => ({ area: f.area, weight: f.peso })),
+    // No live coding a questão é sorteada a cada entrevista; esta só serve de ponto de partida.
+    problemId: r.formato === "system_design" ? DESAFIOS_DE_QUADRO[i % DESAFIOS_DE_QUADRO.length] : junior ? "valid-parentheses" : "top-k-frequent",
+    difficulty: r.formato === "live_coding" ? (junior ? "facil" : "medio") : undefined,
+    durationMin: r.duracaoMin,
+  });
+});
 
 /** Config pelo id (memória, depois arquivo). Inexistente ou inválida: undefined. */
 export async function findConfig(id: string): Promise<InterviewConfig | undefined> {
