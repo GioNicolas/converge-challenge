@@ -1,13 +1,14 @@
 /**
  * Convites de triagem (um por candidato). Só servidor.
  *
- * Memória + `data/convites/<token>.json`. O token é o único segredo do link de agendamento,
- * então é validado antes de tocar no filesystem: nada além de 32 hex chega ao caminho do arquivo.
+ * Memória + (Supabase, quando configurado; senão `data/convites/<token>.json`). O token é o único segredo do
+ * link de agendamento, então é validado antes de tocar no armazenamento: nada além de 32 hex chega ao caminho.
  */
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { kvRemoto } from "@/lib/storage/kv";
 
 export const CONVITE_VALIDADE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -64,6 +65,11 @@ export function criarConvite(dados: NovoConvite): Convite {
 export async function salvarConvite(convite: Convite): Promise<void> {
   if (!TOKEN_VALIDO.test(convite.token)) throw new Error("token de convite inválido");
   convites.set(convite.token, convite);
+  const kv = kvRemoto();
+  if (kv) {
+    await kv.set("convite", convite.token, convite);
+    return;
+  }
   await mkdir(pasta(), { recursive: true });
   await writeFile(join(pasta(), `${convite.token}.json`), JSON.stringify(convite, null, 2), "utf8");
 }
@@ -74,7 +80,10 @@ export async function acharConvite(token: string): Promise<Convite | undefined> 
   const emMemoria = convites.get(token);
   if (emMemoria) return expirado(emMemoria) ? undefined : emMemoria;
   try {
-    const parsed = ConviteSchema.safeParse(JSON.parse(await readFile(join(pasta(), `${token}.json`), "utf8")));
+    const kv = kvRemoto();
+    const bruto = kv ? await kv.get("convite", token) : JSON.parse(await readFile(join(pasta(), `${token}.json`), "utf8"));
+    if (bruto === null) return undefined;
+    const parsed = ConviteSchema.safeParse(bruto);
     if (!parsed.success || parsed.data.token !== token) return undefined;
     if (expirado(parsed.data)) return undefined;
     convites.set(token, parsed.data);
@@ -91,6 +100,16 @@ export const novoEntrevistaId = () => randomBytes(8).toString("hex");
  * mas o painel continua precisando do nome de quem fez a entrevista.
  */
 export async function listarConvites(): Promise<Convite[]> {
+  const kv = kvRemoto();
+  if (kv) {
+    const porToken = new Map(convites);
+    for (const linha of await kv.list("convite")) {
+      const parsed = ConviteSchema.safeParse(linha.value);
+      // O que acabou de ser gravado nesta instância (memória) vale mais que a leitura do banco.
+      if (parsed.success && parsed.data.token === linha.key && !porToken.has(linha.key)) porToken.set(linha.key, parsed.data);
+    }
+    return [...porToken.values()];
+  }
   let nomes: string[] = [];
   try {
     nomes = (await readdir(pasta())).filter((n) => TOKEN_VALIDO.test(n.replace(/\.json$/, "")));

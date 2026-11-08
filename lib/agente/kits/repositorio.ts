@@ -3,6 +3,8 @@
  * Só no servidor. Em memória, singleton em globalThis (sobrevive ao hot reload do Next, como o
  * repositório de sessões). Trocar por banco = outra implementação da interface.
  */
+import { kvRemoto } from "@/lib/storage/kv";
+import { criarRepositorioAvaliacoesKv } from "./repositorio-kv";
 import type { Kit, Problema } from "./tipos";
 
 export type RegistroAvaliacao = {
@@ -63,7 +65,9 @@ const CHAVE = Symbol.for("convergechallenge.repositorioAvaliacoes");
 
 export function repositorioAvaliacoesPadrao(): RepositorioAvaliacoes {
   const g = globalThis as unknown as Record<symbol, RepositorioAvaliacoes | undefined>;
-  return (g[CHAVE] ??= criarRepositorioAvaliacoesEmMemoria());
+  // No Supabase quando configurado (vale entre instâncias e reinícios); senão em memória.
+  const kv = kvRemoto();
+  return (g[CHAVE] ??= kv ? criarRepositorioAvaliacoesKv(kv) : criarRepositorioAvaliacoesEmMemoria());
 }
 
 /** Só para testes: troca (ou limpa, com null) o singleton. */
