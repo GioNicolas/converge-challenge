@@ -97,7 +97,9 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     maxTokens: 1500,
     reasoningEffort: "low",
     raciocinioSo: "featherless",
-    hedgeMs: 2_500,
+    // Sem hedge: com um modelo forte (Sonnet) a resposta passa de 2,5 s quase sempre, a reserva corria junto e
+    // ganhava, e duas "derrotas" abriam o disjuntor por 3 min. O Totti falava pelo GLM achando que era o Sonnet.
+    // A reserva agora só entra em erro (o log perguntar_llm mostra quem respondeu cada turno).
     temperatura: 0.5,
   },
   filtro: {

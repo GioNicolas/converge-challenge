@@ -108,6 +108,18 @@ export async function perguntar(
       imagem: entrada.imagemBase64 ?? null,
     });
     saida = r.dados;
+    // Quem respondeu de fato este turno: com reserva e disjuntor no `lib/llm`, o modelo configurado nem sempre é
+    // o que fala. Sem isso não dá para saber se o Totti "burro" era o modelo forte ou a reserva.
+    log("perguntar_llm", {
+      sessao_id: entrada.sessao_id,
+      versao: v2 ? "v2" : "v1",
+      modelo: r.modelo ?? "desconhecido",
+      provedor: r.provedor ?? "desconhecido",
+      ms: r.ms,
+      tokens_entrada: r.uso?.entrada,
+      tokens_saida: r.uso?.saida,
+      custo_usd: r.uso?.custo,
+    });
   } catch (e) {
     log("perguntar_falhou", {
       sessao_id: entrada.sessao_id,

@@ -11,6 +11,24 @@ const estado = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm
 const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {} });
 
 describe("perguntar", () => {
+  it("registra no log quem respondeu o turno (modelo, provedor, tempo e custo)", async () => {
+    const falso = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false }]);
+    const llm = {
+      ...falso,
+      async completarJson<T>(args: Parameters<typeof falso.completarJson<T>>[0]) {
+        const r = await falso.completarJson(args);
+        return { ...r, ms: 3200, modelo: "zai-org/GLM-5.3-Flash", provedor: "featherless", uso: { entrada: 9000, saida: 120, custo: 0.002 } };
+      },
+    };
+    const eventos: [string, Record<string, unknown>][] = [];
+    await perguntar({ llm, kit: kitDemo, problema, log: (e, m) => eventos.push([e, m]) }, estado, { fase: "REQUISITOS", texto: "Oi", sessao_id: "s1" }, AGORA);
+    const turno = eventos.find(([e]) => e === "perguntar_llm")?.[1];
+    assert.ok(turno, "faltou o evento perguntar_llm");
+    assert.equal(turno.modelo, "zai-org/GLM-5.3-Flash");
+    assert.equal(turno.provedor, "featherless");
+    assert.equal(turno.ms, 3200);
+    assert.equal(turno.custo_usd, 0.002);
+  });
   it("resposta e feedback recebem o desenho e a pergunta ativa no loop rápido", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Você separou as leituras da escrita.", requisito: null, concluiu: false }]);
     const r = await perguntar(deps(llm), { ...estado, fase: "ALTO_NIVEL" }, {

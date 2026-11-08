@@ -146,6 +146,7 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
           dados: r.data,
           ms: r.durationMs ?? Date.now() - inicio,
           modelo: r.model,
+          provedor: r.provider,
           uso: { entrada: r.promptTokens, saida: r.completionTokens, custo: r.costUsd },
         };
       } catch (e) {
