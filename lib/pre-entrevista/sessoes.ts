@@ -15,9 +15,8 @@
  * (as falas acumuladas viram uma rodada só).
  */
 import { randomUUID } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
-import { join } from "path";
-import { InterviewConfig, type FocusArea } from "@/lib/contracts";
+import { findConfig, saveConfig } from "@/lib/config/store";
+import { type InterviewConfig, type FocusArea } from "@/lib/contracts";
 import { classificacaoDoFormatoAtivo, type Classificacao, type Vaga } from "./classificador";
 import { aplicarCobertura, areasEmJogo, avaliarCobertura, mesclarCobertura, topicosDo, ultimaFalaDoAgente } from "./cobertura";
 import { type Competencia, type ResultadoCompetencias } from "./competencias";
@@ -29,7 +28,6 @@ import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
 import { criarRascunho, rascunhoNoFormatoAtivo, type Rascunho, type Turno } from "./rascunho";
 import { estadoInicialEnfase, type EstadoEnfase } from "./enfase";
 import { recalcularRascunho, type DetalhePeso } from "./pesos";
-import { pastaDados } from "@/lib/dados";
 
 export interface Sessao {
   id: string;
@@ -538,9 +536,8 @@ export async function extrairSeAtrasada(sessao: Sessao): Promise<void> {
 export async function salvarConfig(sessao: Sessao, config: InterviewConfig): Promise<void> {
   sessao.configFinal = config;
   store.configs.set(config.id, config);
-  const pasta = pastaDados("configs");
-  await mkdir(pasta, { recursive: true });
-  await writeFile(join(pasta, `${config.id}.json`), JSON.stringify(config, null, 2), "utf8");
+  // Mesmo armazenamento que a entrevista usa para achar o plano (Supabase em produção, arquivo em dev).
+  await saveConfig(config);
 }
 
 /** Busca a config na memória e, se não estiver lá, no arquivo. Id inválido ou inexistente: undefined. */
@@ -548,11 +545,5 @@ export async function buscarConfig(id: string): Promise<InterviewConfig | undefi
   if (!ID_VALIDO.test(id)) return undefined;
   const emMemoria = store.configs.get(id);
   if (emMemoria) return emMemoria;
-  try {
-    const texto = await readFile(pastaDados("configs", `${id}.json`), "utf8");
-    const lido = InterviewConfig.safeParse(JSON.parse(texto));
-    return lido.success ? lido.data : undefined;
-  } catch {
-    return undefined;
-  }
+  return findConfig(id);
 }
