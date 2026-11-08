@@ -40,6 +40,10 @@ async function main() {
   g.codigo.forEach((c, i) => {
     if (!unico(`c${c.t}`)) return;
     itens.push({ t: c.t, evento: { type: "snapshot", t: c.t, code: c.code, version: i + 1, language: c.language } as never });
+    // Bloco grande de uma vez: a IDE manda uma colagem junto (components/ide/useCodeCapture.ts).
+    const antes = g.codigo.filter((d) => d.t < c.t).at(-1)?.code ?? "";
+    const novas = c.code.split("\n").length - antes.split("\n").length;
+    if (novas >= 6) itens.push({ t: c.t + 1, evento: { type: "paste", t: c.t + 1, chars: c.code.length - antes.length, lines: novas, startLine: 1 } as never });
     const proximo = g.codigo.find((d) => d.t > c.t)?.t ?? Number.POSITIVE_INFINITY;
     if (proximo - c.t > PAUSA_MS) itens.push({ t: c.t + PAUSA_MS, evento: { type: "pause", t: c.t + PAUSA_MS, idleMs: PAUSA_MS } as never });
   });
