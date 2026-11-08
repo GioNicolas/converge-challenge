@@ -540,13 +540,14 @@ export function useRecentes(): string[] {
 // Leitura para a tela: as etapas de uma vaga publicada e frases curtas sobre ela.
 // ---------------------------------------------------------------------------
 
-export const ETAPAS_VAGA = ["plano", "entrevistas", "escores", "aprendizado", "contratacoes"] as const;
+// Na ordem em que a recrutadora usa: o que decidir, quem está no processo, o plano e o resto.
+export const ETAPAS_VAGA = ["escores", "entrevistas", "plano", "aprendizado", "contratacoes"] as const;
 export type EtapaVaga = (typeof ETAPAS_VAGA)[number];
 
 export const NOME_ETAPA: Record<EtapaVaga, string> = {
-  plano: "Plano combinado",
+  plano: "Plano da entrevista",
   entrevistas: "Candidatos",
-  escores: "Escores",
+  escores: "Para decidir",
   aprendizado: "O que o Totti aprendeu",
   contratacoes: "Contratações",
 };
@@ -566,7 +567,8 @@ export const numeroCurto = (n: number) =>
 /** O número ao lado de cada etapa no menu (o plano não tem número). */
 export function contagemDa(v: VagaEmpresa, etapa: EtapaVaga): number | null {
   if (etapa === "entrevistas") return v.funil.inscritos;
-  if (etapa === "escores") return v.funil.concluiram;
+  // "Para decidir" conta quem espera decisão; numa vaga encerrada, quem concluiu.
+  if (etapa === "escores") return v.etapa === "encerrada" ? v.funil.concluiram : v.funil.novos;
   if (etapa === "contratacoes") return v.contratados ?? null;
   return null;
 }
