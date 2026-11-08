@@ -5,7 +5,11 @@
  * e devolve um `Passo`. Regras:
  *  - cada área recebe no máximo uma pergunta de aprofundamento, e não se pergunta de novo por resposta curta;
  *  - área que ela já tratou na fala (respondeu ou declarou central) não é perguntada de novo;
- *  - no máximo `MAX_APROFUNDAMENTOS` perguntas de aprofundamento por conversa, depois segue para o resumo;
+ *  - no máximo `MAX_APROFUNDAMENTOS` perguntas de aprofundamento por conversa, e só em área que ela pediu ou na de
+ *    maior peso: perguntar de uma área que ela não trouxe puxa a resposta para ela e infla o peso dessa área;
+ *  - se ela já falou da área principal antes de qualquer aprofundamento, uma pergunta de escolha sobre o que ela disse;
+ *  - antes do primeiro resumo, uma pergunta de contexto (o que reprova direto, o que não deu certo antes), se ela ainda
+ *    não disse nenhum eliminatório;
  *  - pedido de system design: com o formato disponível, vira a troca escolhida (ver `trocaPedida`); com a trava
  *    desligada (`SYSTEM_DESIGN_ATIVO = false`), aviso uma vez, e a conversa segue;
  *  - cada mudança de foco (e cada área ainda sem definição depois de uma mudança) é perguntada uma vez;
@@ -24,7 +28,7 @@ import type { DecisaoTradeoff, DecisoesTradeoff, Foco } from "./rascunho";
 /** Quantas vezes o início e o nível podem ser perguntados: a pergunta e uma nova tentativa. */
 export const MAX_PERGUNTAS_POR_TOPICO = 2;
 /** Teto de perguntas de aprofundamento na conversa inteira (uma por área, no máximo). */
-export const MAX_APROFUNDAMENTOS = 3;
+export const MAX_APROFUNDAMENTOS = 2;
 /** Depois de tantos resumos, o Totti para de pedir revisão e encerra. */
 export const MAX_RESUMOS = 3;
 /** Quantas dúvidas seguidas o Totti responde. Depois disso, a conversa segue pelo fluxo normal. */
@@ -61,6 +65,8 @@ export type Passo =
   | { tipo: "confirmar_inicio" }
   /** A vaga não disse o nível e ela ainda não respondeu: a Totti pergunta só o nível, em uma frase. */
   | { tipo: "perguntar_nivel" }
+  /** O que a vaga não diz: o que reprova direto e o que não deu certo antes. Uma vez, antes do primeiro resumo. */
+  | { tipo: "perguntar_contexto" }
   | AprofundarPasso
   | OferecerTradeoffPasso
   | {
@@ -145,18 +151,30 @@ function aprofundarPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): Aprofundar
   const peso = (area: FocusArea) => e.focus.find((f) => f.area === area)?.weight ?? 0;
   const pedida = (area: FocusArea) => (e.sinais[`quer_${area}`] ?? 0) >= LIMIAR;
   const jaFalou = new Set(e.areasFaladas ?? []);
+  // Área que ela não pediu só ganha pergunta se for a de maior peso: perguntar de outra puxa a resposta para ela
+  // ("o que destaca quem mantém a calma?" vira "manter a calma") e a área entra no foco sem ela querer.
+  const pesoMaximo = Math.max(0, ...emJogo.filter(medida).map(peso));
+  const maisPesada = (area: FocusArea) => peso(area) >= pesoMaximo;
   // Área que já teve a dúvida "continua ou fica de lado?" fica com o peso atual e não é perguntada de novo.
   const candidatas = emJogo
     .filter(
       (a) =>
         medida(a) &&
+        (pedida(a) || maisPesada(a)) &&
         !jaFalou.has(a) &&
         !coberto(criterio(a)) &&
         perguntas(criterio(a)) === 0 &&
         perguntas(`duvida_${a}`) === 0,
     )
     .sort((a, b) => Number(pedida(b)) - Number(pedida(a)) || peso(b) - peso(a));
-  return candidatas[0] ? { tipo: "aprofundar", area: candidatas[0], motivo: "inicial" } : undefined;
+  if (candidatas[0]) return { tipo: "aprofundar", area: candidatas[0], motivo: "inicial" };
+  // Nenhuma pergunta ainda e ela já falou da área principal: uma pergunta de escolha sobre o que ela disse
+  // ("você falou de offline: o que é pior, perder pedido ou demorar pra sincronizar?"). Uma por conversa, no máximo.
+  if (feitas > 0) return undefined;
+  const principal = emJogo
+    .filter((a) => medida(a) && jaFalou.has(a) && perguntas(`duvida_${a}`) === 0)
+    .sort((a, b) => peso(b) - peso(a))[0];
+  return principal ? { tipo: "aprofundar", area: principal, motivo: "inicial" } : undefined;
 }
 
 /**
@@ -310,6 +328,9 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   const aprofundar = aprofundarPasso(e, emJogo);
   if (aprofundar) return e.trocaPendente ? { ...aprofundar, confirmaTroca: e.trocaPendente } : aprofundar;
 
+  // 4b. Contexto: o que reprova direto e o que não deu certo antes. Só se ela ainda não disse um eliminatório.
+  if (e.resumos === 0 && !coberto("eliminatorios") && perguntas("contexto") === 0) return { tipo: "perguntar_contexto" };
+
   // 5. Resumo: o primeiro, e depois revisões enquanto ela pedir mudança (com limite).
   if (e.resumos === 0) return { tipo: "resumo_final" };
   if (e.resumos < MAX_RESUMOS) return { tipo: "resumo_final", revisao: true };
@@ -331,6 +352,9 @@ export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
       break;
     case "perguntar_nivel":
       contar("nivel");
+      break;
+    case "perguntar_contexto":
+      contar("contexto");
       break;
     case "aprofundar":
       contar(criterio(passo.area));
@@ -365,6 +389,8 @@ export function descreverPasso(passo: Passo): string {
       return "confirmar_inicio";
     case "perguntar_nivel":
       return "perguntar_nivel";
+    case "perguntar_contexto":
+      return "perguntar_contexto";
     case "aprofundar":
       return `aprofundar ${passo.area} (${passo.motivo})${passo.confirmaTroca ? ` com troca confirmada para ${passo.confirmaTroca}` : ""}`;
     case "oferecer_tradeoff":

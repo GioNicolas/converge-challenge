@@ -128,7 +128,10 @@ const EXEMPLOS_QUER: Record<FocusArea, string> = {
 };
 
 const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
-  tecnico: "'isso não é tão importante pra gente', 'pode diminuir a parte de algoritmo'",
+  tecnico:
+    "'isso não é tão importante pra gente', 'pode diminuir a parte de algoritmo'. Pedir um problema mais simples ou um código " +
+    "que não precisa ser perfeito ('não precisa ser complicado', 'não precisa estar 100% funcionando'), ou trocar algoritmo por " +
+    "raciocínio lógico e explicação ('não tão focado em algoritmos, mais em raciocínio lógico'), NÃO é dispensar: raciocínio e explicação são desta área",
   pressao: "'coloca menos pressão', 'pressão eu tiraria', 'não precisa ser muito rigoroso com prazo'",
   escala_produto: "'escala não é prioridade agora', 'pode tirar a parte de escalabilidade'",
   uso_ia: "'pode tirar IA', 'IA aplicada não pesa tanto'",
@@ -310,9 +313,11 @@ function sinaisDo(): Pergunta[] {
         "A última fala da recrutadora é uma pergunta ou dúvida dirigida ao Totti (sobre o formato, a avaliação ou o processo), e não uma resposta?",
       sinal_sim:
         "Sim se ela perguntou ao Totti como a entrevista é avaliada, como funciona o formato ou o processo: " +
-        "'mas como isso vai ser avaliado num live code?', 'isso acontece na entrevista toda?', 'e se ele não usar IA, conta?'.",
+        "'mas como isso vai ser avaliado num live code?', 'isso acontece na entrevista toda?', 'e se ele não usar IA, conta?', " +
+        "ou se pediu a opinião ou a recomendação dele: 'o que você acha?', 'você tem alguma dica do que eu deveria procurar?', 'o que você recomenda?'. " +
+        "Vale também quando ela responde e, na mesma fala, termina com uma pergunta dessas ao Totti: a pergunta dela precisa de resposta.",
       sinal_nao:
-        "Não se ela respondeu ao Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), pediu mudança " +
+        "Não se ela só respondeu ao Totti (concordou, corrigiu, escolheu uma opção, descreveu um comportamento), sem pergunta dirigida a ele, pediu mudança " +
         "('tira a dica leve', 'muda pra quarenta e cinco'), aprovou o resumo ('pode finalizar?', 'tá bom') ou fez pergunta que não é sobre a entrevista.",
     },
     {
@@ -421,9 +426,28 @@ export function aplicarCobertura(r: Rascunho, cobertura: Record<string, number>,
 }
 
 /** Nível de ênfase de uma área na última fala da recrutadora. Os exemplos são os que o Jev usa para escolher. */
+/**
+ * O que NÃO é cada área, para o Jev não confundir. Sem isso, "falha de rede" e "não travar no pico" viravam pressão
+ * (são sobre o sistema, não sobre o candidato), e "não precisa de algoritmo complicado" dispensava a área técnica.
+ */
+const NAO_E: Record<FocusArea, string> = {
+  tecnico:
+    "Esta área inclui raciocínio lógico, entender o problema, explicar o que está fazendo, pedir ajuda e usar bem as dicas, " +
+    "e código claro, não só algoritmos. Dizer que ela mesma não entende de código ('não sei muito sobre código limpo') não é dispensar. " +
+    "Pedir um problema mais simples ou do dia a dia ('não algoritmos complicados', 'menos algoritmo, mais raciocínio lógico', " +
+    "'problemas práticos') não dispensa a área: é sobre a dificuldade, e a área continua sendo avaliada; isso é 'respondeu'.",
+  pressao:
+    "É sobre o CANDIDATO sob pressão: tempo curto, travar, requisito que muda, ser questionado. Pedir ajuda, pedir dica e explicar " +
+    "o raciocínio são comunicação, da área técnica, não pressão. Falhas, quedas, picos de carga " +
+    "ou o app travar são sobre o SISTEMA, e são escalabilidade, não pressão: nesse caso é 'nao_falou' para pressão.",
+  escala_produto:
+    "Inclui o sistema aguentar picos de carga, falhas de rede, quedas, disponibilidade, consistência, cache, sincronização e volume de dados.",
+  uso_ia: "É construir com IA (LLM, agentes, RAG). Usar Copilot ou Cursor para programar não conta como falar dessa área.",
+};
+
 function nivelDaFala(area: FocusArea) {
   const nome = NOME_AREA_FALA[area];
-  return choice(`Na ÚLTIMA fala da recrutadora, o que ela disse sobre ${nome}?`, {
+  return choice(`Na ÚLTIMA fala da recrutadora, o que ela disse sobre ${nome}? ${NAO_E[area]}`, {
     nao_falou: { quando: "a fala não tocou nessa área, nem de passagem." },
     dispensou: {
       quando: "disse que a área não precisa, que pode tirar, que é sem muita ênfase ou que não é tanto sobre ela.",
