@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { trocarIdsPorNomes } from "../guardas";
+import { semPerguntaNoFim, trocarIdsPorNomes } from "../guardas";
 
 describe("trocarIdsPorNomes", () => {
   const grafo = "COMPONENTES\n- [r5] Cache Redis (retângulo)\n- [e2] Réplica de leitura (elipse)\nCONEXÕES\n- [s5] Cache Redis → Réplica de leitura \"miss\"";
@@ -13,5 +13,17 @@ describe("trocarIdsPorNomes", () => {
   it("id desconhecido entre colchetes vira 'esse elemento'; texto sem id não muda", () => {
     assert.equal(trocarIdsPorNomes("E no [r9]?", grafo), "E no esse elemento?");
     assert.equal(trocarIdsPorNomes("Por que esse cache?", grafo), "Por que esse cache?");
+  });
+});
+
+describe("semPerguntaNoFim", () => {
+  it("tira a pergunta de condução do fim e põe um convite", () => {
+    const r = semPerguntaNoFim("Sem problema, seguimos. Quer olhar outra parte do desenho?");
+    assert.match(r, /^Sem problema, seguimos\. /);
+    assert.doesNotMatch(r, /\?/);
+  });
+  it("fala só com pergunta vira um convite; fala sem pergunta não muda", () => {
+    assert.doesNotMatch(semPerguntaNoFim("O que mais você quer detalhar?"), /\?/);
+    assert.equal(semPerguntaNoFim("Tranquilo, continua daí."), "Tranquilo, continua daí.");
   });
 });

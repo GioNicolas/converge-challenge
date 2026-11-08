@@ -71,3 +71,19 @@ export function trocarIdsPorNomes(texto: string, grafo: string): string {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
+
+const CONVITES = ["Pode continuar de onde parou.", "Continua daí.", "Pode seguir com o desenho."];
+
+/**
+ * Depois de um "não sei" ou de um "pula", a fala não termina em pergunta: o modelo às vezes fecha com uma
+ * pergunta de condução ("quer olhar outra parte?") e o candidato, que acabou de soltar o assunto, fica com outra
+ * cobrança. Tira a frase com interrogação do fim e, se não sobrar convite, põe um curto.
+ */
+export function semPerguntaNoFim(texto: string): string {
+  const t = texto.trim();
+  if (!t.endsWith("?")) return t;
+  const frases = t.match(/[^.!?]+[.!?]+/g)?.map((f) => f.trim()) ?? [t];
+  while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  const convite = CONVITES[t.length % CONVITES.length];
+  return [...frases, convite].join(" ");
+}

@@ -1,6 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
-import { limitarFrases } from "./guardas";
+import { limitarFrases, semPerguntaNoFim } from "./guardas";
 import { mapearAcoesVisuais, type AcaoVisual } from "../presenca/acoesVisuais";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
@@ -99,7 +99,9 @@ export async function perguntar(
   const haPerguntaAtiva = !!(entrada.perguntaAtiva || estado.perguntaAtiva);
   const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho });
-  const texto = limitarFrases(saida.texto, 2);
+  const curto = limitarFrases(saida.texto, 2);
+  // Assunto solto ("não sei", "pula"): a vez volta com um convite, nunca com outra pergunta.
+  const texto = desfecho === "nao_sabe" || desfecho === "pulou" ? semPerguntaNoFim(curto) : curto;
   if (!saida.responder || !texto) return mudoOuConcluiu();
   const requisito = saida.requisito?.trim()
     ? saida.requisito.trim().slice(0, MAX_CARACTERES_REQUISITO)

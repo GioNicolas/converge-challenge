@@ -120,3 +120,24 @@ describe("perguntar: prompt contra quebra de personagem (sem limpeza por código
   });
   });
 });
+
+describe("desfecho da pergunta ativa", () => {
+  const ativa = { ...estado, fase: "APROFUNDAMENTO" as const };
+  it("não sei: repassa o desfecho e a fala não termina em pergunta", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Sem problema, seguimos. Quer olhar outra parte?", requisito: null, concluiu: false, desfecho: "nao_sabe" }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei, nunca vi isso.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.equal(r.desfecho, "nao_sabe");
+    assert.doesNotMatch(r.texto, /\?/);
+  });
+  it("respondeu: a pergunta curta do fim continua valendo", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. E se o contador cair?", requisito: null, concluiu: false, desfecho: "respondeu" }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador.", perguntaAtiva: "Como gera o código?" }, AGORA);
+    assert.equal(r.desfecho, "respondeu");
+    assert.equal(r.texto, "Saquei. E se o contador cair?");
+  });
+  it("sem pergunta ativa não há desfecho", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, continua daí.", requisito: null, concluiu: false, desfecho: "pulou" }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Vou pular essa parte." }, AGORA);
+    assert.equal(r.desfecho, null);
+  });
+});

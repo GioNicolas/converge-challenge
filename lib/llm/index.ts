@@ -109,8 +109,9 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     featherlessEnv: "ANALYST_MODEL",
     featherlessDefault: "zai-org/GLM-5.3-Flash",
     maxTokens: 4000,
+    // Vale para os dois: sem isso o Gemini pensa por conta própria (~400 tokens, +2,5 s) e a análise
+    // encostava no prazo de 8 s. Com "low" ele responde em ~3 s com o mesmo prompt.
     reasoningEffort: "low",
-    raciocinioSo: "featherless",
     hedgeMs: 6_000,
     temperatura: 0.4,
   },

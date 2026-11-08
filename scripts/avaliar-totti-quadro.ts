@@ -121,6 +121,7 @@ const CASOS_FALA: CasoFala[] = [
     checar: (t, r) => [
       ...(!r.responder ? ["ficou calado"] : []),
       ...(TEMA_COLISAO.test(t) ? ["insistiu no assunto que ele disse não saber"] : []),
+      ...(/\?\s*$/.test(t) ? ["fechou com pergunta em vez de convite"] : []),
       ...(/voc[êe] n[ãa]o sabe|n[ãa]o pensou/i.test(t) ? ["parafraseou o 'não sei' como robô"] : []),
     ],
   },
@@ -132,6 +133,7 @@ const CASOS_FALA: CasoFala[] = [
     checar: (t, r) => [
       ...(!r.responder ? ["ficou calado"] : []),
       ...(TEMA_COLISAO.test(t) ? ["insistiu no assunto que ele quis pular"] : []),
+      ...(/\?\s*$/.test(t) ? ["fechou com pergunta em vez de convite"] : []),
     ],
   },
   {
