@@ -4,6 +4,11 @@
  * O store fica em `globalThis` para sobreviver ao hot reload do `next dev`. Não é banco: se o
  * servidor reiniciar, as sessões somem. Só as configs finais também vão para `data/configs/`.
  *
+ * Na Vercel cada requisição pode cair numa instância diferente (ou numa nova, depois de reciclar), e a
+ * sessão não está lá: era o "sessão não encontrada" ao publicar. Por isso a tela guarda a `copia` que
+ * vem em todo estado e a manda de volta: `sincronizarSessao` reconstrói a sessão a partir dela quando a
+ * instância não tem a sessão ou tem uma versão mais velha.
+ *
  * Cada fala da recrutadora passa pelo turno (`turno.ts`): cobertura síncrona, planejador, fala do Totti.
  * A extração lenta (`extrair` + cobertura) roda depois, em segundo plano. Se chegar fala nova durante
  * uma rodada, nada roda em paralelo: ao terminar, roda uma rodada extra com a transcrição mais recente
@@ -90,7 +95,12 @@ export interface EstadoSessao {
   pesos: DetalhePeso[];
   logs: EventoLog[];
   configFinal?: InterviewConfig;
+  /** A sessão inteira (sem os logs), para a tela devolver quando a instância do servidor não a tiver. A demonstração não tem. */
+  copia?: CopiaSessao;
 }
+
+/** A sessão como a tela guarda e devolve: tudo menos os logs (que só servem para depurar). */
+export type CopiaSessao = Omit<Sessao, "logs">;
 
 interface Store {
   sessoes: Map<string, Sessao>;
@@ -460,7 +470,68 @@ export function estadoDaSessao(sessao: Sessao): EstadoSessao {
     pesos: sessao.pesosDetalhe,
     logs: sessao.logs,
     configFinal: sessao.configFinal,
+    copia: copiaDaSessao(sessao),
   };
+}
+
+function copiaDaSessao(sessao: Sessao): CopiaSessao {
+  const copia: Partial<Sessao> = { ...sessao };
+  delete copia.logs;
+  return copia as CopiaSessao;
+}
+
+const ID_SESSAO = /^[0-9a-f-]{36}$/;
+
+/** A cópia tem o formato de uma sessão? Só o essencial: o resto vem do próprio servidor que a gerou. */
+function pareceCopia(c: unknown, id: string): c is CopiaSessao {
+  if (!c || typeof c !== "object") return false;
+  const x = c as Partial<CopiaSessao>;
+  return (
+    x.id === id &&
+    ID_SESSAO.test(id) &&
+    typeof x.criadaEm === "number" &&
+    !!x.vaga &&
+    !!x.classificacao &&
+    !!x.rascunho &&
+    !!x.plano &&
+    Array.isArray(x.transcricao) &&
+    Array.isArray(x.competencias) &&
+    !!x.status
+  );
+}
+
+/** A cópia está à frente da sessão desta instância: mais falas ou uma extração mais recente. */
+const maisNova = (c: CopiaSessao, s: Sessao) =>
+  c.transcricao.length > s.transcricao.length ||
+  (c.transcricao.length === s.transcricao.length && c.status.versaoExtraida > s.status.versaoExtraida);
+
+/**
+ * A sessão desta instância, reconstruída da `copia` da tela quando faltar ou estiver atrás.
+ * Uma sessão ocupada (fala sendo respondida) ou extraindo nunca é trocada: ela é a mais nova.
+ */
+export function sincronizarSessao(id: string, copia?: unknown): Sessao | undefined {
+  const atual = store.sessoes.get(id);
+  if (!pareceCopia(copia, id)) return atual;
+  if (atual && (store.ocupadas.has(id) || atual.status.extraindo || !maisNova(copia, atual))) return atual;
+  const sessao: Sessao = {
+    ...structuredClone(copia),
+    logs: atual?.logs ?? [],
+    // A extração que rodava em outra instância não roda aqui: a finalização refaz se estiver atrás.
+    status: { extraindo: false, versaoExtraida: copia.status.versaoExtraida },
+  };
+  store.sessoes.set(id, sessao);
+  registrarEvento(sessao, {
+    tipo: "aviso",
+    resumo: `sessão reconstruída da cópia da tela (${sessao.transcricao.length} falas)`,
+    dados: { tinhaSessao: !!atual, falas: sessao.transcricao.length, versaoExtraida: sessao.status.versaoExtraida },
+  });
+  return sessao;
+}
+
+/** A extração não acompanhou a última fala (rodou em outra instância ou falhou): roda agora. */
+export async function extrairSeAtrasada(sessao: Sessao): Promise<void> {
+  await aguardarExtracao(sessao);
+  if (sessao.status.versaoExtraida < sessao.transcricao.length) await extrairAgora(sessao);
 }
 
 /** Guarda a config final em memória e em `data/configs/<id>.json`. */

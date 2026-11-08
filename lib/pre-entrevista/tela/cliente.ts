@@ -1,10 +1,15 @@
 // Único ponto de acesso da tela da pré-entrevista ao servidor.
 // Usa as rotas reais (/api/pre-entrevista/...) por padrão. A demonstração roteirizada só entra com
 // NEXT_PUBLIC_USAR_SERVIDOR=0: antes, sem a variável, a tela caía nela em silêncio e parecia estar no servidor.
+//
+// O servidor guarda a sessão na memória de uma instância; na Vercel a próxima requisição pode cair em outra.
+// Por isso todo estado traz a `copia` da sessão: ela fica guardada aqui (e no navegador, para retomar um
+// rascunho depois) e vai junto com cada fala e com a finalização. Se a instância não tiver a sessão, ela
+// é reconstruída a partir da cópia em vez de responder "sessão não encontrada".
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "../classificador";
 import type { Rascunho } from "../rascunho";
-import type { EstadoSessao } from "../sessoes";
+import type { CopiaSessao, EstadoSessao } from "../sessoes";
 import { estadoInicialDemo, responderDemo } from "./demo";
 
 const API = "/api/pre-entrevista/sessoes";
@@ -23,6 +28,32 @@ const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Na demonstração, as sessões ficam na memória da página.
 const sessoesDemo = new Map<string, EstadoSessao>();
 
+// A última cópia de cada sessão (ver o topo do arquivo). Memória primeiro; o navegador guarda para retomar.
+const copias = new Map<string, CopiaSessao>();
+const CHAVE_COPIA = (id: string) => `converge.sessao.${id}`;
+
+function guardar(estado: EstadoSessao): EstadoSessao {
+  if (!estado.copia) return estado;
+  copias.set(estado.id, estado.copia);
+  try {
+    localStorage.setItem(CHAVE_COPIA(estado.id), JSON.stringify(estado.copia));
+  } catch {
+    // Sem espaço ou sem acesso: a cópia em memória basta para esta visita.
+  }
+  return estado;
+}
+
+function copiaDe(id: string): CopiaSessao | undefined {
+  const emMemoria = copias.get(id);
+  if (emMemoria) return emMemoria;
+  try {
+    const salva = localStorage.getItem(CHAVE_COPIA(id));
+    return salva ? (JSON.parse(salva) as CopiaSessao) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function criarSessao(vaga: Vaga): Promise<EstadoSessao> {
   if (!usarServidor()) {
     await esperar(2600); // o tempo do Totti "lendo" a vaga
@@ -36,7 +67,7 @@ export async function criarSessao(vaga: Vaga): Promise<EstadoSessao> {
     body: JSON.stringify(vaga),
   });
   if (!r.ok) throw new Error(await erroDe(r));
-  return (await r.json()) as EstadoSessao;
+  return guardar((await r.json()) as EstadoSessao);
 }
 
 export async function enviarFala(sessaoId: string, texto: string): Promise<EstadoSessao> {
@@ -51,18 +82,27 @@ export async function enviarFala(sessaoId: string, texto: string): Promise<Estad
   const r = await fetch(`${API}/${sessaoId}/mensagem`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: texto }),
+    body: JSON.stringify({ text: texto, copia: copiaDe(sessaoId) }),
   });
   if (!r.ok) throw new Error(await erroDe(r));
-  return (await r.json()) as EstadoSessao;
+  return guardar((await r.json()) as EstadoSessao);
 }
 
 /** Estado mais recente (a extração do rascunho roda em segundo plano no servidor). */
 export async function buscarSessao(sessaoId: string): Promise<EstadoSessao | null> {
   if (!usarServidor()) return sessoesDemo.get(sessaoId) ?? null;
-  const r = await fetch(`${API}/${sessaoId}`, { cache: "no-store" });
+  let r = await fetch(`${API}/${sessaoId}`, { cache: "no-store" });
+  // Esta instância não tem a sessão: manda a cópia para ela reconstruir.
+  const copia = r.status === 404 ? copiaDe(sessaoId) : undefined;
+  if (copia) {
+    r = await fetch(`${API}/${sessaoId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ copia }),
+    });
+  }
   if (!r.ok) throw new Error(await erroDe(r));
-  return (await r.json()) as EstadoSessao;
+  return guardar((await r.json()) as EstadoSessao);
 }
 
 export type ResultadoFinal = { config: InterviewConfig } | { erros: string[] };
@@ -88,7 +128,7 @@ export async function finalizar(sessaoId: string, rascunho: Rascunho): Promise<R
   const r = await fetch(`${API}/${sessaoId}/finalizar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rascunho }),
+    body: JSON.stringify({ rascunho, copia: copiaDe(sessaoId) }),
   });
   const j = (await r.json().catch(() => ({}))) as CorpoErro & { ok?: boolean; config?: InterviewConfig };
   if (r.ok && j.ok && j.config) return { config: j.config };

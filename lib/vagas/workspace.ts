@@ -558,26 +558,25 @@ export function situacaoDoRascunho(r: RascunhoVaga): string {
 export { dias as quandoFoi };
 
 // ---------------------------------------------------------------------------
-// Estágio de cada vaga na tela inicial: o que o recrutador tem que fazer agora.
-//   Definir escopo (rascunho com o Totti) → Enviar convites → Aguardando entrevistas → Ver resultados
+// Estágio de cada vaga na tela inicial, em ordem cronológica (a pipeline):
+//   Definir escopo (rascunho com o Totti) → Aguardando entrevistas → Ver resultados
+// Não há estágio de "enviar convites": ao publicar, os convites saem sozinhos (EnvioConvites).
 // ---------------------------------------------------------------------------
 
-export const ESTAGIOS = ["escopo", "convidar", "aguardando", "resultados"] as const;
+export const ESTAGIOS = ["escopo", "aguardando", "resultados"] as const;
 export type Estagio = (typeof ESTAGIOS)[number];
 
 export const NOME_ESTAGIO: Record<Estagio, string> = {
   escopo: "Definir escopo",
-  convidar: "Enviar convites",
   aguardando: "Aguardando entrevistas",
   resultados: "Ver resultados",
 };
 
-/** O que fazer em cada estágio, numa linha. */
+/** O que acontece em cada estágio, numa linha. */
 export const DICA_ESTAGIO: Record<Estagio, string> = {
-  escopo: "Termine o plano da entrevista com o Totti",
-  convidar: "O plano está pronto, falta chamar os candidatos",
-  aguardando: "Convites enviados, os candidatos estão fazendo",
-  resultados: "Chegaram relatórios para você revisar",
+  escopo: "Termine o plano com o Totti",
+  aguardando: "Os candidatos estão fazendo",
+  resultados: "Relatórios para revisar",
 };
 
 /** O estágio de uma vaga publicada (encerradas ficam fora do quadro). Funil já com convites e entrevistas reais. */
@@ -585,7 +584,8 @@ export function estagioDa(v: VagaEmpresa): Exclude<Estagio, "escopo"> | "encerra
   if (v.etapa === "encerrada") return "encerrada";
   const f = v.funil;
   if (f.novos > 0) return "resultados";
-  if (f.convidados === 0) return "convidar";
+  // Publicada e sem convite ainda: os convites são automáticos, então a vaga já está esperando os candidatos.
+  if (f.convidados === 0) return "aguardando";
   if (f.emAndamento === 0 && f.concluiram >= f.convidados) return "resultados";
   return "aguardando";
 }
