@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sendInterviewInvite } from "@/lib/email";
-import { acharConvite, salvarConvite } from "@/lib/convites/store";
-import { horariosDisponiveis } from "@/lib/convites/horarios";
+import { acharConvite, linkDaEntrevista, novoEntrevistaId, salvarConvite } from "@/lib/convites/store";
+import { horarioAceito } from "@/lib/convites/horarios";
 import { ehCandidatoTeste } from "@/lib/convites/teste";
 
 export const runtime = "nodejs";
@@ -26,16 +26,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ erro: "corpo inválido" }, { status: 400 });
   }
   const parsed = Body.safeParse(json);
-  if (!parsed.success || !horariosDisponiveis().includes(parsed.data.horario)) {
+  if (!parsed.success || !horarioAceito(parsed.data.horario)) {
     return NextResponse.json({ erro: "horário indisponível" }, { status: 400 });
   }
   const horario = parsed.data.horario;
 
-  const base = (process.env.APP_URL || new URL(req.url).origin).replace(/\/$/, "");
-  const joinUrl = `${base}/?config=${encodeURIComponent(convite.configId)}`;
+  const base = process.env.APP_URL || new URL(req.url).origin;
+  // O link carrega o id da entrevista: é por ele que o painel sabe quem fez cada entrevista.
+  const agendado = { ...convite, status: "agendado" as const, agendadoPara: horario, entrevistaId: novoEntrevistaId() };
+  const joinUrl = linkDaEntrevista(base, agendado);
 
   // Salva antes de enviar: se o email falhar, o horário escolhido continua valendo.
-  await salvarConvite({ ...convite, status: "agendado", agendadoPara: horario });
+  await salvarConvite(agendado);
 
   const { nome, email } = convite.candidato;
   let emailStatus: "enviado" | "simulado" | "erro" = "simulado";

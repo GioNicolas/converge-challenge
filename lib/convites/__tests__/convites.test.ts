@@ -1,9 +1,14 @@
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 const { createElement } = React;
 import { render } from "@react-email/render";
-import { horariosDisponiveis } from "@/lib/convites/horarios";
+import {
+  ehHorarioDeTesteValido,
+  horarioAceito,
+  horariosDeTeste,
+  horariosDisponiveis,
+} from "@/lib/convites/horarios";
 import { candidatosTeste, ehCandidatoTeste } from "@/lib/convites/teste";
 import { acharConvite } from "@/lib/convites/store";
 import { TriagemConviteEmail } from "@/lib/email/templates/TriagemConvite";
@@ -13,10 +18,16 @@ import type { TriagemConvitePayload } from "@/lib/email/types";
 Object.assign(globalThis, { React });
 
 const env = process.env as Record<string, string | undefined>;
-const saved = env.CANDIDATOS_TESTE;
+const saved = { CANDIDATOS_TESTE: env.CANDIDATOS_TESTE, HORARIOS_DE_TESTE: env.HORARIOS_DE_TESTE };
+// A flag do shell não pode vazar pros testes de horários regulares.
+beforeEach(() => {
+  delete env.HORARIOS_DE_TESTE;
+});
 afterEach(() => {
-  if (saved === undefined) delete env.CANDIDATOS_TESTE;
-  else env.CANDIDATOS_TESTE = saved;
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete env[k];
+    else env[k] = v;
+  }
 });
 
 const diaDaSemana = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`).getUTCDay();
@@ -44,6 +55,62 @@ describe("horariosDisponiveis", () => {
     // 2026-11-05 01:00 UTC ainda é 4/11 à noite em Brasília: "amanhã" é quinta, dia 5.
     const slots = horariosDisponiveis(new Date("2026-11-05T01:00:00Z"));
     assert.equal(slots[0], "2026-11-05T09:00:00-03:00");
+  });
+});
+
+describe("horários de teste (HORARIOS_DE_TESTE=1)", () => {
+  // 10:00:20 em Brasília: arredonda pra cima até 10:01, então +3 e +5 dão 10:04 e 10:06.
+  const agora = new Date("2026-11-06T10:00:20-03:00");
+
+  it("sem a flag, a lista não tem horários de teste", () => {
+    delete env.HORARIOS_DE_TESTE;
+    assert.equal(horariosDisponiveis(agora)[0], "2026-11-09T09:00:00-03:00");
+    assert.equal(horariosDisponiveis(agora).length, 20);
+  });
+
+  it("com a flag, os dois horários de teste vêm primeiro, no minuto cheio e com -03:00", () => {
+    env.HORARIOS_DE_TESTE = "1";
+    assert.deepEqual(horariosDeTeste(agora), ["2026-11-06T10:04:00-03:00", "2026-11-06T10:06:00-03:00"]);
+    const lista = horariosDisponiveis(agora);
+    assert.equal(lista.length, 22);
+    assert.deepEqual(lista.slice(0, 2), horariosDeTeste(agora));
+  });
+
+  it("usa o relógio de Brasília mesmo quando o UTC já virou o dia", () => {
+    env.HORARIOS_DE_TESTE = "1";
+    // 23:58 de 6/11 em Brasília = 02:58Z de 7/11.
+    assert.deepEqual(horariosDeTeste(new Date("2026-11-07T02:58:00Z")), [
+      "2026-11-07T00:01:00-03:00",
+      "2026-11-07T00:03:00-03:00",
+    ]);
+  });
+
+  it("o POST aceita o horário de teste mostrado minutos antes, mesmo com a lista já diferente", () => {
+    env.HORARIOS_DE_TESTE = "1";
+    const [primeiro] = horariosDeTeste(agora);
+    const doisMinutosDepois = new Date(agora.getTime() + 2 * 60_000);
+    assert.ok(!horariosDisponiveis(doisMinutosDepois).includes(primeiro));
+    assert.equal(horarioAceito(primeiro, doisMinutosDepois), true);
+    // Até 5 min depois do horário (quem demorou pra confirmar) ainda vale.
+    assert.equal(horarioAceito(primeiro, new Date(Date.parse(primeiro) + 4 * 60_000)), true);
+  });
+
+  it("recusa horário de teste fora da janela, fora do formato ou com a flag desligada", () => {
+    env.HORARIOS_DE_TESTE = "1";
+    assert.equal(ehHorarioDeTesteValido("2026-11-06T10:30:00-03:00", agora), false); // +30 min
+    assert.equal(ehHorarioDeTesteValido("2026-11-06T09:50:00-03:00", agora), false); // 10 min atrás
+    assert.equal(ehHorarioDeTesteValido("2026-11-06T10:04:30-03:00", agora), false); // segundos
+    assert.equal(ehHorarioDeTesteValido("2026-11-06T13:04:00Z", agora), false); // outro offset
+    delete env.HORARIOS_DE_TESTE;
+    assert.equal(horarioAceito("2026-11-06T10:04:00-03:00", agora), false);
+  });
+
+  it("horários regulares continuam aceitos com ou sem a flag", () => {
+    delete env.HORARIOS_DE_TESTE;
+    assert.equal(horarioAceito("2026-11-09T14:00:00-03:00", agora), true);
+    assert.equal(horarioAceito("2026-11-09T14:15:00-03:00", agora), false);
+    env.HORARIOS_DE_TESTE = "1";
+    assert.equal(horarioAceito("2026-11-09T14:00:00-03:00", agora), true);
   });
 });
 
