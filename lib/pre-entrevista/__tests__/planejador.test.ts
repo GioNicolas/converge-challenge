@@ -3,14 +3,17 @@ import assert from "node:assert/strict";
 import {
   CATALOGO,
   SYSTEM_DESIGN_ATIVO,
+  mede,
   criteriosIniciais,
   modoAlternativoQueMede,
   modoAtivo,
   problemaPadrao,
 } from "@/lib/pre-entrevista/catalogo";
 import { nomeAreaFala } from "@/lib/pre-entrevista/cobertura";
-import { cortarNaPrimeiraPergunta, falaFormatoIndisponivel, limparFala } from "@/lib/pre-entrevista/conversa";
+import { cortarNaPrimeiraPergunta, falaFormatoIndisponivel, limparFala, trocarPergunta } from "@/lib/pre-entrevista/conversa";
+import { PERGUNTA_CONTEXTO, PERGUNTAS, perguntaObvia, perguntasDaArea } from "@/lib/pre-entrevista/perguntas";
 import { montarGuia } from "@/lib/pre-entrevista/guia";
+import { lerDuracao, perguntouSobreTempo } from "@/lib/pre-entrevista/duracao";
 import {
   aplicarPasso,
   decisaoDaOferta,
@@ -23,12 +26,15 @@ import {
 } from "@/lib/pre-entrevista/planejador";
 import { aplicarDecisoesTradeoff, mudarModo, paraInterviewConfig, Rascunho } from "@/lib/pre-entrevista/rascunho";
 
-/** Estado em que o início já foi confirmado: a próxima decisão é de aprofundamento. */
+/**
+ * Estado em que o início já foi confirmado e ela já disse um eliminatório: a próxima decisão é de aprofundamento,
+ * e sem aprofundamento vem o resumo (a pergunta de contexto tem testes próprios).
+ */
 function estado(extra: Partial<EstadoPlanejamento>): EstadoPlanejamento {
   return {
     ...planoInicial(),
     focus: [],
-    cobertura: { confirmou_inicio: 1 },
+    cobertura: { confirmou_inicio: 1, eliminatorios: 1 },
     perguntasPorTopico: { confirmou_inicio: 1 },
     ...extra,
   };
@@ -89,7 +95,7 @@ describe("aprofundar: uma pergunta por área, sem follow-up", () => {
   });
 
   it("no máximo MAX_APROFUNDAMENTOS perguntas na conversa; depois segue para o resumo", () => {
-    assert.equal(MAX_APROFUNDAMENTOS, 3);
+    assert.equal(MAX_APROFUNDAMENTOS, 2);
     const focus = [
       { area: "tecnico" as const, weight: 0.25 },
       { area: "pressao" as const, weight: 0.25 },
@@ -99,15 +105,15 @@ describe("aprofundar: uma pergunta por área, sem follow-up", () => {
     const abaixo = proximoPasso(
       estado({
         focus,
-        perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1, criterio_pressao: 1 },
+        perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 },
       }),
     );
-    assert.deepEqual(abaixo, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
+    assert.deepEqual(abaixo, { tipo: "aprofundar", area: "pressao", motivo: "inicial" });
 
     const no_teto = proximoPasso(
       estado({
         focus,
-        perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1, criterio_pressao: 1, criterio_escala_produto: 1 },
+        perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1, criterio_pressao: 1 },
       }),
     );
     assert.equal(no_teto.tipo, "resumo_final");
@@ -116,6 +122,115 @@ describe("aprofundar: uma pergunta por área, sem follow-up", () => {
   it("aplicarPasso conta a pergunta de aprofundamento em criterio_<area>", () => {
     const plano = aplicarPasso(planoInicial(), { tipo: "aprofundar", area: "tecnico", motivo: "inicial" });
     assert.equal(plano.perguntasPorTopico.criterio_tecnico, 1);
+  });
+});
+
+describe("aprofundar só o que ela trouxe ou o que mais pesa", () => {
+  const focus = [
+    { area: "tecnico" as const, weight: 0.6 },
+    { area: "pressao" as const, weight: 0.4 },
+  ];
+
+  it("área que ela não pediu e não é a de maior peso não ganha pergunta (a pergunta inflaria o peso dela)", () => {
+    const passo = proximoPasso(
+      estado({ focus, areasFaladas: ["tecnico"], perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 }, mode: "live_coding" }),
+    );
+    assert.equal(passo.tipo, "resumo_final");
+  });
+
+  it("ela já falou da área principal e nada foi perguntado: uma pergunta de escolha sobre ela, uma vez", () => {
+    const passo = proximoPasso(estado({ focus, areasFaladas: ["tecnico", "pressao"], mode: "live_coding" }));
+    assert.deepEqual(passo, { tipo: "aprofundar", area: "tecnico", motivo: "inicial" });
+  });
+
+  it("área que ela pediu ganha pergunta mesmo sem ser a de maior peso", () => {
+    const passo = proximoPasso(estado({ focus, areasFaladas: ["tecnico"], sinais: { quer_pressao: 0.9 }, mode: "live_coding" }));
+    assert.deepEqual(passo, { tipo: "aprofundar", area: "pressao", motivo: "inicial" });
+  });
+
+  it("a de maior peso vem primeiro quando ela não pediu nada", () => {
+    const passo = proximoPasso(estado({ focus, mode: "live_coding" }));
+    assert.deepEqual(passo, { tipo: "aprofundar", area: "tecnico", motivo: "inicial" });
+  });
+});
+
+describe("pergunta de contexto (o que reprova direto, o que não deu certo antes)", () => {
+  const semEliminatorio = (extra: Partial<EstadoPlanejamento>) => estado({ cobertura: { confirmou_inicio: 1 }, ...extra });
+
+  it("vem depois dos aprofundamentos e antes do primeiro resumo, uma vez", () => {
+    const focus = [{ area: "tecnico" as const, weight: 1 }];
+    const depois = semEliminatorio({ focus, perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 }, mode: "live_coding" });
+    assert.equal(proximoPasso(depois).tipo, "perguntar_contexto");
+
+    const plano = aplicarPasso(depois, { tipo: "perguntar_contexto" });
+    assert.equal(plano.perguntasPorTopico.contexto, 1);
+    assert.equal(proximoPasso({ ...depois, ...plano }).tipo, "resumo_final");
+  });
+
+  it("não pergunta se ela já disse um eliminatório", () => {
+    const focus = [{ area: "tecnico" as const, weight: 1 }];
+    const passo = proximoPasso(estado({ focus, perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 }, mode: "live_coding" }));
+    assert.equal(passo.tipo, "resumo_final");
+  });
+
+  it("não volta depois do resumo", () => {
+    const passo = proximoPasso(semEliminatorio({ focus: [{ area: "tecnico", weight: 1 }], resumos: 1, perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 }, mode: "live_coding" }));
+    assert.notEqual(passo.tipo, "perguntar_contexto");
+  });
+});
+
+describe("perguntas decisivas", () => {
+  it("o molde 'o que separa um ótimo de um fraco' é reconhecido; pergunta de escolha, não", () => {
+    for (const obvia of [
+      "Sobre manter a calma quando dá errado, o que diferencia um desenvolvedor pleno de um que tem muita dificuldade?",
+      "Num problema de algoritmo, o que separa um candidato ótimo de um fraco para implementar telas?",
+      "Em componentes e modelo de dados, o que faz você achar um candidato ótimo e não só bom para essa vaga?",
+      "O que separa um engenheiro excelente de um que apenas cumpre o básico?",
+    ]) {
+      assert.equal(perguntaObvia(obvia), true, obvia);
+    }
+    for (const boa of [
+      "Se o tempo acabar, conta mais ele ter uma solução funcionando ou ter explicado bem o caminho?",
+      "Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?",
+      PERGUNTA_CONTEXTO,
+    ]) {
+      assert.equal(perguntaObvia(boa), false, boa);
+    }
+  });
+
+  it("todas as perguntas do banco passam na própria checagem e terminam com ?", () => {
+    for (const modo of ["live_coding", "system_design"] as const) {
+      for (const lista of Object.values(PERGUNTAS[modo])) {
+        for (const p of lista ?? []) {
+          assert.equal(perguntaObvia(p.texto), false, p.id);
+          assert.ok(p.texto.trim().endsWith("?"), p.id);
+        }
+      }
+    }
+  });
+
+  it("toda área que o formato mede tem pergunta no banco, em todo nível", () => {
+    for (const modo of ["live_coding", "system_design"] as const) {
+      for (const area of ["tecnico", "pressao", "escala_produto", "uso_ia"] as const) {
+        if (!mede(modo, area)) continue;
+        for (const nivel of ["junior", "pleno", "senior"] as const) {
+          assert.ok(perguntasDaArea(modo, area, nivel, "").length > 0, `${modo}/${area}/${nivel}`);
+        }
+      }
+    }
+  });
+
+  it("a vaga puxa a pergunta mais ligada a ela", () => {
+    const [primeira] = perguntasDaArea("system_design", "escala_produto", "senior", "app de delivery offline-first com sincronização");
+    assert.equal(primeira.id, "o_que_nao_pode_falhar");
+  });
+
+  it("trocarPergunta mantém a frase de antes e troca só a pergunta", () => {
+    assert.equal(
+      trocarPergunta("Então vamos de system design. O que separa um ótimo de um fraco?", "Qual é pior?"),
+      "Então vamos de system design. Qual é pior?",
+    );
+    assert.equal(trocarPergunta("O que separa um ótimo de um fraco?", "Qual é pior?"), "Qual é pior?");
   });
 });
 
@@ -344,5 +459,18 @@ describe("falaFormatoIndisponivel", () => {
       falaFormatoIndisponivel("live_coding"),
       "System design ainda não está disponível nesta versão, então a entrevista segue em live coding. Prefere seguir assim ou mudar alguma coisa?",
     );
+  });
+});
+
+describe("duração não sai de porcentagem nem de 'se o tempo acabar'", () => {
+  it("'se o tempo acabar' não é pergunta de duração; 'quanto tempo' e 'minutos' são", () => {
+    assert.equal(perguntouSobreTempo("Se o tempo acabar, o que conta mais pra você: funcionar ou explicar?"), false);
+    assert.equal(perguntouSobreTempo("Quanto tempo você quer de entrevista?"), true);
+    assert.equal(perguntouSobreTempo("Trinta minutos está bom?"), true);
+  });
+
+  it("porcentagem não vira minutos, mesmo depois de pergunta de tempo", () => {
+    assert.equal(lerDuracao("não preciso que esteja 100% funcionando", { perguntouTempo: true }), undefined);
+    assert.equal(lerDuracao("uns 45", { perguntouTempo: true }), 45);
   });
 });
