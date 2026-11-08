@@ -23,9 +23,9 @@ export function InterviewRescheduleEmail(props: InterviewReschedulePayload) {
         <strong>{when}</strong> ({props.durationMin} min).
       </Text>
       {props.reason && (
-        <Text style={{ ...emailTypography.muted, color: palette.accentDark }}>Motivo: {props.reason}</Text>
+        <Text style={{ ...emailTypography.body, color: palette.textMuted }}>Motivo: {props.reason}</Text>
       )}
-      <Section style={{ textAlign: "center", margin: "28px 0" }}>
+      <Section style={{ margin: "24px 0" }}>
         <Button href={props.joinUrl} style={emailTypography.button}>
           Entrar na entrevista
         </Button>
