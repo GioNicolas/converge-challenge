@@ -23,6 +23,8 @@ const KICKOFF_PRIORITY = 0.95;
 const KICKOFF_READING_MS = 14_000;
 /** Se o candidato já escreveu esse tanto de linhas além do código inicial, ele escolheu codar primeiro: a abertura é descartada. */
 const KICKOFF_SKIP_IF_LINES_WRITTEN = 12;
+/** Se o candidato já falou esse tanto (contou o plano sozinho, depois da apresentação), a abertura é descartada. */
+const KICKOFF_SKIP_IF_WORDS_SPOKEN = 15;
 /** Prioridade mínima, já com o boost de momento, pra uma pergunta virar blip. */
 const BLIP_THRESHOLD = 0.6;
 /** Perguntas com prioridade a partir daqui pulam a regra de 60 s entre blips (não as outras). */
@@ -195,6 +197,10 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
     if (linesWrittenBeyondStarter(session) >= KICKOFF_SKIP_IF_LINES_WRITTEN) {
       kickoff.status = "stale";
       return { reason: "abertura descartada: candidato já começou a codar" };
+    }
+    if (palavrasFaladas(session) >= KICKOFF_SKIP_IF_WORDS_SPOKEN) {
+      kickoff.status = "stale";
+      return { reason: "abertura descartada: candidato já contou o plano falando" };
     }
     if (t < KICKOFF_READING_MS) {
       return { reason: `esperando: tempo de leitura (faltam ${Math.ceil((KICKOFF_READING_MS - t) / 1000)} s)` };
@@ -500,6 +506,14 @@ function previewFor(q: QueuedQuestion): string {
   if (q.kind === "retorno") return q.topicLabel === "como ficou a mudança" ? "E aí, como ficou a mudança?" : "E aí, como foi o desafio?";
   if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
+}
+
+/** Quantas palavras o candidato já disse na sessão (falas gravadas na linha do tempo). */
+function palavrasFaladas(session: SessionState): number {
+  return session.events.reduce(
+    (total, e) => total + (e.type === "speech" && e.role === "candidate" ? e.text.split(/\s+/).filter(Boolean).length : 0),
+    0,
+  );
 }
 
 export function allPassed(result: RunResult): boolean {

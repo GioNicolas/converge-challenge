@@ -16,3 +16,11 @@ test("quadro sem tempos não inventa duração", () => {
 test("live coding diz a duração da vaga", () => {
   assert.match(comoFuncionaLiveCoding(45), /uns 45 minutos/);
 });
+
+test("live coding cita a vaga e explica que o Totti acompanha o código por voz", () => {
+  const fala = comoFuncionaLiveCoding(30, "Desenvolvedora Backend Pleno");
+  assert.match(fala, /para a vaga de Desenvolvedora Backend Pleno/);
+  assert.match(fala, /acompanhar o seu código o tempo todo/);
+  assert.match(fala, /por voz/);
+  assert.doesNotMatch(comoFuncionaLiveCoding(30), /para a vaga de/);
+});
