@@ -187,7 +187,15 @@ export function criarConversor(): {
           menorDistancia = p.distancia;
         }
       }
-      if (proxima && !vinculados.has(proxima.id)) absorvidos.set(texto.id, proxima.id);
+      if (proxima && !vinculados.has(proxima.id)) { absorvidos.set(texto.id, proxima.id); continue; }
+      // Rótulo colado fora da forma ("Postgres" embaixo da elipse): vira o nome da forma sem nome mais próxima.
+      if (proxima) continue;
+      // Só texto FORA do retângulo envolvente: no canto da caixa de uma elipse ainda é anotação solta.
+      const fora = (c: ExcalidrawElement) =>
+        ponto[0] < c.x || ponto[0] > c.x + c.width || ponto[1] < c.y || ponto[1] > c.y + c.height;
+      const semNome = caixas.filter((c) => fora(c) && !vinculados.has(c.id) && ![...absorvidos.values()].includes(c.id));
+      const colada = maisProximo(ponto, semNome, 28);
+      if (colada) absorvidos.set(texto.id, colada.id);
     }
     for (const texto of soltos) {
       const destino = absorvidos.get(texto.id);
@@ -211,8 +219,12 @@ export function criarConversor(): {
         if (binding) return ids.get(absorvidos.get(binding.elementId) ?? binding.elementId) ?? null;
         const ponto = e.points[indice];
         if (!ponto) return null;
-        const proximo = maisProximo([e.x + ponto[0], e.y + ponto[1]], caixas, 40);
-        return proximo ? id(proximo.id) : null;
+        const alvo: Ponto = [e.x + ponto[0], e.y + ponto[1]];
+        const proximo = maisProximo(alvo, caixas, 40);
+        if (proximo) return id(proximo.id);
+        // Diagramas só com texto ("Cliente -> API -> Banco"): vale o texto solto mais próximo.
+        const textoProximo = maisProximo(alvo, soltos.filter((t) => !absorvidos.has(t.id) && textoDigitado(t)), 60);
+        return textoProximo ? id(textoProximo.id) : null;
       }
       const comeco = ponta(e.startBinding, 0);
       const fim = ponta(e.endBinding, e.points.length - 1);
@@ -225,6 +237,7 @@ export function criarConversor(): {
         id: id(e.id), tipo: e.type,
         de: inverter ? fim : comeco, para: inverter ? comeco : fim,
         seta, rotulo: nome(e.id),
+        ...(e.strokeStyle === "dashed" || e.strokeStyle === "dotted" ? { tracejada: true } : {}),
       };
     });
     const anotacoes = soltos.filter((e) => !absorvidos.has(e.id)).map((e) => ({
@@ -253,8 +266,9 @@ export function criarConversor(): {
     linhas.push("CONEXÕES");
     for (const c of conexoes) {
       const rotulo = c.rotulo ? ` (${entreAspas(c.rotulo)})` : "";
+      const tracejada = c.tracejada ? " (tracejada)" : "";
       const solta = c.de === null || c.para === null ? ` (${c.tipo === "arrow" ? "seta" : "linha"} solta)` : "";
-      linhas.push(`- [${c.id}] ${descreverConexao(instantaneo, c)}${rotulo}${solta}`);
+      linhas.push(`- [${c.id}] ${descreverConexao(instantaneo, c)}${rotulo}${tracejada}${solta}`);
     }
     if (anotacoes.length) linhas.push("ANOTAÇÕES SOLTAS", ...anotacoes.map((a) =>
       `- [${a.id}] ${entreAspas(a.texto)}${a.dentroDe ? `  dentro de [${a.dentroDe}] ${nomeDoElemento(instantaneo, a.dentroDe)}` : ""}`));

@@ -128,9 +128,14 @@ export function useCodeCapture({ sendEvent, nowT, endedRef, starters: STARTERS, 
     [flushSnapshot, sendEvent],
   );
 
+  /** Código e linguagem de agora (o que está no editor, mesmo antes do snapshot sair). */
+  const getLiveCode = useCallback(() => ({ code: codeRef.current, language: langRef.current }), []);
+
   return {
     code,
     language,
+    flushSnapshot,
+    getLiveCode,
     onCodeChange,
     onPaste,
     changeLanguage,

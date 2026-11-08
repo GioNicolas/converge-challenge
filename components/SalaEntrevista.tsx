@@ -123,6 +123,14 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (estado.fase === "ENCERRADA") liberarMidia();
   }, [estado.fase, liberarMidia]);
   const demo = useDemoRequisitos();
+  // `?debug=1` mostra os botões de demonstração; `?iniciar=1` pula o modal (o lobby já foi feito na pré-entrevista).
+  const [debug, setDebug] = useState(false);
+  const [iniciarAuto, setIniciarAuto] = useState(false);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    setDebug(p.get("debug") === "1");
+    setIniciarAuto(p.get("iniciar") === "1");
+  }, []);
 
   // Cada requisito combinado é escrito pelo agente no próprio quadro, abaixo do enunciado.
   const requisitosEscritos = useRef(0);
@@ -173,6 +181,9 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     await midia.pedir();
     entrevista.comecar();
   }
+  // Vindo do lobby da pré-entrevista: começa sozinho, uma vez. Sem gesto prévio do usuário (áudio bloqueado),
+  // o modal normal continua à espera do clique.
+  const iniciouSozinho = useRef(false);
 
   // Conversa por texto: só com servidor real e entrevista em andamento. Demo e digitadas aparecem juntas, por horário.
   const podeDigitar = usarServidor() && sessao !== null && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA";
@@ -207,10 +218,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   useEffect(() => {
     if (midia.microfoneLigado && midia.volume > 0.08) registrarSom();
   }, [midia.microfoneLigado, midia.volume, registrarSom]);
-  const receberParcial = useCallback((texto: string) => {
-    setParcialVoz(texto);
-    registrarFalaParcial(texto);
-  }, [registrarFalaParcial]);
   const [falaPendente, setFalaPendente] = useState<string | null>(null);
   const enviarVozRef = useRef(enviarDigitado);
   enviarVozRef.current = enviarDigitado;
@@ -226,7 +233,65 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
   }, [estado.fase]);
   useEffect(() => () => filaVoz.current?.limpar(), []);
-  const receberVoz = useCallback((texto: string) => filaVoz.current?.adicionar(texto), []);
+  // Turn-taking: os trechos finais do STT se acumulam e só seguem após 750 ms de silêncio real.
+  // Fala parcial ou voz no microfone nesse intervalo adia o envio (não corta a frase no meio).
+  // Teto: barulho constante da sala não pode segurar a fala para sempre (2,5 s depois do primeiro trecho, só o
+  // silêncio de 750 ms em curso decide).
+  const bufferVoz = useRef("");
+  const timerVoz = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inicioBufferVoz = useRef(0);
+  const agendarEnvioVoz = useCallback((porVolume = false) => {
+    if (porVolume && Date.now() - inicioBufferVoz.current > 2500) return;
+    if (timerVoz.current) clearTimeout(timerVoz.current);
+    timerVoz.current = setTimeout(() => {
+      timerVoz.current = null;
+      const texto = bufferVoz.current.trim();
+      bufferVoz.current = "";
+      if (texto) filaVoz.current?.adicionar(texto);
+    }, 750);
+  }, []);
+  const receberVoz = useCallback((texto: string) => {
+    if (!texto.trim()) return;
+    if (!bufferVoz.current) inicioBufferVoz.current = Date.now();
+    bufferVoz.current = bufferVoz.current ? `${bufferVoz.current} ${texto.trim()}` : texto.trim();
+    agendarEnvioVoz();
+  }, [agendarEnvioVoz]);
+  useEffect(() => {
+    if (timerVoz.current && midia.volume > 0.08) agendarEnvioVoz(true);
+  }, [midia.volume, agendarEnvioVoz]);
+  useEffect(() => () => { if (timerVoz.current) clearTimeout(timerVoz.current); }, []);
+  useEffect(() => {
+    if (estado.fase !== "ENCERRADA") return;
+    if (timerVoz.current) clearTimeout(timerVoz.current);
+    timerVoz.current = null;
+    bufferVoz.current = "";
+  }, [estado.fase]);
+
+  const receberParcial = useCallback((texto: string) => {
+    setParcialVoz(texto);
+    registrarFalaParcial(texto);
+    if (texto && timerVoz.current) agendarEnvioVoz();
+  }, [registrarFalaParcial, agendarEnvioVoz]);
+
+  // Barge-in: o candidato falou por cima (volume alto por mais de 380 ms) e o Totti cala na hora.
+  const calarRef = useRef<(() => void) | undefined>(undefined);
+  calarRef.current = entrevista.silenciar;
+  const timerBarge = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const interrompendo = entrevista.agenteFalando && midia.microfoneLigado && midia.volume > 0.2;
+    if (interrompendo) {
+      if (!timerBarge.current) {
+        timerBarge.current = setTimeout(() => {
+          timerBarge.current = null;
+          calarRef.current?.();
+        }, 380);
+      }
+    } else if (timerBarge.current) {
+      clearTimeout(timerBarge.current);
+      timerBarge.current = null;
+    }
+  }, [entrevista.agenteFalando, midia.microfoneLigado, midia.volume]);
+  useEffect(() => () => { if (timerBarge.current) clearTimeout(timerBarge.current); }, []);
   const escuta = useTranscricao({
     stream: midia.stream,
     ativo: midia.microfoneLigado && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,
@@ -238,6 +303,15 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   });
 
   const pronto = quadro !== null && sessao !== null;
+  useEffect(() => {
+    if (!iniciarAuto || iniciouSozinho.current || !pronto || estado.fase !== "AGUARDANDO") return;
+    if (!(navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation?.hasBeenActive) return;
+    iniciouSozinho.current = true;
+    void comecar().catch((erro) => {
+      console.warn("[sala] início automático falhou:", erro);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iniciarAuto, pronto, estado.fase]);
   const mostrarCartao = estado.fase === "AGUARDANDO" || estado.fase === "ENCERRADA";
 
   return (
@@ -277,7 +351,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       )}
 
       {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
-      {estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
+      {debug && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
         <div className="absolute top-[72px] left-4 z-10 flex gap-2">
           <button
             onClick={entrevista.perguntaDemo}
@@ -416,7 +490,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
                     você.
                   </p>
                   {/* Só para demonstração: em produção, a recrutadora recebe o link pelo painel dela. */}
-                  {sessao && usarServidor() && (
+                  {debug && sessao && usarServidor() && (
                     <a
                       href={`/relatorio/${encodeURIComponent(sessao.sessao_id)}`}
                       target="_blank"

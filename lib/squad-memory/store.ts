@@ -6,6 +6,7 @@
  * começa vazia; a empresa da demo começa com a semente de `semente.ts` (vagas anteriores já decididas).
  */
 import { randomUUID } from "crypto";
+import { kvPadrao } from "@/lib/storage/kv";
 import { SEMENTE } from "./semente";
 import type {
   Concordancia,
@@ -44,6 +45,90 @@ const store: Store = (g.__squadMemory ??= { empresas: new Map() });
 
 const agora = () => new Date().toISOString();
 
+// ---------------------------------------------------------------------------
+// Persistência (Supabase, quando configurado). As funções abaixo continuam síncronas sobre o Map local;
+// cada mudança dispara a gravação do estado da empresa (fire-and-forget) e `hidratarSquadMemory()` traz o
+// que outras instâncias gravaram. O estado gravado inclui a semente, então hidratar nunca a duplica.
+// ---------------------------------------------------------------------------
+
+const NS_KV = "squad-memory";
+/** Quanto tempo uma hidratação vale antes de consultar o KV de novo (outras instâncias podem ter gravado). */
+const VALIDADE_HIDRATACAO_MS = 5_000;
+
+const h = globalThis as unknown as { __squadMemoryHidratacao?: { em: number; emAndamento?: Promise<void> } };
+const hidratacao = (h.__squadMemoryHidratacao ??= { em: 0 });
+const filas = new Map<string, Promise<void>>();
+
+function persistir(empresaId: string): void {
+  try {
+    const kv = kvPadrao();
+    if (kv.nome !== "supabase") return;
+    const e = store.empresas.get(empresaId);
+    if (!e) return;
+    const anterior = filas.get(empresaId) ?? Promise.resolve();
+    filas.set(
+      empresaId,
+      anterior
+        .then(() => kv.set(NS_KV, empresaId, structuredClone(e)))
+        .catch((err) => console.error("[squad-memory] não gravou:", err instanceof Error ? err.message : "erro")),
+    );
+  } catch (err) {
+    console.error("[squad-memory] não gravou:", err instanceof Error ? err.message : "erro");
+  }
+}
+
+/** Carrega do KV o estado das empresas e troca o local por ele. Idempotente; falha do KV não derruba. */
+export async function hidratarSquadMemory(): Promise<void> {
+  const kv = kvPadrao();
+  if (kv.nome !== "supabase") return;
+  if (hidratacao.emAndamento) return hidratacao.emAndamento;
+  if (Date.now() - hidratacao.em < VALIDADE_HIDRATACAO_MS) return;
+  hidratacao.emAndamento = (async () => {
+    try {
+      for (const l of await kv.list<EstadoEmpresa>(NS_KV)) {
+        const v = l.value;
+        if (!v || !Array.isArray(v.regras) || !Array.isArray(v.decisoes) || !Array.isArray(v.ignorados)) continue;
+        const pendente = filas.get(l.key);
+        let base = v;
+        if (pendente) {
+          await pendente; // o que é local sobe antes de ler de volta
+          base = (await kv.get<EstadoEmpresa>(NS_KV, l.key)) ?? v;
+        }
+        store.empresas.set(l.key, { regras: base.regras, decisoes: base.decisoes, ignorados: base.ignorados });
+      }
+      hidratacao.em = Date.now();
+    } catch (err) {
+      console.error("[squad-memory] não hidratou:", err instanceof Error ? err.message : "erro");
+    } finally {
+      hidratacao.emAndamento = undefined;
+    }
+  })();
+  return hidratacao.emAndamento;
+}
+
+/** Espera as gravações em curso no KV. As rotas que mudam a memória chamam antes de responder: na Vercel a
+ * instância pode congelar logo depois da resposta e levar junto o que ainda não subiu. */
+export async function gravacoesPendentesSquadMemory(): Promise<void> {
+  await Promise.all([...filas.values()]);
+}
+
+/** Só para testes: esquece que já hidratou. */
+export function reiniciarHidratacaoSquadMemory(): void {
+  hidratacao.em = 0;
+  hidratacao.emAndamento = undefined;
+  filas.clear();
+}
+
+function empresaDaRegra(id: string): string | undefined {
+  for (const [empresaId, e] of store.empresas) if (e.regras.some((r) => r.id === id)) return empresaId;
+  return undefined;
+}
+
+function persistirDaRegra(id: string): void {
+  const empresaId = empresaDaRegra(id);
+  if (empresaId) persistir(empresaId);
+}
+
 /** Estado da empresa, criado na primeira consulta. A empresa atual nasce com a semente da demo. */
 function estadoDa(empresaId: string): EstadoEmpresa {
   let e = store.empresas.get(empresaId);
@@ -80,6 +165,7 @@ export function adicionarRegra(nova: NovaRegra): RegraSquad {
     criadaEm: nova.criadaEm ?? agora(),
   };
   estadoDa(regra.empresaId).regras.push(regra);
+  persistir(regra.empresaId);
   return regra;
 }
 
@@ -102,6 +188,7 @@ export function alternarRegra(id: string, ativa?: boolean): RegraSquad | undefin
   const achada = acharRegra(id);
   if (!achada) return undefined;
   achada.regra.ativa = ativa ?? !achada.regra.ativa;
+  persistirDaRegra(id);
   return achada.regra;
 }
 
@@ -113,13 +200,16 @@ export function editarRegra(
   const achada = acharRegra(id);
   if (!achada) return undefined;
   Object.assign(achada.regra, mudanca);
+  persistirDaRegra(id);
   return achada.regra;
 }
 
 export function apagarRegra(id: string): boolean {
   const achada = acharRegra(id);
   if (!achada) return false;
+  const empresaId = empresaDaRegra(id);
   achada.empresa.regras = achada.empresa.regras.filter((r) => r.id !== id);
+  if (empresaId) persistir(empresaId);
   return true;
 }
 
@@ -135,15 +225,17 @@ export function registrarMotivoIgnorado(input: {
 }): MotivoIgnorado {
   const item: MotivoIgnorado = { ...input, id: `ignorado-${randomUUID().slice(0, 8)}`, criadoEm: agora() };
   estadoDa(input.empresaId).ignorados.push(item);
+  persistir(input.empresaId);
   return item;
 }
 
 /** Tira um trecho ignorado (ex.: ao desfazer a resposta dos 90 dias num ensaio da demo). */
 export function apagarMotivoIgnorado(id: string): boolean {
-  for (const e of store.empresas.values()) {
+  for (const [empresaId, e] of store.empresas) {
     const i = e.ignorados.findIndex((m) => m.id === id);
     if (i >= 0) {
       e.ignorados.splice(i, 1);
+      persistir(empresaId);
       return true;
     }
   }
@@ -165,6 +257,7 @@ export function registrarDecisao(input: NovaDecisao): DecisaoRegistrada {
     decididaEm: input.decididaEm ?? agora(),
   };
   estadoDa(input.empresaId).decisoes.push(decisao);
+  persistir(input.empresaId);
   return decisao;
 }
 

@@ -9,6 +9,8 @@ interface ChatDeps {
   applyCommands: (commands: EditorCommand[]) => void;
   onAgentReply?: (texto: string) => Promise<unknown>;
   onCancelReply?: () => void;
+  /** Código e linguagem de agora: vão junto de cada turno para o Totti nunca comentar versão velha. */
+  getLiveCode?: () => { code: string; language: string };
 }
 
 /** Fala na tela: a mensagem do contrato mais o horário em que apareceu (Date.now()). */
@@ -48,7 +50,7 @@ function errorText(err: unknown): string {
  * dois encerrar ("pode seguir" do agente ou "voltar a programar" do candidato). As conversas encerradas ficam
  * em `previous`. `epochRef` invalida respostas que chegam depois de fechar.
  */
-export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onCancelReply }: ChatDeps) {
+export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onCancelReply, getLiveCode }: ChatDeps) {
   const [open, setOpen] = useState(false);
   const [blip, setBlip] = useState<Blip | null>(null);
   /** Há uma conversa em andamento, visível ou não (a fala solta esperando a decisão do entrevistador). */
@@ -72,6 +74,8 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
   const turnoRef = useRef(0);
   const vozRef = useRef({ onAgentReply, onCancelReply });
   vozRef.current = { onAgentReply, onCancelReply };
+  const liveCodeRef = useRef(getLiveCode);
+  liveCodeRef.current = getLiveCode;
 
   useEffect(() => () => {
     epochRef.current++;
@@ -150,8 +154,10 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
       setError(null);
       try {
         const contexto = ativa.blip ? [] : livresRef.current;
+        const live = liveCodeRef.current?.();
         const res = await postChat({
           sessionId,
+          ...(live ? { code: live.code, language: live.language } : {}),
           blipId: ativa.blip?.id,
           messages: [...contexto, ...history].map(({ role, text }) => ({ role, text })),
         });

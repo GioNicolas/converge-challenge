@@ -102,7 +102,7 @@ export default function ProblemPanel({ problem, elapsedMs, durationMs, aberto, o
             {...entrada}
             style={{ transformOrigin: "top left" }}
             aria-label="Problema"
-            className="vidro flex max-h-[calc(100vh-10rem)] w-[360px] flex-col rounded-padrao shadow-flutuante"
+            className="vidro flex max-h-[calc(100vh-13rem)] w-[360px] flex-col rounded-padrao shadow-flutuante"
           >
             <header className="flex items-start justify-between gap-3 px-4 pt-3">
               <div>

@@ -5,6 +5,7 @@ import { registrarEvento } from "@/lib/pre-entrevista/log";
 import { aplicarPesosNaSessao, extrairSeAtrasada, salvarConfig, sincronizarSessao, substituirRascunho } from "@/lib/pre-entrevista/sessoes";
 import { atualizarNaoAvaliado } from "@/lib/pre-entrevista/turno";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
+import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +63,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   // As regras ativas da vaga desta config vão junto (a entrevista recarrega as ativas quando começa).
   // Config nova é vaga nova: começa sem regras de outras vagas.
+  await hidratarSquadMemory();
   resultado.config = comRegrasDaSquad(resultado.config);
   await salvarConfig(sessao, resultado.config);
   registrarEvento(sessao, {

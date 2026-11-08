@@ -19,6 +19,8 @@ export type Conexao = Readonly<{
   para: string | null;
   seta: Seta;
   rotulo: string;
+  /** Seta ou linha desenhada tracejada ou pontilhada. */
+  tracejada?: boolean;
 }>;
 
 export type Secao = Readonly<{

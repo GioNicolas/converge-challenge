@@ -1,15 +1,6 @@
-import type { Metadata } from "next";
-import PreEntrevistaTotti from "@/components/pre-entrevista/PreEntrevistaTotti";
-import "../../tema-recrutador.css";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "Nova entrevista · Totti",
-};
-
+/** A criação de vagas vive em /vagas/nova. */
 export default function Page() {
-  return (
-    <div className={`tema-recrutador min-h-dvh`}>
-      <PreEntrevistaTotti />
-    </div>
-  );
+  redirect("/vagas/nova");
 }

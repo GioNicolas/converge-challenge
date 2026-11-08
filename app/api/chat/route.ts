@@ -4,6 +4,10 @@ import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import { findBlipQuestion } from "@/lib/agents/policy";
 import { ChatRequest } from "@/lib/contracts";
 import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
+import { appendEvent, latestCode, sessionNow } from "@/lib/session/store";
+
+/** Teto do código aceito na conversa (o mesmo espírito do limite de snapshot). */
+const MAX_CODE_CHARS = 100_000;
 
 export const dynamic = "force-dynamic";
 // Depois de uma etapa concluída, o analista roda em segundo plano (after) e pode levar alguns segundos.
@@ -16,6 +20,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { sessionId, blipId, messages } = parsed.data;
+  // O contrato não carrega o código; ele vem à parte, validado aqui.
+  const extra = (body ?? {}) as { code?: unknown; language?: unknown };
+  const liveCode = typeof extra.code === "string" && extra.code.length <= MAX_CODE_CHARS ? extra.code : undefined;
+  const liveLanguage = typeof extra.language === "string" && extra.language.length > 0 && extra.language.length <= 40 ? extra.language : undefined;
 
   const session = await sessaoViva(sessionId);
   if (!session) {
@@ -24,6 +32,18 @@ export async function POST(request: Request) {
 
   if (blipId !== undefined && !findBlipQuestion(session, blipId)) {
     return NextResponse.json({ error: "blip não encontrado" }, { status: 404 });
+  }
+
+  // Grava o código de agora antes do turno: o Totti nunca comenta uma versão velha.
+  if (liveCode !== undefined && !session.ended && liveCode !== latestCode(session)) {
+    appendEvent(session, {
+      type: "snapshot",
+      sessionId: session.sessionId,
+      t: sessionNow(session),
+      code: liveCode,
+      version: (session.codeHistory.at(-1)?.version ?? 0) + 1,
+      language: liveLanguage ?? session.language,
+    });
   }
 
   const response = await runInterviewerTurn(session, { blipId, messages });

@@ -268,8 +268,9 @@ test("semente: o ajuste de plano de Engenharia de Dados não entra na entrevista
   assert.ok(!ids.includes("semente-regra-modelagem"));
   assert.ok(!ids.includes("semente-regra-estimativa"));
   assert.ok(!ids.includes("semente-regra-observabilidade"));
-  // As da vaga atual (Backend Pleno da demo) entram.
-  assert.deepEqual([...ids].sort(), ["semente-regra-custo", "semente-regra-plano-antes"]);
+  // As da vaga atual (Backend Pleno da demo) entram, e também a dos 90 dias do Otávio (outra vaga de backend da
+  // empresa): o resultado de uma contratação ajusta a próxima entrevista nos critérios que ela usa.
+  assert.deepEqual([...ids].sort(), ["semente-regra-90-dias-otavio", "semente-regra-custo", "semente-regra-plano-antes"]);
   // Toda regra da semente aponta para uma vaga que tem decisões (a tela mostra o nome da vaga).
   const vagas = new Set(concordancia(EMPRESA_DEMO).porVaga.map((v) => v.vagaId));
   for (const r of listarRegras(EMPRESA_DEMO)) assert.ok(vagas.has(r.origem.vagaId), r.id);

@@ -7,13 +7,13 @@ describe("janela da sala", () => {
   const inicio = Date.parse(horario);
   const janela = janelaDaSala(horario, 45);
 
-  it("abre dois minutos antes e fecha 15 minutos depois do fim previsto", () => {
+  it("abre dez minutos antes e fecha 15 minutos depois do fim previsto", () => {
     assert.equal(janela.abre, inicio - ABRE_ANTES_MS);
     assert.equal(janela.fecha, inicio + 45 * 60_000 + FECHA_DEPOIS_MS);
   });
 
   it("antes de abrir é cedo; dentro da janela, aberta; depois, encerrada", () => {
-    assert.equal(situacaoDaSala(janela, inicio - 10 * 60_000), "cedo");
+    assert.equal(situacaoDaSala(janela, inicio - 20 * 60_000), "cedo");
     assert.equal(situacaoDaSala(janela, janela.abre - 1), "cedo");
     assert.equal(situacaoDaSala(janela, janela.abre), "aberta");
     assert.equal(situacaoDaSala(janela, inicio + 30 * 60_000), "aberta");
