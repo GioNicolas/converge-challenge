@@ -53,7 +53,7 @@ export interface ConversaDeps {
  * O "uhum" do Totti assim que o candidato termina de falar, enquanto a resposta é preparada: ele sabe na hora que foi
  * ouvido (a resposta de verdade leva alguns segundos). Curtos para o áudio ficar guardado (lib/voz/cliente.ts).
  */
-export const RECONHECIMENTOS = ["Uhum.", "Certo.", "Entendi.", "Hum, tá."];
+export const RECONHECIMENTOS = ["Uhum, entendi.", "Legal, hmm.", "Hum, certo.", "Uhum, saquei.", "Tá, entendi."];
 /** Falas mais curtas que isso ("tá", "ok") já são um reconhecimento: o Totti não responde com outro. */
 const MIN_PALAVRAS_RECONHECER = 4;
 /** Fora de uma conversa, só falas com pelo menos isso de palavras ganham o "uhum". */

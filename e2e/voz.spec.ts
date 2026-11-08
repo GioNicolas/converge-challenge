@@ -188,7 +188,7 @@ test("IDE: conversa só por voz, sem barra lateral; a pergunta sai na pausa e o 
   await emitir(page, "Hum, deixa eu pensar um pouco.");
   await expect.poll(() => pedidos.filter((p) => p.blipId).length, { timeout: 8000 }).toBe(2);
   await page.waitForTimeout(1200);
-  expect((await falas(page)).slice(antes).every((f) => ["Uhum.", "Certo.", "Entendi.", "Hum, tá."].includes(f))).toBe(true);
+  expect((await falas(page)).slice(antes).every((f) => ["Uhum, entendi.", "Legal, hmm.", "Hum, certo.", "Uhum, saquei.", "Tá, entendi."].includes(f))).toBe(true);
   expect(await grifos(page)).toBeGreaterThan(0);
 
   // Respondeu: a paráfrase sai por voz, o assunto fecha e o grifo some.
