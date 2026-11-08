@@ -6,9 +6,8 @@
 // aparecerem cortados. No celular o menu vira uma gaveta, aberta pelo botão do topo.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { Brain, LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
+import { LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { useVagas, type EtapaVaga } from "@/lib/vagas/workspace";
 import { curvaSuave } from "@/lib/design/motion";
 import Marca from "./Marca";
@@ -51,8 +50,6 @@ function useRecolhido() {
 
 export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
   const { vagas, rascunhos } = useVagas();
-  const caminho = usePathname();
-  const naMemoria = caminho === "/vagas/aprendizado";
   const [gaveta, setGaveta] = useState(false);
   const { recolhido, animar, alternar } = useRecolhido();
 
@@ -104,21 +101,12 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
         <ItemMenu
           href="/vagas"
           icone={<LayoutList size={16} strokeWidth={1.75} />}
-          atual={!vagaAtual && !naMemoria}
+          atual={!vagaAtual}
           n={totalVagas}
           compacto={compacto}
           onClick={() => setGaveta(false)}
         >
           Todas as vagas
-        </ItemMenu>
-        <ItemMenu
-          href="/vagas/aprendizado"
-          icone={<Brain size={16} strokeWidth={1.75} />}
-          atual={naMemoria}
-          compacto={compacto}
-          onClick={() => setGaveta(false)}
-        >
-          O que o Totti aprendeu
         </ItemMenu>
       </nav>
 

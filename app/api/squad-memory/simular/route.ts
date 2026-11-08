@@ -1,5 +1,5 @@
 // Só desenvolvimento: simula o Tech Lead decidindo (Aprovar/Reprovar com motivo), pelo mesmo caminho
-// do clique de verdade (decisão registrada, extrator e regras guardadas). A tela /vagas/aprendizado usa no modo dev.
+// do clique de verdade (decisão registrada, extrator e regras guardadas). A aba "O que o Totti aprendeu" da vaga usa no modo dev.
 //   curl -X POST localhost:3000/api/squad-memory/simular -H "content-type: application/json" \
 //     -d '{"decisao":"reprovado","motivo":"propôs Kafka sem necessidade para esse volume"}'
 import { NextResponse } from "next/server";

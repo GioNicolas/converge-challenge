@@ -626,7 +626,7 @@ function Ajuste({ c, destaque, onDesfez }: { c: ContratacaoVista; destaque: bool
         {regras.length > 0 && (
           <div className="flex flex-wrap gap-x-5 gap-y-2 text-[13.5px]">
             <Link
-              href={`/vagas/aprendizado?vaga=${encodeURIComponent(c.vagaId)}`}
+              href={`/vagas/vaga?id=${encodeURIComponent(c.vagaId)}&etapa=aprendizado`}
               className="inline-flex items-center gap-1.5 font-medium text-texto-claro underline-offset-4 hover:underline"
             >
               O que o Totti aprendeu nesta vaga

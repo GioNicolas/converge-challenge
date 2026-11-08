@@ -28,7 +28,7 @@ function oQueMuda(r: RegraSquad): string {
 
 /**
  * `vagaIds`: os ids com que esta vaga aparece na memória (o da vaga e o da config dela, ver `vagaDaConfig`).
- * Uma regra só vale na vaga de onde veio, então só as desta vaga aparecem aqui.
+ * Uma regra só vale na vaga de onde veio, então só as desta vaga aparecem aqui. O primeiro id é o da vaga.
  */
 export default function AprendidoNoPlano({ formato, vagaIds }: { formato: InterviewMode; vagaIds: string[] }) {
   const [memoria, setMemoria] = useState<VisaoMemoria | null>(null);
@@ -62,7 +62,7 @@ export default function AprendidoNoPlano({ formato, vagaIds }: { formato: Interv
           Aprendido com o time
           <span className="numero text-[13px] font-normal text-texto-suave">{regras.length}</span>
         </h2>
-        <Link href={`/vagas/aprendizado?vaga=${encodeURIComponent(regras[0].origem.vagaId)}`} className="inline-flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto">
+        <Link href={`/vagas/vaga?id=${encodeURIComponent(vagaIds[0])}&etapa=aprendizado`} className="inline-flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto">
           Ver tudo
           <ArrowRight size={13} />
         </Link>
