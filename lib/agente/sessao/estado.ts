@@ -102,6 +102,11 @@ export type EstadoSessao = {
   ultimaPerguntaEm: number | null;
   /** Quando o candidato terminou de responder a última pergunta. */
   ultimaRespostaEm: number | null;
+  /**
+   * Quando o agente disse a última fala solta (resposta a uma dúvida, comentário, continuação). Uma pergunta nova
+   * não sai logo depois dela. Ausente em estados guardados antes desse campo.
+   */
+  ultimaFalaDoAgenteEm?: number | null;
 
   /** Todas as perguntas feitas, com os elementos citados. */
   perguntas: PerguntaFeita[];
@@ -449,6 +454,7 @@ export function transicionar(
       return {
         estado: {
           ...estado,
+          ultimaFalaDoAgenteEm: agora,
           conversa: [...estado.conversa, { quem: "agente", texto: evento.texto, em: agora }],
         },
         efeitos: [],

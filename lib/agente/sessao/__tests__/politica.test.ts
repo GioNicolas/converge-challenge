@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { estadoInicial, type EstadoSessao } from "../estado";
+import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
   extrairIdsDoGrafo,
   filtrarResposta,
@@ -217,5 +217,39 @@ describe("extrairIdsDoGrafo", () => {
   it("pega os ids de todas as seções", () => {
     const grafo = `${GRAFO}\nANOTAÇÕES SOLTAS\n- [t1] "algo"\nORDEM NA TELA (esquerda → direita)\n- Cliente, Postgres`;
     assert.deepEqual([...extrairIdsDoGrafo(grafo)].sort(), ["e1", "r1", "s1", "t1"]);
+  });
+});
+
+describe("depois de uma fala solta do agente", () => {
+  const base = { plin: "LIVRE" as const };
+
+  it("a fala do agente registra a hora, e uma pergunta nova espera um pouco", () => {
+    const depois = transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "São 20 mil por dia. Pode seguir com o desenho." }, AGORA).estado;
+    assert.equal(depois.ultimaFalaDoAgenteEm, AGORA);
+    assert.equal(motivoBloqueioPlin(depois, AGORA + 3_000), "AGENTE_ACABOU_DE_FALAR");
+    assert.equal(motivoBloqueioPlin(depois, AGORA + 14_999), "AGENTE_ACABOU_DE_FALAR");
+  });
+
+  it("passado o intervalo a pergunta volta a poder sair", () => {
+    const depois = transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "Certo." }, AGORA).estado;
+    assert.equal(motivoBloqueioPlin(depois, AGORA + 15_000), null);
+  });
+
+  it("estado guardado antes do campo não bloqueia nada", () => {
+    assert.equal(estadoEm("APROFUNDAMENTO", base).ultimaFalaDoAgenteEm, undefined);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", base), AGORA), null);
+  });
+
+  it("o plin de uma análise logo depois da fala é rebaixado", () => {
+    const depois = transicionar(estadoEm("APROFUNDAMENTO", base), { tipo: "AGENTE_FALOU", texto: "Certo." }, AGORA).estado;
+    assert.equal(podeLevantarPlin(depois, "duvida", AGORA + 2_000), false);
+    assert.equal(podeLevantarPlin(depois, "duvida", AGORA + 20_000), true);
+  });
+
+  it("o intervalo entre perguntas continua valendo por conta própria", () => {
+    assert.equal(
+      motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 10_000 }), AGORA),
+      "INTERVALO_ENTRE_PERGUNTAS",
+    );
   });
 });

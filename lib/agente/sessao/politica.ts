@@ -8,6 +8,11 @@ import type { Fase, RespostaAnalise, StatusAnalise } from "./tipos";
 
 export type Regras = {
   intervaloEntrePerguntasMs: number;
+  /**
+   * Depois de qualquer fala solta do agente (resposta, comentário, continuação), uma pergunta nova do Analista
+   * espera este tempo. Sem isso, "Pode seguir com o desenho." vinha seguido de outra pergunta em segundos.
+   */
+  intervaloAposFalaDoAgenteMs?: number;
   maxPerguntas: number;
   /** Tamanho máximo da nota que o cursor escreve no quadro. */
   maxCaracteresNota: number;
@@ -26,6 +31,7 @@ export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
   intervaloEntrePerguntasMs: 25_000,
+  intervaloAposFalaDoAgenteMs: 15_000,
   maxPerguntas: 5,
   maxCaracteresNota: 40,
 };
@@ -67,7 +73,8 @@ export type MotivoBloqueio = "FASE_NAO_ANALISA" | "CANDIDATO_RESPONDENDO";
 export type MotivoBloqueioPlin =
   | MotivoBloqueio
   | "LIMITE_DE_PERGUNTAS"
-  | "INTERVALO_ENTRE_PERGUNTAS";
+  | "INTERVALO_ENTRE_PERGUNTAS"
+  | "AGENTE_ACABOU_DE_FALAR";
 
 /**
  * Por que a análise não deve rodar agora (null = pode rodar).
@@ -115,6 +122,13 @@ export function motivoBloqueioPlin(
     agora - estado.ultimaPerguntaEm < regras.intervaloEntrePerguntasMs
   ) {
     return "INTERVALO_ENTRE_PERGUNTAS";
+  }
+  if (
+    estado.ultimaFalaDoAgenteEm != null &&
+    regras.intervaloAposFalaDoAgenteMs !== undefined &&
+    agora - estado.ultimaFalaDoAgenteEm < regras.intervaloAposFalaDoAgenteMs
+  ) {
+    return "AGENTE_ACABOU_DE_FALAR";
   }
   return null;
 }
