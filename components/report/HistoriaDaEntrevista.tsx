@@ -1,10 +1,10 @@
 "use client";
 
-// A entrevista contada num gráfico só: quanto dos testes passava a cada execução, com os acontecimentos
-// escritos em cima (travou, dica, mudança no problema, adaptou). Dá para entender sem legenda; passar o mouse
-// mostra o detalhe e clicar num acontecimento abre o código e a conversa daquele minuto.
+// A entrevista contada em duas partes: em cima, um gráfico simples de quanto dos testes passava a cada execução,
+// com um ícone no minuto de cada acontecimento; embaixo, os mesmos acontecimentos escritos, em ordem de tempo.
+// Passar o mouse num deles acende o outro; clicar abre o código e a conversa daquele minuto.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ClipboardPaste, Lightbulb, Shuffle, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Check, ChevronRight, ClipboardPaste, Lightbulb, Shuffle, TriangleAlert, type LucideIcon } from "lucide-react";
 import type { Gravacao } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { execucaoAte } from "@/lib/gravacao";
@@ -16,9 +16,9 @@ export interface Acontecimento {
   /** Trechos (travou, mudança) vão até aqui; null = até o fim da entrevista. */
   fim?: number | null;
   tipo: TipoAcontecimento;
-  /** O que fica escrito no gráfico: curto e com o número que importa ("Travou por 2 min"). */
+  /** O que fica escrito: curto e com o número que importa ("Travou por 2 min"). */
   titulo: string;
-  /** Aparece ao passar o mouse. */
+  /** Explicação de uma linha, embaixo do título na lista. */
   detalhe?: string;
   /** Índice no painel de momentos; sem ele, não abre. */
   momento?: number;
@@ -32,18 +32,20 @@ const ICONE: Record<TipoAcontecimento, LucideIcon> = {
   colagem: ClipboardPaste,
 };
 
-/** Cor do ícone: vermelho para o que pesa contra, verde para o que conta a favor, tinta no resto. */
+/** O que pesa contra fica em tinta cheia com borda; o resto, em areia. Sem cor: o tema do papel é só tinta. */
 const TOM: Record<TipoAcontecimento, string> = {
-  travou: "bg-perigo text-sobre-marca",
-  dica: "bg-texto text-texto-claro",
-  mudanca: "bg-texto text-texto-claro",
-  adaptou: "bg-sucesso text-sobre-marca",
+  travou: "bg-texto text-texto-claro",
+  dica: "bg-superficie-2 text-texto",
+  mudanca: "bg-superficie-2 text-texto",
+  adaptou: "bg-texto text-texto-claro",
   colagem: "bg-texto text-texto-claro",
 };
 
-const ALTURA_PLOT = 176;
-const FOLGA_Y = 12;
-const ALTURA_LINHA_ROTULO = 30;
+const ALTURA_PLOT = 150;
+const FOLGA_Y = 10;
+const TAMANHO_ICONE = 22;
+/** Altura de cada fileira de ícones acima do gráfico. */
+const ALTURA_FILEIRA = TAMANHO_ICONE + 4;
 
 /** "50 s", "2 min", "1 min 50 s": mais fácil de ler que 01:50 quando é uma duração. */
 export function duracaoCurta(ms: number): string {
@@ -62,7 +64,7 @@ function marcasDoEixo(duracao: number): number[] {
   return marcas;
 }
 
-/** Largura do componente na tela (para não encavalar os rótulos). */
+/** Largura do componente na tela. */
 function useLargura<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [largura, setLargura] = useState(0);
@@ -74,16 +76,6 @@ function useLargura<T extends HTMLElement>() {
     return () => obs.disconnect();
   }, []);
   return [ref, largura] as const;
-}
-
-let contexto: CanvasRenderingContext2D | null = null;
-/** Largura do texto do rótulo, medida com a mesma fonte da página. */
-function medir(texto: string): number {
-  if (typeof document === "undefined") return texto.length * 7;
-  contexto ??= document.createElement("canvas").getContext("2d");
-  if (!contexto) return texto.length * 7;
-  contexto.font = `500 12.5px ${getComputedStyle(document.body).fontFamily}`;
-  return contexto.measureText(texto).width;
 }
 
 type Props = {
@@ -102,235 +94,219 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
   const duracao = Math.max(duracaoBruta, ...execucoes.map((e) => e.t), ...acontecimentos.map((a) => a.fim ?? a.t), 1);
   const x = (t: number) => (Math.min(Math.max(t, 0), duracao) / duracao) * largura;
   const yFrac = (f: number) => FOLGA_Y + (1 - f) * (ALTURA_PLOT - 2 * FOLGA_Y);
-  const fracEm = (t: number) => {
-    const e = gravacao ? execucaoAte(gravacao, t) : undefined;
-    return e && e.total ? e.passed / e.total : null;
-  };
   const marcas = useMemo(() => marcasDoEixo(duracao), [duracao]);
 
-  // Rótulos em fileiras: cada um começa no minuto do acontecimento e desce para a fileira de baixo se encostar.
-  const rotulos = useMemo(() => {
+  // Em ordem de tempo: a lista lê de cima para baixo como a entrevista aconteceu.
+  const ordem = useMemo(
+    () => acontecimentos.map((a, i) => ({ a, i })).sort((p, q) => p.a.t - q.a.t),
+    [acontecimentos],
+  );
+
+  // Ícones acima do gráfico, cada um no seu minuto: se encostar no de antes, sobe para a fileira de cima.
+  const icones = useMemo(() => {
     if (!largura) return [];
     const fimDasFileiras: number[] = [];
-    return acontecimentos
-      .map((a, i) => ({ a, i }))
-      .sort((p, q) => p.a.t - q.a.t)
-      .map(({ a, i }) => {
-        const w = medir(a.titulo) + 34;
-        const ancora = (Math.min(a.t, duracao) / duracao) * largura;
-        const esquerda = Math.max(0, Math.min(ancora - 10, largura - w));
-        let fileira = fimDasFileiras.findIndex((fim) => fim + 8 <= esquerda);
-        if (fileira < 0) fileira = fimDasFileiras.length;
-        fimDasFileiras[fileira] = esquerda + w;
-        return { a, i, esquerda, ancora, fileira };
-      });
-  }, [acontecimentos, largura, duracao]);
-  const fileiras = Math.max(1, ...rotulos.map((r) => r.fileira + 1));
-  const alturaRotulos = fileiras * ALTURA_LINHA_ROTULO + 6;
+    return ordem.map(({ a, i }) => {
+      const cx = (Math.min(a.t, duracao) / duracao) * largura;
+      let fileira = fimDasFileiras.findIndex((fim) => fim + 3 <= cx - TAMANHO_ICONE / 2);
+      if (fileira < 0) fileira = fimDasFileiras.length;
+      fimDasFileiras[fileira] = cx + TAMANHO_ICONE / 2;
+      return { a, i, cx, fileira };
+    });
+  }, [ordem, largura, duracao]);
+  const fileiras = Math.max(1, ...icones.map((c) => c.fileira + 1));
+  const alturaTrilha = fileiras * ALTURA_FILEIRA + 4;
 
-  // Degraus: de uma execução até a próxima, e a última vai até o fim.
+  // Degraus da curva: de uma execução até a próxima, e a última vai até o fim. A área embaixo dá corpo à linha.
   const curva = useMemo(() => {
     if (!largura || execucoes.length === 0) return null;
     const fr = (e: { passed: number; total: number }) => (e.total ? e.passed / e.total : 0);
     let d = `M ${x(execucoes[0].t)} ${yFrac(fr(execucoes[0]))}`;
     for (const e of execucoes.slice(1)) d += ` H ${x(e.t)} V ${yFrac(fr(e))}`;
     d += ` H ${largura}`;
-    return { linha: d };
+    const area = `${d} V ${ALTURA_PLOT - FOLGA_Y} H ${x(execucoes[0].t)} Z`;
+    return { linha: d, area };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [execucoes, largura, duracao]);
 
   const abre = (a: Acontecimento) => a.momento !== undefined && !!onAbrir && !!gravacao;
+  const acender = (i: number) => ({
+    onPointerEnter: () => setDestaque(i),
+    onPointerLeave: () => setDestaque(null),
+    onFocus: () => setDestaque(i),
+    onBlur: () => setDestaque(null),
+  });
 
   return (
-    <figure className="rounded-padrao bg-superficie p-4 sm:p-6">
-      <figcaption className="mb-5">
-        <p className="font-medium">Como foi a entrevista</p>
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-[17px] font-medium">Como foi a entrevista</h2>
         <p className="text-sm text-texto-suave">
           {execucoes.length > 0
-            ? "Quanto dos testes passava cada vez que ele rodou o código. Clique num acontecimento para ver o código e a conversa."
-            : "Os acontecimentos da entrevista. Clique num deles para ver o código e a conversa."}
+            ? "A linha mostra quanto dos testes passava cada vez que ele rodou o código."
+            : "O que aconteceu durante a entrevista, em ordem."}
         </p>
-      </figcaption>
+      </div>
 
-      <div className="flex gap-2">
-        {/* Eixo y: só 0, metade e todos */}
-        <div aria-hidden className="relative w-9 shrink-0 text-right text-[11px] text-texto-suave tabular-nums">
-          {execucoes.length > 0 &&
-            [1, 0.5, 0].map((f) => (
-              <span key={f} className="absolute right-0 -translate-y-1/2" style={{ top: alturaRotulos + yFrac(f) }}>
-                {f * 100}%
-              </span>
-            ))}
+      <div className="rounded-padrao bg-superficie p-4 sm:p-6">
+        <div className="flex gap-2">
+          {/* Eixo y: só 0, metade e todos */}
+          <div aria-hidden className="relative w-9 shrink-0 text-right text-[11px] text-texto-suave tabular-nums">
+            {execucoes.length > 0 &&
+              [1, 0.5, 0].map((f) => (
+                <span key={f} className="absolute right-0 -translate-y-1/2" style={{ top: alturaTrilha + yFrac(f) }}>
+                  {f * 100}%
+                </span>
+              ))}
+          </div>
+
+          <div ref={ref} className="relative min-w-0 flex-1">
+            {/* Trilha: um ícone por acontecimento, no minuto em que aconteceu */}
+            <div className="relative" style={{ height: alturaTrilha }}>
+              {icones.map(({ a, i, cx, fileira }) => {
+                const Icone = ICONE[a.tipo];
+                return (
+                  <span
+                    key={i}
+                    aria-hidden
+                    {...acender(i)}
+                    className={`absolute flex -translate-x-1/2 items-center justify-center rounded-full ring-2 ring-superficie transition-transform duration-150 ${TOM[a.tipo]} ${
+                      destaque === i ? "scale-125" : ""
+                    }`}
+                    style={{ left: cx, top: (fileiras - 1 - fileira) * ALTURA_FILEIRA, width: TAMANHO_ICONE, height: TAMANHO_ICONE }}
+                  >
+                    <Icone size={12} strokeWidth={2.25} />
+                  </span>
+                );
+              })}
+            </div>
+
+            {/* O gráfico */}
+            <div
+              className="relative"
+              style={{ height: ALTURA_PLOT }}
+              onPointerMove={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                const t = ((e.clientX - r.left) / r.width) * duracao;
+                setCursor({ t: Math.min(duracao, Math.max(0, t)), y: e.clientY - r.top });
+              }}
+              onPointerLeave={() => setCursor(null)}
+            >
+              {execucoes.length > 0 &&
+                [1, 0.5, 0].map((f) => (
+                  <span key={f} aria-hidden className="absolute inset-x-0 h-px bg-texto/[0.07]" style={{ top: yFrac(f) }} />
+                ))}
+
+              {/* Trechos (travou, mudança) em faixa clara; os pontuais, só a linha fina do ícone até embaixo */}
+              {acontecimentos.map((a, i) =>
+                a.fim === undefined ? (
+                  <span
+                    key={`linha-${i}`}
+                    aria-hidden
+                    className={`absolute inset-y-0 w-px transition-colors duration-150 ${destaque === i ? "bg-texto/50" : "bg-texto/15"}`}
+                    style={{ left: x(a.t) }}
+                  />
+                ) : (
+                  <span
+                    key={`trecho-${i}`}
+                    aria-hidden
+                    className={`absolute inset-y-0 border-l transition-colors duration-150 ${
+                      destaque === i ? "border-texto/50 bg-texto/[0.08]" : "border-texto/20 bg-texto/[0.04]"
+                    }`}
+                    style={{ left: x(a.t), width: Math.max(2, x(a.fim ?? duracao) - x(a.t)) }}
+                  />
+                ),
+              )}
+
+              {curva && (
+                <svg width={largura} height={ALTURA_PLOT} className="absolute inset-0 overflow-visible" aria-hidden>
+                  <path d={curva.area} fill="var(--texto)" fillOpacity={0.06} />
+                  <path d={curva.linha} fill="none" stroke="var(--texto)" strokeWidth={2} strokeLinejoin="round" />
+                  {execucoes.map((e, i) => (
+                    <circle
+                      key={i}
+                      cx={x(e.t)}
+                      cy={yFrac(e.total ? e.passed / e.total : 0)}
+                      r={3}
+                      fill="var(--texto)"
+                      stroke="var(--superficie)"
+                      strokeWidth={1.5}
+                    />
+                  ))}
+                </svg>
+              )}
+
+              {cursor && gravacao && <Cursor cursor={cursor} gravacao={gravacao} x={x(cursor.t)} largura={largura} />}
+            </div>
+
+            {/* Eixo do tempo */}
+            <div aria-hidden className="relative mt-1.5 h-4 text-[11px] text-texto-suave tabular-nums">
+              {marcas.map((t, i) => (
+                <span
+                  key={t}
+                  className={`absolute ${i === 0 ? "" : "-translate-x-1/2"} ${i % 2 === 1 ? "hidden sm:block" : ""}`}
+                  style={{ left: x(t) }}
+                >
+                  {formatMs(t)}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
 
-        <div ref={ref} className="relative min-w-0 flex-1">
-          {/* Rótulos dos acontecimentos, com uma linha fina até o gráfico */}
-          <div className="relative" style={{ height: alturaRotulos }}>
-            {rotulos.map(({ a, i, esquerda, ancora, fileira }) => {
+        {/* Os acontecimentos escritos, na ordem em que aconteceram */}
+        {ordem.length > 0 && (
+          <ol className="mt-5 flex flex-col border-t border-borda pt-3">
+            {ordem.map(({ a, i }) => {
               const Icone = ICONE[a.tipo];
-              const ativo = destaque === i;
               const conteudo = (
                 <>
-                  <span className={`flex size-[18px] shrink-0 items-center justify-center rounded-full ${TOM[a.tipo]}`}>
-                    <Icone size={10} strokeWidth={2.5} aria-hidden />
+                  <span
+                    className={`mt-px flex shrink-0 items-center justify-center rounded-full ${TOM[a.tipo]}`}
+                    style={{ width: TAMANHO_ICONE, height: TAMANHO_ICONE }}
+                  >
+                    <Icone size={12} strokeWidth={2.25} aria-hidden />
                   </span>
-                  <span className="whitespace-nowrap">{a.titulo}</span>
+                  <span className="numero w-11 shrink-0 pt-0.5 text-[13px] text-texto-suave tabular-nums">{formatMs(a.t)}</span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="text-[14px] font-medium">{a.titulo}</span>
+                    {a.detalhe && <span className="text-[13px] leading-snug text-pretty text-texto-suave">{a.detalhe}</span>}
+                  </span>
+                  {abre(a) && (
+                    <span className="hidden shrink-0 items-center gap-0.5 pt-0.5 text-[13px] text-texto-suave group-hover:text-texto sm:flex">
+                      Ver o momento
+                      <ChevronRight size={14} strokeWidth={1.75} aria-hidden />
+                    </span>
+                  )}
                 </>
               );
-              const classe = `absolute flex h-6 items-center gap-1.5 rounded-full pr-2.5 pl-[3px] text-[12.5px] font-medium transition-colors duration-150 ${
-                ativo ? "bg-superficie-2" : "bg-superficie"
+              const classe = `group -mx-2 flex items-start gap-3 rounded-controle px-2 py-2.5 text-left transition-colors duration-150 ${
+                destaque === i ? "bg-superficie-2/70" : ""
               }`;
-              const estilo = { left: esquerda, top: fileira * ALTURA_LINHA_ROTULO };
-              const eventos = {
-                onPointerEnter: () => setDestaque(i),
-                onPointerLeave: () => setDestaque(null),
-                onFocus: () => setDestaque(i),
-                onBlur: () => setDestaque(null),
-              };
               return (
-                <div key={i}>
-                  <span
-                    aria-hidden
-                    className={`absolute w-px ${ativo ? "bg-texto/60" : "bg-texto/15"}`}
-                    style={{ left: ancora, top: fileira * ALTURA_LINHA_ROTULO + 24, height: alturaRotulos - fileira * ALTURA_LINHA_ROTULO - 24 + ALTURA_PLOT }}
-                  />
+                <li key={i}>
                   {abre(a) ? (
                     <button
                       type="button"
                       onClick={() => onAbrir!(a.momento!)}
-                      aria-label={`${formatMs(a.t)}: ${a.titulo}${a.detalhe ? `. ${a.detalhe}` : ""}. Abrir o código e a conversa.`}
-                      className={`${classe} cursor-pointer outline-none hover:bg-superficie-2 focus-visible:ring-2 focus-visible:ring-marca`}
-                      style={estilo}
-                      {...eventos}
+                      aria-label={`${formatMs(a.t)}: ${a.titulo}. Abrir o código e a conversa.`}
+                      className={`${classe} w-[calc(100%+1rem)] outline-none hover:bg-superficie-2/70 focus-visible:ring-2 focus-visible:ring-marca`}
+                      {...acender(i)}
                     >
                       {conteudo}
                     </button>
                   ) : (
-                    <div className={classe} style={estilo} {...eventos}>
+                    <div className={classe} {...acender(i)}>
                       {conteudo}
                     </div>
                   )}
-                  {ativo && (a.detalhe || abre(a)) && (
-                    <Detalhe a={a} abre={abre(a)} esquerda={esquerda} topo={(fileira + 1) * ALTURA_LINHA_ROTULO} largura={largura} />
-                  )}
-                </div>
+                </li>
               );
             })}
-          </div>
-
-          {/* O gráfico */}
-          <div
-            className="relative"
-            style={{ height: ALTURA_PLOT }}
-            onPointerMove={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              const t = ((e.clientX - r.left) / r.width) * duracao;
-              setCursor({ t: Math.min(duracao, Math.max(0, t)), y: e.clientY - r.top });
-            }}
-            onPointerLeave={() => setCursor(null)}
-          >
-            {/* Grade: só as linhas de 0, metade e todos */}
-            {execucoes.length > 0 &&
-              [1, 0.5, 0].map((f) => (
-                <span key={f} aria-hidden className="absolute inset-x-0 h-px bg-texto/[0.07]" style={{ top: yFrac(f) }} />
-              ))}
-
-            {/* Trechos: travou e mudança */}
-            {acontecimentos.map((a, i) =>
-              a.fim === undefined ? null : (
-                <span
-                  key={`trecho-${i}`}
-                  aria-hidden
-                  className={`absolute inset-y-0 border-l transition-opacity duration-150 ${
-                    a.tipo === "travou" ? "border-perigo/50 bg-perigo/[0.09]" : "border-texto/30 bg-texto/[0.05]"
-                  } ${destaque !== null && destaque !== i ? "opacity-50" : ""}`}
-                  style={{ left: x(a.t), width: Math.max(2, x(a.fim ?? duracao) - x(a.t)) }}
-                />
-              ),
-            )}
-
-            {curva && (
-              <svg width={largura} height={ALTURA_PLOT} className="absolute inset-0 overflow-visible" aria-hidden>
-                <path d={curva.linha} fill="none" stroke="var(--texto)" strokeWidth={2.5} strokeLinejoin="round" />
-                {execucoes.map((e, i) => (
-                  <circle
-                    key={i}
-                    cx={x(e.t)}
-                    cy={yFrac(e.total ? e.passed / e.total : 0)}
-                    r={4}
-                    fill="var(--texto)"
-                    stroke="var(--superficie)"
-                    strokeWidth={2}
-                  />
-                ))}
-              </svg>
-            )}
-
-            {/* Acontecimentos pontuais em cima da curva */}
-            {acontecimentos.map((a, i) => {
-              if (a.fim !== undefined) return null;
-              const Icone = ICONE[a.tipo];
-              const f = fracEm(a.t);
-              return (
-                <span
-                  key={`ponto-${i}`}
-                  aria-hidden
-                  className={`absolute flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full ring-2 ring-superficie transition-transform duration-150 ${TOM[a.tipo]} ${
-                    destaque === i ? "scale-125" : ""
-                  }`}
-                  style={{ left: x(a.t), top: f === null ? ALTURA_PLOT - FOLGA_Y : yFrac(f) }}
-                >
-                  <Icone size={11} strokeWidth={2.5} />
-                </span>
-              );
-            })}
-
-            {cursor && gravacao && (
-              <Cursor cursor={cursor} gravacao={gravacao} x={x(cursor.t)} largura={largura} />
-            )}
-          </div>
-
-          {/* Eixo do tempo */}
-          <div aria-hidden className="relative mt-1.5 h-4 text-[11px] text-texto-suave tabular-nums">
-            {marcas.map((t, i) => (
-              <span
-                key={t}
-                className={`absolute ${i === 0 ? "" : "-translate-x-1/2"} ${i % 2 === 1 ? "hidden sm:block" : ""}`}
-                style={{ left: x(t) }}
-              >
-                {formatMs(t)}
-              </span>
-            ))}
-          </div>
-        </div>
+          </ol>
+        )}
       </div>
-    </figure>
-  );
-}
-
-/** O detalhe do acontecimento, embaixo do rótulo, ao passar o mouse. */
-function Detalhe({ a, abre, esquerda, topo, largura }: {
-  a: Acontecimento;
-  abre: boolean;
-  esquerda: number;
-  topo: number;
-  largura: number;
-}) {
-  const w = Math.min(300, largura);
-  return (
-    <div
-      role="status"
-      className="pointer-events-none absolute z-20 rounded-padrao bg-superficie p-3 text-sm shadow-flutuante ring-1 ring-borda"
-      style={{ left: Math.max(0, Math.min(esquerda, largura - w)), top: topo, width: w }}
-    >
-      <p className="text-xs text-texto-suave tabular-nums">
-        {formatMs(a.t)}
-        {a.fim !== undefined && ` até ${a.fim === null ? "o fim" : formatMs(a.fim)}`}
-      </p>
-      <p className="mt-0.5 font-medium">{a.titulo}</p>
-      {a.detalhe && <p className="mt-1 leading-snug text-pretty">{a.detalhe}</p>}
-      {abre && <p className="mt-2 text-xs text-texto-suave">Clique para ver o código e a conversa</p>}
-    </div>
+    </section>
   );
 }
 
@@ -349,7 +325,7 @@ function Cursor({ cursor, gravacao, x, largura }: {
     <>
       <span aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-texto/40" style={{ left: x }} />
       <div
-        className="pointer-events-none absolute z-10 rounded-padrao bg-superficie p-2.5 text-[13px] shadow-flutuante ring-1 ring-borda"
+        className="pointer-events-none absolute z-10 rounded-pequeno bg-superficie p-2.5 text-[13px] shadow-flutuante ring-1 ring-borda"
         style={{ left: esquerda, top: Math.min(cursor.y + 12, ALTURA_PLOT - 40), width: w }}
       >
         <p className="text-xs text-texto-suave tabular-nums">{formatMs(cursor.t)}</p>
