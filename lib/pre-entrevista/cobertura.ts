@@ -8,7 +8,7 @@
  * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo do Totti.
  */
 import { choice, noul } from "@typesafe-ai/sdk";
-import { FocusArea } from "@/lib/contracts";
+import { FocusArea, type InterviewMode } from "@/lib/contracts";
 import { mede } from "./catalogo";
 import { NIVEIS_ENFASE, type NivelEnfase } from "./enfase";
 import { jev } from "./jev";
@@ -26,6 +26,19 @@ export const NOME_AREA_FALA: Record<FocusArea, string> = {
   escala_produto: "escalabilidade",
   uso_ia: "IA aplicada",
 };
+
+/**
+ * Nome da área na fala do Totti, pelo formato. Em system design a área técnica é avaliada pelo desenho (componentes e
+ * modelo de dados batendo com os requisitos, ver `MEDE`), não por algoritmos. Sem formato, vale `NOME_AREA_FALA`.
+ */
+export function nomeAreaFala(area: FocusArea, modo?: InterviewMode): string {
+  if (area === "tecnico" && modo === "system_design") return "componentes e modelo de dados";
+  return NOME_AREA_FALA[area];
+}
+
+/** Exemplos de critério da área técnica em system design (os de `EXEMPLOS_CRITERIO` são de código). */
+const EXEMPLO_CRITERIO_TECNICO_SD =
+  "'ruim é desenhar componentes que não batem com os requisitos que ele levantou'; 'bom é escolher o banco e justificar o modelo de dados'";
 
 export interface Pergunta {
   id: string;
@@ -121,15 +134,16 @@ const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
   uso_ia: "'pode tirar IA', 'IA aplicada não pesa tanto'",
 };
 
-function criterioDaArea(area: FocusArea): Topico {
-  const nome = NOME_AREA_FALA[area];
+function criterioDaArea(area: FocusArea, modo?: InterviewMode): Topico {
+  const nome = nomeAreaFala(area, modo);
+  const exemplos = area === "tecnico" && modo === "system_design" ? EXEMPLO_CRITERIO_TECNICO_SD : EXEMPLOS_CRITERIO[area];
   return {
     id: `criterio_${area}`,
     area,
     pergunta: `A recrutadora descreveu pelo menos um comportamento concreto e observável, bom ou ruim, SOBRE ${nome}?`,
     sinal_sim:
       `Sim se o comportamento descrito é sobre ${nome}: algo que se vê na entrevista, bom ou ruim, nessa área. Basta um lado. ` +
-      `Exemplos: ${EXEMPLOS_CRITERIO[area]}. Falar de outra área não conta: por exemplo, falar de algoritmos ou de escala não serve para ${nome}.`,
+      `Exemplos: ${exemplos}. Falar de outra área não conta: por exemplo, falar de algoritmos ou de escala não serve para ${nome}.`,
     sinal_nao:
       `Não se ela foi genérica, ou só disse que a área é importante, ou o comportamento que descreveu é de outra área, sem nada observável em ${nome}. ` +
       "Exemplos de genérico: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', 'implementar bem os algoritmos'.",
@@ -176,7 +190,7 @@ export function topicosDo(r: Rascunho): Topico[] {
         "Não se a resposta não fala de formato, senioridade nem foco (ex.: só cumprimenta ou pergunta outra coisa sobre a vaga), " +
         "e não há nenhuma concordância nem correção.",
     },
-    ...areas.map(criterioDaArea),
+    ...areas.map((a) => criterioDaArea(a, r.mode)),
     {
       id: "eliminatorios",
       opcional: true,

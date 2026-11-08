@@ -8,7 +8,9 @@ import {
   modoAtivo,
   problemaPadrao,
 } from "@/lib/pre-entrevista/catalogo";
+import { nomeAreaFala } from "@/lib/pre-entrevista/cobertura";
 import { cortarNaPrimeiraPergunta, falaFormatoIndisponivel, limparFala } from "@/lib/pre-entrevista/conversa";
+import { montarGuia } from "@/lib/pre-entrevista/guia";
 import {
   aplicarPasso,
   decisaoDaOferta,
@@ -256,6 +258,32 @@ describe("problema de system design pela vaga", () => {
     assert.equal(problemaPadrao("system_design", pouca, "Time de pagamentos"), "pagamentos-instantaneos");
     assert.equal(problemaPadrao("system_design", pouca, "Backend"), "chatbot-atendimento-ia");
     assert.equal(problemaPadrao("system_design", muita, "Time de pagamentos"), "chatbot-atendimento-ia");
+  });
+});
+
+describe("nome da área técnica pelo formato", () => {
+  it("em system design a área técnica é o desenho, não algoritmos; em live coding segue igual", () => {
+    assert.equal(nomeAreaFala("tecnico", "system_design"), "componentes e modelo de dados");
+    assert.equal(nomeAreaFala("tecnico", "live_coding"), "algoritmos e código");
+    assert.equal(nomeAreaFala("tecnico"), "algoritmos e código");
+    assert.equal(nomeAreaFala("escala_produto", "system_design"), "escalabilidade");
+  });
+
+  it("o guia do entrevistador usa o nome do formato", () => {
+    const guia = montarGuia({
+      mode: "system_design",
+      focus: ["tecnico"],
+      enfase: { tecnico: 3 },
+      dispensadas: [],
+      frasesImportantes: [],
+      eliminatorios: [],
+      contexto: "",
+      tom: "amigavel",
+      dicas: "leves",
+      naoAvaliado: [],
+    });
+    assert.match(guia, /O que mais importa: componentes e modelo de dados\./);
+    assert.doesNotMatch(guia, /algoritmos/);
   });
 });
 
