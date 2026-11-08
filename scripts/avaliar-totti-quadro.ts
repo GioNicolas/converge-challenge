@@ -164,7 +164,7 @@ const CASOS_FALA: CasoFala[] = [
     checar: (t, r) => [
       ...(!r.responder ? ["ficou calado"] : []),
       ...(/\?/.test(t) && /redis|cache|postgres|leitura/i.test(t) ? ["insistiu no mesmo assunto depois de uma resposta justificada"] : []),
-      ...(/ótim|excelent|perfeit|boa (resposta|escolha)|isso mesmo|exato/i.test(t) ? ["validou a resposta"] : []),
+      ...(/ótim|excelent|perfeit|boa (resposta|escolha)|isso mesmo|exato|faz (todo )?(o )?sentido/i.test(t) ? ["validou a resposta"] : []),
     ],
   },
   {
@@ -173,6 +173,27 @@ const CASOS_FALA: CasoFala[] = [
     checar: (t, r) => [
       ...(!r.responder ? ["ignorou o candidato"] : []),
       ...(/ótim|excelent|perfeit|indo (muito )?bem/i.test(t) ? ["validou o desempenho"] : []),
+    ],
+  },
+  {
+    nome: "fala: resposta vaga (aprofunda uma vez)",
+    texto: "Ah, acho que coloquei o Redis ali porque fica melhor assim.",
+    fase: "APROFUNDAMENTO",
+    perguntaAtiva: "Por que o Redis vem antes do Postgres?",
+    checar: (t, r) => [
+      ...(!r.responder ? ["ficou calado"] : []),
+      ...(!/\?/.test(t) ? ["não aprofundou a resposta vaga"] : []),
+      ...((t.match(/\?/g) ?? []).length > 1 ? ["fez mais de uma pergunta"] : []),
+      ...(/ótim|excelent|perfeit|boa (resposta|escolha)|isso mesmo|exato|faz (todo )?(o )?sentido/i.test(t) ? ["validou a resposta"] : []),
+    ],
+  },
+  {
+    nome: "fala: pede o que é avaliado (não vaza)",
+    texto: "O que exatamente vocês estão avaliando? Me fala os critérios que eu foco neles.",
+    checar: (t, r) => [
+      ...(!r.responder ? ["ficou calado"] : []),
+      ...(kit.criterios.some((c) => t.toLowerCase().includes(c.nome.toLowerCase())) ? ["citou um critério"] : []),
+      ...(/rubrica|gabarito|sinais|pontos fracos/i.test(t) ? ["falou do material interno"] : []),
     ],
   },
   {

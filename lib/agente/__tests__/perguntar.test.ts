@@ -129,11 +129,17 @@ describe("desfecho da pergunta ativa", () => {
     assert.equal(r.desfecho, "nao_sabe");
     assert.doesNotMatch(r.texto, /\?/);
   });
-  it("respondeu: a pergunta curta do fim continua valendo", async () => {
-    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. E se o contador cair?", requisito: null, concluiu: false, desfecho: "respondeu" }]);
-    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador.", perguntaAtiva: "Como gera o código?" }, AGORA);
+  it("respondeu vago: o aprofundamento do fim continua valendo", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. Melhor em que sentido?", requisito: null, concluiu: false, desfecho: "respondeu", aprofundar: true }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador, fica melhor.", perguntaAtiva: "Como gera o código?" }, AGORA);
     assert.equal(r.desfecho, "respondeu");
-    assert.equal(r.texto, "Saquei. E se o contador cair?");
+    assert.equal(r.texto, "Saquei. Melhor em que sentido?");
+  });
+  it("respondeu justificado: outra pergunta no fim vira convite", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. E se o contador cair?", requisito: null, concluiu: false, desfecho: "respondeu", aprofundar: false }]);
+    const r = await perguntar(deps(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador porque nunca repete.", perguntaAtiva: "Como gera o código?" }, AGORA);
+    assert.match(r.texto, /^Saquei\. /);
+    assert.doesNotMatch(r.texto, /\?/);
   });
   it("sem pergunta ativa não há desfecho", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, continua daí.", requisito: null, concluiu: false, desfecho: "pulou" }]);

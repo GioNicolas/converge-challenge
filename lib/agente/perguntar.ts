@@ -107,8 +107,11 @@ export async function perguntar(
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho });
   // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
   const curto = limitarFrases(saida.texto, MAX_FRASES_FALA);
-  // Assunto solto ("não sei", "pula"): a vez volta com um convite, nunca com outra pergunta.
-  const texto = desfecho === "nao_sabe" || desfecho === "pulou" ? semPerguntaNoFim(curto) : curto;
+  // Assunto solto ("não sei", "pula") ou resposta já justificada: a vez volta com um convite, nunca com outra
+  // pergunta. Só a resposta vaga ganha um aprofundamento; o modelo marca qual é qual ("aprofundar"), porque a
+  // regra só no prompt o modelo rápido não seguia (abria outro assunto depois de uma resposta justificada).
+  const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && saida.aprofundar !== true);
+  const texto = semAprofundar ? semPerguntaNoFim(curto) : curto;
   if (!saida.responder || !texto) return mudoOuConcluiu();
   const requisito = saida.requisito?.trim()
     ? saida.requisito.trim().slice(0, MAX_CARACTERES_REQUISITO)
