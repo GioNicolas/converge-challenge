@@ -2,6 +2,7 @@
 
 // Sala da entrevista no quadro: o quadro em tela cheia, a janela de chamada no canto e a legenda embaixo.
 // O enunciado não fica num painel: o agente escreve no próprio quadro.
+import { esperaDoFimDaFala } from "@/lib/audio/fimDaFala";
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
@@ -233,10 +234,11 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
   }, [estado.fase]);
   useEffect(() => () => filaVoz.current?.limpar(), []);
-  // Turn-taking: os trechos finais do STT se acumulam e só seguem após 750 ms de silêncio real.
+  // Turn-taking: os trechos finais do STT se acumulam e só seguem após o silêncio de `esperaDoFimDaFala`
+  // (1,1 s com a frase fechada; até 2,4 s quando ela termina pendurada, "e aí eu colocaria...").
   // Fala parcial ou voz no microfone nesse intervalo adia o envio (não corta a frase no meio).
   // Teto: barulho constante da sala não pode segurar a fala para sempre (2,5 s depois do primeiro trecho, só o
-  // silêncio de 750 ms em curso decide).
+  // silêncio em curso decide).
   const bufferVoz = useRef("");
   const timerVoz = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inicioBufferVoz = useRef(0);
@@ -248,7 +250,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       const texto = bufferVoz.current.trim();
       bufferVoz.current = "";
       if (texto) filaVoz.current?.adicionar(texto);
-    }, 750);
+    }, esperaDoFimDaFala(bufferVoz.current));
   }, []);
   const receberVoz = useCallback((texto: string) => {
     if (!texto.trim()) return;

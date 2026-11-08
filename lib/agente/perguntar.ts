@@ -62,6 +62,8 @@ export type ResultadoPerguntar = {
   /** Falha de infraestrutura: não confundir com a decisão deliberada de escutar. */
   falhou?: boolean;
   visual?: AcaoVisual[];
+  /** A fala terminou numa pergunta do Conversador (v2): conta no intervalo do plin. */
+  perguntou?: boolean;
   estado: EstadoSessao;
 };
 
@@ -126,7 +128,8 @@ export async function perguntar(
   // Assunto solto ("não sei", "pula") ou resposta já justificada: a vez volta com um convite, nunca com outra
   // pergunta. Só a resposta vaga ganha um aprofundamento; o modelo marca qual é qual ("aprofundar"), porque a
   // regra só no prompt o modelo rápido não seguia (abria outro assunto depois de uma resposta justificada).
-  const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && saida.aprofundar !== true);
+  // No v2 quem conduz é o Conversador: depois de uma resposta ele pode puxar um fio; só "não sei"/"pula" perdem a pergunta.
+  const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (!v2 && desfecho === "respondeu" && saida.aprofundar !== true);
   // v2: só tira a pergunta do fim; o convite enlatado entra apenas se não sobrar fala nenhuma.
   const texto = semAprofundar ? (v2 ? semPerguntaNoFimV2(curto) : semPerguntaNoFim(curto)) : curto;
   if (!saida.responder || !texto) return mudoOuConcluiu();
@@ -135,9 +138,12 @@ export async function perguntar(
     : null;
   const repetido = requisito !== null && (entrada.requisitosAtuais ?? []).includes(requisito);
 
-  const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto }, agora).estado;
+  // v2: a pergunta do Conversador conta no intervalo do plin, para o Pensador não emendar outra logo em seguida.
+  const perguntou = v2 && texto.trim().endsWith("?");
+  const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto, ...(perguntou ? { perguntou } : {}) }, agora).estado;
   const ids = extrairIdsDoGrafo(entrada.grafo ?? "");
   const visual = mapearAcoesVisuais(saida.visual, (id) => ids.has(id) ? id : null);
   return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, desfecho, estado: final,
+    ...(perguntou ? { perguntou } : {}),
     ...(visual !== undefined ? { visual } : {}) };
 }

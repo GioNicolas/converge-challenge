@@ -128,7 +128,8 @@ export type EventoSessao =
   | { tipo: "ELEMENTOS_ALTERADOS"; ids: string[] }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
-  | { tipo: "AGENTE_FALOU"; texto: string }
+  /** `perguntou`: a fala do Conversador terminou numa pergunta (v2); conta no intervalo antes do próximo plin. */
+  | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
   /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
   | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
   /** O entrevistador trouxe a mudança no problema (só a primeira vale). */
@@ -429,6 +430,7 @@ export function transicionar(
         estado: {
           ...estado,
           conversa: [...estado.conversa, { quem: "agente", texto: evento.texto, em: agora }],
+          ...(evento.perguntou ? { ultimaPerguntaEm: agora } : {}),
         },
         efeitos: [],
       };
