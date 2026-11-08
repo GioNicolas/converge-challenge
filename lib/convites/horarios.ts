@@ -1,6 +1,7 @@
 /**
  * Horários oferecidos pra triagem: próximos 5 dias úteis (a partir de amanhã), no fuso de Brasília.
- * Com HORARIOS_DE_TESTE=1, entram também dois horários daqui a 3 e 5 minutos, pra testar o fluxo inteiro.
+ * Entram também dois horários daqui a 3 e 5 minutos, pra testar o fluxo inteiro rápido. Ligados por padrão;
+ * HORARIOS_DE_TESTE=0 desliga.
  * Funções puras: recebem o "agora" pra serem testáveis.
  */
 
@@ -25,7 +26,7 @@ const TESTE_JANELA_FUTURO_MS = 15 * MINUTO_MS;
 /** Formato exato que geramos: minuto cheio, offset de Brasília. */
 const FORMATO_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00-03:00$/;
 
-export const horariosDeTesteLigados = () => process.env.HORARIOS_DE_TESTE === "1";
+export const horariosDeTesteLigados = () => process.env.HORARIOS_DE_TESTE !== "0";
 
 /** Instante em ISO com o relógio de Brasília e offset -03:00 (ex.: 2026-11-07T10:03:00-03:00). */
 function isoBrasilia(ms: number): string {
@@ -63,7 +64,7 @@ export function horariosRegulares(agora: Date = new Date()): string[] {
   return slots;
 }
 
-/** Lista mostrada ao candidato: os de teste primeiro (só com a flag), depois os regulares. */
+/** Lista mostrada ao candidato: os de teste primeiro (se ligados), depois os regulares. */
 export function horariosDisponiveis(agora: Date = new Date()): string[] {
   const regulares = horariosRegulares(agora);
   return horariosDeTesteLigados() ? [...horariosDeTeste(agora), ...regulares] : regulares;

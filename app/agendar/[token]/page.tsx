@@ -3,9 +3,12 @@
 // Página do candidato para escolher o horário da entrevista. Abre pelo link do e-mail, quase sempre
 // no celular: uma coluna, alvos de 48px e o botão de confirmar preso no rodapé, à mão do polegar.
 // O tema (papel e tinta) vem de app/agendar/layout.tsx. Os horários são sempre de Brasília.
+// Depois de marcar, esta mesma página (o link do único e-mail) vira "Entrevista marcada": o botão do
+// Google Agenda e o de entrar, que só abre perto do horário (ver lib/convites/janela.ts).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { Check } from "lucide-react";
+import { CalendarPlus, Check } from "lucide-react";
+import { janelaDaSala, situacaoDaSala } from "@/lib/convites/janela";
 
 const FUSO = "America/Sao_Paulo";
 
@@ -22,7 +25,7 @@ type Convite = {
   horarios: string[];
   horariosTeste?: string[];
 };
-type Confirmado = { agendadoPara: string; joinUrl: string; emailStatus: "enviado" | "simulado" | "erro" };
+type Confirmado = { agendadoPara: string; joinUrl: string };
 
 const FORMATO: Record<Modo, string> = {
   live_coding: "Programação ao vivo, no navegador",
@@ -168,8 +171,9 @@ export default function AgendarPagina() {
         <Feito
           agendadoPara={confirmado?.agendadoPara ?? convite.agendadoPara}
           joinUrl={confirmado?.joinUrl ?? convite.joinUrl}
-          emailStatus={confirmado?.emailStatus}
           durationMin={convite.durationMin}
+          cargo={convite.cargo}
+          mode={convite.mode}
         />
       )}
 
@@ -293,22 +297,68 @@ function Aviso({ titulo, children }: { titulo: string; children: React.ReactNode
   );
 }
 
-/** Tela final: horário marcado. `emailStatus` só vem logo após marcar; no convite já marcado não há. */
+/** Data no formato do Google Agenda: 20261109T170000Z (UTC). */
+const dataGoogle = (ms: number) => new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+
+/** Link que abre o Google Agenda já com o evento preenchido: título, horário, link da entrevista. */
+function linkGoogleAgenda(cargo: string, mode: Modo, inicio: string, durationMin: number, joinUrl?: string) {
+  const ini = Date.parse(inicio);
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: `Entrevista técnica · ${cargo}`,
+    dates: `${dataGoogle(ini)}/${dataGoogle(ini + durationMin * 60_000)}`,
+    details: [
+      `${FORMATO[mode]}, com um entrevistador de IA.`,
+      joinUrl ? `Entre por aqui no horário (a sala abre 2 minutos antes): ${joinUrl}` : "",
+      "Use um computador com microfone. Não precisa instalar nada.",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    ...(joinUrl ? { location: joinUrl } : {}),
+    ctz: FUSO,
+  });
+  return `https://calendar.google.com/calendar/render?${params}`;
+}
+
+/** "2 dias", "3 h 05 min", "4:09": quanto falta para a sala abrir. */
+function falta(ms: number) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const dias = Math.floor(s / 86400);
+  if (dias >= 1) return `${dias} ${dias === 1 ? "dia" : "dias"}`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h >= 1) return `${h} h ${String(m).padStart(2, "0")} min`;
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Tela final: horário marcado. O Google Agenda vem primeiro (é o que garante que a pessoa volte); o botão de
+ * entrar fica travado com a contagem até a sala abrir, e some depois que o horário passa.
+ */
 function Feito({
   agendadoPara,
   joinUrl,
-  emailStatus,
   durationMin,
+  cargo,
+  mode,
 }: {
   agendadoPara?: string;
   joinUrl?: string;
-  emailStatus?: Confirmado["emailStatus"];
   durationMin: number;
+  cargo: string;
+  mode: Modo;
 }) {
-  const emailFalhou = emailStatus === "simulado" || emailStatus === "erro";
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
   const d = agendadoPara ? new Date(agendadoPara) : null;
+  const janela = agendadoPara ? janelaDaSala(agendadoPara, durationMin) : null;
+  const situacao = janela ? situacaoDaSala(janela, agora) : "aberta";
+
   return (
-    <div className="mt-3">
+    <div className="mt-3 pb-10">
       <span className="grid size-10 place-items-center rounded-full bg-texto text-texto-claro">
         <Check size={20} strokeWidth={2.25} aria-hidden />
       </span>
@@ -323,21 +373,44 @@ function Feito({
         </div>
       )}
 
+      {agendadoPara && situacao !== "encerrada" && (
+        <a
+          href={linkGoogleAgenda(cargo, mode, agendadoPara, durationMin, joinUrl)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-padrao border border-borda bg-superficie text-[16px] font-medium text-texto transition-colors hover:border-texto/40"
+        >
+          <CalendarPlus size={18} strokeWidth={1.75} aria-hidden /> Adicionar ao Google Agenda
+        </a>
+      )}
+
       <p className="mt-5 text-[15px] leading-relaxed text-texto-suave">
-        {emailFalhou
-          ? "Não conseguimos enviar o e-mail de confirmação agora. Guarde este link: é por ele que você entra na hora marcada."
-          : emailStatus === "enviado"
-            ? "Mandamos um e-mail de confirmação com este mesmo link. No horário, é só entrar: não precisa instalar nada."
-            : "No horário, é só entrar pelo botão abaixo ou pelo link do e-mail de confirmação. Não precisa instalar nada."}
+        {situacao === "encerrada"
+          ? "O horário da entrevista já passou. Se você perdeu, responda o e-mail do convite que a gente combina outro."
+          : "O evento da agenda já leva o link da entrevista. Você também pode voltar por esta página: a sala abre dois minutos antes do horário."}
       </p>
 
-      {joinUrl && (
+      {joinUrl && situacao === "aberta" && (
         <a
           href={joinUrl}
           className="mt-6 flex min-h-12 w-full items-center justify-center rounded-padrao bg-texto text-[16px] font-medium text-texto-claro transition-opacity hover:opacity-90"
         >
           Entrar na entrevista
         </a>
+      )}
+      {joinUrl && situacao === "cedo" && janela && (
+        <div className="mt-6 flex flex-col gap-2">
+          <button
+            type="button"
+            disabled
+            className="min-h-12 w-full cursor-not-allowed rounded-padrao bg-texto text-[16px] font-medium text-texto-claro opacity-30"
+          >
+            Entrar na entrevista
+          </button>
+          <p className="numero text-center text-[13.5px] text-texto-suave" aria-live="polite">
+            A sala abre em {falta(janela.abre - agora)}
+          </p>
+        </div>
       )}
     </div>
   );

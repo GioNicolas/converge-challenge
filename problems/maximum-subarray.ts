@@ -4,6 +4,25 @@ import { publicFromIde } from "./_ide";
 export const MAXIMUM_SUBARRAY: Problem = {
   public: publicFromIde("maximum-subarray"),
   private: {
+    // Mudança que o Totti pode trazer no meio da entrevista (ver lib/problems/types.ts).
+    empecilhos: [
+      {
+        id: "lista-vazia",
+        kind: "caso_novo",
+        concept: "entrada_vazia",
+        title: "A lista pode vir vazia",
+        statement: "Agora `nums` pode vir vazio (dia sem nenhum valor). Nesse caso, retorne `0`.",
+        announcement:
+          "Uma mudança: essa função vai rodar num relatório diário, e tem dia que não tem nenhum valor. Então agora a lista pode vir vazia, e aí a resposta é 0. O resto continua igual.",
+        tests: [{ name: "Lista vazia", input: { nums: [] }, expected: 0 }],
+        clarifications: [
+          { question: "Com todos negativos muda alguma coisa?", answer: "Não: continua sendo o maior subarray com pelo menos um elemento." },
+          { question: "Os testes antigos mudam?", answer: "Não, todos continuam valendo." },
+        ],
+        rubricNote:
+          "Boa adaptação: vê que a inicialização com o primeiro elemento quebra na lista vazia e trata a borda sem mudar a resposta dos casos negativos. Fraca: troca a inicialização por 0 e passa a errar quando todos são negativos.",
+      },
+    ],
     hiddenTests: [
       { name: "Todos negativos", input: { nums: [-8, -3, -6, -2, -5] }, expected: -2 },
       { name: "Soma recomeça no meio", input: { nums: [4, -10, 3, 3, -1] }, expected: 6 },

@@ -25,7 +25,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
     // quem recarrega a página continua com o botão de entrar.
     joinUrl: convite.status === "agendado" ? linkDaEntrevista(process.env.APP_URL || new URL(req.url).origin, convite) : undefined,
     horarios: horariosDisponiveis(agora),
-    // Quais da lista são de teste (HORARIOS_DE_TESTE=1), pra página marcar com o rótulo "teste".
+    // Quais da lista são de teste (ligados, salvo HORARIOS_DE_TESTE=0), pra página marcar com o rótulo "teste".
     horariosTeste: horariosDeTesteLigados() ? horariosDeTeste(agora) : [],
   });
 }
