@@ -6,7 +6,7 @@ import type { Problem } from "@/lib/problems/types";
 import type { FocusArea } from "@/lib/contracts";
 import { GUIA_DA_FASE, type Fase } from "@/lib/agents/fase";
 import { buildVagaContext, FOCUS_QUESTION_GUIDE } from "./vaga";
-import { dado, REGRA_DADOS } from "@/lib/agents/injecao";
+import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/agents/injecao";
 
 export function buildAnalystSystem(config: InterviewConfig, problem: Problem): string {
   const criteria = config.criteria.map((c) => `- ${c.id}: ${c.name} — ${c.description}`).join("\n");
@@ -157,7 +157,7 @@ export function buildAnalystUser(input: AnalystTurnInput): string {
 
 FASE: ${input.fase}. ${GUIA_DA_FASE[input.fase]}
 Trecho que acabou de mudar: ${input.changedRegion ?? "(nada mudou desde a última análise)"}
-Na análise anterior, ele parecia estar: ${input.previousThinking ?? "(primeira análise)"}
+Na análise anterior, ele parecia estar: ${dadoEmLinha("hipotese", input.previousThinking ?? "", "(primeira análise)")}
 ${keyMoment}${foco}
 Critérios ainda não explorados:
 ${input.uncovered.length ? input.uncovered.map((c) => `- ${c}`).join("\n") : "(todos já explorados)"}
@@ -169,7 +169,7 @@ ${dado("codigo_do_candidato", input.numberedCode)}
 Eventos desde a última análise:
 ${dado("eventos", input.recentEvents.join("\n"), "(nenhum)")}
 
-Abordagem detectada na análise anterior: ${input.previousApproach ?? "(primeira análise)"}
+Abordagem detectada na análise anterior: ${dadoEmLinha("leitura_do_analista", input.previousApproach ?? "", "(primeira análise)")}
 
 Conversas anteriores com o candidato:
 ${dado("conversas_anteriores", input.conversations, "(nenhuma)")}

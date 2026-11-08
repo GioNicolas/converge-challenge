@@ -8,7 +8,7 @@ import type { ChatMessage, InterviewConfig } from "@/lib/contracts";
 import type { QuestionKind } from "@/lib/session/types";
 import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
-import { dado, REGRA_DADOS } from "@/lib/agents/injecao";
+import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/agents/injecao";
 
 export function buildInterviewerSystem(config: InterviewConfig, problem: Problem): string {
   const pub = problem.public;
@@ -244,8 +244,8 @@ Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.joi
   return `Modo: ${input.mode}. Fase: ${input.fase}. Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Linguagem: ${input.language}.
 ${blip}${mudanca}
 Dica leve disponível: ${input.availableHint ?? dicaSemValor(input.hintsPolicy)}
-Notas internas do analista: ${input.analystNotes ?? "(nenhuma)"}
-Hipótese interna sobre o que ele está tentando fazer agora (contexto seu, o candidato não vê; use só para escolher a pergunta certa, NUNCA a dê como resposta pronta, não a recite nem a confirme): ${input.hypothesis ?? "(nenhuma)"}
+Notas internas do analista: ${dadoEmLinha("leitura_do_analista", input.analystNotes ?? "", "(nenhuma)")}
+Hipótese interna sobre o que ele está tentando fazer agora (contexto seu, o candidato não vê; use só para escolher a pergunta certa, NUNCA a dê como resposta pronta, não a recite nem a confirme): ${dadoEmLinha("hipotese", input.hypothesis ?? "", "(nenhuma)")}
 Conversas anteriores:
 ${dado("conversas_anteriores", input.previousConversations, "(nenhuma)")}
 
