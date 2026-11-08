@@ -3,7 +3,7 @@ import Perola from "@/components/totti/Perola";
 import TemaRecrutador from "@/components/TemaRecrutador";
 
 export const metadata: Metadata = {
-  title: "Obrigado · Totti",
+  title: "Obrigado",
 };
 
 /** Fim da entrevista para o candidato. O relatório vai só para a recrutadora. */

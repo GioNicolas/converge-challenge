@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import TemaRecrutador from "@/components/TemaRecrutador";
 
 export const metadata: Metadata = {
-  title: "Vagas · Totti",
+  title: "Vagas",
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {

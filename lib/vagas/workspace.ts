@@ -638,8 +638,6 @@ export function estagioDa(v: VagaEmpresa): Exclude<Estagio, "escopo"> | "encerra
 // os recortes rápidos da lista (com contagem) e a ordenação.
 // ---------------------------------------------------------------------------
 
-/** Quanto de entrevista humana cada triagem feita pelo Totti poupa (estimativa do painel). */
-export const MINUTOS_POR_TRIAGEM = 30;
 /** A partir de quantos inscritos a vaga conta como de alto volume. */
 export const ALTO_VOLUME = 1_000;
 
@@ -660,23 +658,20 @@ export type Totais = {
   /** Relatórios prontos esperando o parecer da recrutadora. */
   pendentes: number;
   vagasComPendentes: number;
-  horasPoupadas: number;
 };
 
 /** Soma o funil das vagas abertas. */
 export function totaisDas(vagas: VagaEmpresa[]): Totais {
   const abertas = vagas.filter((v) => v.etapa !== "encerrada");
   const soma = (f: (v: VagaEmpresa) => number) => abertas.reduce((t, v) => t + f(v), 0);
-  const entrevistados = soma((v) => v.funil.concluiram);
   return {
     vagas: abertas.length,
     inscritos: soma((v) => v.funil.inscritos),
     convidados: soma((v) => v.funil.convidados),
-    entrevistados,
+    entrevistados: soma((v) => v.funil.concluiram),
     emAndamento: soma((v) => v.funil.emAndamento),
     pendentes: soma(novosDa),
     vagasComPendentes: abertas.filter((v) => novosDa(v) > 0).length,
-    horasPoupadas: Math.round((entrevistados * MINUTOS_POR_TRIAGEM) / 60),
   };
 }
 
@@ -688,19 +683,25 @@ export function porcento(parte: number, todo: number): string {
   return `${p.toLocaleString("pt-BR", { maximumFractionDigits: p < 10 ? 1 : 0 })}%`;
 }
 
-/** Os atalhos da lista, na ordem dos chips. */
-export const RECORTES_RAPIDOS = ["todas", "pendentes", "em_entrevista", "alto_volume", "live_coding", "system_design", "escopo"] as const;
-/** Além dos chips: "com_relatorios" vem do funil e "encerradas" do link no fim da lista. */
-export type Recorte = (typeof RECORTES_RAPIDOS)[number] | "com_relatorios" | "encerradas";
+/** As abas da lista: o estado da vaga, na ordem em que ela pede a recrutadora. */
+export const RECORTES_RAPIDOS = ["todas", "pendentes", "em_entrevista", "escopo"] as const;
+/** Fora das abas: "encerradas" vem do link no fim da lista; os outros ainda abrem por link antigo (?recorte=). */
+export type Recorte =
+  | (typeof RECORTES_RAPIDOS)[number]
+  | "com_relatorios"
+  | "encerradas"
+  | "alto_volume"
+  | "live_coding"
+  | "system_design";
 
 export const NOME_RECORTE: Record<Recorte, string> = {
   todas: "Todas",
-  pendentes: "Com decisão pendente",
+  pendentes: "Precisam de você",
   em_entrevista: "Em entrevista",
   alto_volume: `Alto volume (+${numero(ALTO_VOLUME)})`,
   live_coding: NOME_FORMATO_CURTO.live_coding,
   system_design: NOME_FORMATO_CURTO.system_design,
-  escopo: "Com o Totti",
+  escopo: "Em definição",
   com_relatorios: "Com entrevistas feitas",
   encerradas: "Encerradas",
 };
