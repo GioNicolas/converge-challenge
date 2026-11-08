@@ -138,6 +138,18 @@ export function registrarMotivoIgnorado(input: {
   return item;
 }
 
+/** Tira um trecho ignorado (ex.: ao desfazer a resposta dos 90 dias num ensaio da demo). */
+export function apagarMotivoIgnorado(id: string): boolean {
+  for (const e of store.empresas.values()) {
+    const i = e.ignorados.findIndex((m) => m.id === id);
+    if (i >= 0) {
+      e.ignorados.splice(i, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
 export function listarMotivosIgnorados(empresaId: string): MotivoIgnorado[] {
   return [...estadoDa(empresaId).ignorados].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm));
 }

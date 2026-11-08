@@ -25,6 +25,7 @@
     "test:kits": "tsx --test lib/agente/kits/__tests__/*.test.ts",
     "test:vagas": "tsx --test lib/agente/kits/__tests__/vagas-*.test.ts app/api/__tests__/avaliacoes.test.ts",
     "test:squad": "tsx --test lib/squad-memory/__tests__/*.test.ts",
+    "test:noventa-dias": "tsx --test lib/noventa-dias/__tests__/*.test.ts",
     "test:plano": "tsx --test lib/agente/planejamento/__tests__/*.test.ts app/api/__tests__/dev-plano.test.ts",
     "agente:chat": "tsx scripts/agente-chat.ts"
   },
