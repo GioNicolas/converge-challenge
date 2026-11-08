@@ -1,0 +1,50 @@
+# Deploy de produção na Vercel para qualquer merge na main.
+#
+# O projeto da Vercel é da conta pessoal do Lucas (plano Hobby): a integração com o GitHub só faz deploy
+# de commits dele, e os de outras pessoas ficam "Blocked". Esta Action faz o deploy desses commits com o
+# token do Lucas. Os commits do próprio Lucas continuam com a integração normal (pulados aqui, para não
+# subir duas vezes).
+#
+# Precisa do secret VERCEL_TOKEN no repositório (Settings → Secrets and variables → Actions), criado em
+# https://vercel.com/account/tokens. Dá para rodar à mão em Actions → "Deploy de produção" → Run workflow.
+
+name: Deploy de produção
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Merges seguidos: só o último sobe.
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: team_HeT9mrlHuxqAk7KjY9SVni02
+  VERCEL_PROJECT_ID: prj_Xe3p0XqmlPjlY3ddh2OM8EHlqIWa
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.author.email != 'ltodarosouza@gmail.com'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar a CLI da Vercel
+        run: npm install --global vercel@latest
+
+      - name: Baixar variáveis e configuração de produção
+        run: vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Build
+        run: vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Deploy
+        run: vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
