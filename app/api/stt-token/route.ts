@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { criarLimitador, ipDe } from "@/lib/agente/rotas/http";
 import { getSession } from "@/lib/session/store";
 
 export const runtime = "nodejs";
@@ -8,23 +9,6 @@ export const dynamic = "force-dynamic";
 // A chave do ElevenLabs fica só aqui, no servidor.
 const URL_TOKEN = "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe";
 
-/** Limite em memória (best-effort, por instância): cada token abre uma conexão cobrada no ElevenLabs. */
-function criarLimitador(max: number, janelaMs: number) {
-  const acessos = new Map<string, { contagem: number; expira: number }>();
-  return {
-    estourou(chave: string): boolean {
-      const agora = Date.now();
-      if (acessos.size > 1000) for (const [k, v] of acessos) if (v.expira <= agora) acessos.delete(k);
-      const atual = acessos.get(chave);
-      if (!atual || atual.expira <= agora) {
-        acessos.set(chave, { contagem: 1, expira: agora + janelaMs });
-        return false;
-      }
-      atual.contagem += 1;
-      return atual.contagem > max;
-    },
-  };
-}
 // Uma conexão usa 1 token + até 5 reconexões; os limites deixam folga e barram laços de pedidos.
 const limitadorPorIp = criarLimitador(30, 60_000);
 const limitadorPorSessao = criarLimitador(20, 600_000);
@@ -37,9 +21,7 @@ export async function GET(req: NextRequest) {
   const chave = process.env.ELEVENLABS_API_KEY;
   if (!chave) return erro(503, "ELEVENLABS_API_KEY não configurada.");
 
-  // x-real-ip é posto pelo proxy; x-forwarded-for pode ser forjado pelo cliente.
-  const ip = req.headers.get("x-real-ip")?.trim() || req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  if (limitadorPorIp.estourou(ip)) return erro(429, "muitos pedidos de token; tente em instantes");
+  if (limitadorPorIp.estourou(ipDe(req))) return erro(429, "muitos pedidos de token; tente em instantes");
   // Só sai token para sessão real e em andamento.
   const sessao = getSession(sessaoId);
   if (!sessao) return erro(404, "sessão não encontrada");

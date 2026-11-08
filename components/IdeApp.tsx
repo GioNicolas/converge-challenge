@@ -37,7 +37,8 @@ export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" |
 /** Frases finais com menos palavras que isso são descartadas. */
 const MIN_PALAVRAS_FALA = 2;
 
-export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId?: string; vaga?: VagaIDE }) {
+/** `convite`: id do link do e-mail; liga esta sessão ao candidato no painel da vaga. */
+export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { problemId?: string; vaga?: VagaIDE; convite?: string }) {
   const DURATION_MS = vaga.durationMin * 60_000;
   const router = useRouter();
   // A questão vem da config da vaga (nível definido pelo agente); `problemId` só sobrescreve em testes.
@@ -45,6 +46,18 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG }: { problemId
   // Abre na primeira linguagem da vaga que a questão tem (a recrutadora pode ter restringido, ex.: só C++).
   const initialLanguage = vaga.languages.find((l) => l in problem.starters) ?? vaga.languages[0];
   const session = useSession(problem.id, vaga.id, vaga.durationMin, initialLanguage);
+  // Avisa uma vez de quem é a sessão. Best-effort: se falhar, a entrevista segue e só aparece sem nome.
+  const vinculadaRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sessionId = session.sessionId;
+    if (!convite || !sessionId || vinculadaRef.current === sessionId) return;
+    vinculadaRef.current = sessionId;
+    void fetch("/api/convites/sessao", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ convite, sessionId }),
+    }).catch(() => {});
+  }, [convite, session.sessionId]);
   const capture = useCodeCapture({
     sendEvent: session.sendEvent,
     nowT: session.nowT,

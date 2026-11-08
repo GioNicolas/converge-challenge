@@ -10,7 +10,7 @@ import { Criterion, FocusArea, InterviewConfig, InterviewMode } from "@/lib/cont
 import type { Classificacao, Vaga } from "./classificador";
 import { problems } from "@/lib/problems";
 import { selecionarProblema } from "@/lib/problems/selecao";
-import { CATALOGO, criteriosIniciais, problemaPadrao } from "./catalogo";
+import { CATALOGO, criteriosIniciais, modoAtivo, problemaPadrao } from "./catalogo";
 import { LINGUAGENS_IDE } from "./linguagens";
 
 /** Uma fala da conversa de pré-entrevista. */
@@ -161,6 +161,11 @@ export function mudarModo(r: Rascunho, modo: InterviewMode): Rascunho {
     r.focus,
   );
   return { ...r, mode: modo, criteria, problemId: undefined };
+}
+
+/** Formato que não está disponível nesta versão (ver `SYSTEM_DESIGN_ATIVO`) volta para live coding. Função pura. */
+export function rascunhoNoFormatoAtivo(r: Rascunho): Rascunho {
+  return modoAtivo(r.mode) ? r : mudarModo(r, "live_coding");
 }
 
 /**

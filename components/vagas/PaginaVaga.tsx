@@ -631,7 +631,7 @@ function EntrevistasReais({ reais }: { reais: EntrevistaReal[] }) {
             >
               <div className="flex min-w-0 flex-col">
                 <span className="truncate text-[14.5px] text-texto">
-                  Candidato {e.sessionId.slice(0, 6)}
+                  {e.candidato ?? `Candidato ${e.sessionId.slice(0, 6)}`}
                   {a === "pronto" && <span className="rotulo rotulo-destaque ml-2">Novo</span>}
                 </span>
                 <span className="numero truncate text-[12.5px] text-texto-suave">

@@ -24,6 +24,14 @@ export type EmailClient = {
   };
 };
 
+/**
+ * Texto puro: o html-to-text põe títulos em CAIXA ALTA por padrão, e grito em caixa alta pesa
+ * contra nos filtros de spam. Mantém o título como foi escrito.
+ */
+const htmlToTextOptions = {
+  selectors: ["h1", "h2", "h3"].map((selector) => ({ selector, options: { uppercase: false } })),
+};
+
 /** Falha real de envio/renderização; as rotas traduzem pra 502. */
 export class EmailDeliveryError extends Error {
   constructor(message: string) {
@@ -81,7 +89,7 @@ export async function sendEmail(
   /** Seam de teste: cliente alternativo (padrão: Resend via fetch). */
   client: EmailClient = resendFetchClient,
 ): Promise<EmailSendResult> {
-  const from = process.env.EMAIL_FROM ?? "Converge Challenge <onboarding@resend.dev>";
+  const from = process.env.EMAIL_FROM ?? "Time de Recrutamento <onboarding@resend.dev>";
   const replyTo = process.env.EMAIL_REPLY_TO || undefined;
   const domain = to.split("@")[1] ?? "?";
 
@@ -91,7 +99,7 @@ export async function sendEmail(
   }
 
   try {
-    const [html, text] = await Promise.all([render(template), render(template, { plainText: true })]);
+    const [html, text] = await Promise.all([render(template), render(template, { plainText: true, htmlToTextOptions })]);
     const { data, error } = await client.emails.send({ from, to, subject, html, text, replyTo });
     if (error) throw error;
     return { status: "sent", id: data!.id };

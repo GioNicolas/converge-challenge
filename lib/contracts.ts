@@ -213,3 +213,15 @@ export const Report = z.object({
   }),
 });
 export type Report = z.infer<typeof Report>;
+
+// ---------------------------------------------------------------------------
+// Silêncio do candidato (quadro e cérebro precisam concordar: o quadro dispara a análise,
+// o prompt do cérebro diz ao modelo o que conta como silêncio). Provisório, para os testes.
+// ---------------------------------------------------------------------------
+
+/** Silêncio total (sem desenhar, digitar nem falar) a partir do qual o agente pode quebrá-lo. */
+export const SILENCIO_S = 8;
+/** Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. */
+export const SILENCIO_INICIAL_S = 15;
+/** Se o silêncio continua depois de uma análise, o quadro volta a perguntar ao modelo a cada tanto. */
+export const SILENCIO_REPETIR_S = 30;

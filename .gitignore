@@ -42,6 +42,14 @@ next-env.d.ts
 
 !.env.example
 
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+# kits gerados localmente (scripts/gerar-kit.ts)
+/kits-gerados/
+
 # vendor copiado por scripts/copy-vendor.mjs
 /public/pyodide/
 /public/monaco/
