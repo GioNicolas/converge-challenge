@@ -49,6 +49,14 @@ const SILENCIO_INICIAL_MS = SILENCIO_INICIAL_S * 1000;
 const REPETIR_SILENCIO_MS = SILENCIO_REPETIR_S * 1000;
 /** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
 const COR_ENUNCIADO = "#1e1e1e";
+/** Silêncio depois de uma fala sem resposta do agente que encerra a resposta à pergunta ativa. */
+const SILENCIO_FIM_DA_RESPOSTA_MS = 7_000;
+/** Quando o pedido falha de vez: curtas, neutras e variadas. */
+const FALAS_DE_REPETICAO = [
+  "Desculpa, me perdi aqui. Pode repetir?",
+  "Não peguei essa última parte. Pode falar de novo?",
+  "Perdi o fio por um instante. Pode repetir o que disse?",
+];
 /** Entre um pedido de mudança recusado pelo servidor e o próximo. */
 const INTERVALO_PEDIDO_EMPECILHO_MS = 15_000;
 /** Respostas do servidor que encerram as tentativas nesta sessão. */
@@ -634,6 +642,38 @@ export function useEntrevista(
     if (reanalisar) void descarregarJa().then(() => gatilho.current?.dispararAgora());
   }, [descarregarJa, enviar, registrar]);
 
+  /**
+   * O modelo escolheu escutar (`responder:false`) no meio da resposta a uma pergunta: se o candidato ficar
+   * quieto por um tempo, a resposta acabou. Sem isso a pergunta ficava ativa para sempre e a análise e o
+   * quebra-silêncio, bloqueados.
+   */
+  const fimDaRespostaCalada = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agendarFimDaResposta = useCallback((texto: string) => {
+    if (fimDaRespostaCalada.current) clearTimeout(fimDaRespostaCalada.current);
+    const conferir = () => {
+      fimDaRespostaCalada.current = null;
+      if (estadoAtual.current.plin !== "PERGUNTA_ATIVA") return;
+      const quieto = Date.now() - ultimaFalaEm.current >= SILENCIO_FIM_DA_RESPOSTA_MS;
+      if (!quieto || falaParcial.current || pedidosEmAndamento.current > 0 || agenteFalandoRef.current) {
+        fimDaRespostaCalada.current = setTimeout(conferir, 1000);
+        return;
+      }
+      terminarResposta(texto);
+    };
+    fimDaRespostaCalada.current = setTimeout(conferir, SILENCIO_FIM_DA_RESPOSTA_MS);
+  }, [terminarResposta]);
+  useEffect(() => () => { if (fimDaRespostaCalada.current) clearTimeout(fimDaRespostaCalada.current); }, []);
+
+  /** O pedido falhou mesmo depois de tentar de novo: o agente pede para repetir, em vez de ficar calado. */
+  const pedidosDeRepeticao = useRef(0);
+  const pedirParaRepetir = useCallback(() => {
+    const fase = estadoAtual.current.fase;
+    if (fase === "AGUARDANDO" || fase === "ENCERRADA") return;
+    const texto = FALAS_DE_REPETICAO[pedidosDeRepeticao.current++ % FALAS_DE_REPETICAO.length];
+    conversa.current.push({ quem: "agente", texto });
+    void dizer(texto);
+  }, [dizer]);
+
   // Conversa por texto (enquanto não há voz do candidato): as falas digitadas e as respostas do /perguntar.
   const [mensagens, setMensagens] = useState<MensagemConversa[]>([]);
   const contadorDeMensagens = useRef(0);
@@ -690,6 +730,7 @@ export function useEntrevista(
       const novas = [registrarFalaDoCandidato()];
       // A devolutiva vem do loop rápido, sem flush + nova análise antes de responder.
       if (atual.plin === "PERGUNTA_ATIVA" && (r.responder || r.concluiu)) terminarResposta(texto, false);
+      else if (atual.plin === "PERGUNTA_ATIVA") agendarFimDaResposta(texto);
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
         const alvos = [...new Set((mapearAcoesVisuais(r.visual, (id) => conversor.current.idReal(id)) ?? []).flatMap(alvosDaAcao))];
@@ -720,7 +761,7 @@ export function useEntrevista(
       }
       return { requisito: r.responder ? r.requisito : null };
     },
-    [sessao, quadro, cursor, registrar, dizer, terminarResposta, enviar, limparVisualDaConversa],
+    [sessao, quadro, cursor, registrar, dizer, terminarResposta, agendarFimDaResposta, enviar, limparVisualDaConversa],
   );
   const registrarFalaParcial = useCallback((texto: string) => {
     falaParcial.current = !!texto.trim();
@@ -770,6 +811,7 @@ export function useEntrevista(
     terminarResposta,
     mensagens,
     enviarTexto,
+    pedirParaRepetir,
     registrarAtividade,
     encerrar,
     empecilho,

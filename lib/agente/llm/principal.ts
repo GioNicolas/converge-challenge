@@ -19,8 +19,9 @@ import { ErroLlm, type LlmArgs, type LlmCliente, type LlmResultado } from "./cli
 const PAPEL: Record<string, LlmRole> = {
   [NOME_SCHEMA_ANALISE]: "analyst", // análise do desenho, ao vivo
   [NOME_SCHEMA_PLANEJADOR]: "analyst", // conversa de plano com a recrutadora
-  [NOME_SCHEMA_PERGUNTAR]: "interviewer", // fala com o candidato
-  [NOME_SCHEMA_ABERTURA]: "interviewer", // apresentação e despedida
+  // Fala com o candidato, ao vivo: modelo sem raciocínio. O GLM fica para a análise e o relatório.
+  [NOME_SCHEMA_PERGUNTAR]: "conversa",
+  [NOME_SCHEMA_ABERTURA]: "conversa", // apresentação e despedida
   [NOME_SCHEMA_SCORECARD]: "evaluator", // relatório final
   [NOME_SCHEMA_KIT]: "evaluator", // geração do kit a partir da vaga
 };
@@ -40,7 +41,11 @@ export type OpcoesPrincipal = {
   completar?: typeof completeJson;
 };
 
-function comLimite<T>(promessa: Promise<T>, ms: number, sinal?: AbortSignal): Promise<T> {
+/**
+ * Espera a promessa até `ms` ou até o sinal de quem chama. Nos dois casos `cancelar` aborta a chamada por
+ * baixo: sem isso ela continuaria segurando a vaga do provedor e a próxima fala esperaria na fila.
+ */
+function comLimite<T>(promessa: Promise<T>, ms: number, cancelar: AbortController, sinal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolver, rejeitar) => {
     const limpar = () => {
       clearTimeout(prazo);
@@ -48,10 +53,12 @@ function comLimite<T>(promessa: Promise<T>, ms: number, sinal?: AbortSignal): Pr
     };
     const abortar = () => {
       limpar();
+      cancelar.abort();
       rejeitar(new ErroLlm("abortado", "chamada abortada"));
     };
     const prazo = setTimeout(() => {
       limpar();
+      cancelar.abort();
       rejeitar(new ErroLlm("timeout", `LLM passou de ${ms} ms`));
     }, ms);
     if (sinal?.aborted) return abortar();
@@ -95,6 +102,8 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
         return r.data;
       });
       const sistema = [args.sistema.estatico, args.sistema.dinamico].filter(Boolean).join("\n\n");
+      const prazoMs = args.timeoutMs ?? PRAZO_PADRAO_MS;
+      const cancelar = new AbortController();
       try {
         const r = await comLimite(
           completar<T>({
@@ -103,8 +112,11 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
             user: juntarMensagens(args.mensagens),
             schema: espiao,
             maxTokens: args.maxTokens !== undefined && args.maxTokens >= MIN_TOKENS_RESPEITADOS ? args.maxTokens : undefined,
+            signal: cancelar.signal,
+            prazoMs,
           }),
-          args.timeoutMs ?? PRAZO_PADRAO_MS,
+          prazoMs,
+          cancelar,
           args.sinal,
         );
         return {

@@ -99,10 +99,13 @@ export async function checkReply(
   candidateLines: string[],
   officialHint?: string,
   code?: string,
+  /** Prazo do filtro: passou, a fala passa (como quando o filtro está fora do ar). */
+  prazoMs?: number,
 ): Promise<{ safe: boolean; reason: string; costUsd: number }> {
   try {
     const result = await completeJson({
       role: "fast",
+      ...(prazoMs !== undefined ? { prazoMs, signal: AbortSignal.timeout(Math.max(300, prazoMs)) } : {}),
       system: REPLY_SYSTEM,
       user: `DICA OFICIAL (permitida): ${officialHint ?? "(nenhuma)"}\n\nCÓDIGO DO CANDIDATO:\n${code || "(vazio)"}\n\nÚLTIMAS FALAS DO CANDIDATO:\n${candidateLines.length ? candidateLines.join("\n") : "(nenhuma)"}\n\nFALA DO ENTREVISTADOR: ${reply}`,
       schema: FilterVerdict,

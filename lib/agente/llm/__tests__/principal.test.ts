@@ -41,8 +41,8 @@ describe("criarClientePrincipal (cérebro do quadro sobre o lib/llm)", () => {
     const esperado: Array<[string, string]> = [
       [NOME_SCHEMA_ANALISE, "analyst"],
       [NOME_SCHEMA_PLANEJADOR, "analyst"],
-      [NOME_SCHEMA_PERGUNTAR, "interviewer"],
-      [NOME_SCHEMA_ABERTURA, "interviewer"],
+      [NOME_SCHEMA_PERGUNTAR, "conversa"],
+      [NOME_SCHEMA_ABERTURA, "conversa"],
       [NOME_SCHEMA_SCORECARD, "evaluator"],
       [NOME_SCHEMA_KIT, "evaluator"],
       ["schema_desconhecido", "evaluator"],
@@ -118,6 +118,24 @@ describe("criarClientePrincipal (cérebro do quadro sobre o lib/llm)", () => {
       cliente.completarJson(base(NOME_SCHEMA_ANALISE, { timeoutMs: 30 })),
       (e: unknown) => e instanceof ErroLlm && e.codigo === "timeout",
     );
+  });
+
+  it("passou do prazo: a chamada por baixo é cancelada (libera a vaga do provedor)", async () => {
+    const { chamadas, cliente } = falso({ n: 1 }, { demora: 300 });
+    await assert.rejects(cliente.completarJson(base(NOME_SCHEMA_ANALISE, { timeoutMs: 30 })));
+    const sinal = (chamadas[0] as { signal?: AbortSignal }).signal;
+    assert.ok(sinal, "o lib/llm recebe um sinal");
+    assert.equal(sinal.aborted, true);
+    assert.equal((chamadas[0] as { prazoMs?: number }).prazoMs, 30);
+  });
+
+  it("sinal de quem chama abortado: a chamada por baixo também é cancelada", async () => {
+    const { chamadas, cliente } = falso({ n: 1 }, { demora: 300 });
+    const controle = new AbortController();
+    const p = cliente.completarJson(base(NOME_SCHEMA_ANALISE, { sinal: controle.signal }));
+    controle.abort();
+    await assert.rejects(p);
+    assert.equal((chamadas[0] as { signal?: AbortSignal }).signal?.aborted, true);
   });
 
   it("sinal abortado: ErroLlm 'abortado'", async () => {

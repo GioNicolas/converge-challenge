@@ -211,10 +211,13 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const [falaPendente, setFalaPendente] = useState<string | null>(null);
   const enviarVozRef = useRef(enviarDigitado);
   enviarVozRef.current = enviarDigitado;
+  const pedirParaRepetirRef = useRef(entrevista.pedirParaRepetir);
+  pedirParaRepetirRef.current = entrevista.pedirParaRepetir;
   const filaVoz = useRef<FilaFalas | null>(null);
   if (!filaVoz.current) filaVoz.current = new FilaFalas(
     async (texto) => { await enviarVozRef.current(texto); setFalaPendente(null); },
-    (texto) => setFalaPendente(texto),
+    // Falhou mesmo com a nova tentativa: o agente pede para repetir (a conversa segue) e o texto fica para reenviar.
+    (texto) => { setFalaPendente(texto); pedirParaRepetirRef.current(); },
   );
   useEffect(() => {
     if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
@@ -248,6 +251,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           iniciadaEm={entrevista.iniciadaEm}
           midia={midia}
           agenteFalando={entrevista.agenteFalando}
+          agentePensando={entrevista.aguardandoResposta}
           onClicarPlin={entrevista.clicarPlin}
           onTerminarResposta={entrevista.terminarResposta}
           onEncerrar={() => setConfirmandoFim(true)}
