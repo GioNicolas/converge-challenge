@@ -164,7 +164,7 @@ export function montarSistemaDinamico(
   briefing = "",
 ): string {
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
-  const bloqueio = motivoBloqueioPlin(estado, agora);
+  const bloqueio = motivoBloqueioPlin(estado, agora, REGRAS_PADRAO, { paradoHaS: pedido.parado_ha_s });
   const semEvidencia = criteriosSemEvidencia(estado);
   const pendente = estado.perguntaPendente;
   // A conversa inteira do servidor, mais as falas recentes que só o quadro tem (a apresentação, o desafio).
