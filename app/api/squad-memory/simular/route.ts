@@ -1,5 +1,5 @@
 // Só desenvolvimento: simula o Tech Lead decidindo no Slack (Aprovar/Reprovar com motivo), pelo mesmo caminho
-// do clique de verdade (decisão registrada, extrator, resposta na thread). Sem SLACK_BOT_TOKEN a thread só vai ao log.
+// do clique de verdade (decisão registrada, extrator e regras guardadas). A tela /vagas/aprendizado usa no modo dev.
 //   curl -X POST localhost:3000/api/squad-memory/simular -H "content-type: application/json" \
 //     -d '{"decisao":"reprovado","motivo":"propôs Kafka sem necessidade para esse volume"}'
 import { NextResponse } from "next/server";
@@ -55,8 +55,8 @@ export async function POST(req: Request) {
     status: decisao,
     decidedBy: "tech-lead-demo",
     reason: motivo?.trim() || undefined,
+    // Sem `ts`: não há card de verdade no Slack, então não há thread para responder.
     channel: process.env.SLACK_CHANNEL_ID || undefined,
-    ts: `${Date.now() / 1000}`,
   };
   const aprendizado = await aprenderDaDecisao(record);
   return NextResponse.json({ aprendizado, memoria: visaoDaMemoria() });
