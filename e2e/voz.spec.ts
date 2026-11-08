@@ -112,7 +112,8 @@ test("recrutadora dita a vaga e conversa com Totti sem repetir voz no polling", 
     await rota.fulfill({ json: estado });
   });
   await page.goto("/pre-entrevista/nova");
-  await page.getByRole("button", { name: "Usar um exemplo" }).click();
+  // Os exemplos de vaga viraram cartões (um por nível e área): qualquer um preenche a vaga.
+  await page.getByRole("button", { name: "Júnior Frontend" }).click();
   await page.getByRole("button", { name: "Ditar por voz" }).first().click();
   await expect.poll(() => ouvindo(page)).toBe(true);
   await emitir(page, "Precisamos de experiência com Python.");
@@ -414,7 +415,8 @@ test("abrir o microfone enquanto o Totti prepara a voz cancela a fala, que não 
     await rota.fallback();
   });
   await page.goto("/pre-entrevista/nova");
-  await page.getByRole("button", { name: "Usar um exemplo" }).click();
+  // Os exemplos de vaga viraram cartões (um por nível e área): qualquer um preenche a vaga.
+  await page.getByRole("button", { name: "Júnior Frontend" }).click();
   await page.getByRole("button", { name: "Começar com o Totti" }).click();
   await expect.poll(() => sinteses, { timeout: 25000 }).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "Interromper resposta falada" })).toBeVisible();
