@@ -21,6 +21,14 @@ export type Provedor = keyof typeof URLS;
 const ESPERAS_503_MS = [2000, 4000];
 /** Tempo máximo por tentativa HTTP. */
 const TIMEOUT_PADRAO_MS = 60_000;
+/**
+ * Alvo que falhou de forma recuperável (timeout, 5xx, 429, rede) fica de fora por este tempo: sem isso, cada chamada
+ * esperava o timeout inteiro dele (15 s na extração) antes de cair no próximo, que responde em 2 s.
+ */
+const DESCANSO_MS = 2 * 60_000;
+/** Até quando cada alvo (`provedor/modelo`) fica de fora. Por instância do servidor. */
+const descansoAte = new Map<string, number>();
+const chaveAlvo = (a: Alvo) => `${a.provedor}/${a.model}`;
 
 export interface Mensagem {
   role: "system" | "user" | "assistant";
@@ -164,12 +172,16 @@ export async function chat({
   const inicio = Date.now();
   const tentativas: Tentativa[] = [];
   const falhas: string[] = [];
+  // Alvos em descanso ficam de fora; se todos estiverem, tenta todos (melhor tentar do que falhar sem tentar).
+  const agora = Date.now();
+  const disponiveis = alvos.filter((a) => (descansoAte.get(chaveAlvo(a)) ?? 0) <= agora);
 
-  for (const alvo of alvos) {
+  for (const alvo of disponiveis.length > 0 ? disponiveis : alvos) {
     const inicioAlvo = Date.now();
     try {
       const content = await tentarAlvo(alvo, { messages, maxTokens, timeoutMs, temperature });
       const ms = Date.now() - inicioAlvo;
+      descansoAte.delete(chaveAlvo(alvo));
       tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms });
       return { content, ms: Date.now() - inicio, provedor: alvo.provedor, model: alvo.model, tentativas };
     } catch (err) {
@@ -177,6 +189,7 @@ export async function chat({
       tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms: Date.now() - inicioAlvo, erro: mensagem });
       // Erro não recuperável (ex.: 4xx que não é 429): não adianta tentar o próximo alvo.
       if (!(err instanceof FalhaRecuperavel)) throw new ErroChat(mensagem, tentativas);
+      descansoAte.set(chaveAlvo(alvo), Date.now() + DESCANSO_MS);
       falhas.push(`${alvo.provedor}/${alvo.model}: ${mensagem}`);
     }
   }

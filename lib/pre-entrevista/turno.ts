@@ -11,7 +11,7 @@
  */
 import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
-import { acumularEnfase, declararCentral } from "./enfase";
+import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
 import { aberturaDoAgente, responder, tradeoffDaAbertura } from "./conversa";
 import { ErroChat } from "./llm";
 import { registrarEvento } from "./log";
@@ -55,6 +55,18 @@ function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
   };
 }
 
+/**
+ * `dispensa_<área>` lê a conversa inteira e às vezes toma "menos algoritmo complicado, mais problema do dia a dia" por
+ * dispensar a área técnica. A ênfase, lida fala a fala, é mais precisa: se ela respondeu sobre a área ou a declarou central,
+ * e nunca a dispensou, o sinal de dispensa não vale. Sem isso, o Totti perguntava se podia tirar a área e ela ficava fora
+ * do plano até o fim. Função pura.
+ */
+export function semDispensaContrariada(sinais: Record<string, number>, enfase: EstadoEnfase): Record<string, number> {
+  const contrariadas = AREAS.filter((a) => enfase[a].declarado === "central" || (enfase[a].declarado !== "dispensou" && enfase[a].maximo >= 2));
+  if (!contrariadas.some((a) => (sinais[`dispensa_${a}`] ?? 0) > 0)) return sinais;
+  return { ...sinais, ...Object.fromEntries(contrariadas.map((a) => [`dispensa_${a}`, 0])) };
+}
+
 /** Última fala dela na transcrição, se houver. */
 function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
   return transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
@@ -70,11 +82,11 @@ async function atualizarCobertura(sessao: Sessao): Promise<void> {
     const cob = await avaliarCobertura(sessao.rascunho, sessao.transcricao.slice(), {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
     });
-    sessao.plano = { ...sessao.plano, sinais: cob.sinais };
     // A ênfase é por fala: classifica só a última fala dela, e o acumulado é feito no código (ver `enfase.ts`).
     const ultimaDela = ultimaFalaDaRecrutadora(sessao.transcricao);
     const porFala = await avaliarEnfaseDaFala(sessao.transcricao);
     if (ultimaDela) sessao.enfaseEstado = acumularEnfase(sessao.enfaseEstado, porFala.niveis, ultimaDela);
+    sessao.plano = { ...sessao.plano, sinais: semDispensaContrariada(cob.sinais, sessao.enfaseEstado) };
 
     // Falas dela que mostram tom, dicas e eliminatório: entram no guia como trecho, sem passar pelo extrator.
     if (ultimaDela) {
