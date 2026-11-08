@@ -551,3 +551,36 @@ export function situacaoDoRascunho(r: RascunhoVaga): string {
 }
 
 export { dias as quandoFoi };
+
+// ---------------------------------------------------------------------------
+// Estágio de cada vaga na tela inicial: o que o recrutador tem que fazer agora.
+//   Definir escopo (rascunho com o Totti) → Enviar convites → Aguardando entrevistas → Ver resultados
+// ---------------------------------------------------------------------------
+
+export const ESTAGIOS = ["escopo", "convidar", "aguardando", "resultados"] as const;
+export type Estagio = (typeof ESTAGIOS)[number];
+
+export const NOME_ESTAGIO: Record<Estagio, string> = {
+  escopo: "Definir escopo",
+  convidar: "Enviar convites",
+  aguardando: "Aguardando entrevistas",
+  resultados: "Ver resultados",
+};
+
+/** O que fazer em cada estágio, numa linha. */
+export const DICA_ESTAGIO: Record<Estagio, string> = {
+  escopo: "Termine o plano da entrevista com o Totti",
+  convidar: "O plano está pronto, falta chamar os candidatos",
+  aguardando: "Convites enviados, os candidatos estão fazendo",
+  resultados: "Chegaram relatórios para você revisar",
+};
+
+/** O estágio de uma vaga publicada (encerradas ficam fora do quadro). Funil já com convites e entrevistas reais. */
+export function estagioDa(v: VagaEmpresa): Exclude<Estagio, "escopo"> | "encerrada" {
+  if (v.etapa === "encerrada") return "encerrada";
+  const f = v.funil;
+  if (f.novos > 0) return "resultados";
+  if (f.convidados === 0) return "convidar";
+  if (f.emAndamento === 0 && f.concluiram >= f.convidados) return "resultados";
+  return "aguardando";
+}

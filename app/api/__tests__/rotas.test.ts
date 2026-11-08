@@ -70,7 +70,7 @@ describe("POST /api/sessoes", () => {
   it("cria a sessão com o formato do contrato e só dados públicos do problema", async () => {
     const { corpo, sessao_id } = await novaSessao();
     assert.deepEqual(Object.keys(corpo).sort(), ["apresentacao", "area", "despedida", "problema", "sessao_id", "tempos"]);
-    assert.deepEqual(Object.keys(corpo.problema as object).sort(), ["enunciado", "titulo"]);
+    assert.deepEqual(Object.keys(corpo.problema as object).filter((k) => k !== "fala_do_desafio").sort(), ["enunciado", "titulo"]);
     assert.match(sessao_id, /^[0-9a-f-]{36}$/);
     assert.equal(corpo.area, "system design");
     assert.ok((corpo.tempos as Record<string, number>).REQUISITOS > 0);
@@ -93,6 +93,15 @@ describe("POST /api/sessoes", () => {
     assert.equal(comErro.apresentacao, null);
     assert.equal(comErro.despedida, null);
     assert.ok(comErro.sessao_id, "a sessão é criada mesmo sem a abertura");
+  });
+  it("a abertura é guardada por kit+problema: a 2ª sessão não chama o modelo de novo", async () => {
+    const llm = criarClienteFalso([{ apresentacao: "Olá, tudo bem? Vamos começar.", despedida: "Obrigado. Daremos retorno." }]);
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const a = (await novaSessao()).corpo;
+    const b = (await novaSessao()).corpo;
+    assert.equal(a.apresentacao, "Olá, tudo bem? Vamos começar.");
+    assert.equal(b.apresentacao, a.apresentacao);
+    assert.equal(llm.chamadas.filter((c) => c.nomeSchema === "abertura_entrevista").length, 1);
   });
   it("avaliação desconhecida: 404 {erro}", async () => {
     const r = await criar(post("/api/sessoes", { avaliacao_id: "nao-existe", candidato_id: "c" }));

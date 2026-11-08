@@ -7,6 +7,8 @@ import type { ControleCursor } from "@/components/CursorAgente";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import { perguntar } from "@/lib/sessao/servidor";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
+import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
+import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {
   analisar,
   calar,
@@ -38,12 +40,10 @@ import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff"
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
-/** Silêncio total (sem desenhar nem falar) que dispara uma análise para o agente poder quebrá-lo. Provisório. Igual a LIMITE_SILENCIO_S no servidor. */
-const SILENCIO_MS = 8_000;
-/** Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. Provisório. Igual a LIMITE_SILENCIO_INICIAL_S no servidor. */
-const SILENCIO_INICIAL_MS = 15_000;
-/** Se o silêncio continua depois de uma análise, volta a perguntar ao modelo a cada tanto. */
-const REPETIR_SILENCIO_MS = 30_000;
+/** Silêncios que disparam uma análise para o agente poder quebrá-los (valores compartilhados com o cérebro em lib/contracts.ts). */
+const SILENCIO_MS = SILENCIO_S * 1000;
+const SILENCIO_INICIAL_MS = SILENCIO_INICIAL_S * 1000;
+const REPETIR_SILENCIO_MS = SILENCIO_REPETIR_S * 1000;
 /** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
 const COR_ENUNCIADO = "#1e1e1e";
 
@@ -284,13 +284,16 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     let cancelado = false;
     (async () => {
       const { titulo, enunciado } = sessao.problema;
+      // O que se ESCREVE no quadro é o enunciado; o que se FALA é a fala natural do desafio (ver falaDoDesafio.ts).
+      const falaDoDesafio = montarFalaDoDesafio(sessao.problema);
       // O agente se apresenta antes de passar o desafio (a fala vem do cérebro; sem ela, vai direto ao desafio).
       if (sessao.apresentacao) {
         conversa.current.push({ quem: "agente", texto: sessao.apresentacao });
         await dizer(sessao.apresentacao);
         if (cancelado) return;
       }
-      const fala = dizer(`${titulo}. ${enunciado}`);
+      conversa.current.push({ quem: "agente", texto: falaDoDesafio });
+      const fala = dizer(falaDoDesafio);
       await quadro.agente.escrever({
         id: "agente-enunciado-titulo",
         grupo: "enunciado",
@@ -309,7 +312,6 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         cor: COR_ENUNCIADO,
       });
       await fala;
-      conversa.current.push({ quem: "agente", texto: enunciado });
       if (!cancelado) enviar({ tipo: "APRESENTACAO_TERMINOU" });
     })();
     return () => {
@@ -472,8 +474,10 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         horario: Date.now(),
       });
       ultimaAtividade.current = Date.now();
+      // A fala já entra na conversa que as análises recebem (uma análise pode rodar enquanto o /perguntar espera).
+      const falaDoCandidato: FalaRecente = { quem: "candidato", texto };
+      conversa.current.push(falaDoCandidato);
       const registrarFalaDoCandidato = () => {
-        conversa.current.push({ quem: "candidato", texto });
         registrar("fala", { quem: "candidato", texto });
         return nova("candidato", texto);
       };
@@ -484,7 +488,15 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
         return { requisito: null };
       }
 
-      const r = await perguntar(sessao.sessao_id, atual.fase, texto);
+      let r: Awaited<ReturnType<typeof perguntar>>;
+      try {
+        r = await perguntar(sessao.sessao_id, atual.fase, texto);
+      } catch (erro) {
+        // Não foi enviada: sai da conversa para o texto poder ser reenviado sem duplicar.
+        const i = conversa.current.indexOf(falaDoCandidato);
+        if (i >= 0) conversa.current.splice(i, 1);
+        throw erro;
+      }
       const novas = [registrarFalaDoCandidato()];
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
@@ -506,6 +518,10 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     },
     [sessao, registrar, dizer, terminarResposta, enviar],
   );
+  /** Digitar na Conversa é atividade: o silêncio só conta depois que o candidato para de escrever. */
+  const registrarAtividade = useCallback(() => {
+    ultimaAtividade.current = Date.now();
+  }, []);
   const encerrar = useCallback(() => {
     silenciar();
     enviar({ tipo: "ENCERRAR" });
@@ -528,6 +544,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     terminarResposta,
     mensagens,
     enviarTexto,
+    registrarAtividade,
     encerrar,
   };
 }

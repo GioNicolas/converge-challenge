@@ -247,6 +247,7 @@ export default function SalaEntrevista() {
         onFechar={fecharConversa}
         mensagens={mensagensDaConversa}
         onEnviar={podeDigitar ? enviarDigitado : undefined}
+        onDigitando={entrevista.registrarAtividade}
         onVerNoQuadro={(id) => console.debug("[conversa] ver no quadro", id)}
       />
 

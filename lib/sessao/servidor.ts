@@ -8,7 +8,7 @@ export type { Alinhamento } from "../presenca/alinhamento";
 const EsquemaSessao: z.ZodType<Sessao> = z.object({
   sessao_id: z.string().min(1),
   area: z.string(),
-  problema: z.object({ titulo: z.string(), enunciado: z.string() }),
+  problema: z.object({ titulo: z.string(), enunciado: z.string(), fala_do_desafio: z.string().optional() }),
   tempos: z.record(
     z.enum(["AGUARDANDO", "APRESENTACAO", "REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO", "ENCERRADA"]),
     z.number().finite().nonnegative(),

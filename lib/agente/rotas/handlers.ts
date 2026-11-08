@@ -8,6 +8,9 @@ import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
+import type { LlmCliente } from "../llm/cliente";
+import type { Kit, Problema } from "../kits/tipos";
+import type { Abertura } from "../prompts/abertura";
 import { perguntar } from "../perguntar";
 import { transicionar, estadoInicial, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
@@ -66,14 +69,9 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
     candidatoId: corpo.dados.candidato_id,
     estado: comeco.estado,
   });
-  // Apresentação e despedida escritas pelo modelo (1 chamada). Sem LLM ou em erro: null, e o quadro não fala.
-  const abertura = ctx.llm
-    ? await comPrazo(
-        gerarAbertura({ llm: ctx.llm, kit, problema }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
-        PRAZO_ABERTURA_MS,
-        null,
-      )
-    : null;
+  // Apresentação e despedida escritas pelo modelo (1 chamada, guardada por kit+problema: só a primeira sessão paga a espera).
+  // Sem LLM ou em erro: null, e o quadro não fala.
+  const abertura = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema) : null;
   console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id, abertura: abertura !== null });
   return json({
     sessao_id: sessao.id,
@@ -103,6 +101,28 @@ const EsquemaPedidoLimitado = EsquemaPedidoAnalise.extend({
 /** Leva o estado do servidor até a fase que o quadro informou (só avança), por evento da máquina. */
 function sincronizarFase(estado: EstadoSessao, fase: EstadoSessao["fase"], agora: number): EstadoSessao {
   return transicionar(estado, { tipo: "SINCRONIZAR_FASE", fase }, agora).estado;
+}
+
+/** Aberturas já geradas, por LLM (os testes trocam o LLM) e por kit+problema. Só guarda sucesso; limite simples de tamanho. */
+const cacheAbertura = new WeakMap<object, Map<string, Abertura>>();
+const MAX_ABERTURAS_EM_CACHE = 200;
+
+async function aberturaDaSessao(llm: LlmCliente, kit: Kit, problema: Problema): Promise<Abertura | null> {
+  const chave = `${kit.id}:${problema.id}:${problema.titulo}:${problema.enunciado}`;
+  let doLlm = cacheAbertura.get(llm);
+  if (!doLlm) cacheAbertura.set(llm, (doLlm = new Map()));
+  const guardada = doLlm.get(chave);
+  if (guardada) return guardada;
+  const nova = await comPrazo(
+    gerarAbertura({ llm, kit, problema }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
+    PRAZO_ABERTURA_MS,
+    null,
+  );
+  if (nova) {
+    if (doLlm.size >= MAX_ABERTURAS_EM_CACHE) doLlm.clear();
+    doLlm.set(chave, nova);
+  }
+  return nova;
 }
 
 function comPrazo<T>(promessa: Promise<T>, ms: number, reserva: T): Promise<T> {
