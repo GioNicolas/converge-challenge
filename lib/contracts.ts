@@ -324,6 +324,13 @@ export const Gravacao = z.object({
   falas: z.array(z.object({ t: z.number(), role: z.enum(["candidate", "agent"]), text: z.string() })),
   execucoes: z.array(z.object({ t: z.number(), passed: z.number().int(), total: z.number().int() })),
   /** Acontecimentos curtos para dar contexto ("recebeu uma dica", "colou 12 linhas"). */
-  marcos: z.array(z.object({ t: z.number(), text: z.string() })),
+  marcos: z.array(
+    z.object({
+      t: z.number(),
+      text: z.string(),
+      /** Para o gráfico escolher o ícone. Opcional: relatórios salvos antes não têm. */
+      tipo: z.enum(["dica", "colagem", "mudanca", "linguagem", "adiou"]).optional(),
+    }),
+  ),
 });
 export type Gravacao = z.infer<typeof Gravacao>;

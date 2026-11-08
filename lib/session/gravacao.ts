@@ -32,19 +32,19 @@ export function gravacaoDaSessao(session: SessionState): Gravacao {
         execucoes.push({ t: e.t, passed: e.result.passed, total: e.result.total });
         break;
       case "hint":
-        marcos.push({ t: e.t, text: `Recebeu uma dica (nível ${e.level})` });
+        marcos.push({ t: e.t, text: `Recebeu uma dica (nível ${e.level})`, tipo: "dica" });
         break;
       case "paste":
-        marcos.push({ t: e.t, text: `Colou ${e.lines === 1 ? "1 linha" : `${e.lines} linhas`} de código` });
+        marcos.push({ t: e.t, text: `Colou ${e.lines === 1 ? "1 linha" : `${e.lines} linhas`} de código`, tipo: "colagem" });
         break;
       case "empecilho":
-        marcos.push({ t: e.t, text: `O Totti trouxe uma mudança no problema: ${e.title}` });
+        marcos.push({ t: e.t, text: `O Totti trouxe uma mudança no problema: ${e.title}`, tipo: "mudanca" });
         break;
       case "language_changed":
-        marcos.push({ t: e.t, text: `Trocou a linguagem para ${e.language}` });
+        marcos.push({ t: e.t, text: `Trocou a linguagem para ${e.language}`, tipo: "linguagem" });
         break;
       case "blip_snoozed":
-        marcos.push({ t: e.t, text: "Adiou uma pergunta do Totti" });
+        marcos.push({ t: e.t, text: "Adiou uma pergunta do Totti", tipo: "adiou" });
         break;
       default:
         break;
