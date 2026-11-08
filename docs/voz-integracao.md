@@ -37,7 +37,7 @@ O merge preserva a revisão atual do plano e o fluxo atual do quadro; não resta
 ```dotenv
 # Somente no servidor; mesma chave para entrada e saída.
 ELEVENLABS_API_KEY=
-# Opcionais; padrão Fernando - Casual e eleven_multilingual_v2.
+# Opcionais; padrão Fernando - Casual e eleven_flash_v2_5 (o mais rápido; eleven_multilingual_v2 soa um pouco melhor, mas leva ~2x mais).
 ELEVENLABS_VOICE_ID=
 ELEVENLABS_MODEL_ID=
 # Fluxos reais da pré-entrevista e do quadro.

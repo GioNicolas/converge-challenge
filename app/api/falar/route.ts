@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 // Voz do agente: Fernando - Casual (pt-BR, voz da biblioteca: a API exige plano pago).
 // ELEVENLABS_VOICE_ID só é preciso para trocar de voz (copie o ID em Voices, no painel do ElevenLabs).
 const VOZ_PADRAO = "jyRzzBWbHll8EUfOjmhe";
-const MODELO_PADRAO = "eleven_multilingual_v2";
+// Flash v2.5: ~0,45 s para uma fala curta (o multilingual_v2 levava ~1,1 s). Troque com ELEVENLABS_MODEL_ID.
+const MODELO_PADRAO = "eleven_flash_v2_5";
 const MAXIMO_CARACTERES = 2000;
 const porIp = criarLimitador(60, 60_000);
 const global = criarLimitador(300, 600_000);
