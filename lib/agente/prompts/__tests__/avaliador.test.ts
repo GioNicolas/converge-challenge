@@ -99,7 +99,8 @@ describe("bloco dinâmico", () => {
     assert.ok(esperados.length > 0);
     assert.ok(d.includes(`SEM evidência: ${esperados.join(", ")}`));
     assert.ok(!d.includes("SEM evidência: requisitos"));
-    assert.ok(d.includes('"Por que um banco só?" (elementos: e1)'));
+    assert.ok(d.includes('"Por que um banco só?" (assunto:'));
+    assert.ok(d.includes("elementos: e1)"));
     assert.ok(d.includes("degrau 1"));
   });
 

@@ -12,10 +12,11 @@ import { analisar, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
 import type { Kit, Problema } from "../kits/tipos";
-import type { Abertura } from "../prompts/abertura";
+import { apresentacaoReserva, DESPEDIDA_RESERVA, type Abertura, type ContextoAbertura } from "../prompts/abertura";
+import { etapasEmTexto } from "../prompts/contexto";
 import { avaliacaoDoPlano, escalarTempos, planoDaConfig } from "../plano";
 import { perguntar } from "../perguntar";
-import { transicionar, estadoInicial, TEMPOS_PADRAO, type EstadoSessao, type EventoSessao } from "../sessao/estado";
+import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFase,
   EsquemaPedidoAnalise,
@@ -107,7 +108,14 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   }
   // Apresentação e despedida escritas pelo modelo (1 chamada, guardada por kit+problema: só a primeira sessão paga a espera).
   // Sem LLM ou em erro: null, e o quadro não fala.
-  const abertura = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema) : null;
+  // A abertura diz quanto tempo dura e quais as etapas: o tempo do plano, ou a soma das fases.
+  const contextoAbertura = {
+    duracaoMin: tempoDaEntrevista(sessao.estado, ctx.agora()).totalMin || undefined,
+    etapas: etapasEmTexto(sessao.estado),
+  };
+  const gerada = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema, contextoAbertura) : null;
+  // Sem o modelo, uma apresentação fixa: o Totti nunca começa sem se apresentar.
+  const abertura = gerada ?? (ctx.llm ? { apresentacao: apresentacaoReserva(kit, contextoAbertura), despedida: DESPEDIDA_RESERVA } : null);
   console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id, plano: plano !== null, abertura: abertura !== null });
   return json({
     sessao_id: sessao.id,
@@ -143,14 +151,14 @@ function sincronizarFase(estado: EstadoSessao, fase: EstadoSessao["fase"], agora
 const cacheAbertura = new WeakMap<object, Map<string, Abertura>>();
 const MAX_ABERTURAS_EM_CACHE = 200;
 
-async function aberturaDaSessao(llm: LlmCliente, kit: Kit, problema: Problema): Promise<Abertura | null> {
-  const chave = `${kit.id}:${problema.id}:${problema.titulo}:${problema.enunciado}`;
+async function aberturaDaSessao(llm: LlmCliente, kit: Kit, problema: Problema, contexto: ContextoAbertura): Promise<Abertura | null> {
+  const chave = `${kit.id}:${problema.id}:${problema.titulo}:${problema.enunciado}:${contexto.duracaoMin ?? ""}:${contexto.etapas ?? ""}`;
   let doLlm = cacheAbertura.get(llm);
   if (!doLlm) cacheAbertura.set(llm, (doLlm = new Map()));
   const guardada = doLlm.get(chave);
   if (guardada) return guardada;
   const nova = await comPrazo(
-    gerarAbertura({ llm, kit, problema }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
+    gerarAbertura({ llm, kit, problema, ...contexto }, AbortSignal.timeout(PRAZO_ABERTURA_MS)),
     PRAZO_ABERTURA_MS,
     null,
   );
@@ -250,6 +258,14 @@ const EsquemaPerguntar = z.object({
   gestos_recentes: z.array(z.string().max(250)).max(6).optional(),
 });
 
+/** A pergunta do agente que esta fala responde: a ativa, ou a última com o texto que o quadro mandou. */
+function perguntaRespondida(estado: EstadoSessao, perguntaAtiva: string | undefined): number | null {
+  if (estado.perguntaAtiva) return estado.perguntaAtiva.numero;
+  const texto = perguntaAtiva?.trim();
+  if (!texto) return null;
+  return estado.perguntas.findLast((p) => p.pergunta.trim() === texto)?.numero ?? null;
+}
+
 export async function perguntarHandler(req: Request, { params }: ParamsId): Promise<Response> {
   const { id } = await params;
   const corpo = await lerJsonValidado(req, EsquemaPerguntar, MAX_CORPO_JSON);
@@ -266,6 +282,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const agora = ctx.agora();
   const { fase, texto } = corpo.dados;
   let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "visual"> = { responder: false, texto: "", requisito: null, concluiu: false };
+  let desfecho: Desfecho | null = null;
 
   if (ctx.llm) {
     const estado = sincronizarFase(sessao.estado, fase, agora);
@@ -282,6 +299,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
     );
     if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
     resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu, ...(r.visual !== undefined ? { visual: r.visual } : {}) };
+    desfecho = r.desfecho;
   }
 
   // Reaplica as falas sobre o estado mais recente (eventos podem ter mexido nele no meio do caminho).
@@ -289,6 +307,11 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   let novo = sincronizarFase(atual, fase, agora);
   novo = transicionar(novo, { tipo: "CANDIDATO_FALOU", texto, fimDeResposta: false }, agora).estado;
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto }, agora).estado;
+  // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
+  const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
+  if (desfecho && numeroDaPergunta !== null) {
+    novo = transicionar(novo, { tipo: "DESFECHO_DA_PERGUNTA", numero: numeroDaPergunta, desfecho, resposta: texto }, agora).estado;
+  }
   await ctx.repositorio.salvarEstado(id, novo);
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder });
 

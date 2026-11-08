@@ -3,7 +3,7 @@
 import { limitarFrases } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
-import { EsquemaAbertura, montarPromptAbertura, NOME_SCHEMA_ABERTURA, type Abertura } from "./prompts/abertura";
+import { EsquemaAbertura, montarPromptAbertura, NOME_SCHEMA_ABERTURA, type Abertura, type ContextoAbertura } from "./prompts/abertura";
 import { logPadrao, type LogMeta } from "./analisar";
 
 export type DepsAbertura = {
@@ -12,9 +12,9 @@ export type DepsAbertura = {
   problema: Problema;
   modelo?: string;
   log?: LogMeta;
-};
+} & ContextoAbertura;
 
-const MAX_FRASES_APRESENTACAO = 3;
+const MAX_FRASES_APRESENTACAO = 4;
 const MAX_FRASES_DESPEDIDA = 3;
 export const PRAZO_ABERTURA_MS = 6000;
 
@@ -22,7 +22,7 @@ export async function gerarAbertura(deps: DepsAbertura, sinal?: AbortSignal): Pr
   const log = deps.log ?? logPadrao;
   try {
     const r = await deps.llm.completarJson({
-      sistema: montarPromptAbertura(deps.kit, deps.problema),
+      sistema: montarPromptAbertura(deps.kit, deps.problema, { duracaoMin: deps.duracaoMin, etapas: deps.etapas }),
       mensagens: [{ role: "user", content: "Escreva a apresentação e a despedida agora, somente com o JSON." }],
       schema: EsquemaAbertura,
       nomeSchema: NOME_SCHEMA_ABERTURA,

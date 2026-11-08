@@ -11,8 +11,8 @@ import {
   montarSistemaEstaticoPerguntar,
   NOME_SCHEMA_PERGUNTAR,
 } from "./prompts/entrevistador";
-import { transicionar, type EstadoSessao } from "./sessao/estado";
-import type { Fase } from "./sessao/tipos";
+import { transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
+import type { Fase, FalaRecente } from "./sessao/tipos";
 import { logPadrao, type LogMeta } from "./analisar";
 
 export type DepsPerguntar = {
@@ -33,6 +33,8 @@ export type EntradaPerguntar = {
   grafo?: string;
   perguntaAtiva?: string;
   gestosRecentes?: string[];
+  /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
+  conversaDoQuadro?: FalaRecente[];
 };
 
 export type ResultadoPerguntar = {
@@ -41,6 +43,8 @@ export type ResultadoPerguntar = {
   requisito: string | null;
   /** O candidato disse que terminou ("pronto"): o quadro avança/reanalisa. */
   concluiu: boolean;
+  /** Como ele reagiu à pergunta ativa (só quando havia uma). */
+  desfecho: Desfecho | null;
   /** Falha de infraestrutura: não confundir com a decisão deliberada de escutar. */
   falhou?: boolean;
   visual?: AcaoVisual[];
@@ -63,14 +67,14 @@ export async function perguntar(
     { tipo: "CANDIDATO_FALOU", texto: entrada.texto, fimDeResposta: false },
     agora,
   ).estado;
-  const mudo = (): ResultadoPerguntar => ({ responder: false, texto: "", requisito: null, concluiu: false, estado: comFala });
+  const mudo = (): ResultadoPerguntar => ({ responder: false, texto: "", requisito: null, concluiu: false, desfecho: null, estado: comFala });
 
   let saida;
   try {
     const r = await deps.llm.completarJson({
       sistema: {
         estatico: montarSistemaEstaticoPerguntar(deps.kit, deps.problema),
-        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes),
+        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro),
       },
       mensagens: [{ role: "user", content: entrada.texto }],
       schema: EsquemaSaidaPerguntar,
@@ -91,7 +95,10 @@ export async function perguntar(
 
   // Se o candidato terminou é o modelo quem interpreta; o código não procura palavras.
   const concluiu = saida.concluiu === true;
-  const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu });
+  // O desfecho só vale quando havia pergunta ativa: sem ela, não há assunto para encerrar.
+  const haPerguntaAtiva = !!(entrada.perguntaAtiva || estado.perguntaAtiva);
+  const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
+  const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho });
   const texto = limitarFrases(saida.texto, 2);
   if (!saida.responder || !texto) return mudoOuConcluiu();
   const requisito = saida.requisito?.trim()
@@ -102,6 +109,6 @@ export async function perguntar(
   const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto }, agora).estado;
   const ids = extrairIdsDoGrafo(entrada.grafo ?? "");
   const visual = mapearAcoesVisuais(saida.visual, (id) => ids.has(id) ? id : null);
-  return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, estado: final,
+  return { responder: true, texto, requisito: repetido ? null : requisito, concluiu, desfecho, estado: final,
     ...(visual !== undefined ? { visual } : {}) };
 }
