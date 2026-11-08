@@ -27,14 +27,14 @@ type Props = {
   voltar?: ReactNode;
 };
 
-/** Cartões de exemplo (vagas de `fixtures/pre-entrevista/vagas.ts`): nível, nome curto e onde/com o quê. Seis fecham a grade 3×2. */
-const EXEMPLOS: { id: string; nivel: string; nome: string; detalhe: string }[] = [
-  { id: "backend-senior-pagamentos", nivel: "Sênior", nome: "Backend de pagamentos", detalhe: "Fintech · Go, Kotlin, Kafka" },
-  { id: "frontend-junior", nivel: "Júnior", nome: "Frontend", detalhe: "Edtech · React, TypeScript" },
-  { id: "fullstack-startup", nivel: "Pleno", nome: "Full stack", detalhe: "Startup · Next.js, Node.js" },
-  { id: "ia-pleno", nivel: "Pleno", nome: "Engenharia de IA", detalhe: "Agentes · LLMs, RAG, Python" },
-  { id: "tech-lead-mobile", nivel: "Liderança", nome: "Tech lead mobile", detalhe: "Delivery · Kotlin, Swift" },
-  { id: "estagio-dados", nivel: "Estágio", nome: "Engenharia de dados", detalhe: "Python, SQL" },
+/** Cartões de exemplo (vagas de `fixtures/pre-entrevista/vagas.ts`): nível e nome curto. Seis fecham a grade (uma linha no desktop, 3×2 ou 2×3 em telas menores). */
+const EXEMPLOS: { id: string; nivel: string; nome: string }[] = [
+  { id: "backend-senior-pagamentos", nivel: "Sênior", nome: "Backend" },
+  { id: "frontend-junior", nivel: "Júnior", nome: "Frontend" },
+  { id: "fullstack-startup", nivel: "Pleno", nome: "Full stack" },
+  { id: "ia-pleno", nivel: "Pleno", nome: "IA" },
+  { id: "tech-lead-mobile", nivel: "Tech lead", nome: "Mobile" },
+  { id: "estagio-dados", nivel: "Estágio", nome: "Dados" },
 ];
 
 const moldura =
@@ -165,12 +165,9 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
           </h1>
           <p className="text-[16px] text-texto-suave">Cole a descrição. O Totti cuida do resto.</p>
         </div>
-        <div className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[14px] font-medium text-texto">Comece de um exemplo</span>
-            <span className="text-[13px] text-texto-suave">ou escreva do zero abaixo</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] text-texto-suave">Comece de um exemplo ou escreva do zero abaixo</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
             {EXEMPLOS.map((e) => {
               const ativo = exemploAtual === e.id;
               return (
@@ -179,22 +176,21 @@ export default function EntradaVaga({ onEnviar, erro, inicial, voltar }: Props) 
                   type="button"
                   onClick={() => usarExemplo(e.id)}
                   aria-pressed={ativo}
-                  className={`group relative flex flex-col gap-1 rounded-controle border px-3.5 py-3 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 active:scale-[0.98] ${
+                  className={`relative flex flex-col rounded-controle border py-2 pl-3 pr-7 text-left transition-[border-color,background-color,box-shadow,transform] duration-150 active:scale-[0.98] ${
                     ativo
                       ? "border-texto bg-superficie shadow-[0_0_0_3px_rgb(17_17_17/0.08)]"
                       : "border-borda bg-superficie hover:-translate-y-px hover:border-texto/30 hover:shadow-[0_2px_8px_rgb(17_17_17/0.05)]"
                   }`}
                 >
-                  <span className="rotulo text-texto-suave/80">{e.nivel}</span>
-                  <span className="text-[14.5px] font-medium leading-snug text-texto">{e.nome}</span>
-                  <span className="text-[12.5px] leading-snug text-texto-suave">{e.detalhe}</span>
+                  <span className="text-[11.5px] leading-tight text-texto-suave/80">{e.nivel}</span>
+                  <span className="truncate text-[13.5px] font-medium leading-snug text-texto">{e.nome}</span>
                   <span
                     aria-hidden
-                    className={`absolute right-2.5 top-2.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-texto text-fundo transition-[opacity,transform] duration-150 ${
+                    className={`absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full bg-texto text-fundo transition-[opacity,scale] duration-150 ${
                       ativo ? "scale-100 opacity-100" : "scale-75 opacity-0"
                     }`}
                   >
-                    <Check size={11} strokeWidth={2.5} />
+                    <Check size={10} strokeWidth={2.75} />
                   </span>
                 </button>
               );
