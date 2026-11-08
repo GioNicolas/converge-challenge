@@ -127,6 +127,24 @@ describe("fases: orçamento de tempo", () => {
 });
 
 describe("ciclo do plin", () => {
+  const comPerguntaAtiva = () => {
+    const r = transicionar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN);
+    return transicionar(r.estado, { tipo: "PLIN_CLICADO" }, T0 + MIN + 2000).estado;
+  };
+  it("a marca de fim depois do /perguntar não grava a resposta de novo (nem depois da réplica do agente)", () => {
+    let e = transicionar(comPerguntaAtiva(), { tipo: "CANDIDATO_FALOU", texto: "Uso cache.", fimDeResposta: false }, T0 + MIN + 10_000).estado;
+    e = transicionar(e, { tipo: "AGENTE_FALOU", texto: "Certo, e a expiração?" }, T0 + MIN + 11_000).estado;
+    const r = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: " Uso cache. ", fimDeResposta: true }, T0 + MIN + 12_000);
+    assert.deepEqual(r.estado.conversa.slice(-2).map((f) => f.texto), ["Uso cache.", "Certo, e a expiração?"]);
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.deepEqual(r.efeitos.map((f) => f.tipo), ["RESPOSTA_ENCERRADA", "ANALISAR"]);
+  });
+  it("a marca de fim sem texto (botão \"terminei\") encerra a resposta sem gravar fala vazia", () => {
+    const e = comPerguntaAtiva();
+    const r = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "", fimDeResposta: true }, T0 + MIN + 12_000);
+    assert.equal(r.estado.conversa.length, e.conversa.length);
+    assert.equal(r.estado.plin, "LIVRE");
+  });
   it("LIVRE → PLIN_PENDENTE → PERGUNTA_ATIVA → LIVRE", () => {
     const e = emFase("APROFUNDAMENTO");
     let r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN);
