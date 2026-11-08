@@ -17,6 +17,9 @@ const Pedido = z.object({
   motivo: z.string().max(500).optional(),
   candidato: z.string().max(80).optional(),
   recomendacao: z.enum(["avancar", "talvez", "nao_avancar"]).optional(),
+  /** A vaga escolhida na tela: a regra aprendida vale só nela. Sem valor: a Backend Pleno da demo. */
+  vagaId: z.string().trim().min(1).max(120).optional(),
+  vagaTitulo: z.string().trim().min(1).max(120).optional(),
 });
 
 /** O candidato do card de demo do Slack: o Totti recomendou avançar (ainda não conhecia o time). */
@@ -43,15 +46,17 @@ export async function POST(req: Request) {
   const parsed = Pedido.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "pedido inválido" }, { status: 400 });
   const { decisao, motivo, candidato, recomendacao } = parsed.data;
+  const vagaId = parsed.data.vagaId ?? "demo-backend-pleno";
+  const vagaTitulo = parsed.data.vagaTitulo ?? "Backend Pleno";
 
   const record: DecisionRecord = {
     id: `simulado-${Date.now()}`,
     candidateId: "demo-c01",
     candidateName: candidato || "Rafael Moura",
     candidateEmail: "demo@exemplo.com",
-    roleTitle: "Backend Pleno",
-    vagaId: "demo-backend-pleno",
-    report: { ...REPORT, recommendation: recomendacao ?? REPORT.recommendation },
+    roleTitle: vagaTitulo,
+    vagaId,
+    report: { ...REPORT, roleTitle: vagaTitulo, recommendation: recomendacao ?? REPORT.recommendation },
     status: decisao,
     decidedBy: "tech-lead-demo",
     reason: motivo?.trim() || undefined,

@@ -1,11 +1,12 @@
 "use client";
 
 // "O que o Totti aprendeu": a Memória Viva da Squad à vista do time.
-//   1. Concordância Totti × Tech Lead por vaga: o número da vaga atual e a série subindo.
-//   2. As regras que o Totti aprendeu, cada uma com a decisão e a vaga de onde veio (só vale nessa vaga).
-//      Dá para editar, desligar e apagar.
-//   3. O que o guarda-corpo ignorou: motivo não técnico nunca vira regra, mas fica visível.
-//   4. (só em desenvolvimento) Simular o Tech Lead decidindo no Slack, pelo mesmo caminho do clique de verdade.
+// Cada regra só vale na vaga de onde veio, então a tela é de uma vaga por vez: o seletor no topo (e ?vaga= na URL)
+// escolhe qual. Sem escolha, abre na mais recente.
+//   1. Concordância Totti × Tech Lead: o número da vaga escolhida e a série de todas as vagas (clicar troca a vaga).
+//   2. As regras que o Totti aprendeu nesta vaga, cada uma com a decisão de onde veio. Dá para editar, desligar e apagar.
+//   3. O que o guarda-corpo ignorou nesta vaga: motivo não técnico nunca vira regra, mas fica visível.
+//   4. (só em desenvolvimento) Simular o Tech Lead decidindo no Slack nesta vaga, pelo mesmo caminho do clique de verdade.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-react";
@@ -22,20 +23,68 @@ function dataCurta(iso: string): string {
   return `${d.getDate()} ${MESES[d.getMonth()]}`;
 }
 
-/** De onde veio. `comVaga: false` quando a vaga já aparece em outro lugar da linha (nas regras, "vale em …"). */
-function textoDaOrigem(o: OrigemRegra, vagas: Record<string, string>, comVaga = true): string {
-  const vaga = comVaga ? vagas[o.vagaId] : undefined;
-  const onde = vaga ? ` · ${vaga}` : "";
+/** De onde veio. A vaga não entra: a tela inteira já é de uma vaga. */
+function textoDaOrigem(o: OrigemRegra): string {
   switch (o.tipo) {
     case "reprovacao":
-      return `Da reprovação de ${o.candidato}${onde}`;
+      return `Da reprovação de ${o.candidato}`;
     case "aprovacao":
-      return `Da aprovação de ${o.candidato}${onde}`;
+      return `Da aprovação de ${o.candidato}`;
     case "ajuste_plano":
-      return `De um ajuste no plano${onde}`;
+      return "De um ajuste no plano";
     case "resultado_90_dias":
-      return `De ${o.candidato} aos 90 dias (${o.deuCerto ? "deu certo" : "não deu certo"})${onde}`;
+      return `De ${o.candidato} aos 90 dias (${o.deuCerto ? "deu certo" : "não deu certo"})`;
   }
+}
+
+type OpcaoVaga = { id: string; titulo: string };
+
+/** A vaga do card de demo do Slack: o simulador ensina nela quando a memória ainda não tem vaga nenhuma. */
+const VAGA_DA_DEMO: OpcaoVaga = { id: "demo-backend-pleno", titulo: "Backend Pleno" };
+
+/**
+ * As vagas que têm algo na memória, da mais recente para a mais antiga: primeiro as com decisões (na ordem da
+ * concordância), depois as que só têm regra ou motivo ignorado (sem decisão, o nome é o id).
+ */
+function vagasDaMemoria(m: VisaoMemoria): OpcaoVaga[] {
+  const comDecisao = [...m.concordancia.porVaga].reverse().map((v) => ({ id: v.vagaId, titulo: v.vagaTitulo }));
+  const vistos = new Set(comDecisao.map((v) => v.id));
+  const soComRegra: OpcaoVaga[] = [];
+  for (const { origem } of [...m.regras, ...m.ignorados]) {
+    if (vistos.has(origem.vagaId)) continue;
+    vistos.add(origem.vagaId);
+    soComRegra.push({ id: origem.vagaId, titulo: m.vagas[origem.vagaId] ?? origem.vagaId });
+  }
+  return [...comDecisao, ...soComRegra];
+}
+
+/** Qual vaga a tela mostra. A primeira é a mais recente, marcada como atual. */
+function SeletorVaga({ opcoes, escolhida, onEscolher }: { opcoes: OpcaoVaga[]; escolhida: string; onEscolher: (id: string) => void }) {
+  return (
+    <div className="-mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="rotulo text-texto-suave">Vaga</span>
+      <div className="flex flex-wrap gap-0.5 rounded-full bg-superficie-2/70 p-1" role="radiogroup" aria-label="Vaga">
+        {opcoes.map((v, i) => {
+          const ativa = v.id === escolhida;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              role="radio"
+              aria-checked={ativa}
+              onClick={() => onEscolher(v.id)}
+              className={`rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors ${
+                ativa ? "bg-superficie font-medium text-texto shadow-[0_1px_2px_rgb(17_17_17/0.08)]" : "text-texto-suave hover:text-texto"
+              }`}
+            >
+              {v.titulo}
+              {i === 0 && opcoes.length > 1 && <span className="ml-1.5 text-[11.5px] font-normal text-texto-suave">atual</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function Aprendizado() {
@@ -63,7 +112,21 @@ export default function Aprendizado() {
     setMemoria((m) => (m ? { ...m, regras: m.regras.map((r) => (r.id === regra.id ? regra : r)) } : m));
   const tirarRegra = (id: string) => setMemoria((m) => (m ? { ...m, regras: m.regras.filter((r) => r.id !== id) } : m));
 
-  const ativas = memoria?.regras.filter((r) => r.ativa).length ?? 0;
+  // A vaga escolhida (?vaga= na URL, para os links da vaga e dos 90 dias abrirem já nela). Sem escolha: a mais recente.
+  const [pedida, setPedida] = useState<string | null>(null);
+  useEffect(() => setPedida(new URLSearchParams(window.location.search).get("vaga")), []);
+  const opcoes = memoria ? vagasDaMemoria(memoria) : [];
+  const vaga = opcoes.find((v) => v.id === pedida) ?? opcoes[0];
+  const escolher = (id: string) => {
+    setPedida(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set("vaga", id);
+    window.history.replaceState(null, "", url);
+  };
+
+  const regras = memoria?.regras.filter((r) => r.origem.vagaId === vaga?.id) ?? [];
+  const ignorados = memoria?.ignorados.filter((i) => i.origem.vagaId === vaga?.id) ?? [];
+  const ativas = regras.filter((r) => r.ativa).length;
 
   return (
     <Casca>
@@ -95,10 +158,13 @@ export default function Aprendizado() {
 
         {memoria && (
           <>
-            <Concordancia porVaga={memoria.concordancia.porVaga} />
+            {vaga && <SeletorVaga opcoes={opcoes} escolhida={vaga.id} onEscolher={escolher} />}
+
+            <Concordancia porVaga={memoria.concordancia.porVaga} vagaId={vaga?.id} onEscolher={escolher} />
 
             {MODO_DEV && (
               <Simulador
+                vaga={vaga ?? VAGA_DA_DEMO}
                 onAprendeu={(nova, ids) => {
                   setMemoria(nova);
                   setNovas(new Set(ids));
@@ -107,25 +173,24 @@ export default function Aprendizado() {
             )}
 
             <Secao
-              titulo="Critérios aprendidos"
-              detalhe={`${ativas} de ${memoria.regras.length} ${memoria.regras.length === 1 ? "ligado" : "ligados"}`}
-              apoio="Cada critério vale só na vaga de onde veio. Os ligados entram no plano e na avaliação das próximas entrevistas dessa vaga, marcados como critério aprendido com o time."
+              titulo="Critérios aprendidos nesta vaga"
+              detalhe={regras.length ? `${ativas} de ${regras.length} ${regras.length === 1 ? "ligado" : "ligados"}` : undefined}
+              apoio={`Valem só nas entrevistas de ${vaga?.titulo ?? "cada vaga"}. Os ligados entram no plano e na avaliação das próximas entrevistas, marcados como critério aprendido com o time.`}
             >
-              {memoria.regras.length === 0 ? (
+              {regras.length === 0 ? (
                 <div className="cartao p-6 text-[14px] text-texto-suave">
-                  Ainda nada. Quando o Tech Lead escrever o motivo de uma decisão no Slack, o Totti guarda aqui o critério
-                  técnico.
+                  Ainda nada nesta vaga. Quando o Tech Lead escrever o motivo de uma decisão no Slack, o Totti guarda aqui o
+                  critério técnico.
                 </div>
               ) : (
                 <ul className="cartao overflow-hidden py-1">
                   <AnimatePresence initial={false}>
-                    {memoria.regras.map((r) => (
+                    {regras.map((r) => (
                       <LinhaRegra
                         key={r.id}
                         regra={r}
                         nova={novas.has(r.id)}
                         criterios={memoria.criterios}
-                        vagas={memoria.vagas}
                         onMudou={trocarRegra}
                         onApagou={tirarRegra}
                       />
@@ -137,15 +202,15 @@ export default function Aprendizado() {
 
             <Secao
               titulo="O que o Totti ignorou"
-              detalhe={memoria.ignorados.length ? String(memoria.ignorados.length) : undefined}
+              detalhe={ignorados.length ? String(ignorados.length) : undefined}
               apoio="Motivo que não é técnico nunca vira regra. Fica registrado aqui para o time ver o que foi descartado e por quê."
             >
-              {memoria.ignorados.length === 0 ? (
-                <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado até agora.</div>
+              {ignorados.length === 0 ? (
+                <div className="cartao p-6 text-[14px] text-texto-suave">Nenhum motivo descartado nesta vaga.</div>
               ) : (
                 <ul className="cartao overflow-hidden py-1">
-                  {memoria.ignorados.map((m) => (
-                    <LinhaIgnorado key={m.id} item={m} vagas={memoria.vagas} />
+                  {ignorados.map((m) => (
+                    <LinhaIgnorado key={m.id} item={m} />
                   ))}
                 </ul>
               )}
@@ -185,9 +250,18 @@ function Esqueleto() {
 // 1. Concordância
 // ---------------------------------------------------------------------------
 
-function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
+function Concordancia({
+  porVaga,
+  vagaId,
+  onEscolher,
+}: {
+  porVaga: ConcordanciaVaga[];
+  vagaId: string | undefined;
+  onEscolher: (id: string) => void;
+}) {
   const comNumero = porVaga.filter((v) => v.pct !== null);
-  const atual = comNumero.at(-1);
+  // O número grande é o da vaga escolhida; o gráfico continua com todas, para mostrar a série no tempo.
+  const atual = comNumero.find((v) => v.vagaId === vagaId);
   const primeira = comNumero[0];
   const delta = atual && primeira && atual !== primeira ? atual.pct! - primeira.pct! : null;
 
@@ -207,7 +281,7 @@ function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
               {atual.pct}%
             </motion.span>
             <p className="max-w-[420px] text-[14.5px] leading-relaxed text-texto">
-              Na vaga atual ({atual.vagaTitulo}), o Tech Lead decidiu igual ao Totti em{" "}
+              Em {atual.vagaTitulo}, o Tech Lead decidiu igual ao Totti em{" "}
               <span className="numero font-medium">
                 {atual.concordou} de {atual.total}
               </span>{" "}
@@ -230,18 +304,28 @@ function Concordancia({ porVaga }: { porVaga: ConcordanciaVaga[] }) {
             </p>
           </>
         ) : (
-          <p className="text-[14.5px] text-texto-suave">A concordância aparece depois das primeiras decisões no Slack.</p>
+          <p className="max-w-[420px] text-[14.5px] text-texto-suave">
+            A concordância desta vaga aparece depois das primeiras decisões do Tech Lead no Slack.
+          </p>
         )}
       </div>
-      {comNumero.length > 0 && <GraficoConcordancia vagas={comNumero} />}
+      {comNumero.length > 0 && <GraficoConcordancia vagas={comNumero} escolhida={vagaId} onEscolher={onEscolher} />}
     </section>
   );
 }
 
 const ALTURA_GRAFICO = 148;
 
-/** Colunas por vaga, da mais antiga para a atual. A atual em tinta, as anteriores em cinza. */
-function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
+/** Colunas por vaga, da mais antiga para a atual. A escolhida em tinta, as outras em cinza; clicar numa coluna escolhe a vaga. */
+function GraficoConcordancia({
+  vagas,
+  escolhida,
+  onEscolher,
+}: {
+  vagas: ConcordanciaVaga[];
+  escolhida: string | undefined;
+  onEscolher: (id: string) => void;
+}) {
   const [foco, setFoco] = useState<string | null>(null);
   return (
     <figure className="flex flex-col gap-2">
@@ -273,18 +357,28 @@ function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
           <ul className="relative flex">
             {vagas.map((v, i) => {
               const atual = i === vagas.length - 1;
+              const marcada = v.vagaId === escolhida;
               const aberto = foco === v.vagaId;
               const altura = Math.max(2, (ALTURA_GRAFICO * (v.pct ?? 0)) / 100);
               return (
                 <li
                   key={v.vagaId}
                   tabIndex={0}
+                  role="button"
+                  aria-pressed={marcada}
+                  onClick={() => onEscolher(v.vagaId)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onEscolher(v.vagaId);
+                    }
+                  }}
                   onMouseEnter={() => setFoco(v.vagaId)}
                   onMouseLeave={() => setFoco(null)}
                   onFocus={() => setFoco(v.vagaId)}
                   onBlur={() => setFoco(null)}
                   aria-label={`${v.vagaTitulo}: ${v.pct}%, ${v.concordou} de ${v.total} decisões iguais`}
-                  className="group relative flex w-[92px] flex-col items-center outline-none sm:w-[104px]"
+                  className="group relative flex w-[92px] cursor-pointer flex-col items-center outline-none sm:w-[104px]"
                 >
                   <div className="relative flex w-full items-end justify-center" style={{ height: ALTURA_GRAFICO }}>
                     <motion.div
@@ -295,13 +389,13 @@ function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
                         delay: 0.1 + i * 0.08,
                         ease: curvaSuave,
                       }}
-                      className={`relative w-6 rounded-t-[4px] transition-opacity ${atual ? "bg-texto" : "bg-[#c4bdb1]"} ${
-                        foco && !aberto ? "opacity-60" : ""
-                      }`}
+                      className={`relative w-6 rounded-t-[4px] transition-[opacity,background-color] ${
+                        marcada ? "bg-texto" : "bg-[#c4bdb1] group-hover:bg-[#a9a196]"
+                      } ${foco && !aberto ? "opacity-60" : ""}`}
                     >
                       <span
                         className={`numero absolute -top-6 left-1/2 -translate-x-1/2 text-[12.5px] whitespace-nowrap ${
-                          atual ? "font-semibold text-texto" : "text-texto-suave"
+                          marcada ? "font-semibold text-texto" : "text-texto-suave"
                         }`}
                       >
                         {v.pct}%
@@ -332,7 +426,7 @@ function GraficoConcordancia({ vagas }: { vagas: ConcordanciaVaga[] }) {
                   </div>
                   <span
                     className={`mt-2 line-clamp-2 px-1 text-center text-[12px] leading-tight ${
-                      atual ? "font-medium text-texto" : "text-texto-suave"
+                      marcada ? "font-medium text-texto" : "text-texto-suave"
                     }`}
                   >
                     {v.vagaTitulo}
@@ -390,14 +484,12 @@ function LinhaRegra({
   regra,
   nova,
   criterios,
-  vagas,
   onMudou,
   onApagou,
 }: {
   regra: RegraSquad;
   nova: boolean;
   criterios: VisaoMemoria["criterios"];
-  vagas: Record<string, string>;
   onMudou: (r: RegraSquad) => void;
   onApagou: (id: string) => void;
 }) {
@@ -469,21 +561,13 @@ function LinhaRegra({
                 <SeloEfeito efeito={regra.efeito} />
                 <span className="text-[12.5px] text-texto-suave">
                   Pesa em <span className="text-texto">{nomeCriterio}</span>
-                  {" · "}
-                  {vagas[regra.origem.vagaId] ? (
-                    <>
-                      vale em <span className="text-texto">{vagas[regra.origem.vagaId]}</span>
-                    </>
-                  ) : (
-                    "vale só na vaga de origem"
-                  )}
                 </span>
                 {nova && <span className="rotulo-destaque">Acabou de aprender</span>}
                 {!regra.ativa && <span className="text-[12.5px] text-texto-suave">· desligado</span>}
               </div>
               <p className="text-[15px] leading-snug text-texto">{regra.texto}</p>
               <p className="text-[12.5px] text-texto-suave">
-                {textoDaOrigem(regra.origem, vagas, false)} · {dataCurta(regra.criadaEm)}
+                {textoDaOrigem(regra.origem)} · {dataCurta(regra.criadaEm)}
               </p>
               {falha && <p className="text-[12.5px] text-perigo">{falha}</p>}
             </div>
@@ -674,7 +758,7 @@ function EditorRegra({
 // 3. Ignorados
 // ---------------------------------------------------------------------------
 
-function LinhaIgnorado({ item, vagas }: { item: MotivoIgnorado; vagas: Record<string, string> }) {
+function LinhaIgnorado({ item }: { item: MotivoIgnorado }) {
   return (
     <li className="linha-lista flex gap-3 px-5 py-4">
       <ShieldOff size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-texto-suave" />
@@ -684,7 +768,7 @@ function LinhaIgnorado({ item, vagas }: { item: MotivoIgnorado; vagas: Record<st
         </p>
         <p className="text-[13px] text-texto">Ignorado: {item.porque}.</p>
         <p className="text-[12.5px] text-texto-suave">
-          {textoDaOrigem(item.origem, vagas)} · {dataCurta(item.criadoEm)}
+          {textoDaOrigem(item.origem)} · {dataCurta(item.criadoEm)}
         </p>
       </div>
     </li>
@@ -710,7 +794,8 @@ const SUGESTOES: { decisao: "aprovado" | "reprovado"; motivo: string }[] = [
   },
 ];
 
-function Simulador({ onAprendeu }: { onAprendeu: (memoria: VisaoMemoria, novas: string[]) => void }) {
+/** Ensina na vaga escolhida na tela, como se o card do Slack fosse de uma entrevista dela. */
+function Simulador({ vaga, onAprendeu }: { vaga: OpcaoVaga; onAprendeu: (memoria: VisaoMemoria, novas: string[]) => void }) {
   const [decisao, setDecisao] = useState<"aprovado" | "reprovado">("reprovado");
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -727,7 +812,7 @@ function Simulador({ onAprendeu }: { onAprendeu: (memoria: VisaoMemoria, novas: 
       const r = await fetch("/api/squad-memory/simular", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decisao, motivo }),
+        body: JSON.stringify({ decisao, motivo, vagaId: vaga.id, vagaTitulo: vaga.titulo }),
       });
       if (!r.ok) throw new Error(String(r.status));
       const { aprendizado, memoria } = (await r.json()) as {
@@ -752,7 +837,7 @@ function Simulador({ onAprendeu }: { onAprendeu: (memoria: VisaoMemoria, novas: 
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-texto">Simular o Tech Lead no Slack</h2>
         <span className="text-[12px] text-texto-suave">
-          Só em desenvolvimento · Rafael Moura, Backend Pleno · o Totti recomendou avançar
+          Só em desenvolvimento · Rafael Moura, {vaga.titulo} · o Totti recomendou avançar
         </span>
       </div>
       <form

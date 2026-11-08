@@ -62,7 +62,7 @@ export default function AprendidoNoPlano({ formato, vagaIds }: { formato: Interv
           Aprendido com o time
           <span className="numero text-[13px] font-normal text-texto-suave">{regras.length}</span>
         </h2>
-        <Link href="/vagas/aprendizado" className="inline-flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto">
+        <Link href={`/vagas/aprendizado?vaga=${encodeURIComponent(regras[0].origem.vagaId)}`} className="inline-flex items-center gap-1 text-[13px] text-texto-suave hover:text-texto">
           Ver tudo
           <ArrowRight size={13} />
         </Link>
