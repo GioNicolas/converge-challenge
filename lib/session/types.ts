@@ -12,8 +12,9 @@ import type { LlmStatsSnapshot } from "@/lib/llm";
  * (complexidade, bordas) sem insinuar erro. desafio: pedir para melhorar ou resolver um cenário, só com
  * código funcionando. retorno: voltar a um desafio que o candidato topou ("e aí, como foi?").
  * encerramento: a última conversa, quando o candidato pede para finalizar, com o que ficou pendente.
+ * empecilho: o Totti traz uma mudança no problema (lib/agents/empecilho.ts); a primeira fala é o anúncio.
  */
-export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento";
+export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento" | "empecilho";
 
 /** Como o candidato se saiu ao ser sondado num critério (ou se mostrou sozinho). */
 export type ProbeKind = "espontaneo" | "respondeu_bem" | "parcial" | "errou" | "nao_conseguiu" | "com_dica" | "recusou";
@@ -45,6 +46,17 @@ export interface CheckIn {
   /** Versão do código quando o candidato topou: o retorno espera o código mudar. */
   versionAtStart: number;
   status: "aguardando" | "na_fila" | "feito";
+  /** Retorno de um empecilho (não de um desafio): "e aí, como ficou com a mudança?". */
+  empecilhoId?: string;
+}
+
+/** O empecilho da sessão, desde que virou balão. Um por sessão. */
+export interface EmpecilhoState {
+  id: string;
+  blipId: string;
+  raisedAt: number;
+  /** Quando o Totti fez o anúncio (primeira fala da conversa). Antes disso, o candidato ainda não sabe. */
+  announcedAt?: number;
 }
 
 /** Pergunta preparada pelo Analyst, ainda não necessariamente virou blip. */
@@ -139,6 +151,7 @@ export interface SessionState {
   lastConversationEndedAt?: number;
   coverage: Record<string, CriterionCoverage>;
   checkIns: CheckIn[];
+  empecilho?: EmpecilhoState;
   report?: ReportStatus;
   /** Relógio da sessão em ms; só a simulação (scripts/simulate.ts) define. Senão, Date.now() - startedAt. */
   clock?: () => number;
@@ -163,6 +176,7 @@ export interface SessionStateView {
   evidence: EvidenceNote[];
   coverage: Record<string, CriterionCoverage>;
   checkIns: CheckIn[];
+  empecilho?: EmpecilhoState;
   /** Estado da avaliação final (o relatório em si sai em GET /api/report). */
   report?: Omit<ReportStatus, "report">;
   /** Estatísticas dos LLMs (Featherless x OpenRouter) desde o start do servidor. */
