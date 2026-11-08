@@ -1,6 +1,7 @@
 import type { Alinhamento } from "../presenca/alinhamento";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
+import { escolherVozPt } from "./escolherVoz";
 export type ProvedorVoz = "elevenlabs" | "navegador";
 type EventosVoz = { aoIniciar: (provedor: ProvedorVoz) => void; aoProgresso: (caracteres: number) => void };
 
@@ -61,7 +62,7 @@ export function falarNoNavegador(texto: string, sinal: AbortSignal, eventos: Eve
       fala = new SpeechSynthesisUtterance(texto);
       fala.lang = "pt-BR";
       fala.rate = 1.05;
-      const voz = window.speechSynthesis.getVoices().find((v) => /^pt(-|$)/i.test(v.lang));
+      const voz = escolherVozPt(window.speechSynthesis.getVoices());
       if (voz) fala.voice = voz;
       fala.onstart = () => {
         if (terminou) return;
@@ -124,8 +125,9 @@ export function criarVoz(dependencias = { fetch: globalThis.fetch, tocar: tocarC
           sinal.throwIfAborted();
           progresso(parte.texto.length);
           continue;
-        } catch {
+        } catch (erro) {
           sinal.throwIfAborted();
+          console.warn("[voz] usando síntese do navegador:", erro);
         }
       }
       await dependencias.navegador(parte.texto, sinal, { aoIniciar: eventos.aoIniciar, aoProgresso: progresso });

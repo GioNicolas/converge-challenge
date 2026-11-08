@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { EsquemaVisualOpcional, type AcaoVisual } from "../presenca/acoesVisuais";
 import type { MarcaDeFala } from "../presenca/vozSincronizada";
+import { escolherVozPt } from "../voz/escolherVoz";
 
 // Único ponto de acesso do quadro ao servidor.
 // O modo de demonstração continua sendo o padrão.
@@ -232,7 +233,7 @@ function falarNoNavegador(texto: string, aoProgresso: (caracteres: number) => vo
       fala = new SpeechSynthesisUtterance(texto);
       fala.lang = "pt-BR";
       fala.rate = 1.05;
-      const voz = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith("pt"));
+      const voz = escolherVozPt(window.speechSynthesis.getVoices());
       if (voz) fala.voice = voz;
       estimativa = setInterval(() => {
         if (!comAviso) aoProgresso(Math.min(texto.length, Math.round(((performance.now() - inicio) / 1000) * 15)));

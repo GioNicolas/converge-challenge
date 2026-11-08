@@ -16,6 +16,7 @@ import { usarServidor, type Fase } from "@/lib/sessao/cliente";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocalQuadro";
 import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { useLiberarAudio } from "@/lib/presenca/useLiberarAudio";
 import { FilaFalas } from "@/lib/audio/filaFalas";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
@@ -114,6 +115,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const cursor = useRef<ControleCursor | null>(null);
   const entrevista = useEntrevista(quadro, cursor, { configId, convite });
   const midia = useMidiaLocal();
+  // A voz do agente chega depois de uma chamada assíncrona: libera o áudio no primeiro gesto (ex.: "Começar").
+  useLiberarAudio();
   const { estado, sessao } = entrevista;
   const liberarMidia = midia.liberar;
   useEffect(() => {

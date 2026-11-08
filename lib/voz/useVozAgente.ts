@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { focoAudio } from "../audio/foco";
+import { useLiberarAudio } from "../presenca/useLiberarAudio";
 import { reproduzirFala, type ProvedorVoz } from "./cliente";
 
 export type FalaAgente = { id: string; texto: string };
@@ -11,6 +12,8 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
   ultimaFala?: FalaAgente | null;
   bloqueada?: boolean;
 } = {}) {
+  // Sem o destrave, o play() do áudio do ElevenLabs é bloqueado e a fala cai na voz do navegador.
+  useLiberarAudio();
   const [estado, setEstado] = useState<EstadoVoz>("inativa");
   const [habilitada, setHabilitada] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
