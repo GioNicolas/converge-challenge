@@ -1,7 +1,8 @@
 "use client";
 
 // A entrevista contada em duas partes: em cima, um gráfico simples de quanto dos testes passava a cada execução,
-// com um ícone no minuto de cada acontecimento; embaixo, os mesmos acontecimentos escritos, em ordem de tempo.
+// com um ícone no minuto de cada acontecimento e, embaixo dele, as faixas de quando cada um falou e de quando o
+// código mudou (aparecem mesmo se ele nunca rodou o código); abaixo de tudo, os acontecimentos escritos, em ordem.
 // Passar o mouse num deles acende o outro; clicar abre o código e a conversa daquele minuto.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronRight, ClipboardPaste, Lightbulb, Shuffle, TriangleAlert, type LucideIcon } from "lucide-react";
@@ -44,6 +45,9 @@ const TOM: Record<TipoAcontecimento, string> = {
 const ALTURA_PLOT = 150;
 const FOLGA_Y = 10;
 const TAMANHO_ICONE = 22;
+/** Altura de cada faixa (candidato, Totti, código) e o respiro entre o gráfico e elas. */
+const ALTURA_FAIXA = 26;
+const ESPACO_FAIXAS = 10;
 /** Altura de cada fileira de ícones acima do gráfico. */
 const ALTURA_FILEIRA = TAMANHO_ICONE + 4;
 
@@ -91,7 +95,25 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
   const [destaque, setDestaque] = useState<number | null>(null);
 
   const execucoes = gravacao?.execucoes ?? [];
-  const duracao = Math.max(duracaoBruta, ...execucoes.map((e) => e.t), ...acontecimentos.map((a) => a.fim ?? a.t), 1);
+  const temCurva = execucoes.length > 0;
+  // Quando cada um falou e quando o código mudou: é a linha do tempo que existe mesmo sem execução.
+  const faixas = gravacao
+    ? [
+        { nome: "Candidato", marcas: gravacao.falas.filter((f) => f.role === "candidate").map((f) => f.t), tom: "bg-texto" },
+        { nome: "Totti", marcas: gravacao.falas.filter((f) => f.role === "agent").map((f) => f.t), tom: "bg-texto/35" },
+        { nome: "Código", marcas: gravacao.codigo.map((c) => c.t), tom: "bg-texto/60" },
+      ]
+    : [];
+  const alturaPlot = temCurva ? ALTURA_PLOT : 0;
+  const topoFaixas = temCurva ? ALTURA_PLOT + ESPACO_FAIXAS : 0;
+  const alturaArea = topoFaixas + faixas.length * ALTURA_FAIXA;
+  const duracao = Math.max(
+    duracaoBruta,
+    ...execucoes.map((e) => e.t),
+    ...faixas.flatMap((f) => f.marcas),
+    ...acontecimentos.map((a) => a.fim ?? a.t),
+    1,
+  );
   const x = (t: number) => (Math.min(Math.max(t, 0), duracao) / duracao) * largura;
   const yFrac = (f: number) => FOLGA_Y + (1 - f) * (ALTURA_PLOT - 2 * FOLGA_Y);
   const marcas = useMemo(() => marcasDoEixo(duracao), [duracao]);
@@ -142,22 +164,34 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
       <div className="flex flex-col gap-0.5">
         <h2 className="text-[17px] font-medium">Como foi a entrevista</h2>
         <p className="text-sm text-texto-suave">
-          {execucoes.length > 0
-            ? "A linha mostra quanto dos testes passava cada vez que ele rodou o código."
-            : "O que aconteceu durante a entrevista, em ordem."}
+          {temCurva
+            ? "A linha mostra quanto dos testes passava cada vez que ele rodou o código; embaixo, quando cada um falou e quando o código mudou."
+            : "Quando cada um falou e quando o código mudou. Ele não rodou o código nesta entrevista, então não há linha de testes."}
         </p>
       </div>
 
       <div className="rounded-padrao bg-superficie p-4 sm:p-6">
-        <div className="flex gap-2">
-          {/* Eixo y: só 0, metade e todos */}
-          <div aria-hidden className="relative w-9 shrink-0 text-right text-[11px] text-texto-suave tabular-nums">
-            {execucoes.length > 0 &&
+        {!gravacao && acontecimentos.length === 0 && (
+          <p className="text-[14px] text-texto-suave">A gravação desta entrevista não está disponível.</p>
+        )}
+        <div className={`flex gap-2 ${!gravacao && acontecimentos.length === 0 ? "hidden" : ""}`}>
+          {/* Coluna da esquerda: o eixo y do gráfico (0, metade e todos) e o nome de cada faixa */}
+          <div aria-hidden className="relative w-[4.5rem] shrink-0 text-right text-[11px] text-texto-suave tabular-nums">
+            {temCurva &&
               [1, 0.5, 0].map((f) => (
                 <span key={f} className="absolute right-0 -translate-y-1/2" style={{ top: alturaTrilha + yFrac(f) }}>
                   {f * 100}%
                 </span>
               ))}
+            {faixas.map((f, k) => (
+              <span
+                key={f.nome}
+                className="absolute right-0 -translate-y-1/2"
+                style={{ top: alturaTrilha + topoFaixas + k * ALTURA_FAIXA + ALTURA_FAIXA / 2 }}
+              >
+                {f.nome}
+              </span>
+            ))}
           </div>
 
           <div ref={ref} className="relative min-w-0 flex-1">
@@ -181,10 +215,10 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
               })}
             </div>
 
-            {/* O gráfico */}
+            {/* O gráfico e as faixas embaixo dele, com o mesmo eixo de tempo */}
             <div
               className="relative"
-              style={{ height: ALTURA_PLOT }}
+              style={{ height: alturaArea }}
               onPointerMove={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
                 const t = ((e.clientX - r.left) / r.width) * duracao;
@@ -192,7 +226,7 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
               }}
               onPointerLeave={() => setCursor(null)}
             >
-              {execucoes.length > 0 &&
+              {temCurva &&
                 [1, 0.5, 0].map((f) => (
                   <span key={f} aria-hidden className="absolute inset-x-0 h-px bg-texto/[0.07]" style={{ top: yFrac(f) }} />
                 ))}
@@ -219,7 +253,7 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
               )}
 
               {curva && (
-                <svg width={largura} height={ALTURA_PLOT} className="absolute inset-0 overflow-visible" aria-hidden>
+                <svg width={largura} height={alturaPlot} className="absolute inset-x-0 top-0 overflow-visible" aria-hidden>
                   <path d={curva.area} fill="var(--texto)" fillOpacity={0.06} />
                   <path d={curva.linha} fill="none" stroke="var(--texto)" strokeWidth={2} strokeLinejoin="round" />
                   {execucoes.map((e, i) => (
@@ -236,7 +270,21 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
                 </svg>
               )}
 
-              {cursor && gravacao && <Cursor cursor={cursor} gravacao={gravacao} x={x(cursor.t)} largura={largura} />}
+              {/* Faixas: um traço por fala de cada um e por versão do código */}
+              {faixas.map((f, k) => (
+                <div key={f.nome} aria-hidden className="absolute inset-x-0" style={{ top: topoFaixas + k * ALTURA_FAIXA, height: ALTURA_FAIXA }}>
+                  <span className="absolute inset-x-0 top-1/2 h-px bg-texto/[0.07]" />
+                  {f.marcas.map((t, j) => (
+                    <span
+                      key={j}
+                      className={`absolute top-1/2 h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full ${f.tom}`}
+                      style={{ left: x(t) }}
+                    />
+                  ))}
+                </div>
+              ))}
+
+              {cursor && gravacao && <Cursor cursor={cursor} gravacao={gravacao} x={x(cursor.t)} largura={largura} altura={alturaArea} />}
             </div>
 
             {/* Eixo do tempo */}
@@ -311,14 +359,18 @@ export default function HistoriaDaEntrevista({ duracao: duracaoBruta, gravacao, 
 }
 
 /** Linha vertical que acompanha o mouse, com quantos testes passavam e o que estava sendo dito. */
-function Cursor({ cursor, gravacao, x, largura }: {
+function Cursor({ cursor, gravacao, x, largura, altura }: {
   cursor: { t: number; y: number };
   gravacao: Gravacao;
   x: number;
   largura: number;
+  /** Altura da área do gráfico: o cartão não passa do fundo dela. */
+  altura: number;
 }) {
   const e = execucaoAte(gravacao, cursor.t);
-  const fala = gravacao.falas.filter((f) => f.t <= cursor.t && f.t >= cursor.t - 30_000).at(-1);
+  // Com execuções, só a fala dos últimos 30 s (o contexto da linha); sem elas, a conversa é tudo: vale a última fala até ali.
+  const janela = gravacao.execucoes.length > 0 ? 30_000 : Infinity;
+  const fala = gravacao.falas.filter((f) => f.t <= cursor.t && f.t >= cursor.t - janela).at(-1);
   const w = Math.min(260, largura);
   const esquerda = x + 12 + w <= largura ? x + 12 : Math.max(0, x - 12 - w);
   return (
@@ -326,12 +378,15 @@ function Cursor({ cursor, gravacao, x, largura }: {
       <span aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-texto/40" style={{ left: x }} />
       <div
         className="pointer-events-none absolute z-10 rounded-pequeno bg-superficie p-2.5 text-[13px] shadow-flutuante ring-1 ring-borda"
-        style={{ left: esquerda, top: Math.min(cursor.y + 12, ALTURA_PLOT - 40), width: w }}
+        style={{ left: esquerda, top: Math.max(0, Math.min(cursor.y + 12, altura - 40)), width: w }}
       >
         <p className="text-xs text-texto-suave tabular-nums">{formatMs(cursor.t)}</p>
-        <p className="font-medium tabular-nums">
-          {e ? `${e.passed} de ${e.total} testes passando` : "Ainda não tinha rodado o código"}
-        </p>
+        {/* Sem nenhuma execução na entrevista, a linha dos testes não diz nada: fica só a conversa */}
+        {(e || gravacao.execucoes.length > 0) && (
+          <p className="font-medium tabular-nums">
+            {e ? `${e.passed} de ${e.total} testes passando` : "Ainda não tinha rodado o código"}
+          </p>
+        )}
         {fala && (
           <p className="mt-1 line-clamp-2 leading-snug text-texto-suave">
             {fala.role === "candidate" ? "Candidato" : "Totti"}: “{fala.text}”
