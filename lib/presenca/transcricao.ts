@@ -33,6 +33,21 @@ export function esperaParaReconectar(tentativa: number): number | null {
   return Number.isInteger(tentativa) && tentativa >= 0 && tentativa < 5 ? 500 * 2 ** tentativa : null;
 }
 
+/**
+ * O Scribe "ouve" frases em silêncio e ruído de fundo (alucinação). Só aceitamos um trecho se o
+ * microfone teve voz de verdade nele: blocos acima de LIMIAR_VOZ_RMS somando ao menos VOZ_MINIMA_MS.
+ * O microfone já vem com supressão de ruído e ganho automático, então fala normal fica bem acima disso.
+ */
+export const LIMIAR_VOZ_RMS = 0.01;
+export const VOZ_MINIMA_MS = 200;
+
+export function energiaRms(amostras: Float32Array): number {
+  if (!amostras.length) return 0;
+  let soma = 0;
+  for (let i = 0; i < amostras.length; i++) soma += amostras[i] * amostras[i];
+  return Math.sqrt(soma / amostras.length);
+}
+
 export function misturarMono(canais: readonly Float32Array[]): Float32Array {
   const tamanho = canais[0]?.length ?? 0;
   if (canais.some((canal) => canal.length !== tamanho)) throw new RangeError("Os canais devem ter o mesmo tamanho.");

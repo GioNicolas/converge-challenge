@@ -9,7 +9,7 @@ import { perguntar } from "@/lib/sessao/servidor";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/sessao/turnos";
-import { criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
+import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {
   analisar,
@@ -603,7 +603,8 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
       if (atual.plin === "PERGUNTA_ATIVA" && (r.responder || r.concluiu)) terminarResposta(texto, false);
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
-        novas.push(nova("agente", r.texto));
+        const alvos = [...new Set((mapearAcoesVisuais(r.visual, (id) => conversor.current.idReal(id)) ?? []).flatMap(alvosDaAcao))];
+        novas.push({ ...nova("agente", r.texto), ...(alvos.length ? { alvos } : {}), ...(r.requisito ? { requisito: r.requisito } : {}) });
         if (quadro && r.visual?.length) {
           const atual = { quadro, grupo: `conversa:${contadorDeMensagens.current}`, controle: new AbortController(), tarefa: undefined as Promise<void> | undefined };
           visualDaConversa.current = atual;

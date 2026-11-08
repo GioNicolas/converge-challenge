@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
 import {
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
-  misturarMono, reamostrar, urlDoScribe,
+  energiaRms, LIMIAR_VOZ_RMS, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
   type EstadoReamostragem, type TrechoTranscrito,
 } from "./transcricao";
 
@@ -56,6 +56,8 @@ export function criarEscutaTranscricao(opcoes: {
   let conectando = false;
   let pronto = false;
   let segmento = 0;
+  /** Quanto de voz (ms) o microfone captou desde o último trecho fechado. */
+  let vozNoTrecho = 0;
   let socket: WebSocket | null = null;
   let contexto: AudioContext | null = null;
   let fonte: MediaStreamAudioSourceNode | null = null;
@@ -85,6 +87,7 @@ export function criarEscutaTranscricao(opcoes: {
   function limparParcial() {
     if (texto.parcial && !encerrado) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
     texto = { ...texto, parcial: null };
+    vozNoTrecho = 0;
     reamostragem = { soma: 0, peso: 0 };
     pendentes = new Float32Array(0);
   }
@@ -151,6 +154,7 @@ export function criarEscutaTranscricao(opcoes: {
         if (encerrado || !contexto || !pronto) return;
         const canais = Array.from({ length: evento.inputBuffer.numberOfChannels }, (_, i) => evento.inputBuffer.getChannelData(i));
         const amostras = podeOuvir() ? misturarMono(canais) : new Float32Array(evento.inputBuffer.length);
+        if (energiaRms(amostras) >= LIMIAR_VOZ_RMS) vozNoTrecho += (amostras.length / contexto.sampleRate) * 1000;
         const convertido = reamostrar(amostras, contexto.sampleRate, 16000, reamostragem);
         reamostragem = convertido.estado;
         const junto = new Float32Array(pendentes.length + convertido.amostras.length);
@@ -206,9 +210,17 @@ export function criarEscutaTranscricao(opcoes: {
           conectadoEm = performance.now();
           publicar({ motor: "elevenlabs", escutando: podeOuvir(), erro: null });
         } else if (m.message_type === "partial_transcript" && typeof m.text === "string") {
-          receber(m.text, false, `${atual}:${segmento}`);
+          // Sem voz no microfone, o parcial é alucinação: não mostra nem segura o turno do agente.
+          if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, false, `${atual}:${segmento}`);
         } else if (m.message_type === "committed_transcript" && typeof m.text === "string") {
-          receber(m.text, true, `${atual}:${segmento++}`);
+          if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
+          else if (m.text.trim()) {
+            console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
+            if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
+            texto = { ...texto, parcial: null };
+          }
+          segmento++;
+          vozNoTrecho = 0;
         } else if (typeof m.error === "string") {
           falharScribe(["quota_exceeded", "unaccepted_terms", "input_error", "invalid_request", "chunk_size_exceeded"].includes(m.message_type ?? ""));
         }

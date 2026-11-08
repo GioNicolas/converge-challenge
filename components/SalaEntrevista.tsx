@@ -18,7 +18,7 @@ import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { FilaFalas } from "@/lib/audio/filaFalas";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
-import { adicionar, type Requisito } from "@/lib/sessao/requisitos";
+import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
 
 /** Demonstração: o que o agente pergunta, o que o candidato responde e o requisito que fica combinado. */
@@ -64,7 +64,7 @@ function useDemoRequisitos() {
     setPasso((p) => p + 1);
     const idPergunta = `demo-${passo}-agente`;
     const idResposta = `demo-${passo}-candidato`;
-    setMensagens((m) => [...m, { id: idPergunta, quem: "agente", texto: item.pergunta, horario: Date.now() }]);
+    setMensagens((m) => [...m, { id: idPergunta, quem: "agente", texto: item.pergunta, horario: Date.now(), requisito: item.requisito }]);
 
     // A resposta chega aos poucos (parcial), como a transcrição da voz, e depois fica final.
     const palavras = item.resposta.split(" ");
@@ -167,6 +167,21 @@ export default function SalaEntrevista() {
   // Conversa por texto: só com servidor real e entrevista em andamento. Demo e digitadas aparecem juntas, por horário.
   const podeDigitar = usarServidor() && sessao !== null && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA";
   const mensagensDaConversa = [...demo.mensagens, ...entrevista.mensagens].sort((a, b) => a.horario - b.horario);
+
+  // "ver no quadro": o que a fala marcou no desenho, ou o requisito que ela combinou e o agente escreveu.
+  const elementosDaFala = useCallback((m: MensagemConversa) => {
+    if (!quadro || (!m.alvos?.length && !m.requisito)) return [];
+    const alvos = new Set(m.alvos ?? []);
+    const requisito = m.requisito ? normalizar(m.requisito) : null;
+    return quadro.api.getSceneElements().filter((e) => alvos.has(e.id)
+      || (requisito !== null && e.type === "text" && /^agente-requisito-\d+$/.test(e.id) && normalizar(e.originalText) === requisito));
+  }, [quadro]);
+  const verNoQuadro = useCallback((m: MensagemConversa) => {
+    const elementos = elementosDaFala(m);
+    if (!quadro || !elementos.length) return;
+    quadro.api.scrollToContent(elementos, { fitToContent: false, animate: true, duration: 450 });
+    quadro.api.updateScene({ appState: { selectedElementIds: Object.fromEntries(elementos.map((e) => [e.id, true as const])) } });
+  }, [quadro, elementosDaFala]);
   const { enviarTexto } = entrevista;
   const { combinar } = demo;
   const enviarDigitado = useCallback(
@@ -310,7 +325,8 @@ export default function SalaEntrevista() {
         mensagens={mensagensDaConversa}
         onEnviar={podeDigitar ? enviarDigitado : undefined}
         onDigitando={entrevista.registrarAtividade}
-        onVerNoQuadro={(id) => console.debug("[conversa] ver no quadro", id)}
+        onVerNoQuadro={verNoQuadro}
+        temNoQuadro={(m) => elementosDaFala(m).length > 0}
       />
 
       <ConfirmarEncerrar

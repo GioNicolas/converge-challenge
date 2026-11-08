@@ -248,4 +248,7 @@ test("mão compõe gestos e traços livres, pode só falar e preserva o desenho 
   await expect.poll(() => rodada).toBe(3);
   await expect.poll(async () => (await gestos()).length).toBe(0);
   expect((await cenaVisual(page)).filter((e) => e.autor !== "agente")).toEqual(candidatoAntes);
+  // "ver no quadro" só nas falas que marcaram algo do desenho (as duas primeiras); a última só conversou.
+  await page.getByRole("button", { name: "Abrir conversa" }).click();
+  await expect(page.getByRole("button", { name: /^Ver no quadro:/ })).toHaveCount(2);
 });
