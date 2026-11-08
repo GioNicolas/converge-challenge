@@ -64,7 +64,7 @@ flowchart LR
 
 ---
 
-## O que só o Totti faz
+## Onde o Totti faz a diferença
 
 ### 1. Monta a entrevista numa conversa, não num formulário
 
@@ -99,9 +99,10 @@ Entrevista técnica é cheia de pausa. "Deixa eu pensar…" não é fim de respo
 
 ### 4. A mão do Totti no quadro
 
-No system design, o Totti não é só uma voz. Ele tem **um cursor com o nome dele**, como um colega no Figma, e usa o quadro enquanto fala:
+No system design, o Totti não é só uma voz. Quando precisa mostrar algo, ele usa o quadro como um colega no Figma: **um cursor com o nome dele entra em cena**.
 
-- **aponta, sublinha, circula, enquadra, percorre e compara** as peças do desenho do candidato, e escreve anotações curtas;
+- **A mão não fica parada no quadro o tempo todo.** Ela só aparece quando o Totti pergunta sobre uma parte do desenho ou escreve alguma coisa, e **some assim que o gesto termina**. No resto do tempo, o quadro é todo do candidato.
+- Quando aparece, ela **aponta, sublinha, circula, enquadra, percorre e compara** as peças do desenho, ou escreve uma anotação curta;
 - tudo **sincronizado com a voz**: a mão chega na peça na hora em que ele fala dela;
 - os gestos ficam numa camada temporária. **O Totti nunca altera o desenho do candidato.**
 
@@ -158,14 +159,14 @@ Toda decisão da recrutadora ou do tech lead pode virar critério: um motivo com
 
 ### 11. Acompanha a contratação até o fim da experiência
 
-As outras ferramentas param na contratação. O Totti vai até os **90 dias**, o fim da experiência CLT.
+A entrevista não termina na contratação. O Totti vai até os **90 dias**, o fim da experiência CLT.
 
 - A vaga que contratou ganha a aba **Contratações**: para cada pessoa contratada, lado a lado, **o que a entrevista disse e o que aconteceu de verdade**.
 - O gestor responde em **3 toques**: deu certo? em que critério a entrevista errou? o que surpreendeu? (opcional).
 - A resposta vira regra: "a entrevista deu 4 em casos de borda, e o pagamento duplicado em produção mostrou que não era" vira **"Casos de borda → mais rigor: quando esta vaga reabrir, o Totti pede para escrever o teste do caso de borda, não basta citar"**.
 - No topo da aba fica o número que importa: **"2 de 3 aprovadas aos 90 dias"**.
 
-É isso que um concorrente não copia: **a memória do seu time, calibrada pelo resultado real.**
+É isso que fica com a empresa: **a memória do seu time, calibrada pelo resultado real.**
 
 ---
 
