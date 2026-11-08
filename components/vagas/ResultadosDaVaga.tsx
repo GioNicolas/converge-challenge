@@ -263,6 +263,7 @@ export function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
   };
 
   const botao = "rounded-lg border border-borda px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-superficie-2 disabled:opacity-50";
+  const botaoForte = "rounded-lg border border-texto bg-texto px-3 py-1.5 text-[13px] font-medium text-fundo transition-opacity hover:opacity-85 disabled:opacity-50";
 
   return (
     <section className="flex flex-col gap-2 border-t border-borda pt-3" aria-label="Decisão sobre o candidato">
@@ -278,7 +279,7 @@ export function BlocoDeDecisao({ e }: { e: EntrevistaReal }) {
             {escolha === "avancar" ? "Avançar" : "Não avançar"} com {e.candidato ?? "este candidato"}? O candidato recebe o feedback por e-mail.
           </p>
           <div className="flex gap-2">
-            <button type="button" className={`${botao} bg-texto text-fundo`} disabled={enviando} onClick={confirmar}>
+            <button type="button" className={botaoForte} disabled={enviando} onClick={confirmar}>
               {enviando ? "Enviando…" : "Confirmar e avisar"}
             </button>
             <button type="button" className={botao} disabled={enviando} onClick={() => setEscolha(null)}>
