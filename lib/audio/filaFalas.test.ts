@@ -97,3 +97,26 @@ test("encerrar descarta falas pendentes mesmo se o pedido anterior resolver depo
   await andar();
   assert.deepEqual(recebidas, ["em andamento"]);
 });
+
+test("um \"hm\" solto com a resposta a caminho não cancela o pedido nem vira fala nova", async () => {
+  const recebidas: string[] = [];
+  let soltar = () => {};
+  const fila = new FilaFalas((texto) => {
+    recebidas.push(texto);
+    return new Promise<void>((resolver) => { soltar = resolver; });
+  }, () => assert.fail("sem erro esperado"));
+  fila.adicionar("Vou guardar os links num banco relacional.");
+  fila.adicionar("Hmm...");
+  fila.adicionar("é, tá");
+  soltar();
+  await andar();
+  assert.deepEqual(recebidas, ["Vou guardar os links num banco relacional."]);
+});
+
+test("sem nada a caminho, o \"hm\" segue como fala (quem decide é o agente)", async () => {
+  const recebidas: string[] = [];
+  const fila = new FilaFalas(async (texto) => { recebidas.push(texto); }, () => assert.fail("sem erro esperado"));
+  fila.adicionar("hm");
+  await andar();
+  assert.deepEqual(recebidas, ["hm"]);
+});

@@ -238,7 +238,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   }, [estado.fase]);
   useEffect(() => () => filaVoz.current?.limpar(), []);
   // Turn-taking: os trechos finais do STT se acumulam e só seguem após o silêncio de `esperaDoFimDaFala`
-  // (1,1 s com a frase fechada; até 2,4 s quando ela termina pendurada, "e aí eu colocaria...").
+  // (1,5 s com a frase fechada; até 2,6 s quando ela termina pendurada, "e aí eu colocaria...").
   // Fala parcial ou voz no microfone nesse intervalo adia o envio (não corta a frase no meio).
   // Teto: barulho constante da sala não pode segurar a fala para sempre (2,5 s depois do primeiro trecho, só o
   // silêncio em curso decide).
@@ -288,6 +288,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       if (!timerBarge.current) {
         timerBarge.current = setTimeout(() => {
           timerBarge.current = null;
+          // Fica no console: se o Totti for cortado no fim da fala, dá para ver se foi o microfone ouvindo a caixa de som.
+          console.info("[voz] barge-in: o microfone ouviu voz alta por cima do Totti e ele calou");
           calarRef.current?.();
         }, 380);
       }

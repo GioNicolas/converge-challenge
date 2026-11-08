@@ -5,9 +5,10 @@
  */
 const PENDURADA = /(,|\b(e|ent[ãa]o|a[ií]|porque|que|de|do|da|dos|das|pra|para|com|tipo|mas|ou|o|a|os|as|um|uma|no|na|nos|nas|se|quando|como|em|por|pelo|pela|tipo assim|sabe|né|hum+|hm+|é+|ah+|eh+))\s*$/i;
 
-export const ESPERA_FRASE_FECHADA_MS = 1100;
-export const ESPERA_FRASE_CURTA_MS = 1600;
-export const ESPERA_FRASE_PENDURADA_MS = 2400;
+// 1,1 s partia uma em cada três falas de quem pensa alto, e cada pedaço novo refazia a resposta do zero (~5 s).
+export const ESPERA_FRASE_FECHADA_MS = 1500;
+export const ESPERA_FRASE_CURTA_MS = 1900;
+export const ESPERA_FRASE_PENDURADA_MS = 2600;
 
 export function esperaDoFimDaFala(texto: string): number {
   const t = texto.trim().replace(/[.…]+$/, "").trim();

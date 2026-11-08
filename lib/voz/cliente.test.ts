@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { criarVoz, dividirFala, MENSAGEM_VOZ_INDISPONIVEL } from "./cliente";
+import { comFolga } from "./folga";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
 
@@ -22,7 +23,7 @@ test("usa o áudio da Sofia e propaga o progresso do player", async () => {
     },
     tocar: async (_audio, alinhamento, opcoes) => {
       assert.equal(iniciou, false);
-      assert.deepEqual(alinhamento, dadosVoz.alinhamento);
+      assert.deepEqual(alinhamento, comFolga(new Uint8Array(), dadosVoz.alinhamento).alinhamento);
       opcoes.aoProgresso?.(0);
       assert.equal(iniciou, true);
       opcoes.aoProgresso?.(2);

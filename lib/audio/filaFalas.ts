@@ -18,6 +18,13 @@ export type OpcoesFilaFalas = {
 
 const juntar = (...partes: (string | null)[]) => partes.filter((p): p is string => !!p).join(" ");
 
+/** Só som de quem pensa ("hm", "é...", "tá", "então"): não é uma fala nova. */
+const PREENCHIMENTO = /^(?:(?:h+m+|hum+|uhum|aham|ah+|eh+|e+|ta|tah|ok|okay|entao|ne|tipo|bom|beleza|certo)\s*)+$/;
+export function eSoPreenchimento(texto: string): boolean {
+  const t = texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  return !!t && PREENCHIMENTO.test(t);
+}
+
 export class FilaFalas {
   private pendente: string | null = null;
   private falhou: string | null = null;
@@ -41,6 +48,10 @@ export class FilaFalas {
   adicionar(texto: string) {
     const limpo = texto.trim();
     if (!limpo) return;
+    // Um "hm" solto logo depois da fala não pode jogar fora a resposta que já está a caminho: refazer o pedido custa
+    // mais uma volta inteira do modelo e da voz (era a maior parte da demora quando ele pensava alto).
+    const respostaAindaNaoOuvida = !this.pendente && !!this.ultimaEnviada && !!this.opcoes.respostaNaoOuvida?.();
+    if ((this.emVoo || respostaAindaNaoOuvida) && eSoPreenchimento(limpo)) return;
     if (this.emVoo) {
       // O pedido em voo ainda não respondeu: cancela e manda tudo junto.
       const anterior = this.emVoo;
@@ -48,7 +59,7 @@ export class FilaFalas {
       anterior.controle.abort();
       this.pendente = juntar(anterior.texto, this.pendente, limpo);
       this.substitui = true;
-    } else if (!this.pendente && this.ultimaEnviada && this.opcoes.respostaNaoOuvida?.()) {
+    } else if (respostaAindaNaoOuvida) {
       // A resposta chegou mas ainda não tocou: ninguém a ouviu, então ela sai e a fala vai inteira.
       this.opcoes.descartarResposta?.();
       this.pendente = juntar(this.ultimaEnviada, limpo);
