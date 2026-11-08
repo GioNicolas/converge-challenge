@@ -177,3 +177,19 @@ describe("guardas", () => {
     assert.equal(limitarFrases("Um. Dois! Três?", 2), "Um. Dois!");
   });
 });
+
+describe("foto do quadro", () => {
+  const FOTO = "data:image/jpeg;base64,/9j/4AAQ";
+  it("vai ao modelo junto do pedido, com a instrução de como usá-la", async () => {
+    const llm = criarClienteFalso([{ status: "ok", observacoes: [] }]);
+    await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), { ...pedido(), imagem_base64: FOTO }, AGORA);
+    assert.equal(llm.chamadas[0].imagem, FOTO);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
+  });
+  it("sem foto, nada muda", async () => {
+    const llm = criarClienteFalso([{ status: "ok", observacoes: [] }]);
+    await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(llm.chamadas[0].imagem ?? null, null);
+    assert.doesNotMatch(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
+  });
+});

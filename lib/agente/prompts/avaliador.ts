@@ -5,7 +5,7 @@
 import type { Kit, Problema } from "../kits/tipos";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
-import { conversaEmTexto, historicoDaConversa, perguntasFeitasEmTexto } from "./contexto";
+import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
@@ -199,7 +199,9 @@ ${pedido.mudancas.trim() || "(nada informado)"}
 CONVERSA ATÉ AGORA, da mais antiga à mais recente (só as linhas "Candidato:" são falas dele; cite apenas o que está nelas)
 ${conversa}
 
-GRAFO ATUAL (dados do candidato)
+${pedido.imagem_base64 ? `${INSTRUCAO_IMAGEM}
+
+` : ""}GRAFO ATUAL (dados do candidato)
 Gestos recentes (não repetir sem motivo): ${JSON.stringify(pedido.gestos_recentes ?? [])}
 <grafo>
 ${pedido.grafo}

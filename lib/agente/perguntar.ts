@@ -35,6 +35,10 @@ export type EntradaPerguntar = {
   gestosRecentes?: string[];
   /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
   conversaDoQuadro?: FalaRecente[];
+  /** Foto leve do quadro (data URL), para o modelo ver o desenho além do grafo. */
+  imagemBase64?: string | null;
+  /** O que acabou de mudar no desenho. */
+  mudancas?: string;
 };
 
 export type ResultadoPerguntar = {
@@ -74,7 +78,7 @@ export async function perguntar(
     const r = await deps.llm.completarJson({
       sistema: {
         estatico: montarSistemaEstaticoPerguntar(deps.kit, deps.problema),
-        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro),
+        dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64),
       },
       mensagens: [{ role: "user", content: entrada.texto }],
       schema: EsquemaSaidaPerguntar,
@@ -82,6 +86,7 @@ export async function perguntar(
       modelo: deps.modelo,
       maxTokens: deps.maxTokens ?? 200,
       sinal,
+      imagem: entrada.imagemBase64 ?? null,
     });
     saida = r.dados;
   } catch (e) {

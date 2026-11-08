@@ -34,6 +34,8 @@ export const EsquemaPedidoAnalise = z.object({
   conversa_recente: z.array(EsquemaFalaRecente),
   perguntas_feitas: z.number().int().min(0),
   imagem_url: z.string().nullable(),
+  /** Foto leve do quadro (data URL JPEG), para o modelo ver o desenho além do grafo. Ausente = só o grafo. */
+  imagem_base64: z.string().max(500_000).nullable().optional(),
   /** Segundos desde a última atividade do candidato (mexer no desenho ou falar). Ausente = desconhecido. */
   parado_ha_s: z.number().min(0).max(86_400).optional(),
   /** Requisitos já combinados e escritos no quadro. */

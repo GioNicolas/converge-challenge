@@ -24,6 +24,8 @@ export type LlmArgs<T> = {
   /** Orçamento de tempo desta chamada (inclui o retry). Padrão: o do cliente (8000 ms, loop ao vivo). */
   timeoutMs?: number;
   sinal?: AbortSignal;
+  /** Foto do quadro (data URL JPEG/PNG/WebP), para o modelo ver o desenho além do grafo em texto. */
+  imagem?: string | null;
 };
 
 export type LlmResultado<T> = {

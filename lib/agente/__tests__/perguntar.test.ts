@@ -141,3 +141,15 @@ describe("desfecho da pergunta ativa", () => {
     assert.equal(r.desfecho, null);
   });
 });
+
+describe("foto e mudanças do quadro no /perguntar", () => {
+  it("a foto vai ao modelo e o que mudou entra no contexto", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+    await perguntar(deps(llm), { ...estado, fase: "ALTO_NIVEL" }, {
+      fase: "ALTO_NIVEL", texto: "Olha o que eu fiz aqui", imagemBase64: "data:image/jpeg;base64,/9j/", mudancas: "+ adicionou [r2] Cache",
+    }, AGORA);
+    assert.equal(llm.chamadas[0].imagem, "data:image/jpeg;base64,/9j/");
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /acabou de mudar no desenho.*adicionou \[r2\] Cache/);
+    assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
+  });
+});

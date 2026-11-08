@@ -18,6 +18,7 @@ import { avaliacaoDoPlano, escalarTempos, planoDaConfig } from "../plano";
 import { perguntar } from "../perguntar";
 import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
+  EsquemaFalaRecente,
   EsquemaFase,
   EsquemaPedidoAnalise,
   type PedidoAnalise,
@@ -33,7 +34,8 @@ import { criarLimitador, erro, ipDe, json, lerJsonValidado, type ParamsId } from
 export const PRAZO_ANALISE_MS = 8000;
 export const MAX_ANALISES_POR_SESSAO = 200;
 export const MAX_CORPO_JSON = 64 * 1024;
-export const MAX_CORPO_ANALISE = 160 * 1024;
+/** Cabe a foto do quadro (até 500 mil caracteres) além do grafo e da conversa. */
+export const MAX_CORPO_ANALISE = 700_000;
 export const MAX_CORPO_EVENTOS = 256 * 1024;
 export const MAX_IMAGEM = 4 * 1024 * 1024;
 
@@ -140,6 +142,7 @@ const EsquemaPedidoLimitado = EsquemaPedidoAnalise.extend({
     .max(40),
   perguntas_feitas: z.number().int().min(0).max(1000),
   imagem_url: z.string().max(2048).nullable(),
+  imagem_base64: z.string().max(500_000).nullable().optional(),
 });
 
 /** Leva o estado do servidor até a fase que o quadro informou (só avança), por evento da máquina. */
@@ -259,7 +262,16 @@ const EsquemaPerguntar = z.object({
   pergunta_ativa: z.string().max(2000).optional(),
   requisitos: z.array(z.string().max(200)).max(30).optional(),
   gestos_recentes: z.array(z.string().max(250)).max(6).optional(),
+  /** Foto leve do quadro (data URL JPEG). */
+  imagem_base64: z.string().max(500_000).nullable().optional(),
+  /** O que acabou de mudar no desenho. */
+  mudancas: z.string().max(8000).optional(),
+  /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
+  conversa_do_quadro: z.array(EsquemaFalaRecente.extend({ texto: z.string().max(4000) })).max(30).optional(),
 });
+
+/** Corpo do /perguntar: a foto do quadro não cabe no limite padrão. */
+const MAX_CORPO_PERGUNTAR = 700_000;
 
 /** A pergunta do agente que esta fala responde: a ativa, ou a última com o texto que o quadro mandou. */
 function perguntaRespondida(estado: EstadoSessao, perguntaAtiva: string | undefined): number | null {
@@ -271,7 +283,7 @@ function perguntaRespondida(estado: EstadoSessao, perguntaAtiva: string | undefi
 
 export async function perguntarHandler(req: Request, { params }: ParamsId): Promise<Response> {
   const { id } = await params;
-  const corpo = await lerJsonValidado(req, EsquemaPerguntar, MAX_CORPO_JSON);
+  const corpo = await lerJsonValidado(req, EsquemaPerguntar, MAX_CORPO_PERGUNTAR);
   if (!corpo.ok) return corpo.resposta;
   if (!eIdPlausivel(id)) return notFound();
   if (corpo.dados.sessao_id !== id) return erro(400, "sessao_id do corpo diferente da rota");
@@ -293,7 +305,8 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       perguntar(
         { llm: ctx.llm, kit: alvo.kit, problema: alvo.problema },
         estado,
-        { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes },
+        { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes,
+          imagemBase64: corpo.dados.imagem_base64, mudancas: corpo.dados.mudancas, conversaDoQuadro: corpo.dados.conversa_do_quadro },
         agora,
         AbortSignal.timeout(PRAZO_ANALISE_MS),
       ).catch(() => null),

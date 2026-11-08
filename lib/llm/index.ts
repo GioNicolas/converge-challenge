@@ -440,6 +440,8 @@ export async function completeJson<T>(opts: {
   signal?: AbortSignal;
   /** Tempo total que quem chama vai esperar: retry e reparo de JSON só acontecem se couberem nele. */
   prazoMs?: number;
+  /** Imagem que acompanha o pedido (data URL). Só vai ao OpenRouter; sem ela, nada muda. */
+  imageDataUrl?: string | null;
 }): Promise<ChatJsonResult<T>> {
   const cfg = ROLE_CONFIG[opts.role];
   const fala = PAPEIS_DE_FALA.has(opts.role);
@@ -453,6 +455,7 @@ export async function completeJson<T>(opts: {
       priorizarLatencia: fala,
       prioridade: fala ? "fala" : "fundo",
       ...(opts.prazoMs !== undefined ? { prazoAte: Date.now() + opts.prazoMs } : {}),
+      ...(opts.imageDataUrl ? { imageDataUrl: opts.imageDataUrl } : {}),
     },
     models: {
       featherless: process.env[cfg.featherlessEnv] || cfg.featherlessDefault,
