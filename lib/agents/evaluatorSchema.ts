@@ -11,6 +11,13 @@ export const EvaluatorCriterion = z.object({
 
 export const EvaluatorOutput = z.object({
   criteria: z.array(EvaluatorCriterion),
+  /** Só quando houve empecilho: como ele se adaptou à mudança. Fica fora da nota geral. */
+  adaptation: z
+    .object({
+      score: z.number().int().min(1).max(4).nullable(),
+      evidence: z.array(z.object({ at: z.string(), text: z.string() })).max(3),
+    })
+    .nullish(),
   summary: z.string(),
   strengths: z.array(z.string()).max(4),
   concerns: z.array(z.string()).max(4),

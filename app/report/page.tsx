@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Report } from "@/lib/contracts";
+import { CONCEITOS_EMPECILHO, Report } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import type { ReportListItem } from "@/app/api/report/route";
 
@@ -95,6 +95,8 @@ function SessionReport({ id }: { id: string }) {
         ))}
       </section>
 
+      {report.adaptation && <Adaptacao a={report.adaptation} />}
+
       <section className="grid gap-4 sm:grid-cols-3">
         <List title="Pontos fortes" items={report.strengths} />
         <List title="Atenção" items={report.concerns} />
@@ -106,6 +108,43 @@ function SessionReport({ id }: { id: string }) {
         {report.signals.pastes} colagens · {formatMs(report.signals.durationMs)}
       </p>
     </main>
+  );
+}
+
+const TIPO_MUDANCA = { requisito: "O requisito mudou", caso_novo: "Entrou um caso novo" } as const;
+
+/** Empecilho: a mudança que o Totti trouxe no meio e como ele se adaptou. Nota à parte, fora da geral. */
+function Adaptacao({ a }: { a: NonNullable<Report["adaptation"]> }) {
+  const tempo = a.adaptedAt === null ? null : formatMs(a.adaptedAt - a.announcedAt);
+  return (
+    <section className="space-y-3">
+      <h2 className="titulo">Adaptação à mudança</h2>
+      <div className="rounded-padrao bg-superficie p-4 shadow-cartao">
+        <p className="flex justify-between font-medium">
+          {a.title}
+          <span className="numero">{a.score === null ? "Sem nota" : `${a.score}/4`}</span>
+        </p>
+        <p className="label-pequena">
+          {TIPO_MUDANCA[a.kind]} · exige {CONCEITOS_EMPECILHO[a.concept]} · fora da nota geral
+        </p>
+        <p className="mt-2 text-corpo">
+          Veio aos <span className="numero">{formatMs(a.announcedAt)}</span> ·{" "}
+          {tempo ? (
+            <>
+              testes da mudança passaram <span className="numero">{tempo}</span> depois
+            </>
+          ) : (
+            "não chegou a passar nos testes da mudança"
+          )}{" "}
+          · código final: <span className="numero">{a.testsPassed}/{a.testsTotal}</span>
+        </p>
+        {a.evidence.map((e, i) => (
+          <p key={i} className="text-corpo text-texto-suave">
+            <span className="numero">{formatMs(e.t)}</span> — {e.text}
+          </p>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -80,6 +80,64 @@ export const RunResult = z.object({
 export type RunResult = z.infer<typeof RunResult>;
 
 // ---------------------------------------------------------------------------
+// Empecilho: o problema muda no meio da entrevista (agente → IDE)
+// ---------------------------------------------------------------------------
+
+/** requisito: o comportamento pedido muda. caso_novo: entra um tipo de entrada que antes não existia. */
+export const EmpecilhoKind = z.enum(["requisito", "caso_novo"]);
+export type EmpecilhoKind = z.infer<typeof EmpecilhoKind>;
+
+/**
+ * O conceito que o empecilho exige para o candidato se adaptar. Vocabulário fixo de propósito: o relatório
+ * de aprendizado (F2) agrupa por ele ("quanto tempo levou para destravar em valores repetidos").
+ * Conceito novo? Acrescente aqui e em CONCEITOS_EMPECILHO.
+ */
+export const ConceitoEmpecilho = z.enum([
+  "entrada_vazia", // a entrada pode vir vazia
+  "ausencia_de_resposta", // pode não existir solução: devolver um valor combinado
+  "dado_invalido", // leituras inválidas no meio dos dados, que precisam ser ignoradas
+  "valores_repetidos", // a premissa de valores distintos caiu
+  "parametro_fora_do_limite", // um parâmetro pode passar do limite que o código assumia
+  "normalizacao_de_entrada", // limpar ou filtrar a entrada antes de processar
+  "caso_base", // a recorrência ganha um caso base ou limite novo
+  "criterio_de_desempate", // passa a ter várias respostas válidas e uma regra para escolher uma
+]);
+export type ConceitoEmpecilho = z.infer<typeof ConceitoEmpecilho>;
+
+/** Nome legível de cada conceito (relatório e prompts). */
+export const CONCEITOS_EMPECILHO: Record<ConceitoEmpecilho, string> = {
+  entrada_vazia: "tratar entrada vazia",
+  ausencia_de_resposta: "tratar quando não existe resposta",
+  dado_invalido: "ignorar dados inválidos no meio da entrada",
+  valores_repetidos: "lidar com valores repetidos",
+  parametro_fora_do_limite: "lidar com parâmetro fora do limite esperado",
+  normalizacao_de_entrada: "normalizar a entrada antes de processar",
+  caso_base: "redefinir o caso base",
+  criterio_de_desempate: "escolher entre várias respostas válidas com uma regra de desempate",
+};
+
+/** Teste no formato da IDE: argumentos na ordem da assinatura. */
+/** Nome dos testes da mudança na IDE e no RunResult ("Mudança: Sem par"). */
+export const PREFIXO_TESTE_MUDANCA = "Mudança: ";
+
+export const TesteIde = z.object({ name: z.string(), args: z.array(z.unknown()), expected: z.unknown() });
+export type TesteIde = z.infer<typeof TesteIde>;
+
+/** O que a IDE recebe do empecilho quando o agente o anuncia. Os testes só chegam ao navegador nessa hora. */
+export const EmpecilhoPublico = z.object({
+  id: z.string(),
+  kind: EmpecilhoKind,
+  concept: ConceitoEmpecilho,
+  /** Título curto para o bloco "Mudança" do enunciado ("Pode não existir par"). */
+  title: z.string(),
+  /** A regra nova, como vai no enunciado. Pode ter `código` entre crases. */
+  statement: z.string(),
+  /** Testes novos, somados aos visíveis a partir de agora. */
+  tests: z.array(TesteIde),
+});
+export type EmpecilhoPublico = z.infer<typeof EmpecilhoPublico>;
+
+// ---------------------------------------------------------------------------
 // Eventos da sessão (IDE → agente, via POST /api/events)
 // ---------------------------------------------------------------------------
 
@@ -100,6 +158,21 @@ export const SessionEvent = z.discriminatedUnion("type", [
   /** Candidato clicou "agora não" no balão: a pergunta volta mais tarde. */
   z.object({ ...base, type: z.literal("blip_snoozed"), blipId: z.string() }),
   z.object({ ...base, type: z.literal("language_changed"), language: z.string() }),
+  /**
+   * O agente anunciou um empecilho (o servidor grava, na hora da fala do Totti). `concept` diz o que ele exige:
+   * a F2 mede a adaptação a partir daqui (primeiro run com os testes da mudança passando).
+   */
+  z.object({
+    ...base,
+    type: z.literal("empecilho"),
+    empecilhoId: z.string(),
+    kind: EmpecilhoKind,
+    concept: ConceitoEmpecilho,
+    title: z.string(),
+    blipId: z.string(),
+    /** Nomes dos testes da mudança, como aparecem em RunResult.cases. */
+    testNames: z.array(z.string()),
+  }),
   z.object({ ...base, type: z.literal("session_ended"), reason: z.enum(["timeout", "button"]) }),
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
@@ -119,6 +192,8 @@ export const Blip = z.object({
   priority: z.number().min(0).max(1),
   createdAt: z.number(),
   highlight: LineRange.optional(),
+  /** Balão de empecilho: a IDE abre a conversa sozinha, sem "agora não", e aplica a mudança na tela. */
+  empecilho: EmpecilhoPublico.optional(),
 });
 export type Blip = z.infer<typeof Blip>;
 
@@ -204,6 +279,24 @@ export const Report = z.object({
   concerns: z.array(z.string()),
   /** Pontos pra explorar na próxima etapa do processo. */
   nextSteps: z.array(z.string()),
+  /** Como ele se adaptou ao empecilho. Só existe se o Totti chegou a anunciar um. Fora da nota geral. */
+  adaptation: z
+    .object({
+      empecilhoId: z.string(),
+      kind: EmpecilhoKind,
+      concept: ConceitoEmpecilho,
+      title: z.string(),
+      announcedAt: z.number(),
+      /** Primeiro run, depois do anúncio, com todos os testes da mudança passando. null = não chegou lá. */
+      adaptedAt: z.number().nullable(),
+      /** Testes da mudança rodados no servidor ao fim (visíveis + escondidos dela). */
+      testsPassed: z.number().int(),
+      testsTotal: z.number().int(),
+      /** null = não deu para observar (ex.: anunciado no último minuto). */
+      score: z.number().int().min(1).max(4).nullable(),
+      evidence: z.array(Evidence),
+    })
+    .optional(),
   signals: z.object({
     testsPassed: z.number().int(),
     testsTotal: z.number().int(),

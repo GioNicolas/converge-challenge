@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, ChevronDown, ChevronUp, Loader2, X } from "lucide-react";
-import type { RunResult } from "@/lib/contracts";
+import { PREFIXO_TESTE_MUDANCA as PREFIXO_MUDANCA, type RunResult } from "@/lib/contracts";
 
 export type RunState =
   | { status: "idle" }
@@ -86,7 +86,18 @@ function Done({ result }: { result: RunResult }) {
               <X size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-perigo" />
             )}
             <div className="min-w-0">
-              <p className="font-medium">{c.name}</p>
+              <p className="font-medium">
+                {c.name.startsWith(PREFIXO_MUDANCA) ? (
+                  <>
+                    <span className="mr-1.5 rounded-full bg-alerta/15 px-1.5 py-0.5 text-mini font-medium text-alerta">
+                      Mudança
+                    </span>
+                    {c.name.slice(PREFIXO_MUDANCA.length)}
+                  </>
+                ) : (
+                  c.name
+                )}
+              </p>
               {!c.passed && (
                 <p className="font-mono text-mini text-texto-suave">
                   {c.error ?? `esperado ${c.expected}, obtido ${c.got}`}

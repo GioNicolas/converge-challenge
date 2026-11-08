@@ -25,15 +25,29 @@ export type HiddenTestsResult =
   | { ran: true; passed: number; total: number; cases: HiddenTestCase[]; durationMs: number }
   | { ran: false; reason: string };
 
-export async function runHiddenTests(problem: Problem, code: string, language: string): Promise<HiddenTestsResult> {
+export function runHiddenTests(problem: Problem, code: string, language: string): Promise<HiddenTestsResult> {
+  return runServerTests(problem, problem.private.hiddenTests, code, language);
+}
+
+/**
+ * Roda uma lista qualquer de testes do pacote no servidor (os escondidos, ou os da mudança do empecilho).
+ * `prefix` vai na frente do nome de cada caso ("Mudança: ").
+ */
+export async function runServerTests(
+  problem: Problem,
+  tests: ProblemTest[],
+  code: string,
+  language: string,
+  prefix = "",
+): Promise<HiddenTestsResult> {
   if (process.env.NODE_ENV === "production" && process.env.ENABLE_NATIVE_RUN !== "1") {
     return { ran: false, reason: "execução no servidor desligada neste ambiente" };
   }
   const ide = IDE_PROBLEMS[problem.public.id];
   if (!ide) return { ran: false, reason: `problema ${problem.public.id} sem assinatura na IDE` };
   if (code.trim() === "") return { ran: false, reason: "código vazio" };
+  if (tests.length === 0) return { ran: false, reason: "nenhum teste" };
 
-  const tests = problem.private.hiddenTests;
   const started = Date.now();
   const small = tests.filter((t) => !t.large);
   const batches: { tests: ProblemTest[]; timeoutMs: number }[] = [
@@ -43,7 +57,7 @@ export async function runHiddenTests(problem: Problem, code: string, language: s
 
   const cases: HiddenTestCase[] = [];
   for (const batch of batches) {
-    const publicTests = batch.tests.map((t, i) => toPublicTest(ide, t, cases.length + i));
+    const publicTests = batch.tests.map((t, i) => toPublicTest(ide, t, cases.length + i, prefix));
     const result = await runBatch(ide, code, language, publicTests, batch.timeoutMs);
     if (result === undefined) return { ran: false, reason: `linguagem ${language} sem runner no servidor` };
     batch.tests.forEach((t, i) => {
@@ -79,10 +93,10 @@ function runBatch(
 }
 
 /** `input` do teste escondido é um objeto por nome de parâmetro; o runner quer os argumentos em ordem. */
-function toPublicTest(ide: PublicProblem, test: ProblemTest, index: number): PublicTest {
+function toPublicTest(ide: PublicProblem, test: ProblemTest, index: number, prefix: string): PublicTest {
   const input = test.input as Record<string, unknown>;
   return {
-    name: test.name ?? `Escondido ${index + 1}`,
+    name: `${prefix}${test.name ?? `Escondido ${index + 1}`}`,
     args: ide.native.params.map((p) => input[p.name]),
     expected: test.expected,
   };

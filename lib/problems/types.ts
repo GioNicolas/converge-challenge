@@ -1,3 +1,5 @@
+import type { ConceitoEmpecilho, EmpecilhoKind } from "@/lib/contracts";
+
 /**
  * Pacote de um problema. A parte `public` pode ir pro navegador; a `private` NUNCA.
  * Testes são entrada/saída em JSON pra servir a qualquer linguagem.
@@ -23,7 +25,34 @@ export interface ProblemPublic {
   visibleTests: ProblemTest[];
 }
 
+/**
+ * Mudança que o Totti traz no meio da entrevista. Regra para escrever um: a mudança só SOMA casos ao problema,
+ * nunca contradiz um teste original (visível ou escondido), e cabe na mesma assinatura da função.
+ */
+export interface Empecilho {
+  id: string;
+  kind: EmpecilhoKind;
+  /** O que ele exige do candidato (vocabulário fixo, a F2 agrupa por isso). */
+  concept: ConceitoEmpecilho;
+  /** Título do bloco "Mudança" no enunciado. */
+  title: string;
+  /** A regra nova, como vai no enunciado. */
+  statement: string;
+  /** A fala do Totti ao anunciar: natural, curta, com um motivo de negócio. Diz O QUE mudou, nunca COMO adaptar. */
+  announcement: string;
+  /** Testes que a IDE passa a mostrar (input por nome de parâmetro, como os escondidos). Nome sem prefixo. */
+  tests: ProblemTest[];
+  /** Testes extras da mudança, só no servidor ao fim. */
+  hiddenTests?: ProblemTest[];
+  /** Respostas oficiais para dúvidas sobre a mudança. */
+  clarifications: { question: string; answer: string }[];
+  /** O que conta como boa adaptação neste caso (vai para o Evaluator). */
+  rubricNote: string;
+}
+
 export interface ProblemPrivate {
+  /** Mudanças que podem entrar no meio da entrevista. Uma por sessão. */
+  empecilhos?: Empecilho[];
   hiddenTests: ProblemTest[];
   approaches: { name: string; time: string; space: string; description: string }[];
   commonMistakes: string[];

@@ -5,6 +5,7 @@
 import type { AnalystQuestion } from "@/lib/agents/analystSchema";
 import { AnalystOutput } from "@/lib/agents/analystSchema";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
+import { mudancaParaPrompt } from "@/lib/agents/empecilho";
 import { conversasFeitas, faseDaEntrevista, formatarConversas, regiaoAlterada } from "@/lib/agents/fase";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
 import { focoPendente } from "@/lib/agents/focoQuota";
@@ -154,6 +155,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
         return `${c.id}: ${c.name} — ${c.description}`;
       }),
       hasWorkingSolution: hasWorkingSolution(session),
+      mudanca: mudancaParaPrompt(session, formatElapsed),
     });
 
     const result = await completeJson({ role: "analyst", system, user, schema: AnalystOutput });
@@ -304,6 +306,8 @@ function describeEvent(event: SessionEvent): string | undefined {
       return "pediu dica";
     case "language_changed":
       return `mudou a linguagem para ${event.language}`;
+    case "empecilho":
+      return `o entrevistador trouxe uma mudança no problema: ${event.title}`;
     case "blip_closed":
       return "conversa encerrada";
     default:
