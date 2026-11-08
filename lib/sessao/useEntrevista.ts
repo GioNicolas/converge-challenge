@@ -77,7 +77,15 @@ export async function pedidoComImagem(
   }
 }
 
-export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<ControleCursor | null>) {
+/**
+ * `configId`: plano de entrevista da vaga (o servidor escolhe o kit e calibra o agente por ele).
+ * `convite`: id do link do e-mail; liga esta sessão ao candidato no painel da vaga.
+ */
+export function useEntrevista(
+  quadro: Quadro | null,
+  cursor: React.RefObject<ControleCursor | null>,
+  opcoes: { configId?: string; convite?: string } = {},
+) {
   const [sessao, setSessao] = useState<Sessao | null>(null);
   const criacaoDaSessao = useRef<Promise<Sessao> | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
@@ -158,9 +166,17 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
 
   useEffect(() => {
     let cancelado = false;
-    criacaoDaSessao.current ??= criarSessao();
+    criacaoDaSessao.current ??= criarSessao({ configId: opcoes.configId });
     criacaoDaSessao.current.then((nova) => {
       if (!cancelado) setSessao(nova);
+      // Liga a sessão ao convite (painel da vaga). Falhar não atrapalha a entrevista.
+      if (opcoes.convite && usarServidor()) {
+        void fetch("/api/convites/sessao", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ convite: opcoes.convite, sessionId: nova.sessao_id }),
+        }).catch(() => {});
+      }
     }).catch((erro) => console.warn("[sessão] não foi possível iniciar:", erro));
     return () => { cancelado = true; };
   }, []);
@@ -556,7 +572,7 @@ export function useEntrevista(quadro: Quadro | null, cursor: React.RefObject<Con
     try {
       if (chaveDoDesenho) localStorage.removeItem(chaveDoDesenho);
     } catch {}
-  }, [enviar, silenciar, chaveDoDesenho]);
+  }, [enviar, silenciar, chaveDoDesenho, setParcialDoCandidato]);
 
   return {
     sessao,

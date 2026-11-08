@@ -546,7 +546,7 @@ export default function PaginaPreEntrevista() {
                   </a>
                   <div className="mt-2">
                     <a
-                      href={`/entrevista?config=${final.config.id}`}
+                      href={`${final.config.mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${final.config.id}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-block rounded bg-emerald-700 px-3 py-1.5 text-white hover:bg-emerald-800"

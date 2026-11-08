@@ -107,10 +107,11 @@ const Canvas = dynamic(() => import("@/components/Canvas"), {
   loading: () => <div className="h-full w-full animate-pulse bg-superficie-2" />,
 });
 
-export default function SalaEntrevista() {
+/** `configId`: plano de entrevista da vaga; `convite`: id do link do e-mail (liga a sessão ao candidato no painel). */
+export default function SalaEntrevista({ configId, convite }: { configId?: string; convite?: string } = {}) {
   const [quadro, setQuadro] = useState<Quadro | null>(null);
   const cursor = useRef<ControleCursor | null>(null);
-  const entrevista = useEntrevista(quadro, cursor);
+  const entrevista = useEntrevista(quadro, cursor, { configId, convite });
   const midia = useMidiaLocal();
   const { estado, sessao } = entrevista;
   const demo = useDemoRequisitos();

@@ -103,13 +103,14 @@ export function validarResposta(dados: unknown): RespostaAnalise {
 }
 
 // Só o enunciado vem ao navegador: a ficha de requisitos e a rubrica ficam no servidor.
-export async function criarSessao(): Promise<Sessao> {
+export async function criarSessao(opcoes: { configId?: string } = {}): Promise<Sessao> {
   vozDoServidorDisponivel = true;
   if (usarServidor()) {
     const servidor = await import("./servidor");
     return servidor.criarSessao({
       avaliacaoId: process.env.NEXT_PUBLIC_AVALIACAO_ID || "demo",
       candidatoId: process.env.NEXT_PUBLIC_CANDIDATO_ID || "demo",
+      configId: opcoes.configId,
     });
   }
   return {

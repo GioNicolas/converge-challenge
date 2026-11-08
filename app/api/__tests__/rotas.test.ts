@@ -104,6 +104,33 @@ describe("POST /api/sessoes", () => {
     assert.equal(b.apresentacao, a.apresentacao);
     assert.equal(llm.chamadas.filter((c) => c.nomeSchema === "abertura_entrevista").length, 1);
   });
+  it("com config_id: o plano escolhe o kit, escala os tempos e vai para o estado; config desconhecida cai no padrão", async () => {
+    const globais = globalThis as typeof globalThis & { __convergeConfigs?: Map<string, unknown> };
+    const mapa = (globais.__convergeConfigs ??= new Map());
+    mapa.set("cfg-teste-sd", {
+      id: "cfg-teste-sd", mode: "system_design", roleTitle: "Staff Engineer", seniority: "senior",
+      focus: [{ area: "escala_produto", weight: 1 }], recruiterNotes: "autonomia", hints: "nenhuma", tone: "desafiador",
+      criteria: [{ id: "c1", name: "Escala", description: "d", weight: 1, focus: "escala_produto" }],
+      problemId: "chatbot-atendimento-ia", languages: ["python"], durationMin: 70,
+    });
+    try {
+      const r = await criar(post("/api/sessoes", { avaliacao_id: "demo", candidato_id: "c1", config_id: "cfg-teste-sd" }));
+      assert.equal(r.status, 200);
+      const corpo = await r.json();
+      assert.equal((corpo.problema as { titulo: string }).titulo, "Chat em tempo real", "o plano trocou o kit pelo do problema");
+      const estado = (await repo.obter(corpo.sessao_id))?.estado;
+      assert.equal(estado?.plano?.cargo, "Staff Engineer");
+      assert.equal(estado?.plano?.dicas, "nenhuma");
+      assert.equal(estado?.tempos.ALTO_NIVEL, 1200, "70 min é o dobro de 35: 600 s viram 1200");
+      assert.equal(JSON.stringify(corpo).includes("autonomia"), false, "as notas da recrutadora não vão ao navegador");
+
+      const padrao = await (await criar(post("/api/sessoes", { avaliacao_id: "demo", candidato_id: "c1", config_id: "nao-existe" }))).json();
+      assert.equal((padrao.problema as { titulo: string }).titulo, "Encurtador de URL");
+      assert.equal((await repo.obter(padrao.sessao_id))?.estado.plano ?? null, null);
+    } finally {
+      mapa.delete("cfg-teste-sd");
+    }
+  });
   it("avaliação desconhecida: 404 {erro}", async () => {
     const r = await criar(post("/api/sessoes", { avaliacao_id: "nao-existe", candidato_id: "c" }));
     assert.equal(r.status, 404);

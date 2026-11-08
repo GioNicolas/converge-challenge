@@ -4,7 +4,8 @@
 // Tudo aqui é só servidor: a ficha, a rubrica e os motivos nunca vão ao navegador.
 import type { Kit, Problema } from "../kits/tipos";
 import { criteriosSemEvidencia, type EstadoSessao } from "../sessao/estado";
-import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitido } from "../sessao/politica";
+import { blocoDoPlano } from "../plano";
+import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -121,7 +122,7 @@ export function montarSistemaDinamico(
   pedido: PedidoAnalise,
   agora: number,
 ): string {
-  const permitidos = STATUS_ANALISE.filter((s) => statusPermitido(estado.fase, s));
+  const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
   const bloqueio = motivoBloqueioPlin(estado, agora);
   const semEvidencia = criteriosSemEvidencia(estado);
   const feitas = estado.perguntas.map(
@@ -134,8 +135,11 @@ export function montarSistemaDinamico(
         .map((f) => `${f.quem === "agente" ? "Entrevistador (você)" : "Candidato"}: ${f.texto}`)
         .join("\n")
     : "(nada ainda)";
+  const plano = blocoDoPlano(estado.plano);
 
-  return `ESTADO DA ENTREVISTA
+  return `${plano ? `${plano}
+
+` : ""}ESTADO DA ENTREVISTA
 Fase: ${estado.fase}
 Tempo: ${tempoRestante(estado, agora)}
 Perguntas feitas até agora: ${pedido.perguntas_feitas} (limite de ${REGRAS_PADRAO.maxPerguntas})

@@ -4,6 +4,7 @@
 // Regras de ouro: a resposta tem EXATAMENTE o formato do contrato (o quadro rejeita outro); nada de
 // ficha, sinais, armadilhas, rubrica ou diagnóstico sai daqui; o log leva só ids e metadados.
 import { z } from "zod";
+import { findConfig } from "@/lib/config/store";
 import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, respostaSilencio } from "../analisar";
@@ -11,8 +12,9 @@ import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
 import type { Kit, Problema } from "../kits/tipos";
 import type { Abertura } from "../prompts/abertura";
+import { avaliacaoDoPlano, escalarTempos, planoDaConfig } from "../plano";
 import { perguntar } from "../perguntar";
-import { transicionar, estadoInicial, type EstadoSessao, type EventoSessao } from "../sessao/estado";
+import { transicionar, estadoInicial, TEMPOS_PADRAO, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFase,
   EsquemaPedidoAnalise,
@@ -46,6 +48,8 @@ const eIdPlausivel = (id: string) => id.length > 0 && id.length <= 80;
 const EsquemaCriar = z.object({
   avaliacao_id: z.string().min(1).max(100),
   candidato_id: z.string().min(1).max(100),
+  /** Plano de entrevista da vaga (InterviewConfig da pré-entrevista). Sem ele ou desconhecido: entrevista padrão. */
+  config_id: z.string().min(1).max(80).optional(),
 });
 
 export async function criarSessaoHandler(req: Request): Promise<Response> {
@@ -53,7 +57,12 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   const corpo = await lerJsonValidado(req, EsquemaCriar, MAX_CORPO_JSON);
   if (!corpo.ok) return corpo.resposta;
 
-  const alvo = await resolverAvaliacao(corpo.dados.avaliacao_id);
+  // O plano da vaga (se vier) escolhe o kit e calibra a entrevista; config desconhecida cai na entrevista padrão.
+  const config = corpo.dados.config_id ? await findConfig(corpo.dados.config_id) : undefined;
+  const plano = config ? planoDaConfig(config) : null;
+  const avaliacaoId = (config && avaliacaoDoPlano(config)) || corpo.dados.avaliacao_id;
+
+  const alvo = await resolverAvaliacao(avaliacaoId);
   if (!alvo) return erro(404, "avaliação não encontrada");
   // Kit gerado só vai a candidato depois da aprovação humana (AGENTE_PERMITIR_NAO_APROVADA=1 libera, p/ demos).
   if (alvo.dinamica && !alvo.aprovado && process.env.AGENTE_PERMITIR_NAO_APROVADA !== "1") {
@@ -62,17 +71,21 @@ export async function criarSessaoHandler(req: Request): Promise<Response> {
   const { kit, problema } = alvo;
 
   const ctx = contexto();
-  const inicial = estadoInicial({ criterios: kit.criterios.map((c) => c.id) });
+  const inicial = estadoInicial({
+    criterios: kit.criterios.map((c) => c.id),
+    plano,
+    tempos: plano ? escalarTempos(TEMPOS_PADRAO, plano.duracaoMin) : undefined,
+  });
   const comeco = transicionar(inicial, { tipo: "COMECAR" }, ctx.agora());
   const sessao = await ctx.repositorio.criar({
-    avaliacaoId: corpo.dados.avaliacao_id,
+    avaliacaoId,
     candidatoId: corpo.dados.candidato_id,
     estado: comeco.estado,
   });
   // Apresentação e despedida escritas pelo modelo (1 chamada, guardada por kit+problema: só a primeira sessão paga a espera).
   // Sem LLM ou em erro: null, e o quadro não fala.
   const abertura = ctx.llm ? await aberturaDaSessao(ctx.llm, kit, problema) : null;
-  console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id, abertura: abertura !== null });
+  console.warn("[agente] sessao_criada", { sessao_id: sessao.id, kit: kit.id, plano: plano !== null, abertura: abertura !== null });
   return json({
     sessao_id: sessao.id,
     area: kit.area,

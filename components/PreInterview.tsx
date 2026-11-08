@@ -119,7 +119,8 @@ export default function PreInterview({ vaga = DEFAULT_CONFIG, convite }: { vaga?
           <button
             type="button"
             onClick={() =>
-              router.push(`/entrevista?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}`)
+              // System design abre o quadro; live coding abre o IDE. A mesma config e o mesmo convite seguem nos dois.
+              router.push(`${vaga.mode === "system_design" ? "/entrevista/system-design" : "/entrevista"}?config=${encodeURIComponent(vaga.id)}${convite ? `&convite=${convite}` : ""}`)
             }
             className="inline-flex items-center justify-center gap-2 rounded-controle bg-marca px-6 py-3 text-corpo font-semibold text-texto-claro transition-all duration-rapida ease-suave hover:brightness-110 active:scale-[0.98]"
           >
