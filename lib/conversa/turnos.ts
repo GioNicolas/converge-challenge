@@ -48,3 +48,24 @@ export function deveAguardarParaFalar(opcoes: {
 export function deveAnalisarLogoAposResposta(texto: string, concluiu?: boolean): boolean {
   return !concluiu && texto.trim() !== "" && !devolveAVez(texto);
 }
+
+/**
+ * O fim da resposta do candidato a uma pergunta do agente: ele ficou quieto por `limiteMs`. Conta como atividade a voz
+ * dele, a fala do agente (depois de uma pergunta ele precisa de tempo) e o desenho/digitação (`ultimaAtividade`):
+ * quem responde desenhando em silêncio ainda está respondendo. Fala parcial, pedido em andamento ou agente falando
+ * seguram o fim da resposta.
+ */
+export function respostaTerminouPorSilencio(opcoes: {
+  agora: number;
+  ultimaFalaEm: number;
+  ultimaFalaDoAgenteEm: number | null;
+  ultimaAtividade: number;
+  limiteMs: number;
+  falaParcial: boolean;
+  pedidosEmAndamento: number;
+  agenteFalando: boolean;
+}): boolean {
+  if (opcoes.falaParcial || opcoes.pedidosEmAndamento > 0 || opcoes.agenteFalando) return false;
+  const ultima = Math.max(opcoes.ultimaFalaEm, opcoes.ultimaFalaDoAgenteEm ?? 0, opcoes.ultimaAtividade);
+  return opcoes.agora - ultima >= opcoes.limiteMs;
+}

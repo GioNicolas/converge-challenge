@@ -11,7 +11,7 @@ import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
-import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno } from "@/lib/conversa/turnos";
+import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno, respostaTerminouPorSilencio } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
 import {
@@ -697,9 +697,14 @@ export function useEntrevista(
     const conferir = () => {
       fimDaRespostaCalada.current = null;
       if (estadoAtual.current.plin !== "PERGUNTA_ATIVA") return;
-      // O silêncio conta da última fala de qualquer um: depois de uma pergunta do Totti, ele precisa de tempo.
-      const quieto = Date.now() - Math.max(ultimaFalaEm.current, ultimaFalaDoAgenteEm.current ?? 0) >= limite;
-      if (!quieto || falaParcial.current || pedidosEmAndamento.current > 0 || agenteFalandoRef.current) {
+      // O silêncio conta da última fala de qualquer um (depois de uma pergunta do Totti, ele precisa de tempo) e
+      // também do desenho e da digitação: quem responde desenhando ainda está respondendo.
+      const terminou = respostaTerminouPorSilencio({
+        agora: Date.now(), ultimaFalaEm: ultimaFalaEm.current, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current,
+        ultimaAtividade: ultimaAtividade.current, limiteMs: limite, falaParcial: falaParcial.current,
+        pedidosEmAndamento: pedidosEmAndamento.current, agenteFalando: agenteFalandoRef.current,
+      });
+      if (!terminou) {
         fimDaRespostaCalada.current = setTimeout(conferir, 1000);
         return;
       }
