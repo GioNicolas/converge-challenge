@@ -7,9 +7,9 @@
 //   2. As regras que o Totti aprendeu nesta vaga, cada uma com a decisão de onde veio. Dá para editar, desligar e apagar.
 //   3. O que o guarda-corpo ignorou nesta vaga: motivo não técnico nunca vira regra, mas fica visível.
 //   4. (só em desenvolvimento) Simular o Tech Lead decidindo no Slack nesta vaga, pelo mesmo caminho do clique de verdade.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowDown, ArrowUp, Check, Pencil, ShieldOff, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, Pencil, Search, ShieldOff, Trash2, X } from "lucide-react";
 import type { ConcordanciaVaga, EfeitoRegra, MotivoIgnorado, OrigemRegra, RegraSquad } from "@/lib/squad-memory/tipos";
 import type { VisaoMemoria } from "@/lib/squad-memory/visao";
 import { curvaSuave } from "@/lib/design/motion";
@@ -39,50 +39,185 @@ function textoDaOrigem(o: OrigemRegra): string {
 
 type OpcaoVaga = { id: string; titulo: string };
 
+/** Uma vaga no seletor, com o resumo que ajuda a achar a certa entre muitas. */
+type VagaNaMemoria = OpcaoVaga & {
+  /** Concordância da vaga (null: sem decisão com posição). */
+  pct: number | null;
+  /** Critérios ligados aprendidos nesta vaga. */
+  ligados: number;
+  /** ISO da última coisa que aconteceu nela (decisão ou regra): ordena o seletor. */
+  ultimaVez: string;
+};
+
 /** A vaga do card de demo do Slack: o simulador ensina nela quando a memória ainda não tem vaga nenhuma. */
 const VAGA_DA_DEMO: OpcaoVaga = { id: "demo-backend-pleno", titulo: "Backend Pleno" };
 
 /**
- * As vagas que têm algo na memória, da mais recente para a mais antiga: primeiro as com decisões (na ordem da
- * concordância), depois as que só têm regra ou motivo ignorado (sem decisão, o nome é o id).
+ * As vagas que têm algo na memória (decisão, regra ou motivo ignorado), da mais recente para a mais antiga.
+ * Vaga sem decisão não tem nome guardado: aparece pelo id.
  */
-function vagasDaMemoria(m: VisaoMemoria): OpcaoVaga[] {
-  const comDecisao = [...m.concordancia.porVaga].reverse().map((v) => ({ id: v.vagaId, titulo: v.vagaTitulo }));
-  const vistos = new Set(comDecisao.map((v) => v.id));
-  const soComRegra: OpcaoVaga[] = [];
-  for (const { origem } of [...m.regras, ...m.ignorados]) {
-    if (vistos.has(origem.vagaId)) continue;
-    vistos.add(origem.vagaId);
-    soComRegra.push({ id: origem.vagaId, titulo: m.vagas[origem.vagaId] ?? origem.vagaId });
+function vagasDaMemoria(m: VisaoMemoria): VagaNaMemoria[] {
+  const porId = new Map<string, VagaNaMemoria>();
+  const da = (id: string) => {
+    let v = porId.get(id);
+    if (!v) porId.set(id, (v = { id, titulo: m.vagas[id] ?? id, pct: null, ligados: 0, ultimaVez: "" }));
+    return v;
+  };
+  for (const c of m.concordancia.porVaga) {
+    const v = da(c.vagaId);
+    v.pct = c.pct;
+    v.ultimaVez = c.inicio;
   }
-  return [...comDecisao, ...soComRegra];
+  for (const r of m.regras) {
+    const v = da(r.origem.vagaId);
+    if (r.ativa) v.ligados += 1;
+    if (r.criadaEm > v.ultimaVez) v.ultimaVez = r.criadaEm;
+  }
+  for (const i of m.ignorados) da(i.origem.vagaId);
+  return [...porId.values()].sort((a, b) => b.ultimaVez.localeCompare(a.ultimaVez));
 }
 
-/** Qual vaga a tela mostra. A primeira é a mais recente, marcada como atual. */
-function SeletorVaga({ opcoes, escolhida, onEscolher }: { opcoes: OpcaoVaga[]; escolhida: string; onEscolher: (id: string) => void }) {
+const semAcento = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+
+/**
+ * Qual vaga a tela mostra: um botão com a vaga escolhida que abre a lista com busca. Pensado para muitas vagas:
+ * a lista rola, a busca filtra pelo nome e as setas e o Enter escolhem sem mouse.
+ */
+function SeletorVaga({
+  opcoes,
+  escolhida,
+  onEscolher,
+}: {
+  opcoes: VagaNaMemoria[];
+  escolhida: VagaNaMemoria;
+  onEscolher: (id: string) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [busca, setBusca] = useState("");
+  const [marcada, setMarcada] = useState(0);
+  const caixa = useRef<HTMLDivElement>(null);
+  const lista = useRef<HTMLUListElement>(null);
+
+  const termo = semAcento(busca.trim());
+  const filtradas = termo ? opcoes.filter((v) => semAcento(v.titulo).includes(termo)) : opcoes;
+
+  // Fecha ao clicar fora.
+  useEffect(() => {
+    if (!aberto) return;
+    const fora = (e: MouseEvent) => {
+      if (!caixa.current?.contains(e.target as Node)) setAberto(false);
+    };
+    document.addEventListener("mousedown", fora);
+    return () => document.removeEventListener("mousedown", fora);
+  }, [aberto]);
+
+  // A linha marcada pelas setas fica sempre à vista.
+  useEffect(() => {
+    lista.current?.querySelector<HTMLElement>(`[data-i="${marcada}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [marcada]);
+
+  const abrir = () => {
+    setBusca("");
+    setMarcada(Math.max(0, opcoes.findIndex((v) => v.id === escolhida.id)));
+    setAberto(true);
+  };
+  const escolher = (id: string) => {
+    onEscolher(id);
+    setAberto(false);
+  };
+  const tecla = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") {
+      setAberto(false);
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const passo = e.key === "ArrowDown" ? 1 : -1;
+      setMarcada((i) => Math.min(filtradas.length - 1, Math.max(0, i + passo)));
+    }
+    if (e.key === "Enter" && filtradas[marcada]) {
+      e.preventDefault();
+      escolher(filtradas[marcada].id);
+    }
+  };
+
   return (
-    <div className="-mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div ref={caixa} className="relative -mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
       <span className="rotulo text-texto-suave">Vaga</span>
-      <div className="flex flex-wrap gap-0.5 rounded-full bg-superficie-2/70 p-1" role="radiogroup" aria-label="Vaga">
-        {opcoes.map((v, i) => {
-          const ativa = v.id === escolhida;
-          return (
-            <button
-              key={v.id}
-              type="button"
-              role="radio"
-              aria-checked={ativa}
-              onClick={() => onEscolher(v.id)}
-              className={`rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors ${
-                ativa ? "bg-superficie font-medium text-texto shadow-[0_1px_2px_rgb(17_17_17/0.08)]" : "text-texto-suave hover:text-texto"
-              }`}
-            >
-              {v.titulo}
-              {i === 0 && opcoes.length > 1 && <span className="ml-1.5 text-[11.5px] font-normal text-texto-suave">atual</span>}
-            </button>
-          );
-        })}
-      </div>
+      <button
+        type="button"
+        onClick={() => (aberto ? setAberto(false) : abrir())}
+        aria-haspopup="listbox"
+        aria-expanded={aberto}
+        className="flex h-10 max-w-full items-center gap-2 rounded-full bg-superficie-2/70 pr-3.5 pl-4 text-[15px] font-medium text-texto transition-colors hover:bg-superficie-2"
+      >
+        <span className="truncate">{escolhida.titulo}</span>
+        <ChevronDown size={15} className={`shrink-0 text-texto-suave transition-transform duration-200 ${aberto ? "rotate-180" : ""}`} />
+      </button>
+      <span className="text-[13px] text-texto-suave">
+        {opcoes.length} {opcoes.length === 1 ? "vaga" : "vagas"} com aprendizado
+      </span>
+
+      <AnimatePresence>
+        {aberto && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.16, ease: curvaSuave }}
+            className="absolute top-full left-0 z-30 mt-2 flex w-[min(400px,calc(100vw-32px))] flex-col overflow-hidden rounded-[18px] bg-superficie shadow-[var(--sombra-flutuante)]"
+          >
+            <label className="m-2 flex h-9 items-center gap-2 rounded-full bg-superficie-2/70 px-3.5">
+              <Search size={14} className="shrink-0 text-texto-suave" />
+              <input
+                autoFocus
+                value={busca}
+                onChange={(e) => {
+                  setBusca(e.target.value);
+                  setMarcada(0);
+                }}
+                onKeyDown={tecla}
+                placeholder="Buscar vaga"
+                aria-label="Buscar vaga"
+                className="w-full bg-transparent text-[14px] text-texto outline-none placeholder:text-texto-suave/70"
+              />
+            </label>
+            <ul ref={lista} role="listbox" aria-label="Vagas" className="max-h-[320px] overflow-y-auto px-2 pb-2">
+              {filtradas.length === 0 && (
+                <li className="px-3 py-6 text-center text-[13.5px] text-texto-suave">Nenhuma vaga com esse nome.</li>
+              )}
+              {filtradas.map((v, i) => {
+                const atual = v.id === escolhida.id;
+                return (
+                  <li
+                    key={v.id}
+                    data-i={i}
+                    role="option"
+                    aria-selected={atual}
+                    onMouseEnter={() => setMarcada(i)}
+                    onClick={() => escolher(v.id)}
+                    className={`flex cursor-pointer items-center gap-3 rounded-[12px] px-3 py-2.5 ${i === marcada ? "bg-superficie-2/70" : ""}`}
+                  >
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className={`truncate text-[14px] text-texto ${atual ? "font-medium" : ""}`}>{v.titulo}</span>
+                      <span className="text-[12.5px] text-texto-suave">
+                        {v.ligados} {v.ligados === 1 ? "critério ligado" : "critérios ligados"}
+                        {v.pct !== null && ` · ${v.pct}% de concordância`}
+                      </span>
+                    </span>
+                    {opcoes[0].id === v.id && <span className="text-[11.5px] text-texto-suave">mais recente</span>}
+                    <Check size={15} className={`shrink-0 text-texto ${atual ? "" : "invisible"}`} />
+                  </li>
+                );
+              })}
+            </ul>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -158,7 +293,7 @@ export default function Aprendizado() {
 
         {memoria && (
           <>
-            {vaga && <SeletorVaga opcoes={opcoes} escolhida={vaga.id} onEscolher={escolher} />}
+            {vaga && <SeletorVaga opcoes={opcoes} escolhida={vaga} onEscolher={escolher} />}
 
             <Concordancia porVaga={memoria.concordancia.porVaga} vagaId={vaga?.id} onEscolher={escolher} />
 
@@ -309,21 +444,41 @@ function Concordancia({
           </p>
         )}
       </div>
-      {comNumero.length > 0 && <GraficoConcordancia vagas={comNumero} escolhida={vagaId} onEscolher={onEscolher} />}
+      {comNumero.length > 0 && (
+        <GraficoConcordancia
+          vagas={janela(comNumero, vagaId)}
+          escolhida={vagaId}
+          maisRecente={comNumero.at(-1)?.vagaId}
+          onEscolher={onEscolher}
+        />
+      )}
     </section>
   );
 }
 
 const ALTURA_GRAFICO = 148;
+/** Quantas colunas o gráfico mostra: com dezenas de vagas, só as mais recentes (e sempre a escolhida). */
+const COLUNAS_GRAFICO = 6;
+
+/** As últimas vagas da série; se a escolhida for mais antiga, a janela começa nela. */
+function janela(vagas: ConcordanciaVaga[], escolhida: string | undefined): ConcordanciaVaga[] {
+  if (vagas.length <= COLUNAS_GRAFICO) return vagas;
+  const i = vagas.findIndex((v) => v.vagaId === escolhida);
+  const inicio = i >= 0 ? Math.min(i, vagas.length - COLUNAS_GRAFICO) : vagas.length - COLUNAS_GRAFICO;
+  return vagas.slice(inicio, inicio + COLUNAS_GRAFICO);
+}
 
 /** Colunas por vaga, da mais antiga para a atual. A escolhida em tinta, as outras em cinza; clicar numa coluna escolhe a vaga. */
 function GraficoConcordancia({
   vagas,
   escolhida,
+  maisRecente,
   onEscolher,
 }: {
   vagas: ConcordanciaVaga[];
   escolhida: string | undefined;
+  /** A vaga mais recente de toda a série (a janela pode não terminar nela). */
+  maisRecente: string | undefined;
   onEscolher: (id: string) => void;
 }) {
   const [foco, setFoco] = useState<string | null>(null);
@@ -356,7 +511,7 @@ function GraficoConcordancia({
           </div>
           <ul className="relative flex">
             {vagas.map((v, i) => {
-              const atual = i === vagas.length - 1;
+              const atual = v.vagaId === maisRecente;
               const marcada = v.vagaId === escolhida;
               const aberto = foco === v.vagaId;
               const altura = Math.max(2, (ALTURA_GRAFICO * (v.pct ?? 0)) / 100);
