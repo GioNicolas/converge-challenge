@@ -13,7 +13,7 @@ Projeto do **Converge Challenge powered by Tako** (Porto Digital, Recife, novemb
    - **Live coding** (`/entrevista`): IDE no navegador com testes. O agente lê o código, interrompe com perguntas no momento certo e roda testes escondidos no fim.
    - **System design** (`/entrevista/system-design`): quadro Excalidraw. O agente escreve o enunciado, pergunta por voz e anota no quadro.
 5. **Relatório.** O escore e a recomendação aparecem na linha do candidato, no painel da vaga (`/vagas`). O relatório completo traz as evidências de cada critério com o minuto em que aconteceram.
-6. **Aprendizado.** As decisões do time (pelo Slack) e o retorno de 90 dias depois da contratação viram regras na memória da squad (`/vagas/aprendizado`). As próximas entrevistas já usam essas regras.
+6. **Aprendizado.** As decisões da recrutadora no painel e o retorno de 90 dias depois da contratação viram regras na memória da squad (`/vagas/aprendizado`). As próximas entrevistas já usam essas regras.
 
 ## Rodar localmente
 
@@ -43,11 +43,10 @@ O `.env.example` traz todas as variáveis, com comentários. As principais:
 | Pré-entrevista (classificador e cobertura) | `TYPESAFE_API_KEY` |
 | Voz e transcrição | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` |
 | E-mail dos convites | `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `APP_URL` |
-| Slack (decisões do time) | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID` |
 | Banco | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` ([docs/supabase.md](docs/supabase.md)) |
 | Testes e demonstração | `CANDIDATOS_TESTE`, `HORARIOS_DE_TESTE`, `AGENTE_FAKE`, `AGENTE_DEV`, `ARMAZENAMENTO` |
 
-Sem as chaves do Supabase, os dados ficam em memória e na pasta `data/`. Sem a chave do Slack, as mensagens só vão para o log. E-mail de verdade só sai para quem está em `CANDIDATOS_TESTE`.
+Sem as chaves do Supabase, os dados ficam em memória e na pasta `data/`. E-mail de verdade só sai para quem está em `CANDIDATOS_TESTE`.
 
 ## Testes
 
@@ -75,7 +74,7 @@ lib/
   agents/           agente do live coding: leitura do código, quando interromper, avaliação
   agente/           cérebro do system design: estado, perguntas, kits e scorecard
   vagas/ convites/  pipeline da vaga, candidatos, convites e agendamento
-  email/ slack/     e-mails (react-email + Resend) e integração com o Slack
+  email/            e-mails (react-email + Resend)
   squad-memory/     regras que o time ensina ao Totti
   noventa-dias/     retorno pós-contratação que ajusta as regras
   voz/ transcricao/ fala do agente e transcrição do candidato

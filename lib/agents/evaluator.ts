@@ -60,6 +60,11 @@ export function startEvaluation(session: SessionState, opts: { retry?: boolean }
   return status;
 }
 
+/** A avaliação desta sessão roda nesta instância? (Uma cópia restaurada de outra instância diz "gerando" sem rodar aqui.) */
+export function avaliacaoLocal(session: SessionState): boolean {
+  return inFlight.has(session);
+}
+
 /** Espera a avaliação em curso terminar (para scripts). */
 export async function waitForEvaluation(session: SessionState): Promise<ReportStatus | undefined> {
   await inFlight.get(session);

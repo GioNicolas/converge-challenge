@@ -16,7 +16,7 @@ type JanelaTeste = Window & { vozTeste: ControleVozTeste };
 
 async function preparar(page: Page) {
   await page.addInitScript(() => {
-    let atual: SpeechSynthesisUtterance | null = null;
+    let atual: AudioFalso | null = null;
     const reconhecimentos: ReconhecimentoFalso[] = [];
     const controle: ControleVozTeste = {
       falas: [], ouvindo: false, falando: false, autoTerminar: true, midias: [],
@@ -26,7 +26,7 @@ async function preparar(page: Page) {
         const fala = atual;
         atual = null;
         controle.falando = false;
-        fala?.dispatchEvent(new Event("end"));
+        fala?.onended?.();
       },
     };
     const pedirMidia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -53,18 +53,39 @@ async function preparar(page: Page) {
     }
     Object.defineProperty(window, "SpeechRecognition", { configurable: true, value: ReconhecimentoFalso });
     Object.defineProperty(window, "webkitSpeechRecognition", { configurable: true, value: ReconhecimentoFalso });
-    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: {
-      getVoices: () => [],
-      speak: (fala: SpeechSynthesisUtterance) => {
-        atual = fala; controle.falando = true; controle.falas.push(fala.text);
-        queueMicrotask(() => fala.dispatchEvent(new Event("start")));
+    // A voz do agente é só a do ElevenLabs: o /api/falar falso manda o texto como "áudio" e este Audio falso o lê.
+    const tocar = (audio: AudioFalso, texto: string) => {
+      atual = audio; controle.falando = true; controle.falas.push(texto);
+    };
+    class AudioFalso {
+      src = ""; preload = ""; currentTime = 0;
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(src = "") { this.src = src; }
+      async play() {
+        if (this.src.startsWith("data:")) return; // destrave do áudio no primeiro gesto
+        const texto = await (await fetch(this.src)).text();
+        tocar(this, texto);
         if (controle.autoTerminar) setTimeout(controle.terminar, 100);
-      },
-      cancel: () => { atual = null; controle.falando = false; },
-    } });
+      }
+      pause() { if (atual === this) { atual = null; controle.falando = false; } }
+      removeAttribute(nome: string) { if (nome === "src") this.src = ""; }
+    }
+    Object.defineProperty(window, "Audio", { configurable: true, value: AudioFalso });
     (window as unknown as JanelaTeste).vozTeste = controle;
   });
-  await page.route("**/api/falar", (rota) => rota.fulfill({ status: 501, json: { erro: "fallback do teste" } }));
+  await page.route("**/api/falar", (rota) => {
+    const { texto } = rota.request().postDataJSON() as { texto: string };
+    const caracteres = [...texto];
+    return rota.fulfill({ json: {
+      audio_base64: Buffer.from(texto, "utf8").toString("base64"),
+      alinhamento: {
+        characters: caracteres,
+        character_start_times_seconds: caracteres.map((_, i) => i * 0.01),
+        character_end_times_seconds: caracteres.map((_, i) => (i + 1) * 0.01),
+      },
+    } });
+  });
   await page.route("**/api/transcricao/sessao", (rota) => rota.fulfill({ json: { provedor: "navegador" } }));
   await page.route("**/api/stt-token?**", (rota) => rota.fulfill({ status: 503, json: { erro: "fallback do teste" } }));
 }
@@ -129,10 +150,10 @@ test("candidato responde por voz e despedida não fecha a barra antes do áudio"
     if (resposta) pedidos.push(resposta);
     await rota.fulfill({ json: { reply: resposta ? "Obrigado, pode continuar." : "Como você vai começar?", commands: [], end: !!resposta } });
   });
+  // A pergunta abre sozinha logo na primeira pausa: a voz precisa ficar presa desde o carregamento.
+  await page.addInitScript(() => { (window as unknown as JanelaTeste).vozTeste.autoTerminar = false; });
   await page.goto("/entrevista");
-  await page.evaluate(() => { (window as unknown as JanelaTeste).vozTeste.autoTerminar = false; });
-  // O balão flutua continuamente: usa a interação de teclado acessível.
-  await page.getByRole("button", { name: "Abrir a pergunta do entrevistador: Pergunta de teste" }).press("Enter");
+  // Nenhum clique no balão: o entrevistador abre a conversa sozinho.
   const painel = page.getByRole("complementary", { name: "Conversa com o entrevistador" });
   await expect(painel).toBeVisible();
   await expect.poll(async () => (await falas(page)).length).toBe(1);
@@ -146,6 +167,79 @@ test("candidato responde por voz e despedida não fecha a barra antes do áudio"
   await expect(painel).toBeVisible();
   await page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.terminar());
   await expect(painel).toBeHidden({ timeout: 6000 });
+});
+
+test("IDE avisa do feedback, pergunta na pausa, só ouve quem pensa em voz alta e responde ao pedido de feedback", async ({ page }) => {
+  await preparar(page);
+  const pergunta = "O que você está montando nesse loop?";
+  const feedback = "Você guarda cada número num dicionário antes de procurar o par.";
+  const blip = { id: "pausa-e2e", preview: "Sobre o seu loop", priority: 1, createdAt: 0 };
+  let liberar = false;
+  let abriu = false;
+  const pedidos: { blipId?: string; messages: { role: string; text: string }[] }[] = [];
+  await page.route("**/api/events", async (rota) => {
+    if (rota.request().postDataJSON().type === "blip_opened") abriu = true;
+    await rota.fulfill({ json: {} });
+  });
+  await page.route("**/api/blip/pending?**", (rota) => rota.fulfill({ json: liberar && !abriu ? { blip } : {} }));
+  await page.route("**/api/chat", async (rota) => {
+    const pedido = rota.request().postDataJSON() as (typeof pedidos)[number];
+    pedidos.push(pedido);
+    const ultima = pedido.messages.findLast((m) => m.role === "candidate")?.text ?? "";
+    const ouvindo = { reply: "", commands: [], end: false, listening: true };
+    if (pedido.blipId) {
+      if (!ultima) return rota.fulfill({ json: { reply: pergunta, commands: [{ type: "highlight_range", startLine: 1, endLine: 2 }], end: false } });
+      if (/deixa eu pensar/i.test(ultima)) return rota.fulfill({ json: ouvindo });
+      return rota.fulfill({ json: { reply: "Então você procura o complemento a cada número.", commands: [], end: true } });
+    }
+    if (/feedback/i.test(ultima)) {
+      return rota.fulfill({ json: { reply: feedback, commands: [{ type: "highlight_range", startLine: 1, endLine: 2 }], end: true, concluded: true } });
+    }
+    return rota.fulfill({ json: ouvindo });
+  });
+  const painel = page.getByRole("complementary", { name: "Conversa com o entrevistador" });
+
+  await page.goto("/entrevista");
+  // Logo no começo: o agente se apresenta e avisa que dá para pedir feedback ao fim de uma etapa.
+  await expect.poll(async () => (await falas(page)).some((f) => f.includes("pedir um feedback"))).toBe(true);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+
+  // Fala em andamento (transcrição parcial) segura a vez: a pergunta pendente não abre por cima.
+  await page.evaluate(() => (window as unknown as JanelaTeste).vozTeste.emitirParcial("Estou pensando em"));
+  liberar = true;
+  await expect(page.getByRole("button", { name: `Abrir a pergunta do entrevistador: ${blip.preview}` })).toBeVisible({ timeout: 8000 });
+  await page.waitForTimeout(1500);
+  await expect(painel).toBeHidden();
+
+  // Fala solta de quem pensa em voz alta vai ao entrevistador, que só ouve; depois da pausa a pergunta abre sozinha.
+  await emitir(page, "Estou pensando em usar um dicionário aqui.");
+  await expect.poll(() => pedidos.filter((p) => !p.blipId).length).toBe(1);
+  expect(pedidos[0].messages.some((m) => m.role === "agent" && m.text.includes("pedir um feedback"))).toBe(true);
+  await expect(painel).toBeVisible({ timeout: 8000 });
+  await expect.poll(() => falas(page)).toContain(pergunta);
+  await expect.poll(() => ouvindo(page)).toBe(true);
+
+  // Pensando em voz alta dentro da conversa: nada é dito e a conversa continua aberta.
+  const antes = (await falas(page)).length;
+  await emitir(page, "Hum, deixa eu pensar um pouco.");
+  await expect.poll(() => pedidos.filter((p) => p.blipId).length).toBe(2);
+  await page.waitForTimeout(1200);
+  expect((await falas(page)).length).toBe(antes);
+  await expect(painel).toBeVisible();
+
+  // Terminou a resposta: paráfrase neutra, e a conversa fecha.
+  await emitir(page, "Eu guardo cada número num dicionário e procuro o complemento.");
+  await expect.poll(() => falas(page)).toContain("Então você procura o complemento a cada número.");
+  await expect(painel).toBeHidden({ timeout: 8000 });
+
+  // Pedido de feedback fora de um balão: o entrevistador responde e a barra abre com a fala dele.
+  await expect.poll(() => ouvindo(page)).toBe(true);
+  await emitir(page, "Terminei a primeira versão, pode me dar um feedback?");
+  await expect(painel).toBeVisible({ timeout: 8000 });
+  await expect(painel.getByText(feedback)).toBeVisible();
+  await expect(painel.getByText("Você chamou o entrevistador")).toBeVisible();
+  await expect.poll(() => falas(page)).toContain(feedback);
+  await expect(painel).toBeHidden({ timeout: 8000 });
 });
 
 test("quadro encaminha transcrição para a conversa da sessão", async ({ page }) => {

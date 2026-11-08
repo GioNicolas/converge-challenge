@@ -6,9 +6,9 @@
 // aparecerem cortados. No celular o menu vira uma gaveta, aberta pelo botão do topo.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
-import { Brain, LayoutList, Menu, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, X } from "lucide-react";
+import { Brain, LayoutList, Menu, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { useVagas, type EtapaVaga } from "@/lib/vagas/workspace";
 import { curvaSuave } from "@/lib/design/motion";
 import Marca from "./Marca";
@@ -51,10 +51,8 @@ function useRecolhido() {
 
 export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
   const { vagas, rascunhos } = useVagas();
-  const params = useSearchParams();
   const caminho = usePathname();
   const naMemoria = caminho === "/vagas/aprendizado";
-  const aba = params.get("estagio") ?? params.get("aba");
   const [gaveta, setGaveta] = useState(false);
   const { recolhido, animar, alternar } = useRecolhido();
 
@@ -106,26 +104,13 @@ export default function Casca({ children, vagaAtual, etapaAtual }: Props) {
         <ItemMenu
           href="/vagas"
           icone={<LayoutList size={16} strokeWidth={1.75} />}
-          atual={!vagaAtual && !naMemoria && aba !== "escopo"}
+          atual={!vagaAtual && !naMemoria}
           n={totalVagas}
           compacto={compacto}
           onClick={() => setGaveta(false)}
         >
           Todas as vagas
         </ItemMenu>
-        {!!rascunhos?.length && (
-          <ItemMenu
-            href="/vagas?estagio=escopo"
-            icone={<PencilLine size={16} strokeWidth={1.75} />}
-            atual={!vagaAtual && !naMemoria && aba === "escopo"}
-            n={rascunhos.length}
-            compacto={compacto}
-            aviso
-            onClick={() => setGaveta(false)}
-          >
-            Escopos em definição
-          </ItemMenu>
-        )}
         <ItemMenu
           href="/vagas/aprendizado"
           icone={<Brain size={16} strokeWidth={1.75} />}
@@ -233,7 +218,6 @@ function ItemMenu({
   atual,
   n,
   compacto,
-  aviso,
   onClick,
   children,
 }: {
@@ -242,8 +226,6 @@ function ItemMenu({
   atual: boolean;
   n?: number;
   compacto: boolean;
-  /** Recolhido, mostra um ponto no ícone quando há itens (ex.: escopos esperando o Totti). */
-  aviso?: boolean;
   onClick: () => void;
   children: string;
 }) {
@@ -258,20 +240,7 @@ function ItemMenu({
         atual ? "bg-superficie-2 font-medium text-texto" : "text-texto/80 hover:bg-superficie-2/60"
       }`}
     >
-      <span className="relative shrink-0">
-        {icone}
-        <AnimatePresence>
-          {compacto && aviso && !!n && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              transition={{ duration: 0.2, delay: 0.15 }}
-              className="absolute -top-1 -right-1.5 size-2 rounded-full bg-texto ring-2 ring-fundo"
-            />
-          )}
-        </AnimatePresence>
-      </span>
+      <span className="shrink-0">{icone}</span>
       <Texto visivel={!compacto} className="flex-1 justify-between">
         <span className="truncate">{children}</span>
         {n !== undefined && <span className="numero text-[12px] font-normal text-texto-suave">{n}</span>}

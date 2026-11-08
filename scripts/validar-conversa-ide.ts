@@ -74,8 +74,8 @@ async function main() {
     const r = await runInterviewerTurn(s, { blipId: caso.blip ? "q-1" : undefined, messages: mensagens });
     const ms = Date.now() - inicio;
     tempos.push(ms);
-    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.silent ?? false, end: r.end, reply: r.reply }));
-    const respondeu = !r.silent && r.reply.trim() !== "";
+    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, reply: r.reply }));
+    const respondeu = !r.listening && r.reply.trim() !== "";
     if (respondeu !== caso.responde) falhas.push(`${caso.nome}: ${caso.responde ? "devia responder" : "devia ficar quieto"}`);
     else if (respondeu) {
       const problema = caso.checar?.(r.reply);

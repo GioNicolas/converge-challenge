@@ -25,6 +25,7 @@ export default function ControleVoz({ voz, texto, disabled = false }: { voz: Voz
           Ouvir resposta
         </button>
       )}
+      {voz.aviso && <span role="status" className="basis-full text-black/60">{voz.aviso}</span>}
       {voz.erro && <span role="alert" className="basis-full text-red-600">{voz.erro}</span>}
     </div>
   );

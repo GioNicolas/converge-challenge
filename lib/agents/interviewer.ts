@@ -15,9 +15,19 @@ import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/s
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
-const FALLBACK_REPLY = "Desculpa, me perdi aqui. Pode repetir?";
-/** Fala barrada duas vezes pelo filtro: reconhece e fecha, sem arriscar. */
-const SAFE_CLOSE_REPLY = "Entendi. Beleza, pode seguir.";
+/** Falha do LLM: pede para repetir. Varia para não soar como gravação quando acontece mais de uma vez. */
+const FALLBACK_REPLIES = [
+  "Desculpa, me perdi aqui. Pode repetir?",
+  "Opa, não peguei essa. Fala de novo?",
+  "Perdi o fio aqui, pode repetir pra mim?",
+];
+/** Fala barrada duas vezes pelo filtro: reconhece e fecha, sem arriscar (e sem repetir a mesma frase). */
+const SAFE_CLOSE_REPLIES = [
+  "Entendi. Beleza, pode seguir.",
+  "Combinado, fica à vontade pra continuar.",
+  "Beleza, segue no seu ritmo.",
+];
+
 /** Orçamento de um turno: o candidato está esperando a voz. Passou disso, sai a fala de reserva. */
 const PRAZO_TURNO_MS = 7_000;
 /** Cada geração tem no máximo isto; o filtro de fala, bem menos. */
@@ -25,6 +35,20 @@ const PRAZO_GERACAO_MS = 4_500;
 const PRAZO_FILTRO_MS = 1_800;
 /** Só gera de novo (fala barrada) se ainda couber uma geração e um filtro no orçamento. */
 const MIN_PARA_REGERAR_MS = 3_000;
+
+/** A primeira das opções que o entrevistador ainda não disse nesta sessão (ou a menos recente, se já disse todas). */
+export function falaNaoRepetida(opcoes: string[], jaDitas: string[]): string {
+  const ditas = jaDitas.map((t) => t.trim());
+  const nova = opcoes.find((o) => !ditas.includes(o));
+  if (nova) return nova;
+  return [...opcoes].sort((a, b) => ditas.lastIndexOf(a) - ditas.lastIndexOf(b))[0];
+}
+
+/** O que o agente já falou: nesta conversa e nas falas gravadas da sessão. */
+function falasDoAgente(session: SessionState, messages: ChatMessage[]): string[] {
+  const gravadas = session.events.flatMap((e) => (e.type === "speech" && e.role === "agent" ? [e.text] : []));
+  return [...gravadas, ...messages.filter((m) => m.role === "agent").map((m) => m.text)];
+}
 
 export async function runInterviewerTurn(
   session: SessionState,
@@ -88,7 +112,7 @@ export async function runInterviewerTurn(
     analystNotes: analystNotesOf(session),
     // As conversas anteriores (sem a atual, que vai em `messages`).
     previousConversations: formatarConversas(
-      // Na conversa livre, as falas recentes já vêm em `messages`.
+      // Fora de balão, as falas recentes já vêm em `messages` (a conversa livre do fase.ts duplicaria).
       conversasFeitas(session).filter((c) => c.pergunta !== found?.question.question && (found || c.pergunta !== CONVERSA_LIVRE)),
     ),
     messages: req.messages,
@@ -97,28 +121,30 @@ export async function runInterviewerTurn(
   const system = buildInterviewerSystem(session.config, problem);
   const user = buildInterviewerUser(input);
   const candidateLines = req.messages.filter((m) => m.role === "candidate").slice(-3).map((m) => m.text);
+  const opening = found !== undefined && req.messages.length === 0;
   let output: InterviewerOutput;
   const prazo = Date.now() + PRAZO_TURNO_MS;
   const sobra = () => prazo - Date.now();
   try {
     output = await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra()));
-    // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
-    const opening = found !== undefined && req.messages.length === 0;
-    // O modelo escolheu escutar: não há fala para filtrar. A pergunta de um blip sempre sai.
-    if (!opening && (!output.responder || !output.reply.trim())) {
-      registrarObservacoes(session, output, question?.id);
-      return { reply: "", commands: [], end: false, silent: true };
+    // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
+    // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
+    if (!opening && (output.respond === false || output.reply.trim() === "")) {
+      registrarEvidencia(session, output);
+      return { reply: "", commands: [], end: false, listening: true };
     }
-    if (opening && !output.reply.trim()) output = { ...output, responder: true, reply: found.question.question };
+    if (opening && output.reply.trim() === "") output = { ...output, reply: found.question.question, highlight: found.question.highlight ?? null };
+    // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
     if (!(opening && isAboutTheSame(output.reply, found.question.question))) {
       const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
       session.analyst.costUsd += verdict.costUsd;
       if (!verdict.safe && sobra() < MIN_PARA_REGERAR_MS) {
+        // Sem tempo para outra geração: a reserva segura, sem arriscar a fala barrada.
         console.info(`[interviewer] fala barrada (${verdict.reason}) sem tempo para outra: ${output.reply}`);
         output = opening
           ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-          : { ...output, reply: SAFE_CLOSE_REPLY, highlight: null, end: true, gaveHint: false, challenge: null };
+          : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: true, gaveHint: false, challenge: null };
       } else if (!verdict.safe) {
         console.info(`[interviewer] fala barrada (${verdict.reason}): ${output.reply}`);
         output = await generate(
@@ -134,7 +160,7 @@ export async function runInterviewerTurn(
           // Na abertura, a pergunta preparada (já filtrada); depois, reconhece e fecha.
           output = opening
             ? { ...output, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
-            : { ...output, reply: SAFE_CLOSE_REPLY, highlight: null, end: true, gaveHint: false, challenge: null };
+            : { ...output, reply: falaNaoRepetida(SAFE_CLOSE_REPLIES, falasDoAgente(session, req.messages)), highlight: null, end: true, gaveHint: false, challenge: null };
         }
       }
     }
@@ -148,7 +174,7 @@ export async function runInterviewerTurn(
         end: false,
       };
     }
-    return { reply: FALLBACK_REPLY, commands: [], end: false };
+    return { reply: falaNaoRepetida(FALLBACK_REPLIES, falasDoAgente(session, req.messages)), commands: [], end: false };
   }
 
   // A primeira fala de um blip é a pergunta: encerrar ali não deixaria o candidato responder.
@@ -169,7 +195,11 @@ export async function runInterviewerTurn(
       text: hint,
     });
   }
-  registrarObservacoes(session, output, question?.id);
+  registrarEvidencia(session, output);
+  const outcome = output.probeOutcome;
+  if (outcome) {
+    recordOutcome(session, { t, ...outcome, questionId: question?.id, source: "interviewer" });
+  }
   // Topou um desafio (da pergunta de desafio ou emendado numa sondagem): o agente volta depois para ver
   // como foi (policy.enqueueDueCheckIns). Nunca a partir de um retorno, para não virar um ciclo.
   if (
@@ -191,18 +221,21 @@ export async function runInterviewerTurn(
   }
   if (output.end && checkIn) checkIn.status = "feito";
   if (output.end) session.lastConversationEndedAt = t;
+  // Concluiu uma etapa: a próxima análise é um momento-chave (ver consumirEtapaConcluida no analista).
+  const concluded = output.concluded === true && !opening;
+  if (concluded) session.etapaConcluidaEm = t;
 
-  return { reply: output.reply, commands, end: output.end };
+  return { reply: output.reply, commands, end: output.end, ...(concluded ? { concluded } : {}) };
 }
 
-/** Evidência e resultado de sondagem que o modelo registrou (falando ou não). */
-function registrarObservacoes(session: SessionState, output: InterviewerOutput, questionId: string | undefined): void {
-  const t = elapsedMs(session);
-  if (output.evidence) {
-    session.evidence.push({ t, criterionId: output.evidence.criterionId, note: output.evidence.note, source: "interviewer" });
-  }
-  const outcome = output.probeOutcome;
-  if (outcome) recordOutcome(session, { t, ...outcome, questionId, source: "interviewer" });
+function registrarEvidencia(session: SessionState, output: InterviewerOutput): void {
+  if (!output.evidence) return;
+  session.evidence.push({
+    t: elapsedMs(session),
+    criterionId: output.evidence.criterionId,
+    note: output.evidence.note,
+    source: "interviewer",
+  });
 }
 
 /**
@@ -212,7 +245,7 @@ function registrarObservacoes(session: SessionState, output: InterviewerOutput, 
 function anunciarEmpecilho(session: SessionState, blipId: string): string {
   const empecilho = empecilhoDaQuestao(session);
   const state = session.empecilho;
-  if (!empecilho || !state || state.blipId !== blipId) return FALLBACK_REPLY;
+  if (!empecilho || !state || state.blipId !== blipId) return falaNaoRepetida(FALLBACK_REPLIES, falasDoAgente(session, []));
   if (state.announcedAt !== undefined) return empecilho.announcement;
 
   const t = elapsedMs(session);

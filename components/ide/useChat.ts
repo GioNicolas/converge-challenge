@@ -7,7 +7,7 @@ interface ChatDeps {
   sessionId: string | null;
   sendEvent: (input: EventInput) => Promise<void>;
   applyCommands: (commands: EditorCommand[]) => void;
-  onAgentReply?: (texto: string) => Promise<void>;
+  onAgentReply?: (texto: string) => Promise<unknown>;
   onCancelReply?: () => void;
 }
 
@@ -23,26 +23,37 @@ export interface ConversaAnterior {
 
 /** Quanto tempo a última fala do entrevistador fica na tela antes da barra fechar. */
 const END_DELAY_MS = 2500;
-/** Conversa livre (fora de um balão): quantas falas recentes vão de contexto para o entrevistador. */
-const MAX_FALAS_LIVRES = 8;
+/** Falas fora das conversas de balão que vão como contexto para o entrevistador (as mais recentes). */
+const MAX_FALAS_LIVRES = 12;
+/** Assunto de uma conversa que o candidato puxou (sem balão). */
+export const ASSUNTO_LIVRE = "Você chamou o entrevistador";
+
+/**
+ * Conversa em andamento. `blip` null: conversa livre, puxada pelo candidato fora de um balão.
+ * `visivel` false: o candidato falou sozinho e o entrevistador ainda não respondeu; a barra só abre se ele responder.
+ */
+interface Ativa {
+  id: string;
+  blip: Blip | null;
+  visivel: boolean;
+}
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
 /**
- * Conversa com o entrevistador, por voz (e texto na barra lateral).
- *
- * - Pergunta do entrevistador (balão): abre a barra e dura até um dos dois encerrar ("pode seguir" do agente
- *   ou "voltar a programar" do candidato). As conversas encerradas ficam em `previous`.
- * - Conversa livre: o microfone fica aberto e `falar` manda qualquer fala para o entrevistador (modo
- *   "candidato"), sem abrir a barra. Ele escolhe responder ou ficar quieto (`silent`).
- * - Falas que chegam com uma resposta em preparo viram UMA fala só, enviada quando ela chega.
- * `epochRef` invalida respostas que chegam depois de fechar.
+ * Conversa por texto na barra lateral. Abre por um balão do entrevistador, quando o candidato fala com ele
+ * (a fala solta só abre a barra se o entrevistador decidir responder) ou pelo botão de chamar. Dura até um dos
+ * dois encerrar ("pode seguir" do agente ou "voltar a programar" do candidato). As conversas encerradas ficam
+ * em `previous`. `epochRef` invalida respostas que chegam depois de fechar.
  */
 export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onCancelReply }: ChatDeps) {
   const [open, setOpen] = useState(false);
   const [blip, setBlip] = useState<Blip | null>(null);
+  /** Há uma conversa em andamento, visível ou não (a fala solta esperando a decisão do entrevistador). */
+  const [emConversa, setEmConversa] = useState(false);
+  const [livre, setLivre] = useState(false);
   const [messages, setMessages] = useState<Fala[]>([]);
   const [previous, setPrevious] = useState<ConversaAnterior[]>([]);
   const [busy, setBusy] = useState(false);
@@ -50,18 +61,15 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
   /** O entrevistador encerrou: a última fala fica visível, sem campo de resposta, até a barra fechar sozinha. */
   const [ended, setEnded] = useState(false);
 
-  const activeBlipRef = useRef<Blip | null>(null);
+  const ativaRef = useRef<Ativa | null>(null);
   const messagesRef = useRef<Fala[]>([]);
   messagesRef.current = messages;
+  /** Falas fora dos balões (as do candidato, as respostas e a saudação): contexto das conversas livres. */
+  const livresRef = useRef<Fala[]>([]);
+  const contadorLivreRef = useRef(0);
   const epochRef = useRef(0);
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const turnoRef = useRef(0);
-  const busyRef = useRef(false);
-  /** Falas ditas enquanto uma resposta estava em preparo (já juntas). */
-  const pendenteRef = useRef<string | null>(null);
-  /** Histórico curto da conversa livre (fora de balão). */
-  const livreRef = useRef<Fala[]>([]);
-  const [livreBusy, setLivreBusy] = useState(false);
   const vozRef = useRef({ onAgentReply, onCancelReply });
   vozRef.current = { onAgentReply, onCancelReply };
 
@@ -71,18 +79,46 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
     vozRef.current.onCancelReply?.();
   }, []);
 
+  const definirAtiva = useCallback((ativa: Ativa | null) => {
+    ativaRef.current = ativa;
+    setEmConversa(ativa !== null);
+    setLivre(ativa !== null && ativa.blip === null);
+  }, []);
+
+  const guardarLivres = useCallback((falas: Fala[]) => {
+    livresRef.current = [...livresRef.current, ...falas].slice(-MAX_FALAS_LIVRES);
+  }, []);
+
+  /** Fala do agente fora de uma conversa (a saudação): entra no contexto das conversas livres. */
+  const lembrar = useCallback((fala: ChatMessage) => guardarLivres([{ ...fala, at: Date.now() }]), [guardarLivres]);
+
+  /** O entrevistador só ouviu a fala solta: a conversa invisível acaba sem abrir a barra nem calar a voz. */
+  const descartarOculta = useCallback(() => {
+    const ativa = ativaRef.current;
+    if (!ativa || ativa.visivel) return;
+    guardarLivres(messagesRef.current);
+    epochRef.current += 1;
+    definirAtiva(null);
+    setMessages([]);
+    setBusy(false);
+    setError(null);
+    setEnded(false);
+  }, [guardarLivres, definirAtiva]);
+
   const closeChat = useCallback(
     (reason: "agent" | "button") => {
       epochRef.current += 1;
       vozRef.current.onCancelReply?.();
       clearTimeout(endTimerRef.current);
       endTimerRef.current = undefined;
-      const active = activeBlipRef.current;
-      activeBlipRef.current = null;
+      const active = ativaRef.current;
+      definirAtiva(null);
       if (active !== null) {
-        void sendEvent({ type: "blip_closed", blipId: active.id, reason });
+        if (active.blip) void sendEvent({ type: "blip_closed", blipId: active.blip.id, reason });
         const falas = messagesRef.current;
-        if (falas.length > 0) setPrevious((prev) => [...prev, { blipId: active.id, preview: active.preview, falas }]);
+        if (!active.blip) guardarLivres(falas);
+        const preview = active.blip?.preview ?? ASSUNTO_LIVRE;
+        if (falas.length > 0) setPrevious((prev) => [...prev, { blipId: active.id, preview, falas }]);
       }
       // Fechou a conversa, os grifos da pergunta saem junto (qualquer motivo).
       applyCommands([{ type: "clear_highlights" }]);
@@ -93,39 +129,46 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
       setBusy(false);
       setEnded(false);
     },
-    [sendEvent, applyCommands],
+    [sendEvent, applyCommands, definirAtiva, guardarLivres],
   );
 
   /** Candidato volta a programar sem esperar o entrevistador fechar. */
   const close = useCallback(() => closeChat("button"), [closeChat]);
 
-  /** Chama POST /api/chat com o histórico e aplica a resposta. */
+  /**
+   * Chama POST /api/chat com o histórico e aplica a resposta. Se o entrevistador só está ouvindo (o candidato
+   * pensa em voz alta ou continua explicando), nada é dito e a conversa segue esperando a próxima fala.
+   * A fala que estava esperando a vez de tocar não é cortada aqui: uma resposta nova a substitui.
+   */
   const runTurn = useCallback(
-    async (history: Fala[], forBlipId: string): Promise<void> => {
+    async (history: Fala[], ativa: Ativa): Promise<void> => {
       if (sessionId === null) return;
       const epoch = epochRef.current;
       const turno = ++turnoRef.current;
       const vigente = () => epoch === epochRef.current && turno === turnoRef.current;
-      vozRef.current.onCancelReply?.();
       setBusy(true);
       setError(null);
       try {
+        const contexto = ativa.blip ? [] : livresRef.current;
         const res = await postChat({
           sessionId,
-          blipId: forBlipId,
-          messages: history.map(({ role, text }) => ({ role, text })),
+          blipId: ativa.blip?.id,
+          messages: [...contexto, ...history].map(({ role, text }) => ({ role, text })),
         });
         if (!vigente()) return;
-        // Escolheu escutar: a fala do candidato fica no histórico e nada é mostrado nem falado.
-        if (res.silent) {
-          setMessages(history);
-          setBusy(false);
+        if (res.listening || !res.reply.trim()) {
+          if (!ativa.visivel) descartarOculta();
+          else setBusy(false);
           return;
+        }
+        if (!ativa.visivel) {
+          ativa.visivel = true;
+          setOpen(true);
         }
         // Ao encerrar, o grifo sai só quando a barra fecha, não junto com a última fala.
         applyCommands(res.end ? res.commands.filter((c) => c.type !== "clear_highlights") : res.commands);
         setMessages([...history, { role: "agent", text: res.reply, at: Date.now() }]);
-        void sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: forBlipId });
+        void sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: ativa.blip?.id });
         if (res.end) {
           setEnded(true);
         }
@@ -135,108 +178,94 @@ export function useChat({ sessionId, sendEvent, applyCommands, onAgentReply, onC
           endTimerRef.current = setTimeout(() => closeChat("agent"), END_DELAY_MS);
         }
       } catch (err) {
-        if (vigente()) setError(errorText(err));
+        if (!vigente()) return;
+        // Fala solta que não chegou ao entrevistador: segue sem abrir a barra só para mostrar o erro.
+        if (!ativa.visivel) descartarOculta();
+        else setError(errorText(err));
       } finally {
         if (vigente()) setBusy(false);
       }
     },
-    [sessionId, applyCommands, sendEvent, closeChat],
+    [sessionId, applyCommands, sendEvent, closeChat, descartarOculta],
   );
 
-  /** Candidato clicou no balão: abre a barra e o entrevistador faz a pergunta. */
+  /** O entrevistador abre a conversa de um balão (sozinho, numa pausa, ou pelo clique) e faz a pergunta. */
   const openBlip = useCallback(
     async (next: Blip): Promise<void> => {
       if (sessionId === null) return;
+      // Uma fala solta ainda sem resposta perde a vez para a pergunta, mas fica no contexto.
+      const anterior = ativaRef.current;
+      if (anterior && !anterior.visivel) guardarLivres(messagesRef.current);
       epochRef.current += 1;
       vozRef.current.onCancelReply?.();
       clearTimeout(endTimerRef.current);
-      activeBlipRef.current = next;
+      const ativa: Ativa = { id: next.id, blip: next, visivel: true };
+      definirAtiva(ativa);
       setOpen(true);
       setBlip(next);
       setMessages([]);
       setError(null);
       setEnded(false);
       void sendEvent({ type: "blip_opened", blipId: next.id });
-      await runTurn([], next.id);
+      await runTurn([], ativa);
     },
-    [sessionId, sendEvent, runTurn],
+    [sessionId, sendEvent, runTurn, definirAtiva, guardarLivres],
   );
+
+  /**
+   * Fala do candidato fora de uma conversa (em voz alta, enquanto programa). Vai para o entrevistador, que decide
+   * pela intenção se responde (dúvida, pedido de feedback, etapa concluída) ou só ouve (pensando em voz alta).
+   * `registrar` false: murmúrio solto, que não entra na linha do tempo.
+   */
+  const ouvir = useCallback(
+    (text: string, registrar = true) => {
+      if (sessionId === null || ativaRef.current !== null) return;
+      const ativa: Ativa = { id: `livre-${++contadorLivreRef.current}`, blip: null, visivel: false };
+      definirAtiva(ativa);
+      const fala: Fala = { role: "candidate", text, at: Date.now() };
+      setMessages([fala]);
+      setError(null);
+      setEnded(false);
+      if (registrar) void sendEvent({ type: "speech", role: "candidate", text });
+      void runTurn([fala], ativa);
+    },
+    [sessionId, sendEvent, runTurn, definirAtiva],
+  );
+
+  /** Botão de chamar o entrevistador: abre a barra vazia para o candidato escrever (ou falar). */
+  const abrirLivre = useCallback(() => {
+    if (sessionId === null || ativaRef.current !== null) return;
+    epochRef.current += 1;
+    clearTimeout(endTimerRef.current);
+    definirAtiva({ id: `livre-${++contadorLivreRef.current}`, blip: null, visivel: true });
+    setOpen(true);
+    setBlip(null);
+    setMessages([]);
+    setError(null);
+    setEnded(false);
+  }, [sessionId, definirAtiva]);
 
   const send = useCallback(
     (text: string) => {
-      const active = activeBlipRef.current;
+      const active = ativaRef.current;
       if (busy || ended || active === null) return;
       const next: Fala[] = [...messages, { role: "candidate", text, at: Date.now() }];
       setMessages(next);
-      void sendEvent({ type: "speech", role: "candidate", text, blipId: active.id });
-      void runTurn(next, active.id);
+      void sendEvent({ type: "speech", role: "candidate", text, blipId: active.blip?.id });
+      void runTurn(next, active);
     },
     [busy, ended, messages, sendEvent, runTurn],
   );
 
-  /** Um turno da conversa livre: a fala vai no modo "candidato", sem abrir a barra. */
-  const runLivre = useCallback(
-    async (texto: string): Promise<void> => {
-      if (sessionId === null) return;
-      const epoch = epochRef.current;
-      const history: Fala[] = [...livreRef.current, { role: "candidate" as const, text: texto, at: Date.now() }].slice(-MAX_FALAS_LIVRES);
-      livreRef.current = history;
-      busyRef.current = true;
-      setLivreBusy(true);
-      try {
-        const res = await postChat({ sessionId, messages: history.map(({ role, text }) => ({ role, text })) });
-        if (epoch !== epochRef.current || activeBlipRef.current !== null || res.silent || !res.reply.trim()) return;
-        applyCommands(res.commands);
-        livreRef.current = res.end ? [] : [...history, { role: "agent" as const, text: res.reply, at: Date.now() }].slice(-MAX_FALAS_LIVRES);
-        void sendEvent({ type: "speech", role: "agent", text: res.reply });
-        busyRef.current = false;
-        setLivreBusy(false);
-        await vozRef.current.onAgentReply?.(res.reply);
-      } catch (err) {
-        console.warn("[conversa livre] sem resposta do entrevistador:", errorText(err));
-      } finally {
-        busyRef.current = false;
-        setLivreBusy(false);
-      }
-    },
-    [sessionId, applyCommands, sendEvent],
-  );
-
-  /**
-   * Fala do candidato (voz). Com um balão aberto vira a resposta dele; senão, conversa livre. Se o entrevistador
-   * ainda prepara a resposta anterior, junta e manda quando ela chegar.
-   */
-  const falar = useCallback(
-    (texto: string) => {
-      const limpo = texto.trim();
-      if (!limpo) return;
-      if (busy || busyRef.current) {
-        pendenteRef.current = pendenteRef.current ? `${pendenteRef.current} ${limpo}` : limpo;
-        return;
-      }
-      if (activeBlipRef.current !== null) {
-        if (!ended) send(limpo);
-        return;
-      }
-      void runLivre(limpo);
-    },
-    [busy, ended, send, runLivre],
-  );
-
-  // Fala guardada durante uma resposta: sai assim que o entrevistador libera.
-  useEffect(() => {
-    if (busy || livreBusy || !pendenteRef.current) return;
-    const pendente = pendenteRef.current;
-    pendenteRef.current = null;
-    falar(pendente);
-  }, [busy, livreBusy, falar]);
-
   /** Tenta de novo o último turno que falhou (a fala do candidato já está na lista). */
   const retry = useCallback(() => {
-    const active = activeBlipRef.current;
+    const active = ativaRef.current;
     if (busy || active === null) return;
-    void runTurn(messages, active.id);
+    void runTurn(messages, active);
   }, [busy, messages, runTurn]);
 
-  return { open, blip, messages, previous, busy, livreBusy, ended, error, openBlip, send, falar, retry, close };
+  return {
+    open, blip, livre, emConversa, messages, previous, busy, ended, error,
+    openBlip, ouvir, abrirLivre, lembrar, send, retry, close,
+  };
 }

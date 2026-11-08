@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Icone from "@/components/quadro/Icone";
+import VoltarLink from "@/components/VoltarLink";
 import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 import type { AdaptacaoVista, CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
 import type { Recomendacao } from "@/lib/agente/scorecard";
@@ -271,6 +272,9 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
     <main className="min-h-dvh w-full bg-fundo">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 pt-10 pb-24 print:max-w-none print:pt-0">
         <Surgir className="flex items-center justify-between">
+          <div className="flex items-center gap-4 print:hidden">
+            <VoltarLink texto="Voltar aos resultados" />
+          </div>
           <span className="text-sm font-semibold tracking-tight">Totti</span>
           <div className="flex items-center gap-2">
             {r.demonstracao && (

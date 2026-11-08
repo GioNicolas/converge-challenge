@@ -1,7 +1,4 @@
-/**
- * Saída estruturada do Interviewer: uma fala por turno. Os campos de controle têm padrão: o modelo de conversa
- * (rápido, sem raciocínio) às vezes os omite, e um campo esquecido não pode custar um reparo de JSON.
- */
+/** Saída estruturada do Interviewer: uma fala por turno. */
 import { z } from "zod";
 
 export const ProbeKindSchema = z.enum([
@@ -14,9 +11,16 @@ export const ProbeKindSchema = z.enum([
   "recusou",
 ]);
 
+// Campos de controle com padrão: o modelo de conversa (rápido, sem raciocínio) às vezes os omite, e um campo
+// esquecido não pode custar um reparo de JSON.
 export const InterviewerOutput = z.object({
-  /** false quando o candidato só pensa em voz alta: o agente escuta e não fala (reply vazio). */
-  responder: z.boolean().default(true),
+  /**
+   * false quando a fala do candidato não pede resposta (ele está pensando em voz alta, ainda explicando,
+   * ou só confirmou): o entrevistador continua ouvindo e reply fica "". Ausente vale true.
+   */
+  respond: z.boolean().optional(),
+  /** O candidato avisou que concluiu uma etapa do trabalho e quer avançar (pela intenção, não por palavra fixa). */
+  concluded: z.boolean().optional(),
   /** A fala, como um entrevistador humano falaria: 1–2 frases curtas. */
   reply: z.string().default(""),
   /** Linhas pra grifar junto com a fala, ou null quando não fala de um trecho. */

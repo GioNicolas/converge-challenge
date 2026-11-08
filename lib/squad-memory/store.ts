@@ -1,8 +1,8 @@
 /**
  * Store da Memória Viva da Squad, em memória. Fica em globalThis para sobreviver ao hot reload do Next
- * (como `lib/slack/store.ts`). Em serverless NÃO persiste entre instâncias: trocar por banco quando precisar.
+ * Em serverless NÃO persiste entre instâncias: trocar por banco quando precisar.
  *
- * Usada pela F4 (decisões do Tech Lead no Slack) e pela F5 (resultado aos 90 dias). Uma empresa nova
+ * Usada pela F4 (decisões do Tech Lead) e pela F5 (resultado aos 90 dias). Uma empresa nova
  * começa vazia; a empresa da demo começa com a semente de `semente.ts` (vagas anteriores já decididas).
  */
 import { randomUUID } from "crypto";
@@ -21,12 +21,12 @@ import type {
 
 export * from "./tipos";
 
-/** Empresa da demo. No hackathon, uma empresa por canal do Slack. */
+/** Empresa da demo. Uma empresa só, por enquanto. */
 export const EMPRESA_DEMO = "empresa-demo";
 
-/** A empresa de quem está usando: o canal do Slack configurado, ou a da demo. */
+/** A empresa de quem está usando (por enquanto, sempre a da demo). */
 export function empresaAtual(): string {
-  return process.env.SLACK_CHANNEL_ID || EMPRESA_DEMO;
+  return EMPRESA_DEMO;
 }
 
 interface EstadoEmpresa {

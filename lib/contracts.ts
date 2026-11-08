@@ -48,6 +48,12 @@ export type InterviewMode = z.infer<typeof InterviewMode>;
 
 export const InterviewConfig = z.object({
   id: z.string(),
+  /**
+   * Vaga a que a config pertence (id da vaga no workspace ou `jobPostingId` do Slack), quando é diferente do `id`.
+   * Sem valor: a config é a própria vaga, e o `id` vale como id da vaga. As regras da squad só valem na vaga de
+   * onde vieram (ver `vagaDaConfig` em `lib/squad-memory/config.ts`).
+   */
+  vagaId: z.string().optional(),
   mode: InterviewMode.default("live_coding"),
   roleTitle: z.string(),
   /** Descrição da vaga colada pela recrutadora na pré-entrevista. */
@@ -265,8 +271,10 @@ export const ChatResponse = z.object({
   commands: z.array(EditorCommand),
   /** true quando o agente encerra a conversa ("Beleza, pode seguir!"). */
   end: z.boolean(),
-  /** O agente escolheu escutar (o candidato só pensava em voz alta): nada para mostrar nem falar. */
-  silent: z.boolean().optional(),
+  /** O agente só está ouvindo (o candidato pensa em voz alta ou continua explicando): reply vem "" e nada é falado. */
+  listening: z.boolean().optional(),
+  /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
+  concluded: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 

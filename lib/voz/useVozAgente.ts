@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { focoAudio } from "../audio/foco";
+import { useLiberarAudio } from "../presenca/useLiberarAudio";
 import { reproduzirFala, type ProvedorVoz } from "./cliente";
 
 export type FalaAgente = { id: string; texto: string };
@@ -11,9 +12,12 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
   ultimaFala?: FalaAgente | null;
   bloqueada?: boolean;
 } = {}) {
+  // Sem o destrave, o play() do áudio do ElevenLabs é bloqueado e a fala espera o próximo toque.
+  useLiberarAudio();
   const [estado, setEstado] = useState<EstadoVoz>("inativa");
   const [habilitada, setHabilitada] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
   const [provedor, setProvedor] = useState<ProvedorVoz | null>(null);
   const [fala, setFala] = useState<{ quem: "agente"; texto: string; ate: number } | null>(null);
   const atual = useRef<AbortController | null>(null);
@@ -32,6 +36,7 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
     liberar.current = undefined;
     setEstado("inativa");
     setFala(null);
+    setAviso(null);
   }, []);
 
   useEffect(() => {
@@ -46,10 +51,14 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
     };
   }, [parar]);
 
-  const falar = useCallback(async (texto: string) => {
-    if (!montado.current || document.hidden) return;
+  /**
+   * `antesDeTocar`: com o áudio pronto, espera a vez de falar (ver criarVoz); false desiste da fala.
+   * Devolve true se a fala tocou até o fim (false: voz desligada, bloqueada, cancelada ou com erro).
+   */
+  const falar = useCallback(async (texto: string, opcoes?: { antesDeTocar?: () => Promise<boolean> }): Promise<boolean> => {
+    if (!montado.current || document.hidden) return false;
     parar();
-    if (!habilitadaRef.current || bloqueadaRef.current || !texto.trim()) return;
+    if (!habilitadaRef.current || bloqueadaRef.current || !texto.trim()) return false;
     const controle = new AbortController();
     atual.current = controle;
     const vigente = () => atual.current === controle && !controle.signal.aborted;
@@ -57,22 +66,27 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
     setEstado("preparando");
     setFala({ quem: "agente", texto, ate: 0 });
     let liberarFoco: (() => void) | undefined;
+    let tocou = false;
     try {
       await focoAudio.aguardarMicrofone(controle.signal);
       controle.signal.throwIfAborted();
       liberarFoco = focoAudio.assumir("saida", parar);
       liberar.current = liberarFoco;
       await reproduzirFala(texto, controle.signal, {
-        aoIniciar: (fonte) => { if (vigente()) { setEstado("falando"); setProvedor(fonte); } },
+        aoIniciar: (fonte) => { if (vigente()) { tocou = true; setEstado("falando"); setProvedor(fonte); setAviso(null); } },
+        aoAguardarGesto: () => { if (vigente()) setAviso("Toque na tela para ouvir o Totti."); },
         aoProgresso: (ate) => { if (vigente()) setFala({ quem: "agente", texto, ate }); },
-      });
-      if (vigente()) { setEstado("inativa"); setFala(null); }
+      }, opcoes?.antesDeTocar);
+      if (vigente()) { setEstado("inativa"); setFala(null); setAviso(null); return tocou; }
+      return false;
     } catch (e) {
       if (vigente()) {
         setErro(e instanceof Error ? e.message : "A voz está indisponível. A resposta continua no texto.");
         setEstado("erro");
         setFala(null);
+        setAviso(null);
       }
+      return false;
     } finally {
       liberarFoco?.();
       if (atual.current === controle) {
@@ -100,7 +114,7 @@ export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
 
   useEffect(() => { if (bloqueada) parar(); }, [bloqueada, parar]);
 
-  return { estado, habilitada, erro, provedor, fala, falar, parar, alternar, ativa: estado === "preparando" || estado === "falando" };
+  return { estado, habilitada, erro, aviso, provedor, fala, falar, parar, alternar, ativa: estado === "preparando" || estado === "falando" };
 }
 
 export type VozAgente = ReturnType<typeof useVozAgente>;

@@ -13,7 +13,7 @@ export type EfeitoRegra = "valoriza" | "penaliza";
 
 export interface RegraSquad {
   id: string;
-  /** No hackathon: a empresa/canal do Slack (ver `empresaAtual`). */
+  /** A empresa (ver `empresaAtual`). */
   empresaId: string;
   /** Frase curta e técnica: "Penaliza over-engineering: reprovou quem propôs Kafka para volume baixo". */
   texto: string;

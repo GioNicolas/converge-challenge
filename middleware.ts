@@ -21,6 +21,7 @@ export const config = {
     "/report",
     "/report/:path*",
     "/api/report",
+    "/api/decisao",
     "/api/pre-entrevista/:path*",
     "/api/config",
     "/api/configs/:path*",

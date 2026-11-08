@@ -3,6 +3,8 @@
  * Duas vagas anteriores já decididas e a atual em andamento, para a concordância Totti × Tech Lead
  * aparecer subindo (60% → 75% → 92%; a reprovação ao vivo da demo leva a atual para 85%). Uma regra já veio
  * do resultado aos 90 dias (F5): Otávio Reis, que o Totti não recomendava, deu certo.
+ * Cada regra vale só na vaga de onde veio (`origem.vagaId`): as da vaga atual (C) são as que entram na entrevista
+ * Backend Pleno da demo (`DEFAULT_CONFIG.vagaId`) e no relatório de exemplo.
  * O `empresaId` de cada item é trocado pelo da empresa na hora de semear (ver `estadoDa` em `store.ts`).
  */
 import type { DecisaoRegistrada, DecisaoTechLead, MotivoIgnorado, RecomendacaoTotti, RegraSquad } from "./tipos";
@@ -10,7 +12,7 @@ import type { DecisaoRegistrada, DecisaoTechLead, MotivoIgnorado, RecomendacaoTo
 /** A vaga de Pagamentos do workspace (`lib/vagas/workspace.ts`): encerrada, com as contratações de 90 dias atrás (F5). */
 const VAGA_A = { vagaId: "backend-pagamentos", vagaTitulo: "Backend Pleno · Pagamentos" };
 const VAGA_B = { vagaId: "dados-pleno-set", vagaTitulo: "Engenharia de Dados Pleno" };
-/** A vaga do card de demo do Slack (`/api/slack/demo`). */
+/** A vaga da demonstração e da config padrão (`DEFAULT_CONFIG.vagaId`). */
 const VAGA_C = { vagaId: "demo-backend-pleno", vagaTitulo: "Backend Pleno" };
 
 type Linha = [candidato: string, totti: RecomendacaoTotti, techLead: DecisaoTechLead, dia: string];
@@ -78,6 +80,26 @@ export const SEMENTE: { regras: RegraSquad[]; decisoes: DecisaoRegistrada[]; ign
       origem: { tipo: "resultado_90_dias", candidato: "Otávio Reis", ...VAGA_A, deuCerto: true },
       ativa: true,
       criadaEm: "2026-10-24T15:00:00.000Z",
+    },
+    {
+      id: "semente-regra-plano-antes",
+      empresaId: "",
+      texto: "Valoriza quem explica o plano antes de codar: aprovou quem desenhou a abordagem em voz alta",
+      efeito: "valoriza",
+      criterio: "abordagem",
+      origem: { tipo: "aprovacao", candidato: "Luana Ribeiro", ...VAGA_C },
+      ativa: true,
+      criadaEm: "2026-10-27T15:00:00.000Z",
+    },
+    {
+      id: "semente-regra-custo",
+      empresaId: "",
+      texto: "Penaliza quem não sabe dizer o custo da solução: reprovou quem não explicou a complexidade do próprio código",
+      efeito: "penaliza",
+      criterio: "complexidade",
+      origem: { tipo: "reprovacao", candidato: "Camila Freitas", ...VAGA_C },
+      ativa: true,
+      criadaEm: "2026-11-03T15:00:00.000Z",
     },
   ],
   decisoes: [
