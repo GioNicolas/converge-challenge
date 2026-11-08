@@ -56,6 +56,7 @@ export type ResultadoPerguntar = {
 };
 
 const MAX_CARACTERES_REQUISITO = 60;
+export const MAX_FRASES_FALA = 3;
 
 export async function perguntar(
   deps: DepsPerguntar,
@@ -104,7 +105,8 @@ export async function perguntar(
   const haPerguntaAtiva = !!(entrada.perguntaAtiva || estado.perguntaAtiva);
   const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho });
-  const curto = limitarFrases(saida.texto, 2);
+  // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
+  const curto = limitarFrases(saida.texto, MAX_FRASES_FALA);
   // Assunto solto ("não sei", "pula"): a vez volta com um convite, nunca com outra pergunta.
   const texto = desfecho === "nao_sabe" || desfecho === "pulou" ? semPerguntaNoFim(curto) : curto;
   if (!saida.responder || !texto) return mudoOuConcluiu();

@@ -48,10 +48,10 @@ describe("perguntar", () => {
     assert.equal(a.nomeSchema, "resposta_entrevistador");
   });
 
-  it("limita a 2 frases e não repete requisito já no quadro", async () => {
-    const llm = criarClienteFalso([{ responder: true, texto: "Um. Dois. Três.", requisito: "Retenção: 5 anos" }]);
+  it("limita a 3 frases (sem cortar decimais) e não repete requisito já no quadro", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Um. São 2.5 mil por segundo. Três. Quatro.", requisito: "Retenção: 5 anos" }]);
     const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Por quanto tempo guardo?", requisitosAtuais: ["Retenção: 5 anos"] }, AGORA);
-    assert.equal(r.texto, "Um. Dois.");
+    assert.equal(r.texto, "Um. São 2.5 mil por segundo. Três.");
     assert.equal(r.requisito, null);
   });
 
