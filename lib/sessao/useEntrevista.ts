@@ -9,6 +9,7 @@ import { pedirEmpecilho, perguntar } from "@/lib/sessao/servidor";
 import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
+import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
@@ -397,11 +398,12 @@ export function useEntrevista(
       // O que se ESCREVE no quadro é o enunciado; o que se FALA é a fala natural do desafio (ver falaDoDesafio.ts).
       const falaDoDesafio = `${montarFalaDoDesafio(sessao.problema)} Quando terminar uma etapa ou quiser um comentário sobre o desenho, é só me avisar.`;
       // O agente se apresenta antes de passar o desafio (a fala vem do cérebro; sem ela, vai direto ao desafio).
-      if (sessao.apresentacao) {
-        conversa.current.push({ quem: "agente", texto: sessao.apresentacao });
-        await dizer(sessao.apresentacao);
-        if (cancelado) return;
-      }
+      // Logo depois do cumprimento: quanto tempo dura, como funciona e que "não sei" é uma resposta aceita.
+      const comoFunciona = comoFuncionaQuadro(sessao.tempos);
+      const abertura = sessao.apresentacao ? `${sessao.apresentacao} ${comoFunciona}` : comoFunciona;
+      conversa.current.push({ quem: "agente", texto: abertura });
+      await dizer(abertura);
+      if (cancelado) return;
       conversa.current.push({ quem: "agente", texto: falaDoDesafio });
       const fala = dizer(falaDoDesafio);
       await quadro.agente.escrever({
