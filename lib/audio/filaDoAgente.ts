@@ -9,6 +9,8 @@
  *  - "sempre"     abertura, desafio e despedida: tocam sempre, sem limite de idade.
  *  - "resposta"   resposta direta ao candidato (/perguntar): espera a fala atual; vale se a fase é a mesma.
  *                 (Uma fala mais nova do candidato retira a resposta pelo `remover`, ver lib/audio/filaFalas.ts.)
+ *  - "mudanca"    mudança no problema (empecilho): já virou requisito no quadro e não se repete, então espera como a
+ *                 resposta (fase e idade), em vez de ser descartada.
  *  - "pergunta"   pergunta do Analista (plin): espera; vale se ainda é a pergunta ativa (não foi cancelada, não
  *                 expirou, não virou outra) e a fase é a mesma.
  *  - "iniciativa" o Totti falando por conta própria ("pode repetir?"): a premissa é "o candidato está quieto e a vez
@@ -17,7 +19,7 @@
  * Todas, menos "sempre", expiram com `IDADE_MAXIMA_NA_FILA_MS`.
  */
 
-export type OrigemDaFala = "sempre" | "resposta" | "pergunta" | "iniciativa";
+export type OrigemDaFala = "sempre" | "resposta" | "mudanca" | "pergunta" | "iniciativa";
 
 export type MotivoDoDescarte =
   | "agente_ocupado" // iniciativa que chegou com o Totti falando
