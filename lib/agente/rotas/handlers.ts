@@ -312,7 +312,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
 
   const agora = ctx.agora();
   const { fase, texto } = corpo.dados;
-  let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual"> = { responder: false, texto: "", requisito: null, concluiu: false };
+  let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual" | "perguntou"> = { responder: false, texto: "", requisito: null, concluiu: false };
   let desfecho: Desfecho | null = null;
   // A fala substitui a anterior (ele continuou antes de ouvir a resposta): a anterior e a resposta não ouvida saem.
   const semSubstituida = (e: EstadoSessao): EstadoSessao =>
@@ -335,7 +335,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
     if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
     resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu,
       ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),
-      ...(r.visual !== undefined ? { visual: r.visual } : {}) };
+      ...(r.visual !== undefined ? { visual: r.visual } : {}), ...(r.perguntou ? { perguntou: true } : {}) };
     desfecho = r.desfecho;
   }
 
@@ -343,7 +343,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const atual = (await ctx.repositorio.obter(id))?.estado ?? sessao.estado;
   let novo = semSubstituida(sincronizarFase(atual, fase, agora));
   novo = transicionar(novo, { tipo: "CANDIDATO_FALOU", texto, fimDeResposta: false }, agora).estado;
-  if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto }, agora).estado;
+  if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto, ...(resposta.perguntou ? { perguntou: true } : {}) }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
   const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
   if (desfecho && numeroDaPergunta !== null) {

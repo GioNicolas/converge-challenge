@@ -2,6 +2,7 @@
 
 // Sala da entrevista no quadro: o quadro em tela cheia, a janela de chamada no canto e a legenda embaixo.
 // O enunciado não fica num painel: o agente escreve no próprio quadro.
+import { esperaDoFimDaFala } from "@/lib/audio/fimDaFala";
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
@@ -18,7 +19,6 @@ import { useFimPorSilencio } from "@/lib/presenca/useFimPorSilencio";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { useLiberarAudio } from "@/lib/presenca/useLiberarAudio";
 import { FilaFalas } from "@/lib/audio/filaFalas";
-import { PAUSA_FIM_DA_FALA_MS } from "@/lib/conversa/turnos";
 import type { NonDeletedExcalidrawElement } from "@/lib/excalidraw/tipos";
 import { adicionar, normalizar, type Requisito } from "@/lib/sessao/requisitos";
 import { anotarRequisito } from "@/lib/presenca/coreografia";
@@ -237,8 +237,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
   }, [estado.fase]);
   useEffect(() => () => filaVoz.current?.limpar(), []);
-  // Turn-taking: os trechos finais do STT se acumulam e só seguem depois de PAUSA_FIM_DA_FALA_MS de silêncio real
-  // (~3 s sem voz, somando o 1 s que o Scribe espera para fechar o trecho): quem para para pensar não é cortado.
+  // Turn-taking: os trechos finais do STT se acumulam e só seguem após o silêncio de `esperaDoFimDaFala`
+  // (1,5 s com a frase fechada; até 2,6 s quando ela termina pendurada, "e aí eu colocaria...").
   // Fala parcial ou voz no microfone nesse intervalo adia o envio (não corta a frase no meio).
   // Teto: barulho constante da sala não pode segurar a fala para sempre (2,5 s depois do primeiro trecho, só o
   // silêncio em curso decide).
@@ -253,7 +253,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       const texto = bufferVoz.current.trim();
       bufferVoz.current = "";
       if (texto) filaVoz.current?.adicionar(texto);
-    }, PAUSA_FIM_DA_FALA_MS);
+    }, esperaDoFimDaFala(bufferVoz.current));
   }, []);
   const receberVoz = useCallback((texto: string) => {
     if (!texto.trim()) return;

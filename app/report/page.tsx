@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import Link from "next/link";
 import VoltarLink from "@/components/VoltarLink";
 import { useSearchParams } from "next/navigation";
+import { ArrowRight, Check, ChevronDown, TriangleAlert } from "lucide-react";
 import { CONCEITOS_EMPECILHO, Gravacao, Report } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import type { ReportListItem } from "@/app/api/report/route";
@@ -152,15 +153,16 @@ function SessionReport({ id }: { id: string }) {
     id: c.id,
     nome: c.name,
     nota: c.score,
+    resumo: c.evidence[0]?.text,
     provas: c.score === null ? [] : provasDe(c.evidence, c.name),
     regras: c.squadRules?.map((r) => ({ texto: r.text, efeito: r.effect })),
   }));
   const notasFora: NotaCriterio[] = [
     ...(report.adaptation
-      ? [{ id: "adaptacao", nome: ORIGEM_ADAPTACAO, nota: report.adaptation.score, provas: provasDe(report.adaptation.evidence, ORIGEM_ADAPTACAO) }]
+      ? [{ id: "adaptacao", nome: ORIGEM_ADAPTACAO, nota: report.adaptation.score, resumo: report.adaptation.evidence[0]?.text, provas: provasDe(report.adaptation.evidence, ORIGEM_ADAPTACAO) }]
       : []),
     ...(report.learning
-      ? [{ id: "aprendizado", nome: ORIGEM_APRENDIZADO, nota: report.learning.score, provas: provasDe(report.learning.evidence, ORIGEM_APRENDIZADO) }]
+      ? [{ id: "aprendizado", nome: ORIGEM_APRENDIZADO, nota: report.learning.score, resumo: report.learning.evidence[0]?.text, provas: provasDe(report.learning.evidence, ORIGEM_APRENDIZADO) }]
       : []),
   ];
   const acontecimentos = acontecimentosDoRelatorio(report, gravacao).map((ac) => ({
@@ -170,30 +172,62 @@ function SessionReport({ id }: { id: string }) {
   const a = report.adaptation;
   const s = report.signals;
 
+  // Os números que importam, cada um com o nome em cima: dá para ler de relance, sem frase.
+  const fatos: { nome: string; valor: string }[] = [
+    { nome: "Testes escondidos", valor: `${s.testsPassed} de ${s.testsTotal}` },
+    { nome: "Dicas", valor: s.hintsUsed === 0 ? "Nenhuma" : String(s.hintsUsed) },
+    { nome: "Colagens", valor: s.pastes === 0 ? "Nenhuma" : String(s.pastes) },
+    ...(a ? [{ nome: "Adaptou à mudança em", valor: a.adaptedAt === null ? "Não adaptou" : duracaoCurta(a.adaptedAt - a.announcedAt) }] : []),
+    { nome: "Duração", valor: duracaoCurta(s.durationMs) },
+  ];
+
   return (
-    <main className="mx-auto max-w-5xl space-y-8 px-4 py-8 sm:px-8">
-      <VoltarLink texto="Voltar aos resultados" />
-      <header className="space-y-3">
-        <p className="label-pequena">{report.roleTitle}</p>
-        <h1 className="titulo-display text-4xl">
-          {REC[report.recommendation]} · {report.overallScore.toFixed(1).replace(".", ",")}
-          <span className="text-texto-suave">/4</span>
-        </h1>
-        <p className="max-w-3xl leading-relaxed text-pretty">{report.summary}</p>
-        <ul className="flex flex-wrap gap-2 pt-1 text-sm">
-          <Selo>{s.testsPassed}/{s.testsTotal} testes escondidos</Selo>
-          <Selo>{s.hintsUsed === 0 ? "sem dicas" : `${s.hintsUsed} ${s.hintsUsed === 1 ? "dica" : "dicas"}`}</Selo>
-          <Selo>{s.pastes === 0 ? "sem colagens" : `${s.pastes} ${s.pastes === 1 ? "colagem" : "colagens"}`}</Selo>
-          {a && (
-            <Selo>
-              {a.adaptedAt === null
-                ? "não se adaptou à mudança"
-                : `adaptou à mudança em ${formatMs(a.adaptedAt - a.announcedAt)}`}
-            </Selo>
-          )}
-          <Selo>{formatMs(s.durationMs)} de entrevista</Selo>
-        </ul>
-      </header>
+    <main className="mx-auto flex max-w-4xl flex-col gap-12 px-4 py-8 sm:px-8">
+      <div className="flex flex-col gap-6">
+        <VoltarLink texto="Voltar aos resultados" />
+
+        {/* Veredito: o que o Totti recomenda, a nota geral e o porquê em duas frases */}
+        <header className="flex flex-col gap-4">
+          <p className="text-[13px] text-texto-suave">{report.roleTitle} · relatório da entrevista</p>
+          <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-[13px] text-texto-suave">O Totti recomenda</span>
+              <h1 className="titulo-display text-[44px] leading-none">{REC[report.recommendation]}</h1>
+            </div>
+            <NotaGeral nota={report.overallScore} />
+          </div>
+          <p className="max-w-3xl text-[16px] leading-relaxed text-pretty">{report.summary}</p>
+        </header>
+
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-padrao border border-borda bg-borda sm:grid-cols-3 lg:grid-cols-5">
+          {fatos.map((f) => (
+            <div key={f.nome} className="flex flex-col gap-1 bg-superficie px-4 py-3.5 odd:last:col-span-2 lg:odd:last:col-span-1">
+              <dt className="text-[12.5px] text-texto-suave">{f.nome}</dt>
+              <dd className="numero text-[16px] font-medium tabular-nums">{f.valor}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+
+      <section className="grid gap-4 sm:grid-cols-2">
+        <Lista titulo="Pontos fortes" icone={<Check size={13} strokeWidth={2.5} />} itens={report.strengths} />
+        <Lista titulo="Pontos de atenção" icone={<TriangleAlert size={12} strokeWidth={2.25} />} itens={report.concerns} />
+      </section>
+
+      <NotasDosCriterios
+        titulo="Nota por critério"
+        descricao="De 1 a 4. A nota geral é a média destes critérios."
+        notas={notas}
+        onAbrir={gravacao ? setAberto : undefined}
+      />
+      {notasFora.length > 0 && (
+        <NotasDosCriterios
+          titulo="Também observado"
+          descricao="Como ele reagiu à mudança no problema e à ajuda. Não entra na nota geral."
+          notas={notasFora}
+          onAbrir={gravacao ? setAberto : undefined}
+        />
+      )}
 
       <HistoriaDaEntrevista
         duracao={gravacao?.durationMs ?? s.durationMs}
@@ -202,28 +236,12 @@ function SessionReport({ id }: { id: string }) {
         onAbrir={setAberto}
       />
 
-      <div className="max-w-4xl space-y-6">
-        <NotasDosCriterios titulo="Notas" subtitulo="clique para ver as provas" notas={notas} onAbrir={gravacao ? setAberto : undefined} />
-        {notasFora.length > 0 && (
-          <NotasDosCriterios
-            titulo="Fora da nota geral"
-            notas={notasFora}
-            onAbrir={gravacao ? setAberto : undefined}
-          />
-        )}
-      </div>
-
-      <section className="grid gap-6 sm:grid-cols-3">
-        <List title="Pontos fortes" items={report.strengths} />
-        <List title="Atenção" items={report.concerns} />
-        <List title="Próximos passos" items={report.nextSteps} />
-      </section>
-
-      <details className="group rounded-padrao border border-borda">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 font-medium select-none [&::-webkit-details-marker]:hidden">
-          Ver detalhes por critério
-          <span className="text-sm text-texto-suave group-open:hidden">
-            todas as {momentos.length} provas em texto
+      <details className="group -mt-6 rounded-padrao border border-borda">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[14px] font-medium select-none [&::-webkit-details-marker]:hidden">
+          Ver todas as provas em texto
+          <span className="flex items-center gap-1 text-sm font-normal text-texto-suave">
+            {momentos.length} provas
+            <ChevronDown size={14} strokeWidth={1.75} className="transition-transform duration-150 group-open:rotate-180" aria-hidden />
           </span>
         </summary>
         <div className="space-y-6 border-t border-borda px-4 py-4">
@@ -250,7 +268,22 @@ function SessionReport({ id }: { id: string }) {
         </div>
       </details>
 
-      <DecisaoFinal sessionId={id} />
+      <div className="flex flex-col gap-4">
+        {report.nextSteps.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <h2 className="text-[17px] font-medium">Se avançar, explore na próxima etapa</h2>
+            <ul className="flex flex-col gap-1.5 text-[14.5px] leading-snug">
+              {report.nextSteps.map((p) => (
+                <li key={p} className="flex gap-2.5">
+                  <ArrowRight size={14} strokeWidth={1.75} className="mt-[3px] shrink-0 text-texto-suave" aria-hidden />
+                  {p}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <DecisaoFinal sessionId={id} />
+      </div>
 
       {gravacao && (
         <MomentoDaSessao gravacao={gravacao} momentos={momentos} aberto={aberto} onFechar={fechar} onAbrir={setAberto} />
@@ -259,8 +292,43 @@ function SessionReport({ id }: { id: string }) {
   );
 }
 
-function Selo({ children }: { children: ReactNode }) {
-  return <li className="rounded-full bg-superficie-2 px-3 py-1 tabular-nums">{children}</li>;
+/** Nota geral: o número grande e uma barra de 0 a 4 preenchida até ele. */
+function NotaGeral({ nota }: { nota: number }) {
+  return (
+    <div className="flex flex-col items-start gap-2 sm:items-end">
+      <span className="text-[13px] text-texto-suave">Nota geral</span>
+      <span className="titulo-display text-[44px] leading-none tabular-nums">
+        {nota.toFixed(1).replace(".", ",")}
+        <span className="text-[24px] text-texto-suave">/4</span>
+      </span>
+      <span className="relative h-1.5 w-40 overflow-hidden rounded-full bg-texto/10" aria-hidden>
+        <span className="absolute inset-y-0 left-0 rounded-full bg-texto" style={{ width: `${(nota / 4) * 100}%` }} />
+      </span>
+    </div>
+  );
+}
+
+/** Lista curta num cartão, com o mesmo ícone em cada item: forte ou atenção se distinguem pela forma, não pela cor. */
+function Lista({ titulo, icone, itens }: { titulo: string; icone: ReactNode; itens: string[] }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-padrao bg-superficie p-5">
+      <h2 className="text-[15px] font-medium">{titulo}</h2>
+      {itens.length === 0 ? (
+        <p className="text-[14px] text-texto-suave">Nada a destacar.</p>
+      ) : (
+        <ul className="flex flex-col gap-2.5">
+          {itens.map((i) => (
+            <li key={i} className="flex gap-2.5 text-[14px] leading-snug">
+              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full bg-superficie-2 text-texto" aria-hidden>
+                {icone}
+              </span>
+              {i}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function textoDoAcontecimento(a: Acontecimento): string {
@@ -522,23 +590,6 @@ function SessionList() {
         </ul>
       )}
     </main>
-  );
-}
-
-function List({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div>
-      <h2 className="titulo mb-1">{title}</h2>
-      {items.length === 0 ? (
-        <p className="label-pequena">—</p>
-      ) : (
-        <ul className="list-disc space-y-1 pl-5 text-corpo">
-          {items.map((i) => (
-            <li key={i}>{i}</li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 

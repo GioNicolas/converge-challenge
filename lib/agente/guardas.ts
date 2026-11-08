@@ -152,3 +152,49 @@ export function semPerguntaNoFim(texto: string, jaDitas: string[] = []): string 
   const convite = escolherConvite(t, jaDitas);
   return [...frases, convite].join(" ");
 }
+
+/**
+ * Como `semPerguntaNoFim`, mas sem colar um convite pronto quando ainda sobra fala: "Tranquilo, seguimos." já
+ * devolve a vez. O convite fixo só entra se a fala era só a pergunta.
+ */
+/** Começos que só devolvem ao candidato o que ele acabou de dizer ("Entendi que…", "Então você…", "Ou seja…"). */
+const ABERTURA_DE_ECO =
+  /^(?:eu entendi\b|entendi (?:que|entao|voce|vc)\b|se (?:eu )?entendi\b|pelo que (?:eu )?entendi\b|pelo que voce (?:disse|falou)\b|(?:ok |certo |ta |beleza )?entao voce\b|voce (?:disse|falou|comentou|mencionou|explicou|colocou|quer|vai|pretende|esta|ta|escolheu|decidiu)\b|ou seja\b|resumindo\b)/;
+/** Parte das palavras de conteúdo da frase que já estavam na fala do candidato para contar como eco. */
+const LIMIAR_ECO = 0.7;
+
+/**
+ * Tira a primeira frase quando ela só repete o que o candidato acabou de dizer ("Contador com base 62.",
+ * "Entendi que você vai usar Postgres.") e ainda sobra fala depois. Ele sabe o que disse: o eco soa robô e
+ * gasta o tempo dele. Resposta a uma pergunta dele fica de fora pelas palavras (confirmar usa as mesmas).
+ */
+export function semEcoNoComeco(texto: string, falaDoCandidato: string): string {
+  const frases = frasesDe(texto);
+  if (frases.length < 2 || frases[0].endsWith("?")) return texto.trim();
+  const primeira = normalizar(frases[0]);
+  let eco = ABERTURA_DE_ECO.test(primeira);
+  if (!eco && !falaDoCandidato.trim().endsWith("?")) {
+    const daFrase = tokens(frases[0]);
+    const daFala = tokens(falaDoCandidato);
+    let comum = 0;
+    for (const t of daFrase) if (daFala.has(t)) comum++;
+    eco = daFrase.size >= 1 && comum / daFrase.size >= LIMIAR_ECO;
+  }
+  return eco ? frases.slice(1).join(" ").trim() : texto.trim();
+}
+
+/** Fala que é só uma reação, sem conteúdo ("Hm.", "Tá.", "Certo, beleza."). */
+const SO_REACAO = /^(?:(?:h+m+|hum+|uhum|aham|ta|certo|ok|okay|beleza|entendi|saquei|anotado|sei|show|legal|blz)\s*)+$/;
+
+export function eSoReacao(texto: string | undefined): boolean {
+  const t = normalizar(texto ?? "");
+  return t.length > 0 && SO_REACAO.test(t);
+}
+
+export function semPerguntaNoFimV2(texto: string): string {
+  const t = texto.trim();
+  if (!t.endsWith("?")) return t;
+  const frases = frasesDe(t);
+  while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  return frases.length ? frases.join(" ") : CONVITES[t.length % CONVITES.length];
+}

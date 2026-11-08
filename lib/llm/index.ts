@@ -20,10 +20,10 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "codigo" | "conversa" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro";
+export type LlmRole = "analyst" | "codigo" | "conversa" | "conversa_quadro" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro";
 
 /** Papéis que respondem a uma fala ao vivo: passam na frente na fila e nunca esperam uma análise acabar. */
-const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "fast", "filtro", "interviewer"]);
+const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "conversa_quadro", "fast", "filtro", "interviewer"]);
 
 interface RoleConfig {
   featherlessEnv: string;
@@ -86,6 +86,22 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     hedgeMs: 2_500,
     // Mais baixa que o padrão: as regras de fala (devolver a vez, recusar, ficar quieto) variavam entre rodadas.
     temperatura: 0.3,
+  },
+  conversa_quadro: {
+    // O Totti 2 no quadro (TOTTI_QUADRO=v2): o mesmo lugar do "conversa", com modelo próprio para medir pelo
+    // placar (scripts/placar-quadro) sem mexer na pré-entrevista nem na IDE.
+    primario: "openrouter",
+    openrouterEnv: "CONVERSA_QUADRO_MODEL",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
+    featherlessEnv: "CONVERSA_QUADRO_RESERVA_MODEL",
+    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    maxTokens: 1500,
+    reasoningEffort: "low",
+    raciocinioSo: "featherless",
+    // Sem hedge: com um modelo forte (Sonnet) a resposta passa de 2,5 s quase sempre, a reserva corria junto e
+    // ganhava, e duas "derrotas" abriam o disjuntor por 3 min. O Totti falava pelo GLM achando que era o Sonnet.
+    // A reserva agora só entra em erro (o log perguntar_llm mostra quem respondeu cada turno).
+    temperatura: 0.5,
   },
   filtro: {
     // Confere a fala do live coding antes de ela sair (spoiler, validação): fica no caminho de cada resposta.
@@ -190,6 +206,7 @@ const state: LlmState = (globalWithLlm.__llmState ??= {
   roles: {
     analyst: { consecutiveSlow: 0 },
     conversa: { consecutiveSlow: 0 },
+    conversa_quadro: { consecutiveSlow: 0 },
     fast: { consecutiveSlow: 0 },
     filtro: { consecutiveSlow: 0 },
     evaluator: { consecutiveSlow: 0 },
@@ -256,6 +273,7 @@ export function getLlmStats(): LlmStatsSnapshot {
     roles: {
       analyst: roleSnapshot("analyst", state.roles.analyst, now),
       conversa: roleSnapshot("conversa", state.roles.conversa, now),
+      conversa_quadro: roleSnapshot("conversa_quadro", state.roles.conversa_quadro, now),
       fast: roleSnapshot("fast", state.roles.fast, now),
       filtro: roleSnapshot("filtro", state.roles.filtro, now),
       evaluator: roleSnapshot("evaluator", state.roles.evaluator, now),

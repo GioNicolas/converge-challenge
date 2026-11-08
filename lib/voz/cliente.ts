@@ -1,6 +1,7 @@
 import type { Alinhamento } from "../presenca/alinhamento";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
+import { comFolga } from "./folga";
 type DadosVoz = import("zod").infer<typeof RespostaVoz>;
 export type ProvedorVoz = "elevenlabs";
 type EventosVoz = {
@@ -87,9 +88,10 @@ export function criarVoz(dependencias: { fetch?: typeof globalThis.fetch; tocar?
         try {
           const dados = await audioDe(parte.texto, sinal);
           sinal.throwIfAborted();
-          const bytes = Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0));
+          // Silêncio nas duas pontas: sem ele, a saída de som engolia a primeira sílaba e às vezes o finalzinho.
+          const { bytes, alinhamento } = comFolga(Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0)), dados.alinhamento as Alinhamento);
           if (!(await aguardarVez())) return;
-          await tocar(new Blob([bytes], { type: "audio/mpeg" }), dados.alinhamento as Alinhamento, {
+          await tocar(new Blob([bytes as BlobPart], { type: "audio/mpeg" }), alinhamento, {
             sinal,
             aoAguardarGesto: eventos.aoAguardarGesto,
             aoProgresso: (n) => {

@@ -138,7 +138,8 @@ export type EventoSessao =
   | { tipo: "ELEMENTOS_ALTERADOS"; ids: string[] }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
-  | { tipo: "AGENTE_FALOU"; texto: string }
+  /** `perguntou`: a fala do Conversador terminou numa pergunta (v2); conta no intervalo antes do próximo plin. */
+  | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
   /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
   | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
   /** O Totti emendou uma pergunta de continuação na resposta: o fio segue ativo. */
@@ -383,10 +384,15 @@ export function transicionar(
     }
 
     case "CANDIDATO_FALOU": {
-      const comFala: EstadoSessao = {
-        ...estado,
-        conversa: [...estado.conversa, { quem: "candidato", texto: evento.texto, em: agora }],
-      };
+      // A marca de fim de resposta (evento "resposta" do quadro) chega depois que o /perguntar já gravou a fala,
+      // e depois da réplica do agente: gravar de novo fazia parecer que o candidato repetiu o que disse, e o botão
+      // "terminei" (sem texto) gravava uma fala vazia. No fim de resposta, só entra fala nova e não vazia.
+      const texto = evento.texto.trim();
+      const ultimaDoCandidato = estado.conversa.findLast((f) => f.quem === "candidato");
+      const repetida = evento.fimDeResposta && (!texto || ultimaDoCandidato?.texto.trim() === texto);
+      const comFala: EstadoSessao = repetida
+        ? estado
+        : { ...estado, conversa: [...estado.conversa, { quem: "candidato", texto: evento.texto, em: agora }] };
       const ativa = estado.perguntaAtiva;
       // A resposta só termina com a marca de fim vinda do texto do candidato.
       if (estado.plin !== "PERGUNTA_ATIVA" || !ativa || !evento.fimDeResposta) {
@@ -456,6 +462,7 @@ export function transicionar(
           ...estado,
           ultimaFalaDoAgenteEm: agora,
           conversa: [...estado.conversa, { quem: "agente", texto: evento.texto, em: agora }],
+          ...(evento.perguntou ? { ultimaPerguntaEm: agora } : {}),
         },
         efeitos: [],
       };

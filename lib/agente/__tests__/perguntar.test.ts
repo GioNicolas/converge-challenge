@@ -8,9 +8,43 @@ import { estadoInicial } from "../sessao/estado";
 const AGORA = 1_000_000;
 const problema = kitDemo.problemas[0];
 const estado = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm: AGORA };
-const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {} });
+// A maior parte destes testes é das regras do v1; o v2 tem os seus no bloco "Totti 2 no quadro".
+const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {}, versao: "v1" as const });
 
 describe("perguntar", () => {
+  it("segunda reação vazia seguida (\"Hm.\" depois de \"Hm.\") vira silêncio; a primeira passa", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Hm.", requisito: null, concluiu: false }]);
+    const comHm = { ...estado, conversa: [{ quem: "agente" as const, texto: "Hm.", em: AGORA }] };
+    const v2 = { ...deps(llm), versao: "v2" as const };
+    const segunda = await perguntar(v2, comHm, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
+    assert.equal(segunda.responder, false);
+    const primeira = await perguntar(v2, estado, { fase: "REQUISITOS", texto: "E a fila fica separada." }, AGORA);
+    assert.equal(primeira.responder, true);
+    assert.equal(primeira.texto, "Hm.");
+  });
+  it("tira a abertura com eco da fala do candidato", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Entendi que você vai usar um contador. E onde ele fica?", requisito: null, concluiu: false }]);
+    const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Vou usar um contador em base 62." }, AGORA);
+    assert.equal(r.texto, "E onde ele fica?");
+  });
+  it("registra no log quem respondeu o turno (modelo, provedor, tempo e custo)", async () => {
+    const falso = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false }]);
+    const llm = {
+      ...falso,
+      async completarJson<T>(args: Parameters<typeof falso.completarJson<T>>[0]) {
+        const r = await falso.completarJson(args);
+        return { ...r, ms: 3200, modelo: "zai-org/GLM-5.3-Flash", provedor: "featherless", uso: { entrada: 9000, saida: 120, custo: 0.002 } };
+      },
+    };
+    const eventos: [string, Record<string, unknown>][] = [];
+    await perguntar({ llm, kit: kitDemo, problema, log: (e, m) => eventos.push([e, m]) }, estado, { fase: "REQUISITOS", texto: "Oi", sessao_id: "s1" }, AGORA);
+    const turno = eventos.find(([e]) => e === "perguntar_llm")?.[1];
+    assert.ok(turno, "faltou o evento perguntar_llm");
+    assert.equal(turno.modelo, "zai-org/GLM-5.3-Flash");
+    assert.equal(turno.provedor, "featherless");
+    assert.equal(turno.ms, 3200);
+    assert.equal(turno.custo_usd, 0.002);
+  });
   it("resposta e feedback recebem o desenho e a pergunta ativa no loop rápido", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Você separou as leituras da escrita.", requisito: null, concluiu: false }]);
     const r = await perguntar(deps(llm), { ...estado, fase: "ALTO_NIVEL" }, {
@@ -158,6 +192,53 @@ describe("foto e mudanças do quadro no /perguntar", () => {
     assert.equal(llm.chamadas[0].imagem, "data:image/jpeg;base64,/9j/");
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /acabou de mudar no desenho.*adicionou \[r2\] Cache/);
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /FOTO DO QUADRO/);
+  });
+});
+
+describe("Totti 2 no quadro (versao v2)", () => {
+  const ativa = { ...estado, fase: "APROFUNDAMENTO" as const };
+  const depsV2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ ...deps(llm), versao: "v2" as const });
+  it("usa o prompt de objetivos, o schema próprio (papel conversa_quadro) e mostra o que ainda não deu sinal", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "São 100 milhões por mês.", requisito: null }]);
+    const comCriterios = { ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id) }), fase: "REQUISITOS" as const, faseIniciadaEm: AGORA };
+    await perguntar(depsV2(llm), comCriterios, { fase: "REQUISITOS", texto: "Quantas URLs por mês?" }, AGORA);
+    const c = llm.chamadas[0];
+    assert.equal(c.nomeSchema, "resposta_entrevistador_v2");
+    assert.match(c.sistema.estatico, /PARA QUE SERVE ESTA ENTREVISTA/);
+    assert.match(c.sistema.dinamico ?? "", new RegExp(`Ainda sem nenhum sinal.*${kitDemo.criterios[0].nome}`));
+  });
+  it("não sei: tira a pergunta do fim e, se a fala não diz o próximo passo, põe um convite", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, seguimos. Quer olhar outra parte?", requisito: null, desfecho: "nao_sabe" }]);
+    const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.match(r.texto, /^Tranquilo, seguimos\. (Pode|Continua|Fica|Segue)/);
+    assert.doesNotMatch(r.texto, /\?/);
+  });
+  it("não sei com próximo passo concreto: fica como o modelo disse", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, deixa isso de lado. Pode seguir com a próxima parte do desenho.", requisito: null, desfecho: "nao_sabe" }]);
+    const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Não sei.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.equal(r.texto, "Tranquilo, deixa isso de lado. Pode seguir com a próxima parte do desenho.");
+  });
+  it("réplica solta depois de responder à pergunta do Totti ganha a direção", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tudo bem.", requisito: null, desfecho: "respondeu" }]);
+    const r = await perguntar(depsV2(llm), ativa, { fase: "APROFUNDAMENTO", texto: "Uso um contador por servidor.", perguntaAtiva: "Como evita colisão?" }, AGORA);
+    assert.match(r.texto, /^Tudo bem\. \S/);
+  });
+  it("sem versao explícita vale o v2; TOTTI_QUADRO=v1 volta ao v1", async () => {
+    const { versao: _, ...semVersao } = deps(criarClienteFalso([]));
+    const anterior = process.env.TOTTI_QUADRO;
+    try {
+      delete process.env.TOTTI_QUADRO;
+      const a = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+      await perguntar({ ...semVersao, llm: a }, estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
+      assert.equal(a.chamadas[0].nomeSchema, "resposta_entrevistador_v2");
+      process.env.TOTTI_QUADRO = "v1";
+      const b = criarClienteFalso([{ responder: false, texto: "", requisito: null }]);
+      await perguntar({ ...semVersao, llm: b }, estado, { fase: "REQUISITOS", texto: "hmm" }, AGORA);
+      assert.equal(b.chamadas[0].nomeSchema, "resposta_entrevistador");
+    } finally {
+      if (anterior === undefined) delete process.env.TOTTI_QUADRO;
+      else process.env.TOTTI_QUADRO = anterior;
+    }
   });
 });
 
