@@ -3,10 +3,11 @@
 //   2. Entrevistas simuladas com 3 candidatos (um LLM faz o candidato), pelo mesmo caminho do servidor.
 //   3. Um juiz (LLM forte) dá nota a cada fala: escuta, pertinência, naturalidade, concisão e violações.
 //   4. Latência do /perguntar e da análise (p50 e p95).
-// Salva em test-results/placar-quadro/<data>-<rotulo>.json e .md. Usa créditos dos provedores.
+// Salva em test-results/placar-quadro/<data>-<rotulo>.json e .md. O Totti usa os provedores de produção; juiz e candidato, a Featherless (PLACAR_PROVEDOR=openrouter para os pagos).
 //
 //   npm run placar:quadro -- --rotulo atual
 //   npm run placar:quadro -- --rotulo v2 --personas senior_claro,junior_nervoso --so conversas
+//   npm run placar:quadro -- --rejulgar test-results/placar-quadro/A.json   (só o juiz, sobre as falas salvas)
 //   npm run placar:quadro -- --comparar test-results/placar-quadro/A.json test-results/placar-quadro/B.json
 import fs from "node:fs";
 import path from "node:path";
@@ -206,19 +207,21 @@ async function main() {
     const [a, b] = process.argv.slice(comparacao + 1, comparacao + 3).map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Placar);
     return comparar(a, b);
   }
-  const rotulo = arg("rotulo") ?? "sem-rotulo";
+  const rejulgar = arg("rejulgar");
+  const salvo = rejulgar ? (JSON.parse(fs.readFileSync(rejulgar, "utf8")) as Placar) : null;
+  const rotulo = arg("rotulo") ?? (salvo ? `${salvo.rotulo}-rejulgado` : "sem-rotulo");
   const so = arg("so");
   const ids = arg("personas")?.split(",");
   const personas = PERSONAS.filter((p) => !ids || ids.includes(p.id));
   const llm = criarClientePrincipal();
 
-  let casos: ResultadoCaso[] = [];
-  if (so !== "conversas") {
+  let casos: ResultadoCaso[] = salvo ? salvo.casos.map(({ nota: _n, ...c }) => c) : [];
+  if (!salvo && so !== "conversas") {
     console.log("\n== Casos fixos ==");
     casos = await rodarCasos(llm);
   }
-  const conversas: ResultadoConversa[] = [];
-  if (so !== "casos") {
+  const conversas: ResultadoConversa[] = salvo ? salvo.conversas.map(({ juiz: _j, erroJuiz: _e, ...c }) => c) : [];
+  if (!salvo && so !== "casos") {
     for (const p of personas) {
       console.log(`\n== Conversa: ${p.id} ==`);
       conversas.push(await simular(llm, p, console.log));
@@ -242,8 +245,8 @@ async function main() {
   const placar: Placar = {
     rotulo,
     em: new Date().toISOString(),
-    versaoTotti: process.env.TOTTI_QUADRO || "v1",
-    modelos: {
+    versaoTotti: salvo?.versaoTotti ?? (process.env.TOTTI_QUADRO || "v1"),
+    modelos: salvo ? { ...salvo.modelos, juiz: MODELO_JUIZ } : {
       conversa:
         process.env.TOTTI_QUADRO === "v2"
           ? process.env.CONVERSA_QUADRO_MODEL || "google/gemini-3.5-flash-lite"

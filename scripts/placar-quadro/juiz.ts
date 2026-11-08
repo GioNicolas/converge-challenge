@@ -3,11 +3,24 @@
 // Ainda não calibrado com notas humanas: use para comparar versões entre si, não como verdade absoluta.
 import { z } from "zod";
 import { chatJsonVia } from "../../lib/llm/openaiCompat";
+import { featherless } from "../../lib/llm/featherless";
 import { openrouter } from "../../lib/llm/openrouter";
 import { kit, problema } from "./casos";
 import type { Conversa } from "./simulacao";
 
-export const MODELO_JUIZ = process.env.PLACAR_MODELO_JUIZ || "anthropic/claude-sonnet-5.5";
+/**
+ * Juiz e candidato rodam na Featherless por padrão (assinatura, sem custo por token); PLACAR_PROVEDOR=openrouter
+ * volta para os modelos pagos. O Totti em si usa os provedores de produção, como sempre.
+ */
+const featherlessDoPlacar = {
+  ...featherless,
+  // Chave própria (PLACAR_FEATHERLESS_API_KEY), para não disputar a concorrência com a do produto.
+  apiKeyEnv: process.env.PLACAR_FEATHERLESS_API_KEY ? "PLACAR_FEATHERLESS_API_KEY" : featherless.apiKeyEnv,
+  concurrency: Number(process.env.PLACAR_FEATHERLESS_CONCURRENCY) || 2,
+};
+export const PROVEDOR_PLACAR = process.env.PLACAR_PROVEDOR === "openrouter" ? openrouter : featherlessDoPlacar;
+export const MODELO_JUIZ =
+  process.env.PLACAR_MODELO_JUIZ || (PROVEDOR_PLACAR === openrouter ? "anthropic/claude-sonnet-5.5" : "moonshotai/Kimi-K2.6");
 
 export const VIOLACOES = [
   "validou",
@@ -80,7 +93,7 @@ function transcrever(c: Conversa): string {
 }
 
 export async function julgarConversa(c: Conversa): Promise<NotaConversa> {
-  const r = await chatJsonVia(openrouter, {
+  const r = await chatJsonVia(PROVEDOR_PLACAR, {
     model: MODELO_JUIZ,
     system: RUBRICA,
     user: `Avalie esta entrevista simulada. Dê uma nota para CADA fala do Totti (use o número entre colchetes em "n"; não avalie as falas do candidato).
@@ -103,7 +116,7 @@ export async function julgarFalas(itens: FalaAvulsa[]): Promise<NotaFala[]> {
   const lista = itens
     .map((i) => `[${i.n}] CONTEXTO: ${i.contexto}\n    CANDIDATO: ${i.candidato}\n    TOTTI: ${i.totti || "(ficou quieto)"}`)
     .join("\n\n");
-  const r = await chatJsonVia(openrouter, {
+  const r = await chatJsonVia(PROVEDOR_PLACAR, {
     model: MODELO_JUIZ,
     system: RUBRICA,
     user: `Cada item abaixo é um momento isolado de uma entrevista. Dê uma nota para a fala do Totti em CADA item (use o número entre colchetes em "n").

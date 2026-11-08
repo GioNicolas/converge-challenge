@@ -12,9 +12,11 @@ import type { Fase, PedidoAnalise } from "../../lib/agente/sessao/tipos";
 import { chatJsonVia } from "../../lib/llm/openaiCompat";
 import { openrouter } from "../../lib/llm/openrouter";
 import { kit, problema } from "./casos";
+import { PROVEDOR_PLACAR } from "./juiz";
 
 /** Quem faz o candidato: de outra família que o Totti e o juiz, para não se espelharem. */
-export const MODELO_CANDIDATO = process.env.PLACAR_MODELO_CANDIDATO || "openai/gpt-5.4-mini";
+export const MODELO_CANDIDATO =
+  process.env.PLACAR_MODELO_CANDIDATO || (PROVEDOR_PLACAR === openrouter ? "openai/gpt-5.4-mini" : "deepseek-ai/DeepSeek-V3.2");
 
 const PASSO_DO_RELOGIO_MS = 50_000;
 
@@ -154,7 +156,7 @@ async function falaDoCandidato(p: Persona, i: number, desenho: string, turnos: T
     .filter((t) => !t.quieto)
     .map((t) => `${t.fonte === "candidato" ? "Você" : "Entrevistador"}: ${t.texto}`)
     .join("\n");
-  const r = await chatJsonVia(openrouter, {
+  const r = await chatJsonVia(PROVEDOR_PLACAR, {
     model: MODELO_CANDIDATO,
     system: `Você faz o papel de um CANDIDATO numa entrevista de system design por voz, em português do Brasil. Não é assistente: é a pessoa sendo entrevistada.
 Quem você é: ${p.descricao}
