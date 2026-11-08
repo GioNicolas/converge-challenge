@@ -23,13 +23,17 @@ export function BotaoDitado({ transcricao: t, disabled = false }: { transcricao:
   );
 }
 
-export function EstadoDitado({ transcricao: t }: { transcricao: Transcricao }) {
+export function EstadoDitado({ transcricao: t, dica = "Ouvindo… Pare o ditado para revisar e enviar." }: {
+  transcricao: Transcricao;
+  /** O que aparece enquanto o microfone ouve e ainda não há texto parcial. */
+  dica?: string;
+}) {
   return (
     <>
       {t.ativa && (
         <div role="status" className="text-[12px] text-inherit opacity-75">
           {t.estado === "conectando" ? "Conectando o microfone…" : t.estado === "finalizando" ? "Finalizando transcrição…"
-            : t.parcial || "Ouvindo… Pare o ditado para revisar e enviar."}
+            : t.parcial || dica}
         </div>
       )}
       {t.erro && <p role="alert" className="text-[12px] text-red-600">{t.erro}</p>}
