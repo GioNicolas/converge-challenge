@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import { BlocoDeDecisao, CartaoCompleto } from "@/components/vagas/ResultadosDaVaga";
+import { BlocoDeDecisao, CartaoEnxuto } from "@/components/vagas/ResultadosDaVaga";
 import type { EntrevistaReal } from "@/lib/vagas/entrevistas";
 
 export default function PaginaDoResultado() {
@@ -52,7 +52,10 @@ export default function PaginaDoResultado() {
           </header>
 
           {item.cartao ? (
-            <CartaoCompleto e={item} cartao={item.cartao} comDecisao />
+            <>
+              <CartaoEnxuto e={item} cartao={item.cartao} />
+              <BlocoDeDecisao e={item} />
+            </>
           ) : (
             <>
               <p className="text-[14px] text-texto-suave">O relatório ainda está sendo gerado. Volte em instantes.</p>
