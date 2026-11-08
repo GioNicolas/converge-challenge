@@ -7,7 +7,7 @@
  */
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Report } from "@/lib/contracts";
+import { Gravacao, Report } from "@/lib/contracts";
 
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -15,23 +15,27 @@ const ID_VALIDO = /^[A-Za-z0-9_-]{1,80}$/;
 export interface ReportSalvo {
   startedAt: number;
   report: Report;
+  /** Código, falas e execuções da sessão, para o relatório mostrar cada prova no minuto dela. */
+  gravacao?: Gravacao;
 }
 
 const pasta = () => join(process.cwd(), "data", "reports");
 
-export async function saveReport(startedAt: number, report: Report): Promise<void> {
+export async function saveReport(startedAt: number, report: Report, gravacao?: Gravacao): Promise<void> {
   if (!ID_VALIDO.test(report.sessionId)) throw new Error(`id de sessão inválido: ${report.sessionId}`);
   await mkdir(pasta(), { recursive: true });
-  const salvo: ReportSalvo = { startedAt, report };
+  const salvo: ReportSalvo = { startedAt, report, gravacao };
   await writeFile(join(pasta(), `${report.sessionId}.json`), JSON.stringify(salvo, null, 2), "utf8");
 }
 
 function parse(texto: string): ReportSalvo | undefined {
   try {
-    const bruto = JSON.parse(texto) as { startedAt?: unknown; report?: unknown };
+    const bruto = JSON.parse(texto) as { startedAt?: unknown; report?: unknown; gravacao?: unknown };
     const report = Report.safeParse(bruto.report);
     if (!report.success || typeof bruto.startedAt !== "number") return undefined;
-    return { startedAt: bruto.startedAt, report: report.data };
+    // Relatório antigo (sem gravação) ou gravação inválida: o relatório continua valendo, só sem os momentos.
+    const gravacao = Gravacao.safeParse(bruto.gravacao);
+    return { startedAt: bruto.startedAt, report: report.data, gravacao: gravacao.success ? gravacao.data : undefined };
   } catch {
     return undefined;
   }

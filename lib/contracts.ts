@@ -306,3 +306,24 @@ export const Report = z.object({
   }),
 });
 export type Report = z.infer<typeof Report>;
+
+// ---------------------------------------------------------------------------
+// Gravação da sessão: o que o relatório usa para mostrar cada prova no minuto em que aconteceu
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/report/gravacao?sessionId=... — versões do código, falas, execuções e marcos (dica, colagem,
+ * mudança no problema), todos no mesmo relógio das evidências (`t`, ms desde o início). Fica salva em disco
+ * junto com o relatório.
+ */
+export const Gravacao = z.object({
+  sessionId: z.string(),
+  durationMs: z.number(),
+  /** Uma entrada por versão diferente do código, em ordem de tempo. */
+  codigo: z.array(z.object({ t: z.number(), language: z.string(), code: z.string() })),
+  falas: z.array(z.object({ t: z.number(), role: z.enum(["candidate", "agent"]), text: z.string() })),
+  execucoes: z.array(z.object({ t: z.number(), passed: z.number().int(), total: z.number().int() })),
+  /** Acontecimentos curtos para dar contexto ("recebeu uma dica", "colou 12 linhas"). */
+  marcos: z.array(z.object({ t: z.number(), text: z.string() })),
+});
+export type Gravacao = z.infer<typeof Gravacao>;
