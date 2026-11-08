@@ -216,3 +216,53 @@ body {
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
 }
+
+/*
+ * Quadro (agente do Excalidraw): tema CLARO, só nas páginas dele.
+ * O resto do app (live coding, pré-entrevista) segue no tema escuro acima. As páginas do quadro põem
+ * <div className="tema-quadro-pagina contents"> na raiz; :has() vira os tokens no documento todo
+ * (inclusive portais e popovers do Excalidraw), sem JS.
+ */
+@theme inline {
+  /* Só o quadro usa estes nomes (a main tem rounded-controle e shadow-cartao para o mesmo fim). */
+  --color-sucesso-texto: var(--sucesso-texto);
+  --color-alerta-texto: var(--alerta-texto);
+  --color-perigo-texto: var(--perigo-texto);
+  --radius-pequeno: var(--raio-pequeno);
+  --shadow-padrao: var(--sombra);
+}
+
+:root {
+  /* Valores padrão (tema escuro), para os nomes do quadro nunca ficarem indefinidos fora dele. */
+  --sucesso-texto: #30d158;
+  --alerta-texto: #ff9f0a;
+  --perigo-texto: #ff453a;
+  --raio-pequeno: 10px;
+  --sombra: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
+}
+
+:root:has(.tema-quadro-pagina) {
+  color-scheme: light;
+  --fundo: #f5f5f7;
+  --superficie: #ffffff;
+  --superficie-2: #f0f0f2;
+  --vidro: rgb(255 255 255 / 0.72);
+  --vidro-escuro: rgb(28 28 30 / 0.72);
+  --borda: rgb(0 0 0 / 0.08);
+  --texto: #1d1d1f;
+  --texto-suave: #6e6e73;
+  --texto-claro: #f5f5f7;
+  --marca: #0071e3;
+  --marca-suave: #e8f1fc;
+  --sucesso: #34c759;
+  --alerta: #ff9f0a;
+  --perigo: #ff3b30;
+  /* Texto sobre fundo claro (os de cima são para preenchimento e ícones) */
+  --sucesso-texto: #248a3d;
+  --alerta-texto: #b25000;
+  --perigo-texto: #d70015;
+  --raio-padrao: 18px;
+  --raio-pequeno: 10px;
+  --sombra: 0 1px 2px rgb(0 0 0 / 0.04), 0 6px 20px rgb(0 0 0 / 0.06);
+  --sombra-flutuante: 0 2px 6px rgb(0 0 0 / 0.06), 0 18px 48px rgb(0 0 0 / 0.16);
+}

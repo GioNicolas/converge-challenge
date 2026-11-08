@@ -60,6 +60,23 @@ export const CIDADES = [
 
 const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
+/** Índices dos candidatos de teste começam aqui, longe dos demo, para não deslocar os convites salvos. */
+const INDICE_TESTE = 1_000_000;
+/** Candidato de teste (time): recebe e-mail de verdade. */
+export const ehCandidatoTeste = (c: CandidatoVaga) => c.i >= INDICE_TESTE;
+
+type CandidatoTeste = { nome: string; email: string };
+
+let testesPromessa: Promise<CandidatoTeste[]> | null = null;
+/** Os candidatos de teste, buscados uma vez por carregamento da página. Falha vira lista vazia. */
+function buscarTestes(): Promise<CandidatoTeste[]> {
+  testesPromessa ??= fetch("/api/convites/teste")
+    .then((r) => (r.ok ? (r.json() as Promise<{ candidatos?: CandidatoTeste[] }>) : { candidatos: [] }))
+    .then((j) => j.candidatos ?? [])
+    .catch(() => []);
+  return testesPromessa;
+}
+
 const cache = new Map<string, CandidatoVaga[]>();
 
 /** A lista base (sem os convites feitos aqui). Memorizada por vaga. */
@@ -133,17 +150,41 @@ export function useConvitesFeitos() {
 /** Os candidatos de uma vaga com os convites aplicados, e o funil recontado. `null` antes de montar. */
 export function useCandidatos(vagaId: string, funil: Funil) {
   const [lista, setLista] = useState<CandidatoVaga[] | null>(null);
+  // `null` até a busca dos testes terminar: senão a lista vazia piscaria "Ninguém se inscreveu ainda."
+  const [testes, setTestes] = useState<CandidatoTeste[] | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    buscarTestes().then((t) => {
+      if (vivo) setTestes(t);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, []);
 
   const { inscritos, convidados: nConvidados, emAndamento, concluiram, novos } = funil;
   const montar = useCallback(() => {
+    if (testes === null) return;
     const base = gerar(vagaId, { inscritos, convidados: nConvidados, emAndamento, concluiram, novos });
+    // Os de teste entram como inscritos comuns (sem marca), antes dos demonstrativos.
+    const deTeste: CandidatoVaga[] = testes.map((t, k) => ({
+      i: INDICE_TESTE + k,
+      nome: t.nome,
+      email: t.email,
+      cidade: CIDADES[k % CIDADES.length],
+      situacao: "inscrito",
+      haDias: 0,
+      novo: false,
+    }));
+    const todos = [...deTeste, ...base];
     const convidados = new Set(lerConvites()[vagaId] ?? []);
     setLista(
       convidados.size === 0
-        ? base
-        : base.map((c) => (c.situacao === "inscrito" && convidados.has(c.i) ? { ...c, situacao: "convidado", haDias: 0 } : c)),
+        ? todos
+        : todos.map((c) => (c.situacao === "inscrito" && convidados.has(c.i) ? { ...c, situacao: "convidado", haDias: 0 } : c)),
     );
-  }, [vagaId, inscritos, nConvidados, emAndamento, concluiram, novos]);
+  }, [testes, vagaId, inscritos, nConvidados, emAndamento, concluiram, novos]);
 
   useEffect(() => {
     montar();

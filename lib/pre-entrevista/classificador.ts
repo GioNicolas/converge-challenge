@@ -14,6 +14,7 @@
 import { choice, noul, score } from "@typesafe-ai/sdk";
 import type { FocusArea, InterviewMode, InterviewConfig } from "@/lib/contracts";
 import { jev } from "./jev";
+import { modoAtivo } from "./catalogo";
 
 export interface Vaga {
   roleTitle: string;
@@ -238,6 +239,15 @@ export function pesosDoFoco(scores: FocoSugerido[]): InterviewConfig["focus"] {
   const diff = Math.round((1 - pesos.reduce((acc, p) => acc + p.weight, 0)) * 100) / 100;
   pesos[0].weight = Math.round((pesos[0].weight + diff) * 100) / 100;
   return pesos;
+}
+
+/**
+ * Formato que o Jev sugeriu mas que não está disponível nesta versão vira o formato ativo (live coding). Sem a pergunta
+ * de formato, porque ele já está decidido. A classificação original continua com o Jev (quem chama guarda no log). Função pura.
+ */
+export function classificacaoDoFormatoAtivo(c: Classificacao): Classificacao {
+  if (modoAtivo(c.mode.value)) return c;
+  return { ...c, mode: { ...c.mode, value: "live_coding" }, confirmar: c.confirmar.filter((x) => x !== "mode") };
 }
 
 export async function classificarVaga(vaga: Vaga): Promise<Classificacao> {

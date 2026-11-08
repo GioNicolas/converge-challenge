@@ -7,9 +7,10 @@
  */
 import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, AREAS, LIMIAR, NOME_AREA_FALA } from "./cobertura";
-import { COMO_AVALIAMOS, mede, modoAlternativoQueMede } from "./catalogo";
+import { COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
+import { normalizarTexto } from "./frases";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
 import { DURACAO_PADRAO, duracaoDoRascunho, listar, type Rascunho, type Turno } from "./rascunho";
@@ -45,8 +46,10 @@ A fala vai ser ouvida em voz alta.
 
 Como falar:
 - Cada fala tem no máximo 2 frases curtas e uma pergunta só. No resumo final, você escreve só as duas primeiras frases; o resto é acrescentado pelo sistema.
-- Reconheça a resposta dela em 2 a 4 palavras ("Boa.", "Faz sentido.", "Fechado.") ou vá direto para a pergunta.
-  Não comece com "Entendi" e não repita a resposta dela palavra por palavra.
+- Nunca comece com palavra de concordância ou reconhecimento: "Boa", "Fechado", "Certo", "Perfeito", "Ótimo", "Show", "Beleza",
+  "Legal", "Combinado", "Entendi", "Entendido" ou "Faz sentido". Comece direto pelo conteúdo ou pela pergunta.
+- Não repita a resposta dela palavra por palavra.
+- Nunca ofereça como opção algo que ela já disse. Se ela falou de escalabilidade, não a ofereça de novo como escolha.
 - Fale com as palavras dela e da vaga. Nunca use nomes internos (tecnico, pressao, escala_produto, uso_ia, criterio, passo)
   nem as expressões "domínio técnico", "escala e produto" e "pressão e adaptação". Para a área de IA, diga "IA aplicada".
 - Não repita uma pergunta que aparece em "SUAS ÚLTIMAS FALAS", e não pergunte de novo o que ela já respondeu na transcrição.
@@ -61,9 +64,9 @@ Como falar:
   Pergunte sobre o que avaliar no candidato, nunca sobre qual problema dar.
 
 Exemplos de tom (não copie as palavras):
-- "Boa. Num problema de algoritmo, o que faz você achar um candidato ótimo e não só bom?"
-- "Certo. Você prefere que ele explique a complexidade, ou que trate entrada vazia sem ser lembrado?"
-- "Fechado, então escalabilidade entra no foco e IA aplicada fica de lado, beleza? E o que separa uma solução simples de uma que não aguenta volume?"
+- "Num problema de algoritmo, o que faz você achar um candidato ótimo e não só bom?"
+- "Você prefere que ele explique a complexidade, ou que trate entrada vazia sem ser lembrado?"
+- "IA aplicada fica de lado, e escalabilidade entra no foco. O que separa uma solução simples de uma que não aguenta volume?"
 
 A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, o PASSO desta fala e a transcrição.
 Siga o PASSO. Responda somente com a fala do Totti, sem prefixo, sem aspas e sem explicações.`;
@@ -120,7 +123,9 @@ function rotulosDoFoco(r: Rascunho, quantos: number): string[] {
   const vaga = r.jobDescription ?? "";
   const rotulos: string[] = [];
   const ordenadas = [...r.focus].sort((a, b) => b.weight - a.weight).map((f) => f.area);
-  for (const area of ordenadas) {
+  // Área que o formato não mede não entra em "olhando principalmente": a fala diz à parte que ela fica de fora.
+  const medidas = ordenadas.filter((a) => mede(r.mode, a));
+  for (const area of medidas.length ? medidas : ordenadas) {
     const achados = ROTULOS_NA_VAGA[area].filter(([re]) => re.test(vaga)).map(([, nome]) => nome);
     for (const nome of achados.length ? achados : [ROTULO_PADRAO[area]]) {
       if (rotulos.length < quantos && !rotulos.includes(nome)) rotulos.push(nome);
@@ -176,6 +181,20 @@ function fraseDoTradeoff(r: Rascunho, oferta: OferecerTradeoffPasso, nivel?: str
 }
 
 /**
+ * Frase da abertura para a área do foco que o formato não mede e que nenhum outro formato disponível mede:
+ * ela fica pra próxima etapa, sem oferta de troca. Função pura.
+ */
+function fraseSemMedicao(r: Rascunho): string | undefined {
+  const area = [...r.focus]
+    .sort((a, b) => b.weight - a.weight)
+    .map((f) => f.area)
+    .find((a) => semMedicaoNoFormato(r.mode, a));
+  if (!area) return undefined;
+  const frase = `${FORMATO_CURTO[r.mode]} não mede ${NAO_MEDE_FALA[area]}, então isso fica pra próxima etapa.`;
+  return frase.charAt(0).toUpperCase() + frase.slice(1);
+}
+
+/**
  * Primeira fala do agente, montada sem LLM, em até 4 frases: saudação com o cargo, o resumo da vaga (se houver),
  * o formato e o foco (ou o trade-off, se o formato não mede uma área de peso) e a pergunta final.
  * Nível não dito na vaga vira pergunta, não afirmação. Se o formato não está claro, a pergunta é o formato.
@@ -212,6 +231,8 @@ export function aberturaDoAgente(sessao: Sessao): string {
       ? `Pensei em ${FORMATO_CURTO[r.mode]}, olhando principalmente ${focos}.`
       : `Pensei em ${FORMATO_CURTO[r.mode]} pra nível ${nivel}, olhando principalmente ${focos}.`,
   );
+  const semMedicao = fraseSemMedicao(r);
+  if (semMedicao) frases.push(semMedicao);
   frases.push(incerto ? `O nível não está claro na vaga: ${perguntaNivel}` : "É isso, ou quer focar em outra coisa?");
   return frases.join(" ");
 }
@@ -237,7 +258,8 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
   ];
   if (pedidas.length) linhas.push(`- ela também quer avaliar: ${listar(pedidas)}`);
   if (reduzidas.length) linhas.push(`- ela disse que pesa menos ou não importa: ${listar(reduzidas)}`);
-  if (sessao.naoAvaliado.length) linhas.push(`- fica de fora desta entrevista: ${listar(sessao.naoAvaliado)}`);
+  const foraFalado = naoAvaliadoParaFalar(sessao);
+  if (foraFalado.length) linhas.push(`- fica de fora desta entrevista: ${listar(foraFalado)}`);
   linhas.push(
     r.durationMin
       ? `- duração: ${r.durationMin} min (ela disse)`
@@ -269,21 +291,17 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       const confirma = passo.confirmaTroca
         ? `Confirme a troca em 1 frase, com as palavras dela (ex.: 'Fechado, então ${FORMATO_CURTO[passo.confirmaTroca]}.'), e na mesma fala siga o passo abaixo. `
         : "";
-      if (passo.motivo === "vaga") {
-        return (
-          confirma +
-          `A última resposta dela sobre ${NOME_AREA_FALA[passo.area]} foi genérica. Não repita a pergunta anterior. ` +
-          "Ofereça duas opções concretas, do que se vê na entrevista, em forma de pergunta curta, e deixe ela escolher. " +
-          "Não julgue a resposta dela. " +
-          SEM_LOGISTICA
-        );
-      }
       return (
         confirma +
         `Pergunte o que separa um candidato ótimo de um candidato fraco em ${NOME_AREA_FALA[passo.area]}, ` +
         `de forma concreta e ligada ao cargo ${r.roleTitle}. Uma pergunta só. ${SEM_LOGISTICA}`
       );
     }
+    case "informar_formato_indisponivel":
+      return (
+        "Ela pediu system design, que ainda não está disponível nesta versão. Diga isso numa frase curta, sem pedir desculpa, " +
+        `e que a entrevista segue em ${FORMATO_CURTO[r.mode]}. Depois pergunte se ela prefere seguir assim ou mudar alguma coisa. Uma pergunta só.`
+      );
     case "oferecer_tradeoff": {
       const complemento = COMPLEMENTO_OFERTA[passo.area] ? ` ${COMPLEMENTO_OFERTA[passo.area]}` : "";
       return (
@@ -322,14 +340,15 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       );
     case "responder_duvida":
       return [
-        "Ela fez uma pergunta ou dúvida sobre a entrevista (formato, avaliação ou processo). Responda em no máximo 2 frases, " +
+        "Ela fez uma pergunta ou dúvida sobre a entrevista (formato, avaliação ou processo). A resposta tem no máximo 2 frases, " +
           "concretas e honestas, usando só o que está abaixo; não prometa nada além disso. " +
+          "Se ela discordou de algo, não concorde com ela: explique como a entrevista é. " +
           "Se a dúvida for sobre algo que você não sabe, diga isso com franqueza e ofereça um padrão, por exemplo 'a gente segue com o que já combinamos'.",
         `COMO AS ÁREAS EM JOGO SÃO AVALIADAS (${FORMATO_CURTO[r.mode]}):\n${comoAvaliamosDoFoco(sessao)
           .map((f) => `- ${f}`)
           .join("\n")}`,
-        `Depois, em uma frase, retome a pergunta que ficou sem resposta: ${perguntaParaRetomar(passo.retomar, sessao)} ` +
-          "É a mesma pergunta de antes: reformule, sem repetir as palavras dela.",
+        `Depois, em uma pergunta curta, retome o que ficou sem resposta: ${perguntaParaRetomar(passo.retomar, sessao)} ` +
+          "É a mesma pergunta de antes: reformule, sem repetir as palavras dela, e termine perguntando o que ela prefere.",
       ].join("\n\n");
     case "encerrar":
       // Não passa pelo modelo: a fala de encerramento é fixa (ver `falaDeEncerramento`).
@@ -377,6 +396,45 @@ export function removerLogisticaDaRevisao(texto: string): string {
 }
 
 /**
+ * O que o resumo e o modelo podem dizer que fica pra próxima etapa. Vale o que ela decidiu ou dispensou, o que o formato
+ * não mede (a abertura já disse) e o que ela mesma citou. Competência que só veio da descrição da vaga fica nas notas
+ * (`naoAvaliado`), não na fala. Função pura.
+ */
+export function naoAvaliadoParaFalar(sessao: Sessao): string[] {
+  const r = sessao.rascunho;
+  const anunciados = new Set<string>(
+    AREAS.filter(
+      (a) =>
+        sessao.plano.decisoesTradeoff[a] === "proxima_etapa" ||
+        sessao.enfaseEstado[a].declarado === "dispensou" ||
+        semMedicaoNoFormato(r.mode, a),
+    ).map((a) => ROTULO_NAO_AVALIADO[a]),
+  );
+  const falado = ` ${normalizarTexto(
+    sessao.transcricao
+      .filter((t) => t.role === "recrutadora")
+      .map((t) => t.text)
+      .join(" "),
+  )} `;
+  return sessao.naoAvaliado.filter((item) => anunciados.has(item) || falado.includes(` ${normalizarTexto(item)} `));
+}
+
+/**
+ * Uma pergunta por fala: corta o texto do modelo logo depois do primeiro "?", e o resto sai. Se não há "?", ou se o
+ * primeiro cai dentro de aspas (ela ou o Totti citando algo), o texto segue como está. Função pura.
+ */
+export function cortarNaPrimeiraPergunta(texto: string): string {
+  const i = texto.indexOf("?");
+  if (i < 0) return texto;
+  const antes = texto.slice(0, i);
+  const aspasRetas = antes.split('"').length - 1;
+  const abreAspas = (antes.match(/“/g) ?? []).length;
+  const fechaAspas = (antes.match(/”/g) ?? []).length;
+  if (aspasRetas % 2 === 1 || abreAspas > fechaAspas) return texto;
+  return texto.slice(0, i + 1).trim();
+}
+
+/**
  * Frase do resumo com o que fica de fora desta entrevista ("X e Y ficam pra próxima etapa."). Sem o modelo.
  * Sem itens, não há frase.
  */
@@ -388,7 +446,7 @@ export function fraseNaoAvaliado(itens: string[]): string | undefined {
 
 const FALAS_DE_ENCERRAMENTO = [
   "Pronto! Deixei tudo na tela pra você revisar e confirmar.",
-  "Fechado! Agora é só revisar na tela e confirmar.",
+  "Agora é só revisar na tela e confirmar.",
   "Tudo anotado. Falta só revisar na tela e confirmar.",
 ];
 
@@ -489,8 +547,7 @@ function confirmacaoDeterministica(sessao: Sessao): string | undefined {
     partes.push(langs.length >= LINGUAGENS_IDE.length ? "linguagem livre" : `só ${nomesDasLinguagens(langs)}`);
   }
   if (partes.length === 0) return undefined;
-  const abertura = ["Anotado", "Fechado"][Math.floor(Math.random() * 2)];
-  return `${abertura}, ${partes.join(" e ")}. Posso finalizar?`;
+  return `Ajustei ${partes.join(" e ")}. Posso finalizar?`;
 }
 
 /** Resposta sem modelo: mesma forma de `RespostaAgente`, com o provedor "fixa". */
@@ -535,14 +592,29 @@ export function montarMensagensConversa(sessao: Sessao, passo: Passo): Mensagem[
   ];
 }
 
-/** Tira o que não pode ir para a voz: markdown, aspas em volta e prefixo "Totti:". */
-function limparFala(texto: string): string {
-  return texto
+/** Palavra de concordância no começo ("Boa.", "Fechado,", "Faz sentido."). O modelo insiste nelas, então saem aqui. */
+const RE_RECONHECIMENTO_INICIAL =
+  /^(boa|fechado|perfeito|certo|entendido|entendi|[oó]timo|show|beleza|legal|combinado|faz sentido)\s*[.!,]\s+/i;
+
+/**
+ * Tira o que não pode ir para a voz: markdown, aspas em volta, prefixo "Totti:" e palavra de concordância no começo
+ * (a capital volta na nova primeira letra). Único ponto por onde passa a fala do modelo.
+ */
+export function limparFala(texto: string): string {
+  const limpo = texto
     .replace(/^\s*totti\s*:\s*/i, "")
     .replace(/[*_#`]/g, "")
     .trim()
     .replace(/^["“]|["”]$/g, "")
     .trim();
+  let semReconhecimento = limpo;
+  let anterior: string;
+  do {
+    anterior = semReconhecimento;
+    semReconhecimento = semReconhecimento.replace(RE_RECONHECIMENTO_INICIAL, "");
+  } while (semReconhecimento !== anterior && semReconhecimento);
+  if (!semReconhecimento || semReconhecimento === limpo) return limpo;
+  return semReconhecimento.charAt(0).toUpperCase() + semReconhecimento.slice(1);
 }
 
 export interface RespostaAgente {
@@ -565,8 +637,14 @@ export function contarFrases(texto: string): number {
   return texto.split(/[.!?]+/).filter((s) => s.trim()).length;
 }
 
+/** Aviso de que system design não está disponível: fala fixa, sem modelo (ver `SYSTEM_DESIGN_ATIVO`). */
+export function falaFormatoIndisponivel(modo: Rascunho["mode"]): string {
+  return `System design ainda não está disponível nesta versão, então a entrevista segue em ${FORMATO_CURTO[modo]}. Prefere seguir assim ou mudar alguma coisa?`;
+}
+
 export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaAgente> {
   if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
+  if (passo.tipo === "informar_formato_indisponivel") return respostaFixa(falaFormatoIndisponivel(sessao.rascunho.mode));
   // Revisão de tom, dicas ou duração: a confirmação sai pronta. Mudança de foco ou de critério segue com o modelo.
   if (passo.tipo === "resumo_final" && passo.revisao) {
     const confirmacao = confirmacaoDeterministica(sessao);
@@ -606,6 +684,12 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     respostaCrua = `${respostaCrua}\n[reescrita]\n${reescrita.content}`;
     resposta = reescrita;
   }
+  // Uma pergunta por fala: corta a parte do modelo antes de qualquer sufixo que o código acrescente.
+  if (texto) texto = cortarNaPrimeiraPergunta(texto);
+  // Confirmação do início e resposta a dúvida devolvem a decisão para ela: sem pergunta, o código acrescenta uma.
+  if (texto && !texto.includes("?") && (passo.tipo === "confirmar_inicio" || passo.tipo === "responder_duvida")) {
+    texto = `${texto} ${passo.tipo === "confirmar_inicio" ? "Prefere seguir assim ou mudar alguma coisa?" : "O que você prefere?"}`;
+  }
   // No resumo, o código acrescenta o que fica de fora, duração, tom e dicas (do estado) e a pergunta final, em variações.
   // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
   if (texto && passo.tipo === "resumo_final" && passo.revisao) {
@@ -615,7 +699,7 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     const variante = Math.floor(Math.random() * 3);
     texto = [
       texto,
-      fraseNaoAvaliado(sessao.naoAvaliado),
+      fraseNaoAvaliado(naoAvaliadoParaFalar(sessao)),
       fraseLogistica(sessao.rascunho, sessao.preferencias, variante),
       fechamentoDoResumo(),
     ]

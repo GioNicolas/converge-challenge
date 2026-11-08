@@ -1,0 +1,255 @@
+{
+  "meta": {
+    "vaga": "coordenador-obras",
+    "modelo": "anthropic/claude-opus-5.5",
+    "ms": 101908,
+    "tentativas": 1,
+    "uso": {
+      "entrada": 4110,
+      "saida": 7904,
+      "custo": 0.1607906
+    },
+    "errosPrimeiraTentativa": [],
+    "avisos": []
+  },
+  "kit": {
+    "id": "coordenador_obras",
+    "area": "planejamento e coordenação de obras",
+    "persona": "engenheira civil sênior, gerente de obras com 18 anos em edifícios residenciais de múltiplos pavimentos e experiência em recuperação de cronogramas",
+    "tipoEntrevista": "planejamento de obra e logística de canteiro",
+    "modoLeitura": "misto",
+    "criterios": [
+      {
+        "id": "entendimento_problema",
+        "nome": "Entendimento do problema e requisitos",
+        "niveis": {
+          "1": "Começa a desenhar o replanejamento sem perguntar a fase da obra, o tamanho do atraso, o prazo de entrega nem os recursos disponíveis; trabalha com premissas implícitas.",
+          "2": "Pergunta sobre atraso e prazo, mas só levanta verba, restrições de horário, canteiro e segurança quando o entrevistador provoca; deixa premissas sem declarar.",
+          "3": "Antes de desenhar, esclarece fase atual, atraso, data de entrega, verba, equipamentos de transporte vertical e restrições da vizinhança; declara as premissas que assume.",
+          "4": "Além do esperado, quantifica o atraso em dias úteis e o custo de cada mês de atraso, identifica cedo o conflito prazo x verba x segurança e confirma o que está fora de escopo antes de propor qualquer ação."
+        }
+      },
+      {
+        "id": "estrutura_raciocinio",
+        "nome": "Estrutura do raciocínio",
+        "niveis": {
+          "1": "Lista ações soltas (mais gente, hora extra) sem sequência, sem relação com as etapas restantes e sem desenho da rede ou do canteiro.",
+          "2": "Desenha as etapas, mas mistura sequência e logística sem método; só organiza o raciocínio em fases quando provocado.",
+          "3": "Segue um roteiro claro: diagnóstico do atraso, rede das etapas restantes, identificação do caminho crítico, ações de recuperação e verificação do impacto no prazo final.",
+          "4": "Estrutura em camadas (cronograma macro, ciclo de pavimento, logística diária), fecha a conta dos dias recuperados contra o atraso e propõe como acompanhar a execução semana a semana."
+        }
+      },
+      {
+        "id": "tradeoffs_priorizacao",
+        "nome": "Trade-offs e priorização",
+        "niveis": {
+          "1": "Propõe todas as acelerações ao mesmo tempo sem considerar custo ou risco; ignora a verba de contingência e o custo do atraso.",
+          "2": "Reconhece que as ações têm custo, mas não compara alternativas; só prioriza quando o entrevistador aponta que a verba não cobre tudo.",
+          "3": "Compara as alternativas de aceleração pelo custo por dia recuperado e pelo risco, escolhe as que atuam no caminho crítico e cabem na contingência.",
+          "4": "Compara explicitamente o custo da aceleração com o custo do atraso, mantém reserva para imprevistos, apresenta um plano B se a meta não fechar e explica o que renuncia e por quê."
+        }
+      },
+      {
+        "id": "comunicacao",
+        "nome": "Comunicação",
+        "niveis": {
+          "1": "Raciocínio confuso, desenho ilegível ou desconectado da fala; o entrevistador não consegue acompanhar as decisões.",
+          "2": "Explica as decisões quando perguntado, mas o quadro não mostra claramente sequência, caminho crítico ou zonas do canteiro.",
+          "3": "Pensa em voz alta, o quadro mostra rede de etapas e layout do canteiro de forma legível e as decisões são justificadas à medida que aparecem.",
+          "4": "Comunica como faria para a diretoria e para os empreiteiros: resume o plano em poucas mensagens, separa fatos de premissas e antecipa as objeções de cada parte."
+        }
+      },
+      {
+        "id": "sequenciamento_caminho_critico",
+        "nome": "Sequenciamento e caminho crítico",
+        "niveis": {
+          "1": "Não identifica o caminho crítico; acelera atividades com folga ou trata todas as etapas como sequenciais.",
+          "2": "Reconhece a estrutura como crítica, mas não explora sobreposição das etapas seguintes nem a defasagem até o reescoramento; só avança quando provocado.",
+          "3": "Identifica o caminho crítico (estrutura, depois vedação e fachada), reduz o ciclo de laje com recursos adicionais e sobrepõe alvenaria e instalações respeitando a defasagem de pavimentos.",
+          "4": "Usa linha de balanço ou ritmo por pavimento (takt), verifica se o caminho crítico muda depois da aceleração, calcula os dias ganhos por ação e aponta o novo gargalo, por exemplo o transporte vertical."
+        }
+      },
+      {
+        "id": "logistica_canteiro",
+        "nome": "Logística de canteiro e transporte vertical",
+        "niveis": {
+          "1": "Ignora a grua, o elevador e a área livre do canteiro; propõe mais equipes sem pensar em como o material chega ao pavimento.",
+          "2": "Menciona a grua e o elevador, mas não resolve o conflito de uso entre estrutura e acabamento nem o estoque na área livre; só desenha o layout quando pedido.",
+          "3": "Desenha o canteiro com zonas de descarga, estoque, central de armação e fôrmas e acessos; separa a grua para a estrutura e o elevador para alvenaria e instalações, e planeja janelas de uso.",
+          "4": "Dimensiona o fluxo de materiais (entregas just-in-time, kits por pavimento, horários de descarga compatíveis com a vizinhança), avalia a segunda torre de elevador pelo custo e prevê como o layout muda com o avanço da obra."
+        }
+      },
+      {
+        "id": "seguranca_nr18",
+        "nome": "Segurança no canteiro (NR-18)",
+        "niveis": {
+          "1": "Não menciona segurança ou propõe acelerações que a violam, como içamento sobre frentes de trabalho ou atividades sem proteção periférica.",
+          "2": "Cita EPI e NR-18 de forma genérica; só percebe os novos riscos da sobreposição de frentes quando provocado.",
+          "3": "Mostra que mais frentes simultâneas aumentam o risco e inclui no plano proteção periférica antes da liberação do pavimento, isolamento da área de içamento, APR e integração das equipes novas.",
+          "4": "Trata a segurança como restrição que define a sequência: zoneia o canteiro e os pavimentos por risco, ajusta os horários de içamento para não haver pessoas sob a carga, prevê DDS reforçado e indicadores, e recusa acelerações inseguras mesmo sob pressão."
+        }
+      }
+    ],
+    "tiposPergunta": [
+      {
+        "nome": "Justificativa de sequência",
+        "exemplo": "Por que a alvenaria só começa nesse pavimento e não antes?",
+        "revela": "Se o candidato domina as dependências técnicas (escoramento, cura, proteção periférica) e o caminho crítico."
+      },
+      {
+        "nome": "Conta de prazo",
+        "exemplo": "Quantos dias úteis essa mudança recupera, de fato, no prazo final?",
+        "revela": "Se o candidato quantifica a recuperação e fecha a conta contra o atraso, em vez de supor que toda aceleração ajuda."
+      },
+      {
+        "nome": "Custo x benefício",
+        "exemplo": "Se só desse para fazer uma dessas ações, qual você manteria?",
+        "revela": "A capacidade de priorizar pelo custo por dia recuperado e de comparar com o custo do atraso."
+      },
+      {
+        "nome": "Cenário adverso",
+        "exemplo": "E se a grua parar por manutenção durante uma semana?",
+        "revela": "Se o plano tem contingência e se o candidato antecipa riscos operacionais."
+      },
+      {
+        "nome": "Segurança sob pressão",
+        "exemplo": "O empreiteiro quer içar fôrmas enquanto a equipe de alvenaria trabalha embaixo. O que você faz?",
+        "revela": "Se a segurança é tratada como restrição inegociável ou como algo flexível diante do prazo."
+      },
+      {
+        "nome": "Gestão de partes",
+        "exemplo": "Como você leva esse plano ao empreiteiro de estrutura e à diretoria?",
+        "revela": "A capacidade de negociar com empreiteiros, alinhar expectativas e comunicar riscos."
+      }
+    ],
+    "termosTranscricao": [
+      "NR-18",
+      "PGR",
+      "APR",
+      "DDS",
+      "CPM",
+      "caminho crítico",
+      "folga total",
+      "linha de balanço",
+      "LOB",
+      "takt time",
+      "Last Planner",
+      "lean construction",
+      "MS Project",
+      "Primavera",
+      "P6",
+      "Sienge",
+      "BIM",
+      "AutoCAD",
+      "baseline",
+      "curva S",
+      "EAP",
+      "grua",
+      "elevador cremalheira",
+      "guincho",
+      "bandeja de proteção",
+      "proteção periférica",
+      "escoramento",
+      "reescoramento",
+      "fôrma",
+      "armação",
+      "laje",
+      "alvenaria",
+      "contrapiso",
+      "shaft",
+      "habite-se",
+      "medição",
+      "empreiteiro",
+      "just-in-time",
+      "fast track",
+      "crashing"
+    ],
+    "problemas": [
+      {
+        "id": "coordenador_obras_p1",
+        "titulo": "Recuperar o prazo de uma torre residencial atrasada",
+        "enunciado": "Uma das nossas obras residenciais está atrasada e a diretoria quer recuperar o prazo de entrega. Desenhe como você replanejaria a sequência das etapas e a logística do canteiro para chegar lá.",
+        "ficha": [
+          {
+            "pergunta": "Qual é o empreendimento e em que fase está?",
+            "resposta": "Torre única com 1 subsolo, térreo e 16 pavimentos tipo, 4 apartamentos por andar, total de 64 unidades. A estrutura é de concreto armado moldado in loco. O subsolo, o térreo e os 8 primeiros pavimentos tipo estão concretados; faltam 8 lajes, mais a cobertura e o barrilete, que estão fora desta conta. A alvenaria está concluída até o 4º pavimento."
+          },
+          {
+            "pergunta": "De quanto é o atraso e qual é o prazo de entrega?",
+            "resposta": "O atraso acumulado é de 30 dias úteis (cerca de 6 semanas) em relação à baseline. A entrega contratual, com habite-se, é daqui a 14 meses. Mantido o ritmo atual, entregaremos 6 semanas depois."
+          },
+          {
+            "pergunta": "Qual é o ciclo atual de laje e o que dá para fazer nele?",
+            "resposta": "O ciclo atual é de 10 dias úteis por laje, com um jogo de fôrmas e uma equipe de estrutura. Com um segundo jogo de fôrmas (R$ 180 mil) e uma equipe adicional de armação e fôrma (R$ 100 mil para o restante da estrutura), o empreiteiro garante um ciclo de 7 dias úteis. Nas 8 lajes restantes, isso recupera 24 dias úteis, a um custo total de R$ 280 mil."
+          },
+          {
+            "pergunta": "Quanto custa o atraso e qual é a verba para recuperar?",
+            "resposta": "Cada mês de atraso custa cerca de R$ 480 mil em multas aos compradores (R$ 7.500 por unidade por mês × 64 unidades). A diretoria liberou uma verba de contingência de R$ 900 mil para a recuperação e quer manter pelo menos R$ 200 mil dela como reserva até a entrega, ou seja, R$ 700 mil disponíveis para aceleração."
+          },
+          {
+            "pergunta": "Quais equipamentos de transporte vertical existem?",
+            "resposta": "Há uma grua, hoje ocupada quase 100% do tempo pela estrutura (fôrmas, armação e caçambas de concreto), e um elevador cremalheira de obra instalado até o 6º pavimento, que pode ser estendido. Uma segunda torre de elevador cremalheira pode ser locada por R$ 25 mil por mês; até a entrega seriam 10 meses, ou R$ 250 mil."
+          },
+          {
+            "pergunta": "Como é o terreno e o espaço do canteiro?",
+            "resposta": "Terreno urbano de esquina com 1.800 m². A projeção da torre ocupa 900 m², sobrando cerca de 900 m² para central de armação, estoque de fôrmas, baias de material, vestiário e refeitório, administração e acesso de caminhões. Só há um portão de acesso de veículos, na rua de menor movimento."
+          },
+          {
+            "pergunta": "Há restrições de horário ou de vizinhança?",
+            "resposta": "A prefeitura permite obra de segunda a sexta das 7h às 17h e aos sábados das 7h às 12h. Não é permitido trabalho noturno nem aos domingos. Caminhões de concreto e entregas pesadas só podem descarregar entre 9h e 16h por causa do trânsito escolar ao lado."
+          },
+          {
+            "pergunta": "Quais são as regras de segurança que não posso flexibilizar?",
+            "resposta": "A política da construtora, alinhada à NR-18, exige proteção periférica instalada antes de qualquer atividade no pavimento, proíbe içamento com a grua sobre áreas com pessoas trabalhando e exige integração de segurança e APR para toda equipe nova antes de começar. Nenhuma ação de recuperação pode violar isso."
+          },
+          {
+            "pergunta": "Quando a alvenaria pode começar num pavimento?",
+            "resposta": "O projetista estrutural exige que a alvenaria só comece num pavimento depois de retirado o reescoramento, o que acontece quando há 3 lajes concretadas acima dele. Hoje a alvenaria pode avançar até o 5º pavimento. A alvenaria rende 1 pavimento a cada 8 dias úteis com a equipe atual; uma segunda equipe custa R$ 60 mil por mês."
+          },
+          {
+            "pergunta": "Quem são as partes envolvidas?",
+            "resposta": "Diretoria técnica (aprova a verba), empreiteiro de estrutura, empreiteiro de alvenaria, empreiteiro de instalações hidráulica e elétrica, técnico de segurança do trabalho da obra, almoxarifado e o setor de suprimentos da sede, que faz as compras pelo Sienge."
+          },
+          {
+            "pergunta": "Qual é o objetivo e como o sucesso será medido?",
+            "resposta": "O objetivo é entregar com habite-se na data contratual, sem acidente com afastamento e gastando no máximo R$ 700 mil da contingência. O acompanhamento é semanal, comparando o avanço físico com a baseline replanejada."
+          },
+          {
+            "pergunta": "O que está fora de escopo?",
+            "resposta": "Alterações de projeto (estrutural ou arquitetônico), renegociação de prazo com os compradores, troca de empreiteiros e as outras duas obras da construtora. A fase de acabamentos finos e as áreas comuns só entram como impacto no prazo final, sem necessidade de detalhamento."
+          },
+          {
+            "pergunta": "Existe algum conflito entre o que a diretoria quer e o que é viável?",
+            "resposta": "Sim. A diretoria pediu para recuperar tudo só com hora extra aos sábados, mas o sábado tem apenas meio período e o empreiteiro de estrutura cobra 50% a mais nessas horas. Além disso, a grua acelerada para o ciclo de 7 dias passa a disputar horários com a subida de blocos para a alvenaria, e o elevador atual não chega aos pavimentos que vão sendo liberados."
+          }
+        ],
+        "sinaisEsperados": [
+          "Pergunta fase, atraso, prazo, verba e recursos de transporte vertical antes de desenhar a rede ou o canteiro",
+          "Identifica a estrutura como caminho crítico e calcula que reduzir o ciclo de 10 para 7 dias recupera 24 dos 30 dias úteis, buscando os 6 restantes na sobreposição das etapas seguintes",
+          "Respeita a defasagem de 3 lajes para iniciar a alvenaria e usa linha de balanço ou ritmo por pavimento para mostrar a sobreposição entre estrutura, alvenaria e instalações",
+          "Separa os usos da grua (estrutura) e do elevador (alvenaria e instalações), planeja a extensão ou a segunda torre de elevador e janelas de içamento compatíveis com o horário de descarga",
+          "Desenha o layout do canteiro nos 900 m² livres com zonas de descarga, estoque, armação e circulação, e um único portão bem aproveitado",
+          "Compara o custo das ações (R$ 280 mil da estrutura, R$ 250 mil do elevador, segunda equipe de alvenaria) com os R$ 700 mil disponíveis e com os R$ 480 mil por mês do atraso",
+          "Trata segurança como restrição de sequência: proteção periférica antes da liberação, área de içamento isolada, integração e APR das equipes novas",
+          "Propõe uma rotina de acompanhamento semanal contra a baseline replanejada e um plano B caso o ciclo de 7 dias não se confirme"
+        ],
+        "armadilhas": [
+          "Aceitar a hora extra aos sábados como solução principal sem calcular que o meio período não recupera 30 dias úteis e encarece a hora",
+          "Acelerar atividades fora do caminho crítico, como adiantar acabamentos, sem ganho real no prazo final",
+          "Antecipar a alvenaria sem respeitar a retirada do reescoramento ou sem proteção periférica instalada",
+          "Colocar mais equipes sem resolver o transporte vertical, deixando a grua como gargalo disputado entre estrutura e alvenaria",
+          "Gastar toda a contingência sem manter a reserva de R$ 200 mil exigida pela diretoria",
+          "Ignorar as restrições de horário de descarga e de trabalho noturno ao propor concretagens ou entregas"
+        ],
+        "perguntasSugeridas": [
+          "Por que essa etapa e não outra está no caminho crítico?",
+          "Quantos dias úteis o seu plano recupera no total? Como você chegou a esse número?",
+          "E se o ciclo de 7 dias não se confirmar nas duas primeiras lajes?",
+          "Como a grua atende a estrutura e a alvenaria ao mesmo tempo sem colocar ninguém sob a carga?",
+          "Se a diretoria cortar a verba pela metade, o que você mantém?",
+          "Como você garante a segurança das equipes novas que entram no meio da obra?"
+        ]
+      }
+    ]
+  }
+}

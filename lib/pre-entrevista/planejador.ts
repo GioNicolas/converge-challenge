@@ -3,10 +3,13 @@
  *
  * `proximoPasso` é função pura: recebe o foco, a cobertura, os sinais e o que já foi perguntado,
  * e devolve um `Passo`. Regras:
- *  - um tópico é perguntado no máximo duas vezes (a pergunta inicial e um follow-up);
- *  - follow-up só quando a última resposta foi genérica (`resposta_vaga`);
+ *  - cada área recebe no máximo uma pergunta de aprofundamento, e não se pergunta de novo por resposta curta;
+ *  - área que ela já tratou na fala (respondeu ou declarou central) não é perguntada de novo;
+ *  - no máximo `MAX_APROFUNDAMENTOS` perguntas de aprofundamento por conversa, depois segue para o resumo;
+ *  - pedido de system design, enquanto o formato não está disponível: aviso uma vez, e a conversa segue;
  *  - cada mudança de foco (e cada área ainda sem definição depois de uma mudança) é perguntada uma vez;
- *  - área que o formato atual não mede e que está em jogo: a Totti oferece a troca de formato, uma vez por área;
+ *  - área que o formato atual não mede e que está em jogo: a Totti oferece a troca de formato, uma vez por área
+ *    (só quando há outro formato disponível);
  *  - nível em aberto (a vaga não disse e ela não respondeu): a Totti pergunta só o nível, antes do resto;
  *  - dúvida dela sobre a entrevista (`fez_pergunta`): a Totti responde e retoma o passo em curso, sem contar como pergunta nova;
  *  - o resumo vem quando não há mais o que perguntar; depois dele, a Totti só resume de novo se ela pedir mudança;
@@ -17,8 +20,10 @@ import { mede, modoAlternativoQueMede } from "./catalogo";
 import { areasEmJogo, LIMIAR } from "./cobertura";
 import type { DecisaoTradeoff, DecisoesTradeoff, Foco } from "./rascunho";
 
-/** Quantas vezes um tópico pode ser perguntado: a pergunta inicial e um follow-up. */
+/** Quantas vezes o início e o nível podem ser perguntados: a pergunta e uma nova tentativa. */
 export const MAX_PERGUNTAS_POR_TOPICO = 2;
+/** Teto de perguntas de aprofundamento na conversa inteira (uma por área, no máximo). */
+export const MAX_APROFUNDAMENTOS = 3;
 /** Depois de tantos resumos, o Totti para de pedir revisão e encerra. */
 export const MAX_RESUMOS = 3;
 /** Quantas dúvidas seguidas o Totti responde. Depois disso, a conversa segue pelo fluxo normal. */
@@ -27,8 +32,8 @@ export const MAX_DUVIDAS_SEGUIDAS = 2;
 export interface AprofundarPasso {
   tipo: "aprofundar";
   area: FocusArea;
-  /** `inicial`: pergunta o que separa o ótimo do fraco. `vaga`: follow-up depois de resposta genérica. */
-  motivo: "inicial" | "vaga";
+  /** Pergunta o que separa o ótimo do fraco na área. (Não há follow-up: uma pergunta por área.) */
+  motivo: "inicial";
   /** Troca de formato recém-feita: o Totti confirma a troca numa frase antes da pergunta. */
   confirmaTroca?: InterviewMode;
 }
@@ -68,6 +73,8 @@ export type Passo =
       /** Próximo aprofundamento, emendado na mesma fala quando não há dúvida pendente. */
       proximo?: AprofundarPasso;
     }
+  /** Ela pediu system design e o formato não está disponível: a Totti avisa, uma vez, e segue em live coding. */
+  | { tipo: "informar_formato_indisponivel" }
   | { tipo: "resumo_final"; revisao?: boolean }
   | ResponderDuvidaPasso
   | { tipo: "encerrar" };
@@ -76,7 +83,7 @@ export type Passo =
 export interface PlanoEstado {
   /** Sinais do último turno (quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo, escolha de formato). */
   sinais: Record<string, number>;
-  /** Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `nivel`, `criterio_<area>`, `duvida_<area>`, `tradeoff_<area>`). */
+  /** Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `nivel`, `criterio_<area>`, `duvida_<area>`, `tradeoff_<area>`, `formato_indisponivel`). */
   perguntasPorTopico: Record<string, number>;
   /** Áreas que já entraram numa confirmação de mudança de foco ou numa dúvida. */
   mudancasPerguntadas: FocusArea[];
@@ -104,6 +111,10 @@ export interface EstadoPlanejamento extends PlanoEstado {
   cobertura: Record<string, number>;
   /** Nível em aberto agora (ver `nivelEmAberto`): enquanto estiver, o início não conta como coberto. */
   nivelEmAberto?: boolean;
+  /** Áreas que ela já tratou na fala (respondeu ou declarou central): não ganham pergunta de aprofundamento. */
+  areasFaladas?: FocusArea[];
+  /** O formato que ela pode pedir não está disponível nesta versão (ver `SYSTEM_DESIGN_ATIVO`). */
+  formatoIndisponivelPedido?: boolean;
   /**
    * Formato atual. Sem ele (testes antigos), nenhuma área é tratada como não medida e não há oferta de troca.
    */
@@ -112,40 +123,34 @@ export interface EstadoPlanejamento extends PlanoEstado {
 
 const criterio = (area: FocusArea) => `criterio_${area}`;
 
-/** Último aprofundamento feito, direto, emendado numa confirmação de mudança ou antes de uma dúvida respondida. */
-function ultimoAprofundamento(passo: Passo | undefined): AprofundarPasso | undefined {
-  if (passo?.tipo === "responder_duvida") return ultimoAprofundamento(passo.retomar);
-  if (passo?.tipo === "aprofundar") return passo;
-  if (passo?.tipo === "confirmar_mudanca_foco") return passo.proximo;
-  return undefined;
-}
-
 /**
- * Próximo aprofundamento: follow-up da última resposta genérica, ou a área que ela mais pediu
- * (depois pelo peso no foco) que ainda não foi perguntada. Área que o formato não mede nunca entra aqui.
+ * Próximo aprofundamento: a área que ela mais pediu (depois pelo peso no foco) que ainda não foi perguntada.
+ * Área já tratada na fala, área que o formato não mede e área com dúvida pendente ficam de fora. Não há follow-up:
+ * resposta curta não reabre a área. Depois de `MAX_APROFUNDAMENTOS` perguntas, não há aprofundamento. Função pura.
  */
 function aprofundarPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): AprofundarPasso | undefined {
   const coberto = (id: string) => (e.cobertura[id] ?? 0) >= LIMIAR;
   const perguntas = (id: string) => e.perguntasPorTopico[id] ?? 0;
-  const sinal = (id: string) => e.sinais[id] ?? 0;
   const medida = (area: FocusArea) => e.mode === undefined || mede(e.mode, area);
 
-  const anterior = ultimoAprofundamento(e.ultimoPasso);
-  if (
-    anterior &&
-    sinal("resposta_vaga") >= LIMIAR &&
-    emJogo.includes(anterior.area) &&
-    !coberto(criterio(anterior.area)) &&
-    perguntas(criterio(anterior.area)) < MAX_PERGUNTAS_POR_TOPICO
-  ) {
-    return { tipo: "aprofundar", area: anterior.area, motivo: "vaga" };
-  }
+  const feitas = Object.entries(e.perguntasPorTopico)
+    .filter(([id]) => id.startsWith("criterio_"))
+    .reduce((soma, [, n]) => soma + n, 0);
+  if (feitas >= MAX_APROFUNDAMENTOS) return undefined;
 
   const peso = (area: FocusArea) => e.focus.find((f) => f.area === area)?.weight ?? 0;
-  const pedida = (area: FocusArea) => sinal(`quer_${area}`) >= LIMIAR;
+  const pedida = (area: FocusArea) => (e.sinais[`quer_${area}`] ?? 0) >= LIMIAR;
+  const jaFalou = new Set(e.areasFaladas ?? []);
   // Área que já teve a dúvida "continua ou fica de lado?" fica com o peso atual e não é perguntada de novo.
   const candidatas = emJogo
-    .filter((a) => medida(a) && !coberto(criterio(a)) && perguntas(criterio(a)) === 0 && perguntas(`duvida_${a}`) === 0)
+    .filter(
+      (a) =>
+        medida(a) &&
+        !jaFalou.has(a) &&
+        !coberto(criterio(a)) &&
+        perguntas(criterio(a)) === 0 &&
+        perguntas(`duvida_${a}`) === 0,
+    )
     .sort((a, b) => Number(pedida(b)) - Number(pedida(a)) || peso(b) - peso(a));
   return candidatas[0] ? { tipo: "aprofundar", area: candidatas[0], motivo: "inicial" } : undefined;
 }
@@ -229,6 +234,11 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   const oferta = tradeoffPasso(e, emJogo);
   if (oferta) return oferta;
 
+  // 1c. Pediu system design e o formato não está disponível: avisa uma vez, antes do resumo.
+  if (e.resumos === 0 && e.formatoIndisponivelPedido && sinal("pediu_system_design") >= LIMIAR && perguntas("formato_indisponivel") === 0) {
+    return { tipo: "informar_formato_indisponivel" };
+  }
+
   // 2. Mudança de foco que ainda não foi confirmada.
   const entra = emJogo.filter((a) => !focoAtual.includes(a) && !jaPerguntadas.has(a));
   const sai = focoAtual.filter((a) => !emJogo.includes(a) && !jaPerguntadas.has(a));
@@ -286,6 +296,9 @@ export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
     case "oferecer_tradeoff":
       contar(`tradeoff_${passo.area}`);
       break;
+    case "informar_formato_indisponivel":
+      contar("formato_indisponivel");
+      break;
     case "confirmar_mudanca_foco":
       mudancas = [...new Set<FocusArea>([...mudancas, ...passo.entra, ...passo.sai])];
       for (const a of passo.duvida) contar(`duvida_${a}`);
@@ -314,6 +327,8 @@ export function descreverPasso(passo: Passo): string {
       return `aprofundar ${passo.area} (${passo.motivo})${passo.confirmaTroca ? ` com troca confirmada para ${passo.confirmaTroca}` : ""}`;
     case "oferecer_tradeoff":
       return `oferecer_tradeoff ${passo.area} -> ${passo.modoAlternativo}`;
+    case "informar_formato_indisponivel":
+      return "informar_formato_indisponivel";
     case "confirmar_mudanca_foco": {
       const partes = [`entra=[${passo.entra.join(",")}]`, `sai=[${passo.sai.join(",")}]`, `duvida=[${passo.duvida.join(",")}]`];
       return `confirmar_mudanca_foco ${partes.join(" ")}${passo.proximo ? ` + ${descreverPasso(passo.proximo)}` : ""}`;

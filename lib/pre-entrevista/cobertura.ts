@@ -250,6 +250,14 @@ function sinaisDo(): Pergunta[] {
         "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, ou respondeu outra coisa.",
     },
     {
+      id: "pediu_system_design",
+      pergunta: "Na última fala, a recrutadora pediu para fazer system design (desenhar a arquitetura num quadro) nesta entrevista?",
+      sinal_sim:
+        "Sim se ela pediu o formato de system design: 'quero system design', 'prefiro desenhar a arquitetura', 'faz system design'.",
+      sinal_nao:
+        "Não se ela só perguntou ou criticou o system design ('por que system design?'), escolheu live coding, ou respondeu outra coisa.",
+    },
+    {
       id: "quer_tom_desafiador",
       pergunta: "Na última fala, a recrutadora pediu um tom mais desafiador, exigente ou firme para a entrevista?",
       sinal_sim: "Sim se ela pediu tom mais duro: 'mais desafiadora', 'quero um tom mais firme', 'bem exigente'.",

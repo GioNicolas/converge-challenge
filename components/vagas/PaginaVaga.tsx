@@ -10,7 +10,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, ArrowUpRight, ChevronRight, Link2 } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronRight, Link2, X } from "lucide-react";
 import { NOME_AREA } from "@/components/pre-entrevista/textos";
 import {
   ETAPAS_VAGA,
@@ -31,6 +31,7 @@ import {
   NOME_SITUACAO,
   buscaNormalizada,
   convidar,
+  ehCandidatoTeste,
   useCandidatos,
   type CandidatoVaga,
   type Situacao,
@@ -48,6 +49,19 @@ import Casca from "./Casca";
 import { Abas, Busca, Paginacao, Seletor, Voltar } from "./controles";
 
 const POR_PAGINA = 50;
+/** Limite de candidatos por pedido em /api/convites. */
+const LOTE_CONVITES = 200;
+
+type Resultado = { email: string; status: "enviado" | "simulado" | "erro"; motivo?: string; link?: string };
+
+/** O que aparece no aviso depois de convidar. */
+type Retorno = {
+  enviados: number;
+  demo: number;
+  simulados: { nome: string; email: string; link?: string }[];
+  erros: { email: string; motivo?: string }[];
+  falha?: string;
+};
 
 export default function PaginaVaga({ id, etapa }: { id: string; etapa: EtapaVaga }) {
   const { vagas } = useVagas();
@@ -159,6 +173,8 @@ function Candidatos({
   const [ordem, setOrdem] = useState<Ordem>("recentes");
   const [pagina, setPagina] = useState(0);
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set());
+  const [enviando, setEnviando] = useState(false);
+  const [retorno, setRetorno] = useState<Retorno | null>(null);
 
   const contagem = useMemo(() => {
     const n = { todos: 0, aguardando: 0, convidados: 0, em_andamento: 0, concluiu: 0, novos: 0 };
@@ -217,9 +233,64 @@ function Candidatos({
       }
       return novo;
     });
-  const enviarConvites = () => {
-    convidar(vaga.id, [...selecionados]);
-    setSelecionados(new Set());
+  const enviarConvites = async () => {
+    const escolhidos = (lista ?? []).filter((c) => selecionados.has(c.i));
+    // Vaga sem plano salvo: não há formato nem config para o email, então só registra aqui.
+    if (!vaga.resumo) {
+      convidar(vaga.id, escolhidos.map((c) => c.i));
+      setSelecionados(new Set());
+      return;
+    }
+    const plano = vaga.resumo;
+
+    setEnviando(true);
+    const novo: Retorno = { enviados: 0, demo: 0, simulados: [], erros: [] };
+    try {
+      // Em lotes, um por vez: cada lote que chega já vira convite registrado e sai da seleção.
+      for (let ini = 0; ini < escolhidos.length; ini += LOTE_CONVITES) {
+        const lote = escolhidos.slice(ini, ini + LOTE_CONVITES);
+        const res = await fetch("/api/convites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            vagaId: vaga.id,
+            cargo: vaga.cargo,
+            configId: plano.configId,
+            formato: plano.formato,
+            duracaoMin: plano.duracaoMin,
+            candidatos: lote.map((c) => ({ nome: c.nome, email: c.email })),
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { resultados } = (await res.json()) as { resultados: Resultado[] };
+
+        const porEmail = new Map(lote.map((c) => [c.email.toLowerCase(), c]));
+        const registrar: number[] = [];
+        for (const r of resultados) {
+          const c = porEmail.get(r.email);
+          if (!c) continue;
+          if (r.status === "erro") {
+            novo.erros.push({ email: r.email, motivo: r.motivo });
+            continue;
+          }
+          registrar.push(c.i);
+          if (r.status === "enviado") novo.enviados++;
+          else if (ehCandidatoTeste(c)) novo.simulados.push({ nome: c.nome, email: c.email, link: r.link });
+          else novo.demo++;
+        }
+        convidar(vaga.id, registrar);
+        setSelecionados((s) => {
+          const resto = new Set(s);
+          for (const c of lote) resto.delete(c.i);
+          return resto;
+        });
+      }
+    } catch {
+      // Sem resposta: o que não saiu continua selecionado, para tentar de novo.
+      novo.falha = "Não foi possível enviar. Os convites que não saíram continuam selecionados; tente de novo.";
+    }
+    setRetorno(novo);
+    setEnviando(false);
   };
 
   if (lista === null) {
@@ -374,10 +445,80 @@ function Candidatos({
                 <button onClick={() => setSelecionados(new Set())} className="text-texto-claro/75 hover:text-texto-claro">
                   Limpar
                 </button>
-                <button onClick={enviarConvites} className="rounded-full bg-texto-claro px-3.5 py-1.5 font-medium text-texto hover:opacity-90">
-                  Convidar para a entrevista
+                <button
+                  onClick={enviarConvites}
+                  disabled={enviando}
+                  className="rounded-full bg-texto-claro px-3.5 py-1.5 font-medium text-texto hover:opacity-90 disabled:opacity-60"
+                >
+                  {enviando ? "Enviando…" : "Convidar para a entrevista"}
                 </button>
               </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Aviso do último envio: some quando o recrutador fecha */}
+        <AnimatePresence>
+          {retorno && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2, ease: curvaSuave }}
+              role="status"
+              className="cartao mb-3 flex flex-col gap-3 p-5 text-[14px]"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-1">
+                  {retorno.enviados > 0 && (
+                    <p className="text-texto">
+                      <span className="numero">{numero(retorno.enviados)}</span>{" "}
+                      {retorno.enviados === 1 ? "e-mail enviado" : "e-mails enviados"}
+                    </p>
+                  )}
+                  {retorno.demo > 0 && (
+                    <p className="text-texto-suave">
+                      {numero(retorno.demo)} {retorno.demo === 1 ? "convite registrado" : "convites registrados"} para candidatos
+                      de demonstração (sem envio)
+                    </p>
+                  )}
+                  {retorno.falha && <p className="text-perigo">{retorno.falha}</p>}
+                </div>
+                <button onClick={() => setRetorno(null)} aria-label="Fechar aviso" className="text-texto-suave hover:text-texto">
+                  <X size={16} />
+                </button>
+              </div>
+              {retorno.simulados.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-texto-suave">Envio simulado: falta RESEND_API_KEY no .env.local</p>
+                  <ul className="flex flex-col gap-1.5">
+                    {retorno.simulados.map((s) => (
+                      <li key={s.email} className="flex flex-wrap items-center gap-x-3 text-texto">
+                        <span>{s.nome}</span>
+                        {s.link && (
+                          <a
+                            href={s.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-texto-suave underline decoration-texto/25 underline-offset-4 hover:text-texto hover:decoration-texto"
+                          >
+                            abrir link de agendamento
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {retorno.erros.length > 0 && (
+                <ul className="flex flex-col gap-1 text-perigo">
+                  {retorno.erros.map((e) => (
+                    <li key={e.email}>
+                      {e.email}: {e.motivo ?? "falha no envio"}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
