@@ -2,14 +2,14 @@
 
 // A tela inicial do recrutador: as vagas como uma pipeline, na ordem em que andam.
 //   Definir escopo → Aguardando entrevistas → Ver resultados
-// Três cards grandes, um por estágio, com o número de vagas em destaque. Clicar num card abre, logo abaixo,
-// a lista das vagas daquele estágio (clicar de novo fecha). Buscar ou filtrar vira uma lista só, com tudo.
+// Três cards grandes, um por estágio, com o número de vagas em destaque. Abaixo, a lista com todas as vagas abertas;
+// clicar num card mostra só as daquele estágio (clicar de novo volta a tudo). Busca e filtros valem para a lista.
 // Os convites saem sozinhos ao publicar, então não há estágio de "enviar convites" nem "divulgar link".
 // Cada vaga tem o cargo e uma frase curta (com um número, no máximo); os detalhes ficam dentro da vaga.
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AnimatePresence, MotionConfig, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react";
 import { Check, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import {
   DICA_ESTAGIO,
@@ -22,6 +22,7 @@ import {
   estagioDa,
   numeroCurto,
   quandoFoi,
+  situacaoDoRascunho,
   useVagas,
   type Area,
   type Estagio,
@@ -65,7 +66,7 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const [filtro, setFiltro] = useState<Filtro>(null);
   const lista = useRef<HTMLElement>(null);
   useEffect(() => {
-    // O menu lateral muda a URL: "Escopos em definição" abre o estágio, "Todas as vagas" volta ao quadro.
+    // O menu lateral muda a URL: "Escopos em definição" abre o estágio, "Todas as vagas" volta à lista com tudo.
     setFiltro(daUrl && (ESTAGIOS.includes(daUrl as Estagio) || daUrl === "encerradas") ? (daUrl as Filtro) : null);
     setPagina(0);
   }, [daUrl]);
@@ -121,29 +122,35 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const encerradas = filtradas.filter((v) => v.estagio === "encerrada").length;
 
   const temFiltro = !!(area || time || responsavel);
-  // Busca ou filtro ligados sem estágio: uma lista só, com tudo que está aberto.
-  const plana = filtro !== null || temFiltro || !!termo;
+  // Sem estágio escolhido, a lista mostra tudo que está aberto (com busca e filtros aplicados).
   const itensPlanos = useMemo(() => {
     if (filtro) return doEstagio(filtro);
-    if (!plana) return [];
     return ESTAGIOS.flatMap((e) => doEstagio(e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtro, plana, filtradas, escopos, ordem]);
+  }, [filtro, filtradas, escopos, ordem]);
 
   const paginaSegura = Math.min(pagina, Math.max(0, Math.ceil(itensPlanos.length / POR_PAGINA) - 1));
   const visiveis = itensPlanos.slice(paginaSegura * POR_PAGINA, (paginaSegura + 1) * POR_PAGINA);
 
+  // Um só agendamento de rolagem por vez; some junto com a tela.
+  const rolagem = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(rolagem.current), []);
+
   const escolher = (e: Filtro) => {
-    const abrindo = filtro !== e;
-    setFiltro((atual) => (atual === e ? null : e));
+    const proximo = filtro === e ? null : e;
+    setFiltro(proximo);
     setPagina(0);
+    clearTimeout(rolagem.current);
     // No celular os cards empilham e a lista abre abaixo da dobra: a página desce até ela, sem pressa.
-    if (abrindo)
-      setTimeout(() => {
+    if (proximo)
+      rolagem.current = setTimeout(() => {
         const topo = lista.current?.getBoundingClientRect().top ?? 0;
         if (topo > window.innerHeight - 160) {
           const suave = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          lista.current?.scrollIntoView({ behavior: suave ? "smooth" : "auto", block: "start" });
+          lista.current?.scrollIntoView({
+            behavior: suave ? "smooth" : "auto",
+            block: "start",
+          });
         }
       }, 360);
   };
@@ -158,106 +165,101 @@ function Conteudo({ vagas, rascunhos }: { vagas: VagaEmpresa[]; rascunhos: Rascu
   const unicos = (k: "time" | "responsavel") =>
     [...new Set(linhas.map((v) => v[k]).filter((x) => x && x !== "—"))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 
-  const tituloLista = filtro === "encerradas" ? "Encerradas" : filtro ? NOME_ESTAGIO[filtro] : "Resultado da busca";
+  const tituloLista =
+    filtro === "encerradas"
+      ? "Encerradas"
+      : filtro
+        ? NOME_ESTAGIO[filtro]
+        : temFiltro || termo
+          ? "Resultado da busca"
+          : "Todas as vagas";
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: curvaSuave }}
-      className="mx-auto flex max-w-[1120px] flex-col gap-8"
-    >
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="titulo-display text-[40px] text-texto">Vagas</h1>
-        <div className="flex items-center gap-2">
-          <Busca valor={busca} onMudar={(v) => (setBusca(v), setPagina(0))} placeholder="Buscar vaga, time ou responsável" />
-          <Filtros
-            area={area}
-            time={time}
-            responsavel={responsavel}
-            ordem={ordem}
-            times={unicos("time")}
-            responsaveis={unicos("responsavel")}
-            onArea={(v) => (setArea(v), setPagina(0))}
-            onTime={(v) => (setTime(v), setPagina(0))}
-            onResponsavel={(v) => (setResponsavel(v), setPagina(0))}
-            onOrdem={setOrdem}
-          />
-        </div>
-      </header>
+    // "user": com reduzir movimento ligado no sistema, o motion tira os deslizes; a altura da lista é tratada em Altura.
+    <MotionConfig reducedMotion="user">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: curvaSuave }}
+        className="mx-auto flex max-w-[1120px] flex-col gap-8"
+      >
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="titulo-display text-[40px] text-texto">Vagas</h1>
+          <div className="flex items-center gap-2">
+            <Busca valor={busca} onMudar={(v) => (setBusca(v), setPagina(0))} placeholder="Buscar vaga, time ou responsável" />
+            <Filtros
+              area={area}
+              time={time}
+              responsavel={responsavel}
+              ordem={ordem}
+              times={unicos("time")}
+              responsaveis={unicos("responsavel")}
+              onArea={(v) => (setArea(v), setPagina(0))}
+              onTime={(v) => (setTime(v), setPagina(0))}
+              onResponsavel={(v) => (setResponsavel(v), setPagina(0))}
+              onOrdem={setOrdem}
+            />
+          </div>
+        </header>
 
-      {/* Os estágios, em ordem. Clicado, o card abre a lista das vagas dele logo abaixo. */}
-      <nav aria-label="Estágios das vagas" className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        {ESTAGIOS.map((e, i) => (
-          <CardEstagio key={e} passo={i + 1} estagio={e} n={contagem(e)} ativo={filtro === e} onClick={() => escolher(e)} />
-        ))}
-      </nav>
+        {/* Os estágios, em ordem. Clicado, o card abre a lista das vagas dele logo abaixo. */}
+        <nav aria-label="Estágios das vagas" className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {ESTAGIOS.map((e, i) => (
+            <CardEstagio key={e} passo={i + 1} estagio={e} n={contagem(e)} ativo={filtro === e} onClick={() => escolher(e)} />
+          ))}
+        </nav>
 
-      {/* "user": com reduzir movimento ligado no sistema, só o esmaecer fica; nada desliza nem muda de altura. */}
-      <MotionConfig reducedMotion="user">
         <section ref={lista} className="flex scroll-mt-20 flex-col gap-4 md:scroll-mt-8">
           <Altura>
             <AnimatePresence mode="wait" initial={false}>
-              {plana ? (
-                <motion.div
-                  key={`${filtro}-${temFiltro}-${!!termo}`}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0, transition: { duration: 0.1 } }}
-                  transition={{ duration: 0.2, ease: curvaSuave }}
-                  className="flex flex-col gap-4"
-                >
-                  <div className="flex items-center gap-3 px-1">
-                    <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-texto">{tituloLista}</h2>
-                    <span className="numero text-[14px] text-texto-suave">{itensPlanos.length}</span>
-                    {(filtro === "encerradas" || temFiltro || busca) && (
-                      <button
-                        onClick={limpar}
-                        className="flex items-center gap-1 rounded-full bg-superficie-2/70 py-1 pr-2.5 pl-2 text-[12.5px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
-                      >
-                        <X size={12} /> Limpar
-                      </button>
-                    )}
-                  </div>
-                  <div className="cartao overflow-hidden">
-                    {visiveis.length === 0 ? (
-                      <Vazio onLimpar={limpar} />
-                    ) : (
-                      <ul className="py-1.5">
-                        {visiveis.map((it, i) => (
-                          <ItemLista key={chave(it)} it={it} indice={i} mostrarEstagio={!filtro} />
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itensPlanos.length} onMudar={setPagina} />
-                </motion.div>
-              ) : (
-                <motion.p
-                  key="dica"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="px-1 text-[14px] text-texto-suave"
-                >
-                  Escolha um estágio para ver as vagas.
-                </motion.p>
-              )}
+              <motion.div
+                key={`${filtro}-${temFiltro}-${!!termo}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: 0.1 } }}
+                transition={{ duration: 0.2, ease: curvaSuave }}
+                className="flex flex-col gap-4"
+              >
+                <div className="flex items-center gap-3 px-1">
+                  <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-texto">{tituloLista}</h2>
+                  <span className="numero text-[14px] text-texto-suave">{itensPlanos.length}</span>
+                  {(temFiltro || busca) && (
+                    <button
+                      onClick={limpar}
+                      className="flex items-center gap-1 rounded-full bg-superficie-2/70 py-1 pr-2.5 pl-2 text-[12.5px] text-texto-suave transition-colors hover:bg-superficie-2 hover:text-texto"
+                    >
+                      <X size={12} /> Limpar
+                    </button>
+                  )}
+                </div>
+                <div className="cartao overflow-hidden">
+                  {visiveis.length === 0 ? (
+                    <Vazio onLimpar={limpar} />
+                  ) : (
+                    <ul className="py-1.5">
+                      {visiveis.map((it, i) => (
+                        <ItemLista key={chave(it)} it={it} indice={i} mostrarEstagio={!filtro} />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <Paginacao pagina={paginaSegura} porPagina={POR_PAGINA} total={itensPlanos.length} onMudar={setPagina} />
+              </motion.div>
             </AnimatePresence>
           </Altura>
 
-          {filtro !== "encerradas" && encerradas > 0 && (
+          {/* Encerradas não têm card: o mesmo link abre e fecha, sem mexer na busca nem nos filtros. */}
+          {(filtro === "encerradas" || encerradas > 0) && (
             <button
               onClick={() => escolher("encerradas")}
               className="self-start px-1 text-[13px] text-texto-suave underline-offset-4 hover:text-texto hover:underline"
             >
-              Ver vagas encerradas ({encerradas})
+              {filtro === "encerradas" ? "Voltar às vagas abertas" : `Ver vagas encerradas (${encerradas})`}
             </button>
           )}
         </section>
-      </MotionConfig>
-    </motion.div>
+      </motion.div>
+    </MotionConfig>
   );
 }
 
@@ -370,6 +372,8 @@ const entradaLinha = (i: number) =>
 function Altura({ children }: { children: ReactNode }) {
   const dentro = useRef<HTMLDivElement>(null);
   const [altura, setAltura] = useState<number | "auto">("auto");
+  // O reducedMotion do MotionConfig não cobre altura: com reduzir movimento ligado, ela muda de uma vez.
+  const semMovimento = useReducedMotion();
   useEffect(() => {
     const el = dentro.current;
     if (!el) return;
@@ -381,7 +385,7 @@ function Altura({ children }: { children: ReactNode }) {
     <motion.div
       initial={false}
       animate={{ height: altura }}
-      transition={{ duration: 0.34, ease: curvaSuave }}
+      transition={semMovimento ? { duration: 0 } : { duration: 0.34, ease: curvaSuave }}
       className="-m-1 overflow-hidden"
     >
       <div ref={dentro} className="p-1">
@@ -417,6 +421,8 @@ function Grade({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate text-[15px] text-texto">{titulo}</span>
           <span className="truncate text-[12.5px] text-texto-suave">{sub}</span>
+          {/* No celular a situação desce para baixo do detalhe, em vez de sumir. */}
+          <span className="truncate text-[13px] text-texto-suave sm:hidden">{situacao}</span>
         </div>
         <span className="hidden max-w-[240px] shrink-0 truncate text-right text-[13px] text-texto-suave sm:block">
           {situacao}
@@ -490,10 +496,10 @@ function LinhaEscopo({ r, indice, mostrarEstagio }: { r: RascunhoVaga; indice: n
         sub={
           mostrarEstagio ? (
             <span className="flex items-center gap-2">
-              <Selo estagio="escopo" /> · {quandoFoi(diasDoRascunho(r))}
+              <Selo estagio="escopo" /> · {situacaoDoRascunho(r)}
             </span>
           ) : (
-            `Criada ${quandoFoi(diasDoRascunho(r))}`
+            `${situacaoDoRascunho(r)} · criada ${quandoFoi(diasDoRascunho(r))}`
           )
         }
         situacao={<span className="font-medium text-texto">{r.sessaoId ? "Continuar com o Totti" : "Começar com o Totti"}</span>}
