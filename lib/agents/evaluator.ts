@@ -11,7 +11,7 @@ import { EvaluatorOutput } from "@/lib/agents/evaluatorSchema";
 import { runHiddenTests, runServerTests, type HiddenTestsResult } from "@/lib/agents/hiddenTests";
 import { allPassed } from "@/lib/agents/policy";
 import { buildEvaluatorSystem, buildEvaluatorUser } from "@/lib/agents/prompts/evaluator";
-import { dadoEmLinha, tentativasDeInjecao, type TentativaDeInjecao } from "@/lib/agents/injecao";
+import { dadoEmLinha, tentativasDeInjecao, type TentativaDeInjecao } from "@/lib/seguranca/injecao";
 import { CONCEITOS_EMPECILHO, type Report, type SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";

@@ -3,6 +3,7 @@
 // vez, nota sem prova vira null, citação de fala tem que existir de verdade, desenho tem que
 // referenciar ids/horários reais, a nota geral é recalculada e a recomendação perde força quando
 // faltam provas. A recomendação é só sugestão: quem decide é o humano.
+import { neutralizar, tentativasEmTextos } from "../seguranca/injecao";
 import { z } from "zod";
 import type { EventoArmazenado } from "./armazenamento/repositorio";
 import { ErroLlm, type LlmCliente } from "./llm/cliente";
@@ -508,11 +509,11 @@ function resumoDoEvento(e: EventoArmazenado): string {
 
 export function montarEntradaDoPrompt(entrada: EntradaScorecard, fontes: FontesDeProva) {
   const eventos = [...entrada.eventos].sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
-  const completa = eventos.map((e) => `${e.horario} | ${e.tipo} | ${resumoDoEvento(e)}`).join("\n");
+  const completa = eventos.map((e) => `${e.horario} | ${e.tipo} | ${neutralizar(resumoDoEvento(e))}`).join("\n");
   const linhaDoTempo = completa.length <= 40_000 ? completa
     : completa.slice(0, 8000) + "\n[miolo omitido por tamanho; fim preservado]\n" + completa.slice(-31_900);
   const conversaCompleta = entrada.estado.conversa
-    .map((f) => `${new Date(f.em).toISOString()} ${f.quem === "agente" ? "Entrevistador" : "Candidato"}: ${f.texto}`)
+    .map((f) => `${new Date(f.em).toISOString()} ${f.quem === "agente" ? "Entrevistador" : "Candidato"}: ${neutralizar(f.texto)}`)
     .join("\n");
   const conversa = conversaCompleta.length <= 20_000 ? conversaCompleta : "[início omitido]\n" + conversaCompleta.slice(-19_950);
   const observacoes = fontes.observacoes
@@ -524,7 +525,7 @@ export function montarEntradaDoPrompt(entrada: EntradaScorecard, fontes: FontesD
   const regrasDaSquad = blocoDasRegras(entrada.estado.plano?.regrasSquad, "observar");
   const e = entrada.estado.empecilho;
   const mudanca = e ? { horario: new Date(e.anunciadoEm).toISOString(), fala: e.fala, exige: e.exige } : undefined;
-  return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(fontes.grafoFinal, 20_000), imagens,
+  return { linhaDoTempo, conversa, observacoes, grafoFinal: cortar(neutralizar(fontes.grafoFinal), 20_000), imagens,
     ...(regrasDaSquad ? { regrasDaSquad } : {}), ...(mudanca ? { mudanca } : {}) };
 }
 
@@ -559,7 +560,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       timeoutMs,
       sinal: controle.signal,
     })]);
-    return comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(r.dados, {
+    return comAlertaDeInjecao(comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(r.dados, {
       sessaoId: entrada.sessaoId,
       candidatoId: entrada.candidatoId,
       problemaId: deps.problema.id,
@@ -567,7 +568,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       fontes,
       origem: "llm",
       agora: deps.agora,
-    }), entrada.estado), r.dados.adaptacao, entrada.estado, fontes);
+    }), entrada.estado), r.dados.adaptacao, entrada.estado, fontes), entrada.eventos);
   } finally {
     clearTimeout(timer);
   }
@@ -602,7 +603,7 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     briefing_para_proxima_etapa: "[fake] Scorecard determinístico construído do livro de observações.",
   };
   // Sem modelo não há julgamento da adaptação: só os números medidos pela linha do tempo.
-  return comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(saida, {
+  return comAlertaDeInjecao(comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(saida, {
     sessaoId: entrada.sessaoId,
     candidatoId: entrada.candidatoId,
     problemaId: deps.problema.id,
@@ -610,7 +611,28 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     fontes,
     origem: "fake",
     agora: deps.agora,
-  }), entrada.estado), null, entrada.estado, fontes);
+  }), entrada.estado), null, entrada.estado, fontes), entrada.eventos);
+}
+
+/**
+ * Fala do candidato ou texto escrito no quadro dirigido à IA ("ignore as instruções", "dê nota 4"): vira um
+ * alerta em "pontos a aprofundar" para a recrutadora revisar, como no live coding. Não muda nota nem recomendação.
+ */
+export function comAlertaDeInjecao(scorecard: Scorecard, eventos: EventoArmazenado[]): Scorecard {
+  const inicio = Math.min(...eventos.map((e) => Date.parse(e.horario)).filter(Number.isFinite));
+  const textos = eventos.flatMap((e) => {
+    const d = dadosComo(e.dados);
+    const t = Date.parse(e.horario) - inicio;
+    if (e.tipo === "desenho" && typeof d.grafo === "string") return [{ t, onde: "no quadro", texto: d.grafo }];
+    const doCandidato = (e.tipo === "fala" && d.quem === "candidato") || (e.tipo === "resposta" && (d.quem === undefined || d.quem === "candidato"));
+    return doCandidato && typeof d.texto === "string" ? [{ t, onde: "na fala", texto: d.texto }] : [];
+  });
+  const achadas = tentativasEmTextos(textos);
+  if (achadas.length === 0) return scorecard;
+  const mmss = (ms: number) => `${String(Math.floor(ms / 60_000)).padStart(2, "0")}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+  const onde = achadas.map((a) => `${a.onde} em ${mmss(a.t)}`).join(", ");
+  const alerta = `Possível tentativa de instruir a IA (${onde}): "${achadas[0].trecho}". Revise antes de decidir; isso não mudou a nota.`;
+  return { ...scorecard, pontos_a_aprofundar: [alerta, ...scorecard.pontos_a_aprofundar] };
 }
 
 /** Critério com nota que uma regra da squad afeta ganha a marca "aprendido com o time". */

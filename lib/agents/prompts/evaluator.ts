@@ -5,7 +5,7 @@
 import type { InterviewConfig } from "@/lib/contracts";
 import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
-import { dado, REGRA_DADOS } from "@/lib/agents/injecao";
+import { dado, REGRA_DADOS } from "@/lib/seguranca/injecao";
 
 /** Escala pelo que aconteceu quando o critério foi explorado; o "bom" de cada critério vem do pacote do problema. */
 const SCALE = `4 — Mostrou por conta própria e certo; ou respondeu certo e com profundidade quando perguntado sobre um aspecto secundário (ex.: custo de memória).

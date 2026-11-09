@@ -3,7 +3,7 @@
  * para Analyst, Interviewer e Evaluator. É o único lugar que sabe transformar `InterviewConfig`
  * em texto de prompt, então os três agentes personalizam a entrevista do mesmo jeito.
  */
-import { dado } from "@/lib/agents/injecao";
+import { dado } from "@/lib/seguranca/injecao";
 import type { FocusArea, InterviewConfig } from "@/lib/contracts";
 import { blocoDasRegras } from "@/lib/squad-memory/prompt";
 

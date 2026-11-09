@@ -6,7 +6,7 @@ import type { Problem } from "@/lib/problems/types";
 import type { FocusArea } from "@/lib/contracts";
 import { GUIA_DA_FASE, type Fase } from "@/lib/agents/fase";
 import { buildVagaContext, FOCUS_QUESTION_GUIDE } from "./vaga";
-import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/agents/injecao";
+import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/seguranca/injecao";
 
 export function buildAnalystSystem(config: InterviewConfig, problem: Problem): string {
   const criteria = config.criteria.map((c) => `- ${c.id}: ${c.name} — ${c.description}`).join("\n");

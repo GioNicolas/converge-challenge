@@ -8,7 +8,7 @@ import type { ChatMessage, InterviewConfig } from "@/lib/contracts";
 import type { QuestionKind } from "@/lib/session/types";
 import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
-import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/agents/injecao";
+import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/seguranca/injecao";
 
 export function buildInterviewerSystem(config: InterviewConfig, problem: Problem): string {
   const pub = problem.public;

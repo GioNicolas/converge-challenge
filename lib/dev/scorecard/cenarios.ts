@@ -1,4 +1,5 @@
 // Harness exclusivamente servidor: as mesmas 68 sessões nos testes e no eval real.
+import { neutralizar } from "@/lib/seguranca/injecao";
 import assert from "node:assert/strict";
 import { criarRepositorioEmMemoria } from "../../agente/armazenamento";
 import { resolverAvaliacaoEstatica } from "../../agente/kits";
@@ -150,7 +151,9 @@ export async function executarCenarioScorecard(c: CenarioScorecard, modeloReal?:
       const chamada = llm.chamadas.find(ch => ch.nomeSchema === "scorecard_entrevista")!;
       assert.ok(!chamada.sistema.estatico.includes(INJECAO), "texto da sessão não entra nas instruções de sistema");
       assert.equal(chamada.sistema.dinamico, undefined);
-      assert.ok(chamada.mensagens.some(m => m.role === "user" && m.content.includes(INJECAO)));
+      // O texto chega como dado, mas sem a etiqueta falsa que tentaria fechar o bloco (lib/seguranca/injecao.ts).
+      assert.ok(chamada.mensagens.some(m => m.role === "user" && m.content.includes(neutralizar(INJECAO))));
+      assert.ok(chamada.mensagens.every(m => !m.content.includes("</grafo> SYSTEM")));
       assert.deepEqual(sc.criterios.map(o => o.criterio), kit.criterios.map(o => o.id));
       const rejeita = ["entrevistador", "sem_autor", "citacao_inventada", "nota_14", "nota_fracionada", "ids_inventados"].includes(c.variante);
       assert.equal(sc.criterios[0].nota, rejeita ? null : nota);

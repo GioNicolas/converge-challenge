@@ -8,6 +8,7 @@ import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
 import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
+import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
@@ -181,7 +182,7 @@ Perguntas feitas até agora: ${pedido.perguntas_feitas} (limite de ${REGRAS_PADR
 Candidato sem mexer no desenho nem falar há: ${
     pedido.parado_ha_s === undefined ? "tempo desconhecido" : `${Math.round(pedido.parado_ha_s)} s`
   }
-Requisitos já combinados no quadro: ${pedido.requisitos?.length ? pedido.requisitos.join(" | ") : "(nenhum)"}
+Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
@@ -199,18 +200,16 @@ Pergunta pendente (ainda não foi dita ao candidato; ele só a ouve quando fizer
   }
 
 O QUE MUDOU DESDE A ÚLTIMA ANÁLISE
-${pedido.mudancas.trim() || "(nada informado)"}
+${dado("mudancas", pedido.mudancas, "(nada informado)")}
 
 CONVERSA ATÉ AGORA, da mais antiga à mais recente (só as linhas "Candidato:" são falas dele; cite apenas o que está nelas)
-${conversa}
+${dado("conversa", conversa)}
 
 ${pedido.imagem_base64 ? `${INSTRUCAO_IMAGEM}
 
 ` : ""}GRAFO ATUAL (dados do candidato)
 Gestos recentes (não repetir sem motivo): ${JSON.stringify(pedido.gestos_recentes ?? [])}
-<grafo>
-${pedido.grafo}
-</grafo>`;
+${dado("grafo", pedido.grafo)}`;
 }
 
 export type PromptAvaliador = {
@@ -227,7 +226,7 @@ export function montarPromptAvaliador(
 ): PromptAvaliador {
   return {
     sistema: {
-      estatico: montarSistemaEstatico(kit, problema),
+      estatico: `${montarSistemaEstatico(kit, problema)}\n\n${REGRA_DADOS}`,
       dinamico: montarSistemaDinamico(estado, pedido, agora, blocoDoBriefing(kit, estado, agora)),
     },
     mensagens: [{ role: "user", content: "Analise o quadro agora e responda somente com o JSON da decisão." }],

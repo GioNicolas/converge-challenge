@@ -2,6 +2,7 @@
 // o tempo e as etapas da entrevista, e as perguntas já feitas com o que o candidato respondeu.
 // Sem isso o agente esquecia o que já foi dito e perguntava de novo o que o candidato já tinha respondido.
 // Só servidor.
+import { neutralizar } from "../../seguranca/injecao";
 import { normalizar } from "../guardas";
 import { conversaSemRepeticao, tempoDaEntrevista, type EstadoSessao, type PerguntaFeita } from "../sessao/estado";
 import type { FalaRecente, Fase } from "../sessao/tipos";
@@ -66,7 +67,8 @@ function mesclarEmOrdem(base: FalaRecente[], extra: FalaRecente[]): FalaRecente[
 
 export function conversaEmTexto(falas: FalaRecente[], nomeAgente = "Você (Totti)"): string {
   if (!falas.length) return "(nada ainda)";
-  return falas.map((f) => `${f.quem === "agente" ? nomeAgente : "Candidato"}: ${f.texto}`).join("\n");
+  // Sem etiqueta falsa: a fala do candidato não consegue "fechar" o bloco de dados (lib/seguranca/injecao.ts).
+  return falas.map((f) => `${f.quem === "agente" ? nomeAgente : "Candidato"}: ${neutralizar(f.texto)}`).join("\n");
 }
 
 const ETAPA: Partial<Record<Fase, string>> = {

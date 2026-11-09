@@ -1,5 +1,6 @@
 // Loop rápido (o "/perguntar"): o candidato fala com o entrevistador. Responde só pela ficha.
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
+import { neutralizar, REGRA_DADOS } from "../seguranca/injecao";
 import { blocoDoBriefing } from "./briefing";
 import { comVezDevolvida, eSoReacao, limitarFrases, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimV2 } from "./guardas";
 import { mapearAcoesVisuais, type AcaoVisual } from "../presenca/acoesVisuais";
@@ -102,14 +103,15 @@ export async function perguntar(
     const r = await deps.llm.completarJson({
       sistema: v2
         ? {
-            estatico: montarSistemaEstaticoPerguntarV2(deps.kit, deps.problema),
+            estatico: `${montarSistemaEstaticoPerguntarV2(deps.kit, deps.problema)}\n\n${REGRA_DADOS}`,
             dinamico: montarSistemaDinamicoPerguntarV2(estado, deps.kit, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora)),
           }
         : {
-            estatico: montarSistemaEstaticoPerguntar(deps.kit, deps.problema),
+            estatico: `${montarSistemaEstaticoPerguntar(deps.kit, deps.problema)}\n\n${REGRA_DADOS}`,
             dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora)),
           },
-      mensagens: [{ role: "user", content: entrada.texto }],
+      // A fala vai como está (é o que o modelo responde), só sem etiqueta falsa.
+      mensagens: [{ role: "user", content: neutralizar(entrada.texto) }],
       schema: EsquemaSaidaPerguntar,
       nomeSchema: v2 ? NOME_SCHEMA_PERGUNTAR_V2 : NOME_SCHEMA_PERGUNTAR,
       modelo: deps.modelo,

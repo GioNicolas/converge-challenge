@@ -1,5 +1,8 @@
 /**
- * Proteção contra prompt injection nos agentes do live coding (entrevistador, analista e avaliador).
+ * Proteção contra prompt injection nos dois agentes: live coding (entrevistador, analista e avaliador) e quadro
+ * (análise do desenho, conversa e scorecard).
+ * Custo: só texto, sem chamada a LLM. Etiquetar e neutralizar leva ~0,003 ms por prompt; a regra soma ~250 tokens
+ * ao prompt de sistema fixo (que fica no cache). O detector só roda no relatório. Não pesa na latência da fala.
  *
  * Três camadas, nenhuma suficiente sozinha:
  *  1. Regra no system prompt: o que vem do candidato é DADO, nunca instrução (`REGRA_DADOS`).
@@ -29,6 +32,10 @@ export const ETIQUETAS = [
   "leitura_do_analista",
   "hipotese",
   "saida_dos_testes",
+  // Quadro: o desenho em texto (inclui o que o candidato escreve nas caixas), os requisitos e o que mudou.
+  "grafo",
+  "requisitos",
+  "mudancas",
 ] as const;
 export type Etiqueta = (typeof ETIQUETAS)[number];
 
@@ -140,19 +147,23 @@ function linhaSuspeita(texto: string): string | undefined {
   return trecho === undefined ? undefined : trecho.trim().slice(0, 160);
 }
 
-/** Falas do candidato e versões do código com texto dirigido à IA. Uma entrada por trecho distinto. */
-export function tentativasDeInjecao(session: Pick<SessionState, "events" | "codeHistory">): TentativaDeInjecao[] {
-  const achadas: TentativaDeInjecao[] = [];
+/** Textos do candidato com trecho dirigido à IA. Uma entrada por trecho distinto, em ordem de tempo. */
+export function tentativasEmTextos<O extends string>(textos: { t: number; onde: O; texto: string }[]): { t: number; onde: O; trecho: string }[] {
+  const achadas: { t: number; onde: O; trecho: string }[] = [];
   const vistos = new Set<string>();
-  const anotar = (t: number, onde: TentativaDeInjecao["onde"], texto: string) => {
+  for (const { t, onde, texto } of textos) {
     const trecho = linhaSuspeita(texto);
-    if (!trecho || vistos.has(trecho)) return;
+    if (!trecho || vistos.has(trecho)) continue;
     vistos.add(trecho);
     achadas.push({ t, onde, trecho });
-  };
-  for (const e of session.events) {
-    if (e.type === "speech" && e.role === "candidate") anotar(e.t, "fala", e.text);
   }
-  for (const v of session.codeHistory) anotar(v.t, "codigo", v.code);
   return achadas.sort((a, b) => a.t - b.t);
+}
+
+/** Live coding: falas do candidato e versões do código com texto dirigido à IA. */
+export function tentativasDeInjecao(session: Pick<SessionState, "events" | "codeHistory">): TentativaDeInjecao[] {
+  return tentativasEmTextos<TentativaDeInjecao["onde"]>([
+    ...session.events.flatMap((e) => (e.type === "speech" && e.role === "candidate" ? [{ t: e.t, onde: "fala" as const, texto: e.text }] : [])),
+    ...session.codeHistory.map((v) => ({ t: v.t, onde: "codigo" as const, texto: v.code })),
+  ]);
 }
