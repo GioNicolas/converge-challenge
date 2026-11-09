@@ -15,7 +15,8 @@ import { hasProblem } from "@/problems";
 
 export const dynamic = "force-dynamic";
 // A avaliação (testes escondidos + LLM) roda depois da resposta e leva de 15 s a 1 min: a função precisa continuar viva.
-export const maxDuration = 120;
+// O relatório roda depois da resposta (after) e leva alguns minutos na Featherless: o teto de 300 s da Vercel.
+export const maxDuration = 300;
 
 /**
  * A questão que a IDE está mostrando vence a da config (o `?problema=` dos testes troca a questão na tela):

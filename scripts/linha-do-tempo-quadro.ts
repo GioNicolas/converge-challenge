@@ -179,6 +179,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
   let mudancaDesde: number | null = null;
   let empecilhoFeito = false;
   let empecilhoEm = -Infinity;
+  let licencaDeNovoEm = 0;
   let ultimoPedidoEmpecilho = -Infinity;
   type Rodando = { fimEm: number; resposta: RespostaAnalise; valeu: boolean; falaAoAnalisar: number; motivo: string; ajustes: string[] };
   const voo: { rodando: Rodando | null } = { rodando: null };
@@ -191,7 +192,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
   let respondendo: { falaAte: number } | null = null;
 
   const interrupcoes: Interrupcao[] = [];
-  const contagem = { analises: 0, querPerguntar: 0, barradasServidor: 0, barradasQuadro: 0, descartadasPorFala: 0, lentas: 0, canceladasPorFala: 0 };
+  const contagem = { analises: 0, querPerguntar: 0, barradasServidor: 0, barradasQuadro: 0, descartadasPorFala: 0, lentas: 0, canceladasPorFala: 0, licencas: 0 };
 
   const grafo = () => `COMPONENTES E CONEXÕES\n${LINHAS.slice(0, desenhadas).join("\n")}`;
 
@@ -369,7 +370,18 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
     const momentoOk = motivoDoMomento({ ...parado, marco: marcoDeFase(cliente, t), esperandoHaMs: t - (cliente.pendenteDesde ?? t),
       atrasada: interrupcaoAtrasada(ritmoDoCliente(cliente, t)) }) === null;
     const respiroDaMudanca = t - empecilhoEm >= RITMO.respiroMs;
-    if (cliente.plin === "PLIN_PENDENTE" && podeFalar && momentoOk && respiroDaMudanca && cliente.perguntaPendente) {
+    // Como o useEntrevista: no meio do desenho, numa pausa curta, o Totti pede licença antes de perguntar.
+    const desenhando = t - ultimoDesenhoEm < 12_000;
+    const pausaCurta = motivoDoMomento({ ...parado, marco: true }) === null;
+    let liberou = false;
+    if (cliente.plin === "PLIN_PENDENTE" && podeFalar && respiroDaMudanca && desenhando && (momentoOk || pausaCurta) && t >= licencaDeNovoEm) {
+      agenteFalandoAte = t + 3_000;
+      contagem.licencas++;
+      // Ele responde: "pode" (70%) ou "espera".
+      if (sortear() < 0.7) liberou = true;
+      else licencaDeNovoEm = t + 45_000;
+    }
+    if (cliente.plin === "PLIN_PENDENTE" && (liberou || (podeFalar && momentoOk && !desenhando && respiroDaMudanca)) && cliente.perguntaPendente) {
       const p = cliente.perguntaPendente;
       const fase = cliente.fase;
       cli({ tipo: "PLIN_CLICADO" });
@@ -377,7 +389,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
       agenteFalandoAte = t + FALA_DA_PERGUNTA_MS;
       ultimaFalaDoAgenteEm = t;
       passo = null;
-      const i: Interrupcao = { t, fase, tipo: p.status, motivo: motivoDaPendente, desenhando: t - ultimoDesenhoEm < 2_000, texto: p.pergunta ?? "" };
+      const i: Interrupcao = { t, fase, tipo: p.status, motivo: liberou ? `${motivoDaPendente}; com licença` : motivoDaPendente, desenhando: t - ultimoDesenhoEm < 2_000, texto: p.pergunta ?? "" };
       interrupcoes.push(i);
       log(`[${mmss(t)}] ${fase.padEnd(14)} INTERRUPÇÃO ${interrupcoes.length} (${i.tipo}; ${i.motivo}${i.desenhando ? "; NO MEIO DO DESENHO" : ""}) ${i.texto.slice(0, 90)}`);
     }
@@ -412,7 +424,7 @@ export function resumo(r: Awaited<ReturnType<typeof simularQuadro>>): string {
   return [
     `${r.persona} (${r.duracaoMin} min): ${r.interrupcoes.length} interrupções · ${[...porFase].map(([f, n]) => `${f} ${n}`).join(", ")}`,
     `  intervalo entre elas: mín ${gaps[0] ?? "–"} s, mediana ${mediana ?? "–"} s · no meio do desenho: ${r.interrupcoes.filter((i) => i.desenhando).length}`,
-    `  análises ${r.contagem.analises}, quis perguntar ${r.contagem.querPerguntar}, barradas no servidor ${r.contagem.barradasServidor}, no quadro ${r.contagem.barradasQuadro}, descartadas por fala ${r.contagem.descartadasPorFala}, canceladas por fala ${r.contagem.canceladasPorFala}, lentas ${r.contagem.lentas}`,
+    `  análises ${r.contagem.analises}, quis perguntar ${r.contagem.querPerguntar}, barradas no servidor ${r.contagem.barradasServidor}, no quadro ${r.contagem.barradasQuadro}, descartadas por fala ${r.contagem.descartadasPorFala}, canceladas por fala ${r.contagem.canceladasPorFala}, lentas ${r.contagem.lentas}, licenças pedidas ${r.contagem.licencas}`,
   ].join("\n");
 }
 

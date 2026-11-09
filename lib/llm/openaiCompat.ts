@@ -33,6 +33,8 @@ export interface ChatRequest<T> {
   prioridade?: Prioridade;
   /** Epoch ms até quando quem chama espera: o timeout do fetch, o retry e o reparo respeitam esse prazo. */
   prazoAte?: number;
+  /** Tempo máximo de cada tentativa (padrão 90 s). Geração longa (o relatório) precisa de mais: cortar e refazer só gasta. */
+  tempoPorTentativaMs?: number;
   /** Temperatura da amostragem; sem valor, a do provedor. */
   temperature?: number;
   /** Cancela a chamada: para de esperar, aborta o fetch em voo e não faz retry. */
@@ -292,6 +294,7 @@ interface Chamada {
   totals: Totals;
   prioridade: Prioridade;
   prazoAte?: number;
+  tempoPorTentativaMs?: number;
   signal: AbortSignal | undefined;
 }
 
@@ -303,7 +306,7 @@ async function postOnce(c: Chamada, body: Record<string, unknown>): Promise<Post
   const { provider, apiKey, totals, signal } = c;
   // Timeout and external cancel both abort the fetch; only the timeout is retriable.
   const controller = new AbortController();
-  const timeoutMs = Math.max(1, Math.min(TIMEOUT_MS, restante(c.prazoAte)));
+  const timeoutMs = Math.max(1, Math.min(c.tempoPorTentativaMs ?? TIMEOUT_MS, restante(c.prazoAte)));
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onExternalAbort = () => controller.abort();
   signal?.addEventListener("abort", onExternalAbort, { once: true });
@@ -420,7 +423,7 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
   let upstream: string | undefined;
   const call = async (msgs: ChatMessage[]): Promise<Completion> => {
     const result = await callApi(
-      { provider, apiKey, totals, prioridade, prazoAte: req.prazoAte, signal: req.signal },
+      { provider, apiKey, totals, prioridade, prazoAte: req.prazoAte, tempoPorTentativaMs: req.tempoPorTentativaMs, signal: req.signal },
       { ...baseBody, messages: msgs },
     );
     upstream = result.upstream ?? upstream;

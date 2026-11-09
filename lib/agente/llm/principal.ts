@@ -26,7 +26,7 @@ const PAPEL: Record<string, LlmRole> = {
   [NOME_SCHEMA_PERGUNTAR]: "conversa",
   [NOME_SCHEMA_PERGUNTAR_V2]: "conversa_quadro", // Totti 2 no quadro (padrão; TOTTI_QUADRO=v1 volta ao v1)
   [NOME_SCHEMA_ABERTURA]: "conversa", // apresentação e despedida
-  [NOME_SCHEMA_SCORECARD]: "evaluator", // relatório final
+  [NOME_SCHEMA_SCORECARD]: "relatorio", // relatório final: ninguém espera na hora, vai na Featherless
   [NOME_SCHEMA_KIT]: "evaluator", // geração do kit a partir da vaga
   // Questão do quadro de uma vaga: o candidato pode estar esperando por ela, então vai no modelo rápido.
   [NOME_SCHEMA_PROBLEMA]: "analyst",
@@ -39,7 +39,7 @@ const PAPEL_PADRAO: LlmRole = "evaluator";
  * falhava mesmo depois do reparo. Para eles o JSON Schema vai no fim do sistema. Os papéis ao vivo já
  * descrevem o formato no próprio prompt e ficam como estão.
  */
-const PAPEIS_COM_SCHEMA_NO_PROMPT: ReadonlySet<LlmRole> = new Set(["analyst", "evaluator"]);
+const PAPEIS_COM_SCHEMA_NO_PROMPT: ReadonlySet<LlmRole> = new Set(["analyst", "evaluator", "relatorio"]);
 
 /** O formato da resposta, para o modelo que não recebe `response_format`. */
 export function blocoDoFormato(schema: LlmArgs<unknown>["schema"]): string {

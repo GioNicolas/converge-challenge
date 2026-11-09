@@ -10,6 +10,7 @@
  * - Uma fala do Totti por vez: nenhuma corta a outra. O grifo de uma fala sai antes da próxima e quando o
  *   assunto fecha.
  */
+import { LICENCA_SEM_RESPOSTA_MS, liberouAPergunta } from "@/lib/conversa/licenca";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FilaFalas } from "@/lib/audio/filaFalas";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
@@ -69,24 +70,14 @@ const CHANCE_DE_RECONHECER = 0.5;
 
 /** Sem resposta à pergunta do Totti por tanto tempo (depois de ele terminar de perguntar): o assunto fecha. */
 const FIO_SEM_RESPOSTA_MS = 35_000;
-/** Sem resposta ao pedido de licença: ele está concentrado, a pergunta fica para depois. */
-const LICENCA_SEM_RESPOSTA_MS = 10_000;
 /** Pedidos de licença, variados para não soar como gravação. */
 const PEDIDOS_DE_LICENCA = [
   "Ei, posso te perguntar uma coisa sobre o seu código?",
   "Tenho uma dúvida sobre o que você escreveu. Posso perguntar agora?",
   "Posso te interromper rapidinho com uma pergunta?",
 ];
-/** "Espera", "agora não", "só um minuto": a pergunta fica para depois. */
-const ESPERA = /\b(espera|espere|pera|peraí|perai|agora n[ãa]o|n[ãa]o agora|ainda n[ãa]o|s[óo] um (minuto|minutinho|segundo|segundinho|pouco|pouquinho|instante)|um (minuto|minutinho|segundo|instante)|daqui a pouco|depois|calma|aguenta)\b/i;
-/** Liberou de forma explícita ("pode falar", "manda"): vale mesmo que a frase tenha um "depois" no meio. */
-const PODE = /\b(pode (falar|perguntar|mandar)|manda|claro|sim|fala a[íi]|pode sim)\b/i;
-
-/** A resposta ao pedido de licença: true pode perguntar, false é para esperar. */
-export function liberouAPergunta(fala: string): boolean {
-  if (PODE.test(fala)) return true;
-  return !ESPERA.test(fala) && !/^\s*n[ãa]o\b/i.test(fala);
-}
+// A interpretação da resposta é a mesma do quadro (lib/conversa/licenca.ts).
+export { liberouAPergunta };
 
 type Fio = { blip: Blip; falas: Fala[] };
 type Licenca = { blip: Blip; desde: number };

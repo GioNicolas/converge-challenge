@@ -284,7 +284,7 @@ function adaptationScore(judged: number | null, facts: AdaptationFacts): number 
 async function judge(system: string, user: string, judgedIds: string[], status: ReportStatus): Promise<EvaluatorOutput> {
   let lastError = "";
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
-    const result = await completeJson({ role: "evaluator", system, user, schema: EvaluatorOutput });
+    const result = await completeJson({ role: "relatorio", system, user, schema: EvaluatorOutput });
     status.costUsd += result.costUsd;
     const missing = judgedIds.filter((id) => !result.data.criteria.some((c) => c.id === id));
     if (missing.length === 0) return result.data;

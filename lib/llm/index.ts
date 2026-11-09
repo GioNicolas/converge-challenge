@@ -20,7 +20,7 @@ import {
 
 export type { ChatJsonResult, LlmProviderName };
 
-export type LlmRole = "analyst" | "codigo" | "conversa" | "conversa_quadro" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro";
+export type LlmRole = "analyst" | "codigo" | "conversa" | "conversa_quadro" | "evaluator" | "fast" | "filtro" | "interviewer" | "quadro" | "relatorio";
 
 /** Papéis que respondem a uma fala ao vivo: passam na frente na fila e nunca esperam uma análise acabar. */
 const PAPEIS_DE_FALA: ReadonlySet<LlmRole> = new Set(["conversa", "conversa_quadro", "fast", "filtro", "interviewer"]);
@@ -40,6 +40,8 @@ interface RoleConfig {
   hedgeMs?: number;
   /** Temperatura (sem valor, a do provedor). */
   temperatura?: number;
+  /** Tempo máximo de cada tentativa (sem valor, 90 s). */
+  tempoPorTentativaMs?: number;
 }
 
 const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
@@ -65,13 +67,27 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // Os filtros (da fala ao vivo e das perguntas da análise) usam o papel "filtro".
   },
   evaluator: {
+    // Kit da vaga, plano e o que não tem papel próprio: a recrutadora espera na tela, então a reserva entra aos 30 s.
     featherlessEnv: "EVALUATOR_MODEL",
     featherlessDefault: "zai-org/GLM-5.2",
     openrouterEnv: "EVALUATOR_FALLBACK_MODEL",
     openrouterDefault: "z-ai/glm-5.2",
     maxTokens: 6000,
-    // A recrutadora espera o relatório na tela: com a Featherless lenta, o OpenRouter entra em paralelo.
     hedgeMs: 30_000,
+  },
+  relatorio: {
+    // Relatório final da entrevista (live coding e quadro). Ninguém espera por ele na hora: vale qualidade e custo.
+    // O GLM-5.2 na Featherless leva ~3 min (scripts/run-evaluator.ts sem OpenRouter: 177 s, US$ 0,014 em créditos);
+    // com a reserva em 30 s o OpenRouter corria junto e era pago em toda entrevista (US$ 0,014–0,045, o maior custo
+    // dela). Agora a Featherless tem 3,5 min sozinha, numa tentativa só, e o OpenRouter só entra se ela não entregar,
+    // para o relatório sair dentro dos 300 s da função na Vercel. Com função mais longa: LLM_HEDGE_RELATORIO em ms.
+    featherlessEnv: "RELATORIO_MODEL",
+    featherlessDefault: "zai-org/GLM-5.2",
+    openrouterEnv: "RELATORIO_FALLBACK_MODEL",
+    openrouterDefault: "z-ai/glm-5.2",
+    maxTokens: 6000,
+    hedgeMs: 210_000,
+    tempoPorTentativaMs: 280_000,
   },
   conversa: {
     // Responde à fala do candidato ao vivo (quadro e live coding). Medido com scripts/bench-conversa.ts:
@@ -221,6 +237,7 @@ const state: LlmState = (globalWithLlm.__llmState ??= {
     fast: { consecutiveSlow: 0 },
     filtro: { consecutiveSlow: 0 },
     evaluator: { consecutiveSlow: 0 },
+    relatorio: { consecutiveSlow: 0 },
     interviewer: { consecutiveSlow: 0 },
     quadro: { consecutiveSlow: 0 },
     codigo: { consecutiveSlow: 0 },
@@ -291,6 +308,7 @@ export function getLlmStats(): LlmStatsSnapshot {
       fast: roleSnapshot("fast", state.roles.fast, now),
       filtro: roleSnapshot("filtro", state.roles.filtro, now),
       evaluator: roleSnapshot("evaluator", state.roles.evaluator, now),
+      relatorio: roleSnapshot("relatorio", state.roles.relatorio, now),
       interviewer: roleSnapshot("interviewer", state.roles.interviewer, now),
       quadro: roleSnapshot("quadro", state.roles.quadro, now),
       codigo: roleSnapshot("codigo", state.roles.codigo, now),
@@ -511,6 +529,7 @@ export async function completeJson<T>(opts: {
       schema: opts.schema,
       maxTokens: opts.maxTokens ?? cfg.maxTokens,
       ...(cfg.temperatura !== undefined ? { temperature: cfg.temperatura } : {}),
+      ...(cfg.tempoPorTentativaMs !== undefined ? { tempoPorTentativaMs: cfg.tempoPorTentativaMs } : {}),
       priorizarLatencia: fala,
       prioridade: fala ? "fala" : "fundo",
       ...(opts.prazoMs !== undefined ? { prazoAte: Date.now() + opts.prazoMs } : {}),
@@ -550,8 +569,8 @@ function raciocinio(role: LlmRole, cfg: RoleConfig): Record<LlmProviderName, Rea
 
 /**
  * Ms até a reserva correr junto. `LLM_HEDGE_<PAPEL>` troca sem deploy (ms; "0" = sem hedge, só em erro). Ex.: o
- * relatório (evaluator) leva ~3 min no GLM-5.2 da Featherless; com 30 s o OpenRouter corre junto e é pago em toda
- * entrevista (scripts/simulate.ts --com-relatorio: US$ 0,014–0,045 por relatório).
+ * relatório (papel "relatorio") leva ~3 min no GLM-5.2 da Featherless; com função mais longa na Vercel, dá para
+ * dar ainda mais tempo a ela antes de o OpenRouter entrar.
  */
 function hedgeDoPapel(role: LlmRole, cfg: RoleConfig): number | undefined {
   const env = process.env[`LLM_HEDGE_${role.toUpperCase()}`];

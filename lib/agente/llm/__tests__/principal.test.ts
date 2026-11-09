@@ -43,7 +43,7 @@ describe("criarClientePrincipal (cérebro do quadro sobre o lib/llm)", () => {
       [NOME_SCHEMA_PLANEJADOR, "analyst"],
       [NOME_SCHEMA_PERGUNTAR, "conversa"],
       [NOME_SCHEMA_ABERTURA, "conversa"],
-      [NOME_SCHEMA_SCORECARD, "evaluator"],
+      [NOME_SCHEMA_SCORECARD, "relatorio"],
       [NOME_SCHEMA_KIT, "evaluator"],
       ["schema_desconhecido", "evaluator"],
     ];
