@@ -4,6 +4,7 @@
 // npx tsx --env-file-if-exists=.env.local scripts/simular-conducao.ts
 import { analisar, type DepsAnalisar } from "../lib/agente/analisar";
 import { KIT_SYSTEM_DESIGN as kit } from "../lib/agente/kits/system-design";
+import type { LlmCliente } from "../lib/agente/llm/cliente";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
 import { perguntar } from "../lib/agente/perguntar";
 import { estadoInicial, transicionar, type EstadoSessao, type EventoSessao } from "../lib/agente/sessao/estado";
@@ -51,8 +52,10 @@ function sobreposicao(a: string, b: string): number {
   return [...A].filter((w) => B.has(w)).length / Math.min(A.size, B.size);
 }
 
-async function main() {
-  const llm = criarClientePrincipal();
+/** Uma simulação completa. Devolve as perguntas feitas e os problemas de condução encontrados. */
+export async function simular(llm: LlmCliente, opcoes: { silencioso?: boolean } = {}): Promise<{ perguntas: string[]; problemas: string[]; erros: number }> {
+  const console = opcoes.silencioso ? { log: () => {} } : globalThis.console;
+  let erros = 0;
   const problema = kit.problemas[0];
   const deps: DepsAnalisar = { llm, kit, problema, log: () => {} };
   let t = Date.now();
@@ -85,6 +88,7 @@ async function main() {
       parado_ha_s: 12,
     };
     const r = await analisar(deps, estado, pedido, t);
+    if (r.diagnostico.origem === "erro") erros++;
     estado = r.estado;
     const pergunta = r.resposta.pergunta;
     if (!pergunta || r.resposta.status === "ok") {
@@ -114,10 +118,19 @@ async function main() {
     aplicar({ tipo: "CANDIDATO_FALOU", texto: resposta, fimDeResposta: true });
     anteriorFoiNaoSei = n < 2;
   }
+  if (perguntas.length < 2) problemas.push(`só ${perguntas.length} pergunta(s) em 6 análises`);
+  return { perguntas, problemas, erros };
+}
+
+async function main() {
+  const { problemas } = await simular(criarClientePrincipal());
   console.log(`\n${problemas.length ? `PROBLEMAS:\n- ${problemas.join("\n- ")}` : "OK: mudou de assunto e não perguntou pelo que já está desenhado"}`);
   process.exitCode = problemas.length ? 1 : 0;
 }
-main().catch((e) => {
-  console.error(e);
-  process.exitCode = 1;
-});
+
+if (process.argv[1]?.endsWith("simular-conducao.ts")) {
+  main().catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  });
+}

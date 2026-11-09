@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { INTERVALO_ENTRE_PERGUNTAS_S, MAX_PERGUNTAS } from "../../../contracts";
+import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "../../../interrupcao/politica";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
   extrairIdsDoGrafo,
@@ -16,6 +16,9 @@ import { FASES, STATUS_ANALISE, type Fase, type RespostaAnalise } from "../tipos
 
 const AGORA = 10_000_000;
 const MIN = 60_000;
+/** Orçamento e intervalo da política comum para a entrevista padrão (35 min): os mesmos no quadro e no live coding. */
+const LIMITE = orcamentoDeInterrupcoes(35);
+const INTERVALO = intervaloMinimoMs(35);
 
 function estadoEm(fase: Fase, extra: Partial<EstadoSessao> = {}): EstadoSessao {
   return { ...estadoInicial(), fase, faseIniciadaEm: 0, ...extra };
@@ -44,7 +47,7 @@ describe("gestos da análise", () => {
     assert.deepEqual(r.visual, [{ tipo: "percorrer", alvos: ["r1", "s1", "e1"] }]);
   });
   it("política que adia a intervenção também silencia seus desenhos", () => {
-    const r = filtrarResposta(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), resposta({ visual: [{ tipo: "circular", alvo: "e1" }] }), IDS, AGORA);
+    const r = filtrarResposta(estadoEm("APROFUNDAMENTO", { perguntasFeitas: LIMITE }), resposta({ visual: [{ tipo: "circular", alvo: "e1" }] }), IDS, AGORA);
     assert.equal(r.status, "ok");
     assert.deepEqual(r.visual, []);
   });
@@ -91,32 +94,37 @@ describe("podeAnalisar (portão de entrada)", () => {
 
   it("intervalo e limite NÃO bloqueiam a análise (só o plin)", () => {
     assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 1, ultimaPerguntaEm: AGORA - 1000 }), AGORA), true);
-    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), AGORA), true);
+    assert.equal(podeAnalisar(estadoEm("APROFUNDAMENTO", { perguntasFeitas: LIMITE }), AGORA), true);
     assert.equal(podeAnalisar(estadoEm("FECHAMENTO", { perguntasFeitas: 6, perguntaFinalFeita: true }), AGORA), true);
   });
 });
 
-describe("motivoBloqueioPlin (intervalo e limite)", () => {
-  it("intervalo de 25 s desde a última pergunta", () => {
+describe("motivoBloqueioPlin (política comum: orçamento, cota e intervalo)", () => {
+  it("intervalo desde a última pergunta", () => {
     const base = { perguntasFeitas: 1 };
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 24_999 }), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 25_000 }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - INTERVALO + 1 }), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - INTERVALO }), AGORA), null);
   });
 
-  it("limite de 5 perguntas", () => {
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 4 }), AGORA), null);
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), AGORA), "LIMITE_DE_PERGUNTAS");
+  it("orçamento escalado pela duração (35 min no padrão)", () => {
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: LIMITE - 1 }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: LIMITE }), AGORA), "LIMITE_DE_PERGUNTAS");
   });
 
-  it("FECHAMENTO: uma pergunta final, mesmo após as 5 normais", () => {
-    assert.equal(motivoBloqueioPlin(estadoEm("FECHAMENTO", { perguntasFeitas: 5 }), AGORA), null);
-    assert.equal(motivoBloqueioPlin(estadoEm("FECHAMENTO", { perguntasFeitas: 6, perguntaFinalFeita: true }), AGORA), "LIMITE_DE_PERGUNTAS");
+  it("cota proporcional ao tempo: não gasta o orçamento no começo", () => {
+    // Aos 4 de 35 min, a cota é 2.
+    assert.equal(motivoBloqueioPlin(estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA - 4 * MIN, perguntasFeitas: 2 }), AGORA), "COTA_DO_TEMPO");
   });
 
-  it("regras configuráveis", () => {
-    const regras = { intervaloEntrePerguntasMs: 1000, maxPerguntas: 2, maxCaracteresNota: 40 };
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 2 }), AGORA, regras), "LIMITE_DE_PERGUNTAS");
-    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 1, ultimaPerguntaEm: AGORA - 1000 }), AGORA, regras), null);
+  it("começo do aprofundamento é marco: basta o respiro curto", () => {
+    const base = { perguntasFeitas: 2, ultimaPerguntaEm: AGORA - 60_000, ultimaRespostaEm: AGORA - 20_000 };
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", base), AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, faseIniciadaEm: AGORA - 5_000 }), AGORA), null);
+  });
+
+  it("FECHAMENTO: uma pergunta final, mesmo depois do orçamento", () => {
+    assert.equal(motivoBloqueioPlin(estadoEm("FECHAMENTO", { perguntasFeitas: LIMITE }), AGORA), null);
+    assert.equal(motivoBloqueioPlin(estadoEm("FECHAMENTO", { perguntasFeitas: LIMITE + 1, perguntaFinalFeita: true }), AGORA), "LIMITE_DE_PERGUNTAS");
   });
 });
 
@@ -126,7 +134,7 @@ describe("podeLevantarPlin", () => {
     assert.equal(podeLevantarPlin(estadoEm("ALTO_NIVEL"), "dica", AGORA), true);
     assert.equal(podeLevantarPlin(estadoEm("REQUISITOS"), "dica", AGORA), false);
     assert.equal(podeLevantarPlin(estadoEm("APROFUNDAMENTO"), "ok", AGORA), false);
-    assert.equal(podeLevantarPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), "duvida", AGORA), false);
+    assert.equal(podeLevantarPlin(estadoEm("APROFUNDAMENTO", { perguntasFeitas: LIMITE }), "duvida", AGORA), false);
   });
 });
 
@@ -146,7 +154,7 @@ describe("filtrarResposta", () => {
     }
     // Pergunta que a política barra (aqui, limite de perguntas) vira ok, mas o sinal de prontidão continua.
     const comDuvida = resposta({ status: "duvida", avancar_fase: true });
-    const r = filtrarResposta(estadoEm("ALTO_NIVEL", { perguntasFeitas: 5 }), comDuvida, IDS, AGORA);
+    const r = filtrarResposta(estadoEm("ALTO_NIVEL", { perguntasFeitas: LIMITE }), comDuvida, IDS, AGORA);
     assert.equal(r.status, "ok");
     assert.equal(r.avancar_fase, true);
   });
@@ -172,7 +180,7 @@ describe("filtrarResposta", () => {
   });
 
   it("rebaixa por limite e por intervalo", () => {
-    assert.equal(filtrarResposta(estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5 }), resposta(), IDS, AGORA).status, "ok");
+    assert.equal(filtrarResposta(estadoEm("APROFUNDAMENTO", { perguntasFeitas: LIMITE }), resposta(), IDS, AGORA).status, "ok");
     assert.equal(filtrarResposta(estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 10_000 }), resposta(), IDS, AGORA).status, "ok");
   });
 
@@ -282,27 +290,22 @@ describe("intervalo entre perguntas: referência de tempo", () => {
   const motivo = (extra: Partial<EstadoSessao>, agora: number) =>
     motivoBloqueioPlin(estadoEm("APROFUNDAMENTO", { ...base, ...extra }), agora);
 
-  it("usa os valores únicos de contracts", () => {
-    assert.equal(REGRAS_PADRAO.intervaloEntrePerguntasMs, INTERVALO_ENTRE_PERGUNTAS_S * 1000);
-    assert.equal(REGRAS_PADRAO.maxPerguntas, MAX_PERGUNTAS);
+  it("o respiro conta do fim da resposta quando ele é mais recente que o início da pergunta", () => {
+    const e = { ultimaPerguntaEm: AGORA - 5 * MIN, ultimaRespostaEm: AGORA - 10_000 };
+    assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
+    assert.equal(motivo(e, AGORA - 10_000 + RITMO.respiroMs), null);
   });
 
-  it("conta do fim da resposta quando ele é mais recente que o início da pergunta", () => {
-    const e = { ultimaPerguntaEm: AGORA - 60_000, ultimaRespostaEm: AGORA - 10_000 };
+  it("o intervalo conta do início da pergunta", () => {
+    const e = { ultimaPerguntaEm: AGORA - 10_000, ultimaRespostaEm: AGORA - 5 * MIN };
     assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
-    assert.equal(motivo(e, AGORA + 15_000), null);
-  });
-
-  it("conta do início da pergunta quando ela é mais recente que a resposta anterior", () => {
-    const e = { ultimaPerguntaEm: AGORA - 10_000, ultimaRespostaEm: AGORA - 60_000 };
-    assert.equal(motivo(e, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
-    assert.equal(motivo(e, AGORA + 15_000), null);
+    assert.equal(motivo(e, AGORA - 10_000 + INTERVALO), null);
   });
 
   it("estado antigo sem ultimaRespostaEm continua funcionando", () => {
     const antigo = estadoEm("APROFUNDAMENTO", { ...base, ultimaPerguntaEm: AGORA - 10_000 });
     delete (antigo as { ultimaRespostaEm?: number | null }).ultimaRespostaEm;
     assert.equal(motivoBloqueioPlin(antigo, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
-    assert.equal(motivoBloqueioPlin(antigo, AGORA + 15_000), null);
+    assert.equal(motivoBloqueioPlin(antigo, AGORA - 10_000 + INTERVALO), null);
   });
 });

@@ -9,7 +9,8 @@ import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../
 import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
-import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, REGRAS_PADRAO, statusPermitidoNoEstado } from "../sessao/politica";
+import { orcamentoDeInterrupcoes, RITMO } from "../../interrupcao/politica";
+import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, perguntaAtrasada, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -145,12 +146,12 @@ Acompanhe como o candidato se adapta: se ele revisa o desenho onde a mudança pe
 
 /**
  * Agenda (como no live coding): da segunda metade em diante, com critérios ainda sem evidência, a próxima
- * pergunta deve cobrir um deles. As perguntas são poucas (no máximo 5): sem isso o agente gasta todas no mesmo
+ * pergunta deve cobrir um deles. As perguntas são poucas (o orçamento da política comum): sem isso o agente gasta todas no mesmo
  * assunto e o relatório fica sem prova do que a recrutadora pediu.
  */
-function blocoDaAgenda(estado: EstadoSessao, pedido: PedidoAnalise, semEvidencia: string[]): string {
+function blocoDaAgenda(estado: EstadoSessao, pedido: PedidoAnalise, semEvidencia: string[], agora: number): string {
   if (!semEvidencia.length || (estado.fase !== "APROFUNDAMENTO" && estado.fase !== "FECHAMENTO")) return "";
-  const restantes = Math.max(0, REGRAS_PADRAO.maxPerguntas - pedido.perguntas_feitas);
+  const restantes = Math.max(0, orcamentoDeInterrupcoes(ritmoDoEstado(estado, agora).duracaoMin) - pedido.perguntas_feitas);
   if (restantes === 0) return "";
   return `AGENDA: restam ${restantes} pergunta(s) e ${semEvidencia.length} critério(s) sem evidência. Quando for perguntar, prefira um destes critérios (o mais ligado ao foco do plano), com uma pergunta ancorada no que já está no desenho. Se o desenho ainda não dá gancho para nenhum, siga o que estiver mais forte agora.
 `;
@@ -165,7 +166,7 @@ export function montarSistemaDinamico(
   briefing = "",
 ): string {
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
-  const bloqueio = motivoBloqueioPlin(estado, agora, REGRAS_PADRAO, { paradoHaS: pedido.parado_ha_s });
+  const bloqueio = motivoBloqueioPlin(estado, agora, undefined, { paradoHaS: pedido.parado_ha_s });
   const semEvidencia = criteriosSemEvidencia(estado);
   const pendente = estado.perguntaPendente;
   // A conversa inteira do servidor, mais as falas recentes que só o quadro tem (a apresentação, o desafio).
@@ -178,16 +179,18 @@ export function montarSistemaDinamico(
 ` : ""}ESTADO DA ENTREVISTA
 Fase: ${estado.fase}
 Tempo: ${tempoRestante(estado, agora)} (entrevista de ~${total.totalMin} min; faltam ~${total.restanteMin} min no total)
-Perguntas feitas até agora: ${pedido.perguntas_feitas} (limite de ${REGRAS_PADRAO.maxPerguntas})
+Perguntas feitas até agora: ${pedido.perguntas_feitas} (limite de ${orcamentoDeInterrupcoes(ritmoDoEstado(estado, agora).duracaoMin)}, uma a cada ~${RITMO.minutosPorInterrupcao} min)
 Candidato sem mexer no desenho nem falar há: ${
     pedido.parado_ha_s === undefined ? "tempo desconhecido" : `${Math.round(pedido.parado_ha_s)} s`
   }
 Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
-${blocoDoEmpecilho(estado, agora)}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
+${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
+` : ""}${perguntaAtrasada(estado, agora) ? `PERGUNTA EM ATRASO: faz tempo que você não pergunta nada. Se houver qualquer ponto que valha (uma decisão sem justificativa, um requisito sem resposta no desenho, um trade-off não dito), pergunte agora em vez de "ok".
+` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
-${blocoDaAgenda(estado, pedido, semEvidencia)}${briefing ? `
+${blocoDaAgenda(estado, pedido, semEvidencia, agora)}${briefing ? `
 ${briefing}
 ` : ""}
 Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):

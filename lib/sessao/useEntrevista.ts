@@ -33,9 +33,12 @@ import { criarLinhaDoTempo } from "@/lib/sessao/eventos";
 import { FilaDoAgente, type Descartado, type MotivoDoDescarte, type OrigemDaFala } from "@/lib/audio/filaDoAgente";
 import { apontarEAnotar } from "@/lib/presenca/coreografia";
 import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
+import { interrupcaoAtrasada, motivoDoMomento, RITMO } from "@/lib/interrupcao/politica";
 import {
   estadoInicial,
+  marcoDeFase,
   podeAnalisar,
+  ritmoDoCliente,
   transicionar,
   type EstadoEntrevista,
   type EventoEntrevista,
@@ -309,6 +312,10 @@ export function useEntrevista(
   const conversa = useRef<FalaRecente[]>([]);
   /** Última vez que o candidato mexeu no desenho ou falou (vai ao /analisar como `parado_ha_s`). */
   const ultimaAtividade = useRef(Date.now());
+  /** Último traço do candidato no quadro (as "mãos" da política comum de interrupção). */
+  const ultimoDesenhoEm = useRef(0);
+  /** Quando o Totti anunciou a mudança no problema (a próxima pergunta espera um respiro depois dela). */
+  const empecilhoAnunciadoEm = useRef(-Infinity);
   /** Requisitos já combinados (vão ao /analisar para a análise não inventar contexto). */
   const requisitosCombinados = useRef<string[]>([]);
   const gatilho = useRef<Gatilho | null>(null);
@@ -577,7 +584,16 @@ export function useEntrevista(
   useEffect(() => {
     if (estado.plin !== "PLIN_PENDENTE") return;
     const id = setInterval(() => {
-      if (podeTomarTurno({ agora: Date.now(), ultimaFalaEm: ultimaFalaEm.current,
+      const agora = Date.now();
+      const e = estadoAtual.current;
+      // Política comum (lib/interrupcao/politica.ts): só numa pausa real (sem desenhar há 8 s e com uma brecha na
+      // fala), ou numa pausa curta depois de um marco ou quando a pergunta já esperou demais (quem desenha sem
+      // parar também é perguntado). Logo depois da mudança no problema, um respiro para ele absorvê-la.
+      const momento = motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current,
+        marco: marcoDeFase(e, agora), esperandoHaMs: agora - (e.pendenteDesde ?? agora),
+        atrasada: interrupcaoAtrasada(ritmoDoCliente(e, agora)) });
+      const respiroDaMudanca = agora - empecilhoAnunciadoEm.current >= RITMO.respiroMs;
+      if (momento === null && respiroDaMudanca && podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) enviar({ tipo: "PLIN_CLICADO" });
     }, 150);
@@ -609,6 +625,7 @@ export function useEntrevista(
       empecilhoEncerrado.current = true;
       if (estadoAtual.current.fase === "ENCERRADA") return;
       const { fala, requisito } = r.empecilho;
+      empecilhoAnunciadoEm.current = Date.now();
       ultimaAtividade.current = Date.now();
       revisaoDaConversa.current++;
       conversa.current.push({ quem: "agente", texto: fala });
@@ -633,6 +650,7 @@ export function useEntrevista(
       const e = estadoAtual.current;
       const agora = Date.now();
       // Sem cortar ninguém: pausa do candidato, agente quieto, nada pendente, nenhuma pergunta no ar.
+      if (motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current }) !== null) return;
       if (e.plin !== "LIVRE" || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 })) return;
@@ -675,7 +693,8 @@ export function useEntrevista(
   useEffect(() => {
     const id = setInterval(() => {
       const e = estadoAtual.current;
-      const fasesComSilencio = e.fase === "REQUISITOS" || e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO";
+      // No FECHAMENTO também: sem isso, nada disparava análise e a pergunta final quase nunca saía.
+      const fasesComSilencio = e.fase === "REQUISITOS" || e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO" || e.fase === "FECHAMENTO";
       const referencia = Math.max(ultimaAtividade.current, ultimoDisparoParado.current);
       // Primeira vez: SILENCIO_MS depois da última atividade. Se o silêncio continua, só volta a cada REPETIR_SILENCIO_MS.
       const primeiro = e.fase === "REQUISITOS" ? SILENCIO_INICIAL_MS : SILENCIO_MS;
@@ -708,6 +727,7 @@ export function useEntrevista(
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
     ultimaAtividade.current = Date.now();
+    ultimoDesenhoEm.current = Date.now();
     // Um risco solto não encerra os requisitos: precisa de pelo menos 2 elementos significativos.
     if (estadoAtual.current.fase !== "REQUISITOS" || (quadro && elementosSignificativos(quadro.api.getSceneElements()) >= 2)) {
       enviar({ tipo: "CANDIDATO_DESENHOU" });
@@ -728,8 +748,10 @@ export function useEntrevista(
   const [iniciadaEm, setIniciadaEm] = useState<number | null>(null);
   const comecar = useCallback(() => {
     setIniciadaEm(Date.now());
-    enviar({ tipo: "COMECAR" });
-  }, [enviar]);
+    // A duração escala o ritmo das perguntas (política comum): soma dos tempos das fases desta sessão.
+    const somaS = Object.values(sessao?.tempos ?? {}).reduce<number>((s, t) => s + (t ?? 0), 0);
+    enviar({ tipo: "COMECAR", ...(somaS > 0 ? { duracaoMin: somaS / 60 } : {}) });
+  }, [enviar, sessao]);
   /** Demonstração: faz o agente ter uma dúvida agora, sobre o último componente desenhado. */
   const perguntaDemo = useCallback(() => {
     if (!quadro) return;
@@ -884,6 +906,8 @@ export function useEntrevista(
         agendarFimDaResposta(texto, SILENCIO_FIM_DO_SEGUIMENTO_MS);
       } else if (atual.plin === "PERGUNTA_ATIVA" && (r.responder || r.concluiu)) terminarResposta(texto, false);
       else if (atual.plin === "PERGUNTA_ATIVA") agendarFimDaResposta(texto);
+      // O Totti respondeu: a dúvida pendente espera a próxima brecha (não emenda uma pergunta na resposta).
+      if (r.responder && r.texto) enviar({ tipo: "AGENTE_RESPONDEU" });
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
         const alvos = [...new Set((mapearAcoesVisuais(r.visual, (id) => conversor.current.idReal(id)) ?? []).flatMap(alvosDaAcao))];

@@ -7,10 +7,13 @@ import {
   type EstadoSessao,
   type EventoSessao,
 } from "../estado";
+import { intervaloMinimoMs, orcamentoDeInterrupcoes } from "../../../interrupcao/politica";
 import type { Fase, RespostaAnalise } from "../tipos";
 
 const T0 = 1_000_000;
 const MIN = 60_000;
+const LIMITE = orcamentoDeInterrupcoes(35);
+const INTERVALO = intervaloMinimoMs(35);
 
 function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
@@ -228,13 +231,14 @@ describe("ciclo do plin", () => {
     assert.equal(ok.plin, "PLIN_PENDENTE");
   });
 
-  it("5ª resposta no aprofundamento leva ao FECHAMENTO", () => {
-    let e: EstadoSessao = { ...emFase("APROFUNDAMENTO"), perguntasFeitas: 4, ultimaPerguntaEm: null };
+  it("acabar o orçamento de perguntas não encerra o aprofundamento antes da hora", () => {
+    // Já no fim da entrevista (a cota proporcional deixa a última pergunta).
+    let e: EstadoSessao = { ...emFase("APROFUNDAMENTO"), iniciadaEm: T0 - 34 * MIN, perguntasFeitas: LIMITE - 1, ultimaPerguntaEm: null };
     e = aplicar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
     e = transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado;
     const r = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "Pronto.", fimDeResposta: true }, T0 + 2 * MIN);
-    assert.equal(r.estado.fase, "FECHAMENTO");
-    assert.ok(r.efeitos.some((f) => f.tipo === "FASE_MUDOU"));
+    assert.equal(r.estado.perguntasFeitas, LIMITE);
+    assert.equal(r.estado.fase, "APROFUNDAMENTO");
   });
 });
 
@@ -245,25 +249,23 @@ describe("limite e intervalo", () => {
     return transicionar(c, { tipo: "CANDIDATO_FALOU", texto: "ok", fimDeResposta: true }, quando + 2).estado;
   }
 
-  it("não aceita plin antes do intervalo (25 s) depois do fim da última resposta", () => {
-    // pergunta(): clique em +1, resposta termina em +2. O respiro conta do fim da resposta.
-    const e = pergunta(emFase("APROFUNDAMENTO"), T0 + MIN);
-    const cedo = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 2 + 24_999);
+  it("não aceita pergunta antes do intervalo da política comum desde a última pergunta", () => {
+    // pergunta(): clique em +1, resposta termina em +2.
+    const e = pergunta(emFase("APROFUNDAMENTO"), T0 + 10 * MIN);
+    const cedo = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + 10 * MIN + 1 + INTERVALO - 1_000);
     assert.equal(cedo.estado.plin, "LIVRE");
-    const ok = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN + 2 + 25_000);
+    const ok = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + 10 * MIN + 1 + INTERVALO);
     assert.equal(ok.estado.plin, "PLIN_PENDENTE");
   });
 
-  it("no máximo 5 perguntas", () => {
+  it("no máximo o orçamento da entrevista, e o aprofundamento segue", () => {
     let e = emFase("APROFUNDAMENTO");
-    // Sobe o contador sem cair no FECHAMENTO automático: 4 perguntas por aqui.
-    for (let i = 0; i < 4; i++) e = pergunta(e, T0 + (i + 1) * 2 * MIN);
-    assert.equal(e.perguntasFeitas, 4);
+    for (let i = 0; i < LIMITE; i++) e = pergunta(e, T0 + (i + 1) * 3 * MIN);
+    assert.equal(e.perguntasFeitas, LIMITE);
     assert.equal(e.fase, "APROFUNDAMENTO");
-    e = pergunta(e, T0 + 20 * MIN);
-    assert.equal(e.perguntasFeitas, 5);
-    assert.equal(e.fase, "FECHAMENTO");
-    assert.equal(e.perguntas.length, 5);
+    e = pergunta(e, T0 + 40 * MIN);
+    assert.equal(e.perguntasFeitas, LIMITE);
+    assert.equal(e.perguntas.length, LIMITE);
   });
 });
 

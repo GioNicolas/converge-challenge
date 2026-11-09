@@ -1,21 +1,14 @@
 // Política do "portão de entrada": funções puras que decidem SE a análise pode rodar e SE uma
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
-import {
-  INTERVALO_ENTRE_PERGUNTAS_S,
-  inicioDoIntervaloEntrePerguntas,
-  MAX_PERGUNTAS,
-  SILENCIO_INICIAL_S,
-  SILENCIO_S,
-} from "../../contracts";
+import { SILENCIO_INICIAL_S, SILENCIO_S } from "../../contracts";
+import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
 import { mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
-import type { Fase, RespostaAnalise, StatusAnalise } from "./tipos";
+import { FASES, type Fase, type RespostaAnalise, type StatusAnalise } from "./tipos";
 
+/** O ritmo das perguntas (orçamento, cota, intervalo) vem da política comum: lib/interrupcao/politica.ts. */
 export type Regras = {
-  intervaloEntrePerguntasMs: number;
-
-  maxPerguntas: number;
   /** Tamanho máximo da nota que o cursor escreve no quadro. */
   maxCaracteresNota: number;
 };
@@ -32,10 +25,49 @@ export const LIMITE_SILENCIO_S = SILENCIO_S;
 export const LIMITE_SILENCIO_INICIAL_S = SILENCIO_INICIAL_S;
 
 export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: INTERVALO_ENTRE_PERGUNTAS_S * 1000,
-  maxPerguntas: MAX_PERGUNTAS,
   maxCaracteresNota: 40,
 };
+
+/** Duração da entrevista (min) e quando ela começou, para a política comum. */
+function relogioDaEntrevista(estado: EstadoSessao, agora: number): { duracaoMin: number; inicioEm: number } {
+  const somaS = Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
+  const duracaoMin = estado.plano?.duracaoMin ?? somaS / 60;
+  if (estado.iniciadaEm) return { duracaoMin, inicioEm: estado.iniciadaEm };
+  // Estado antigo, sem iniciadaEm: estima pelo tempo das fases já passadas.
+  const anteriores = FASES.slice(0, Math.max(0, FASES.indexOf(estado.fase)));
+  const passadasMs = anteriores.reduce((s, f) => s + (estado.tempos[f] ?? 0), 0) * 1000;
+  return { duracaoMin, inicioEm: (estado.faseIniciadaEm ?? agora) - passadasMs };
+}
+
+/** A fase acabou de começar (aprofundamento, fechamento): é um marco, a hora natural de perguntar. */
+export function marcoDeFase(fase: string, faseIniciadaEm: number | null, agora: number): boolean {
+  return (fase === "APROFUNDAMENTO" || fase === "FECHAMENTO") && faseIniciadaEm !== null && agora - faseIniciadaEm < RITMO.marcoDeFaseMs;
+}
+
+/** Situação da sessão para o ritmo da política comum. O convite de REQUISITOS e a pergunta final ficam fora. */
+export function ritmoDoEstado(estado: EstadoSessao, agora: number): Ritmo {
+  return {
+    agora,
+    ...relogioDaEntrevista(estado, agora),
+    feitas: estado.perguntasFeitas,
+    ultimaEm: estado.ultimaPerguntaEm,
+    ultimaConversaFimEm: estado.ultimaRespostaEm,
+    marco: marcoDeFase(estado.fase, estado.faseIniciadaEm, agora),
+  };
+}
+
+/** Faz tempo demais que o Totti não pergunta nada (e a cota deixa): o prompt pede para ele não ficar só no "ok". */
+export function perguntaAtrasada(estado: EstadoSessao, agora: number): boolean {
+  if (estado.fase !== "ALTO_NIVEL" && estado.fase !== "APROFUNDAMENTO") return false;
+  return interrupcaoAtrasada(ritmoDoEstado(estado, agora));
+}
+
+const CODIGO_DO_RITMO = {
+  orcamento: "LIMITE_DE_PERGUNTAS",
+  cota: "COTA_DO_TEMPO",
+  respiro: "INTERVALO_ENTRE_PERGUNTAS",
+  intervalo: "INTERVALO_ENTRE_PERGUNTAS",
+} as const;
 
 /** Que tipos de plin cada fase aceita. `ok` é sempre permitido (silêncio). */
 const PLINS_DA_FASE: Partial<Record<Fase, StatusAnalise[]>> = {
@@ -74,6 +106,7 @@ export type MotivoBloqueio = "FASE_NAO_ANALISA" | "CANDIDATO_RESPONDENDO";
 export type MotivoBloqueioPlin =
   | MotivoBloqueio
   | "LIMITE_DE_PERGUNTAS"
+  | "COTA_DO_TEMPO"
   | "INTERVALO_ENTRE_PERGUNTAS"
   | "BOLA_COM_O_CANDIDATO";
 
@@ -116,23 +149,21 @@ export function podeAnalisar(
 export function motivoBloqueioPlin(
   estado: EstadoSessao,
   agora: number,
-  regras: Regras = REGRAS_PADRAO,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _regras: Regras = REGRAS_PADRAO,
   candidato: ContextoDoCandidato = {},
 ): MotivoBloqueioPlin | null {
   const base = motivoBloqueio(estado);
   if (base) return base;
-  // REQUISITOS aceita um único convite (o silêncio inicial): não gasta a cota de 5, mas não se repete.
+  // O convite de REQUISITOS e a pergunta final do FECHAMENTO ficam fora do orçamento, mas são únicos.
   if (estado.fase === "REQUISITOS" && estado.conviteFeito) return "LIMITE_DE_PERGUNTAS";
-  if (estado.fase === "FECHAMENTO") {
-    if (estado.perguntaFinalFeita) return "LIMITE_DE_PERGUNTAS";
-  } else if (estado.perguntasFeitas >= regras.maxPerguntas) {
-    return "LIMITE_DE_PERGUNTAS";
-  }
-  // O respiro conta do mais recente entre o início da última pergunta e o fim da última resposta (igual ao quadro).
-  const inicioIntervalo = inicioDoIntervaloEntrePerguntas(estado.ultimaPerguntaEm, estado.ultimaRespostaEm);
-  if (inicioIntervalo !== null && agora - inicioIntervalo < regras.intervaloEntrePerguntasMs) {
-    return "INTERVALO_ENTRE_PERGUNTAS";
-  }
+  if (estado.fase === "FECHAMENTO" && estado.perguntaFinalFeita) return "LIMITE_DE_PERGUNTAS";
+  // Ritmo da política comum (lib/interrupcao/politica.ts): orçamento escalado pela duração, cota proporcional ao
+  // tempo, intervalo e respiro. Igual no quadro (lib/sessao/estados.ts) e no live coding.
+  const ritmo = ritmoDoEstado(estado, agora);
+  const extra = estado.fase === "REQUISITOS" || estado.fase === "FECHAMENTO";
+  const motivo = motivoDoRitmo(extra ? { ...ritmo, feitas: 0, marco: true } : ritmo);
+  if (motivo) return CODIGO_DO_RITMO[motivo.codigo];
   // A bola está com o candidato: depois de qualquer fala solta do agente (resposta, comentário, continuação) ele
   // não pergunta de novo até o candidato agir (falar ou mexer no desenho). Sem ação dele, só um silêncio de verdade
   // (o mesmo limite que já quebra o silêncio) libera a pergunta.

@@ -101,14 +101,17 @@ test("ritmo das perguntas: escreveu uma linha e falou há pouco, a próxima espe
   pergunta(2, "Como você vai percorrer a lista nums?", 81_000);
   agora = 100_000;
   assert.equal(decideBlip(s, agora).blip, undefined);
-  assert.match(lastBlipDecision(s) ?? "", /desde (a última conversa|o último blip)/);
-  agora = 150_000;
+  assert.match(lastBlipDecision(s) ?? "", /desde a última conversa|cota do tempo/);
+  // A cota do tempo (política comum) só libera a segunda pergunta depois dos 3 min de 30; a q-2 envelheceu
+  // e a análise seguinte traz outra. Ainda sem linha nova: espera ele avançar no código.
+  pergunta(3, "Como você vai percorrer a lista nums?", 170_000);
+  agora = 185_000;
   assert.equal(decideBlip(s, agora).blip, undefined);
   assert.match(lastBlipDecision(s) ?? "", /linha\(s\) nova\(s\)/);
-  appendEvent(s, { type: "snapshot", sessionId: id, t: 151_000, code: "def f(nums, target):\n    vistos = {}\n    for i, n in enumerate(nums):\n        falta = target - n\n        if falta in vistos:\n            return [vistos[falta], i]\n", version: 2, language: "python" });
-  appendEvent(s, { type: "pause", sessionId: id, t: 160_000, idleMs: 9_000 });
-  agora = 161_000;
-  assert.equal(decideBlip(s, agora).blip?.id, "q-2");
+  appendEvent(s, { type: "snapshot", sessionId: id, t: 186_000, code: "def f(nums, target):\n    vistos = {}\n    for i, n in enumerate(nums):\n        falta = target - n\n        if falta in vistos:\n            return [vistos[falta], i]\n", version: 2, language: "python" });
+  appendEvent(s, { type: "pause", sessionId: id, t: 195_000, idleMs: 9_000 });
+  agora = 196_000;
+  assert.equal(decideBlip(s, agora).blip?.id, "q-3");
 
   // Uma pergunta nascida antes de ele explicar falando sai: a análise seguinte decide de novo.
   const s2 = getOrCreateSession(`ritmo2-${Date.now()}`, DEFAULT_CONFIG);

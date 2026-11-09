@@ -408,11 +408,7 @@ export function transicionar(
         { tipo: "RESPOSTA_ENCERRADA", numero: ativa.numero },
         { tipo: "ANALISAR", motivo: "resposta_terminou" },
       ];
-      // Atingiu o limite de perguntas no aprofundamento: segue para o fechamento (como no quadro).
-      if (livre.fase === "APROFUNDAMENTO" && livre.perguntasFeitas >= regras.maxPerguntas) {
-        const fechamento = mudarFase(livre, "FECHAMENTO", agora);
-        return { estado: fechamento.estado, efeitos: [...efeitos, ...fechamento.efeitos] };
-      }
+      // Acabar o orçamento de perguntas não encerra o aprofundamento antes da hora: o relógio decide.
       return { estado: livre, efeitos };
     }
 

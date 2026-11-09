@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { INTERVALO_ENTRE_PERGUNTAS_S, MAX_PERGUNTAS } from "@/lib/contracts";
-import { REGRAS_PADRAO as REGRAS_SERVIDOR } from "@/lib/agente/sessao/politica";
+import { estadoInicial as estadoDoServidor } from "@/lib/agente/sessao/estado";
+import { motivoBloqueioPlin } from "@/lib/agente/sessao/politica";
+import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "@/lib/interrupcao/politica";
 import {
+  DURACAO_PADRAO_MIN,
   estadoInicial,
   podeAnalisar,
-  REGRAS_PADRAO,
   transicionar,
   type EstadoEntrevista,
   type EventoEntrevista,
@@ -22,9 +23,10 @@ const duvida: RespostaAnalise = {
 };
 const ok: RespostaAnalise = { ...duvida, status: "ok", pergunta: null, nota: null, elementos: [] };
 
-test("nova fala cancela intervenção ainda não feita, preservando a pergunta já ativa", () => {
+test("nova fala: a intervenção pendente espera a próxima brecha, cai só se ficou velha; a ativa continua", () => {
   const pendente = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
-  assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU" }, 1).plin, "LIVRE");
+  assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU" }, 1).plin, "PLIN_PENDENTE");
+  assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU" }, RITMO.pendenteValidaMs).plin, "LIVRE");
   const ativa = transicionar(pendente, { tipo: "PLIN_CLICADO" }, 1);
   assert.equal(transicionar(ativa, { tipo: "CANDIDATO_CONTINUOU" }, 2).plin, "PERGUNTA_ATIVA");
 });
@@ -108,77 +110,89 @@ test("ciclo completo do plin no aprofundamento", () => {
   assert.equal(e.ultimaRespostaEm, 5_000);
 });
 
-test("respeita o intervalo entre perguntas (25 s) depois da resposta", () => {
-  const depois = { ...noAprofundamento(), ultimaRespostaEm: 10_000 };
-  const cedo = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 34_999);
-  assert.equal(cedo.plin, "LIVRE");
-  const tarde = transicionar(depois, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 35_000);
-  assert.equal(tarde.plin, "PLIN_PENDENTE");
+/** Orçamento, intervalo e respiro da política comum (lib/interrupcao/politica.ts) para a entrevista padrão. */
+const LIMITE = orcamentoDeInterrupcoes(DURACAO_PADRAO_MIN);
+const INTERVALO = intervaloMinimoMs(DURACAO_PADRAO_MIN);
+const RESPIRO = RITMO.respiroMs;
+/** No meio do aprofundamento, longe do começo da fase (marco) e com a cota do tempo livre. */
+function noMeio(): EstadoEntrevista {
+  return { ...noAprofundamento(), faseIniciadaEm: -10 * 60_000, iniciadaEm: -20 * 60_000 };
+}
+const analisar = (e: EstadoEntrevista, t: number) => transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, t).plin;
+
+test("respeita o respiro da política comum depois da resposta", () => {
+  const depois = { ...noMeio(), ultimaPerguntaEm: -5 * 60_000, ultimaRespostaEm: 10_000 };
+  assert.equal(analisar(depois, 10_000 + RESPIRO - 1), "LIVRE");
+  assert.equal(analisar(depois, 10_000 + RESPIRO), "PLIN_PENDENTE");
 });
 
-test("o intervalo conta do mais recente entre o início da pergunta e o fim da resposta", () => {
-  const analisar = (e: EstadoEntrevista, t: number) =>
-    transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, t).plin;
-  // Resposta mais recente que a pergunta: conta da resposta.
-  const respondeu = { ...noAprofundamento(), ultimaPerguntaEm: 1_000, ultimaRespostaEm: 100_000 };
-  assert.equal(analisar(respondeu, 124_999), "LIVRE");
-  assert.equal(analisar(respondeu, 125_000), "PLIN_PENDENTE");
-  // Pergunta mais recente que a resposta anterior (pergunta ainda no ar): conta da pergunta.
-  const perguntando = { ...noAprofundamento(), ultimaPerguntaEm: 100_000, ultimaRespostaEm: 1_000 };
-  assert.equal(analisar(perguntando, 124_999), "LIVRE");
-  assert.equal(analisar(perguntando, 125_000), "PLIN_PENDENTE");
+test("o intervalo conta do início da pergunta e o respiro, do fim da resposta", () => {
+  const respondeu = { ...noMeio(), ultimaPerguntaEm: 1_000, ultimaRespostaEm: 100_000 };
+  assert.equal(analisar(respondeu, 100_000 + RESPIRO - 1), "LIVRE");
+  assert.equal(analisar(respondeu, 100_000 + RESPIRO), "PLIN_PENDENTE");
+  const perguntando = { ...noMeio(), ultimaPerguntaEm: 100_000, ultimaRespostaEm: 1_000 };
+  assert.equal(analisar(perguntando, 100_000 + INTERVALO - 1), "LIVRE");
+  assert.equal(analisar(perguntando, 100_000 + INTERVALO), "PLIN_PENDENTE");
 });
 
-test("o clique na pergunta registra ultimaPerguntaEm e o fim da resposta o supera", () => {
-  let e = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
+test("o clique na pergunta registra ultimaPerguntaEm e o fim da resposta abre o respiro", () => {
+  let e = transicionar(noMeio(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
   e = transicionar(e, { tipo: "PLIN_CLICADO" }, 5_000);
   assert.equal(e.ultimaPerguntaEm, 5_000);
   e = transicionar(e, { tipo: "RESPOSTA_TERMINOU" }, 50_000);
-  assert.equal(transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 74_999).plin, "LIVRE");
-  assert.equal(transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 75_000).plin, "PLIN_PENDENTE");
+  const libera = Math.max(5_000 + INTERVALO, 50_000 + RESPIRO);
+  assert.equal(analisar(e, libera - 1), "LIVRE");
+  assert.equal(analisar(e, libera), "PLIN_PENDENTE");
 });
 
 test("estado salvo sem ultimaPerguntaEm continua funcionando", () => {
-  const antigo = noAprofundamento();
+  const antigo = noMeio();
   delete (antigo as { ultimaPerguntaEm?: number | null }).ultimaPerguntaEm;
-  assert.equal(transicionar(antigo, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "PLIN_PENDENTE");
+  assert.equal(analisar(antigo, 0), "PLIN_PENDENTE");
   const comResposta = { ...antigo, ultimaRespostaEm: 10_000 };
-  assert.equal(transicionar(comResposta, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 34_999).plin, "LIVRE");
-  assert.equal(transicionar(comResposta, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 35_000).plin, "PLIN_PENDENTE");
+  assert.equal(analisar(comResposta, 10_000 + RESPIRO - 1), "LIVRE");
+  assert.equal(analisar(comResposta, 10_000 + RESPIRO), "PLIN_PENDENTE");
 });
 
-test("servidor e quadro usam as mesmas regras de tempo (fonte única em contracts)", () => {
-  assert.equal(REGRAS_PADRAO.intervaloEntrePerguntasMs, INTERVALO_ENTRE_PERGUNTAS_S * 1000);
-  assert.equal(REGRAS_PADRAO.maxPerguntas, MAX_PERGUNTAS);
-  assert.equal(REGRAS_SERVIDOR.intervaloEntrePerguntasMs, REGRAS_PADRAO.intervaloEntrePerguntasMs);
-  assert.equal(REGRAS_SERVIDOR.maxPerguntas, REGRAS_PADRAO.maxPerguntas);
+test("servidor e quadro usam a mesma política (lib/interrupcao/politica.ts)", () => {
+  const T = 30 * 60_000;
+  const cliente = { ...noMeio(), iniciadaEm: 0, ultimaPerguntaEm: T - 60_000, ultimaRespostaEm: T - 50_000, perguntasFeitas: 3 };
+  const servidor = { ...estadoDoServidor(), fase: "APROFUNDAMENTO" as const, faseIniciadaEm: 0, iniciadaEm: 0,
+    ultimaPerguntaEm: T - 60_000, ultimaRespostaEm: T - 50_000, perguntasFeitas: 3 };
+  for (const t of [T, T - 60_000 + INTERVALO]) {
+    assert.equal(analisar(cliente, t) === "PLIN_PENDENTE", motivoBloqueioPlin(servidor, t) === null, `t = ${t}`);
+  }
 });
 
-test("máximo de 5 perguntas; a quinta resposta leva ao fechamento", () => {
-  const quase = { ...noAprofundamento(), perguntasFeitas: 4 };
-  let e = transicionar(quase, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
+test("no máximo o orçamento da entrevista, e acabar o orçamento não pula para o fechamento", () => {
+  const fim = { ...noMeio(), iniciadaEm: -34 * 60_000 };
+  let e = transicionar({ ...fim, perguntasFeitas: LIMITE - 1 }, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
   e = transicionar(e, { tipo: "PLIN_CLICADO" }, 1);
   e = transicionar(e, { tipo: "RESPOSTA_TERMINOU" }, 2);
-  assert.equal(e.perguntasFeitas, 5);
-  assert.equal(e.fase, "FECHAMENTO");
+  assert.equal(e.perguntasFeitas, LIMITE);
+  assert.equal(e.fase, "APROFUNDAMENTO");
+  assert.equal(analisar({ ...fim, perguntasFeitas: LIMITE }, 0), "LIVRE");
+});
 
-  const cheio = { ...noAprofundamento(), perguntasFeitas: 5 };
-  assert.equal(transicionar(cheio, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0).plin, "LIVRE");
+test("a cota proporcional ao tempo não deixa gastar o orçamento no começo", () => {
+  const comeco = { ...noMeio(), iniciadaEm: 0, perguntasFeitas: 2 };
+  assert.equal(analisar(comeco, 4 * 60_000), "LIVRE");
 });
 
 function noFechamento(): EstadoEntrevista {
-  return { ...estadoInicial(), fase: "FECHAMENTO", faseIniciadaEm: 0, perguntasFeitas: 5 };
+  return { ...estadoInicial(), fase: "FECHAMENTO", faseIniciadaEm: 0, perguntasFeitas: LIMITE };
 }
 
-test("fechamento aceita a dúvida final mesmo com 5 perguntas feitas e sem esperar o intervalo", () => {
+test("fechamento aceita a dúvida final mesmo com o orçamento usado, depois do respiro", () => {
   const acabouDeResponder = { ...noFechamento(), ultimaRespostaEm: 10_000 };
-  let e = transicionar(acabouDeResponder, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 10_001);
+  assert.equal(analisar(acabouDeResponder, 10_001), "LIVRE");
+  let e = transicionar(acabouDeResponder, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 10_000 + RESPIRO);
   assert.equal(e.plin, "PLIN_PENDENTE");
-  e = transicionar(e, { tipo: "PLIN_CLICADO" }, 10_002);
+  e = transicionar(e, { tipo: "PLIN_CLICADO" }, 60_000);
   assert.equal(e.plin, "PERGUNTA_ATIVA");
-  assert.equal(e.perguntaAtiva?.numero, 6);
+  assert.equal(e.perguntaAtiva?.numero, LIMITE + 1);
   assert.equal(e.perguntaFinalFeita, true);
-  e = transicionar(e, { tipo: "RESPOSTA_TERMINOU" }, 20_000);
+  e = transicionar(e, { tipo: "RESPOSTA_TERMINOU" }, 70_000);
   assert.equal(e.fase, "FECHAMENTO");
   assert.equal(e.plin, "LIVRE");
 });

@@ -1,7 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { runAnalyst } from "@/lib/agents/analyst";
+import { disparaAnalise } from "@/lib/agents/gatilhos";
 import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
-import { linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { resolveConfig } from "@/lib/config/store";
 import { prewarmPyodide } from "@/lib/execution/pyodide-node";
@@ -24,19 +24,6 @@ export const maxDuration = 120;
 function withProblem(config: InterviewConfig, problemId: string): InterviewConfig {
   if (problemId === config.problemId || !hasProblem(problemId)) return config;
   return { ...config, problemId, difficulty: problems[problemId]?.difficulty };
-}
-
-// A conversa conta como gatilho quando termina (blip_closed), não a cada fala.
-const ANALYZED_TRIGGERS = new Set<SessionEvent["type"]>(["pause", "run", "paste", "blip_closed"]);
-/** Fala solta (fora de balão) longa o bastante para mudar a leitura do Analyst: ele explicou o raciocínio. */
-const PALAVRAS_PARA_ANALISAR = 12;
-
-function disparaAnalise(event: SessionEvent, temCodigo: boolean): boolean {
-  if (ANALYZED_TRIGGERS.has(event.type)) return true;
-  // Antes da primeira linha de código nenhuma pergunta da análise pode sair (lib/agents/policy.ts): analisar a
-  // fala ali só gastava uma chamada.
-  return temCodigo && event.type === "speech" && event.role === "candidate" && event.blipId === undefined
-    && event.text.trim().split(/\s+/).length >= PALAVRAS_PARA_ANALISAR;
 }
 
 export async function POST(request: Request) {
@@ -67,7 +54,7 @@ export async function POST(request: Request) {
     // Na Vercel, o que roda depois da resposta é interrompido a menos que a plataforma saiba que ainda há trabalho.
     after(() => waitForEvaluation(session).then(() => guardarSessao(session)));
   }
-  if (disparaAnalise(event, linesWrittenBeyondStarter(session) > 0)) {
+  if (disparaAnalise(event, session)) {
     try {
       await runAnalyst(session, event);
     } catch (err) {

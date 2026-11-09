@@ -3,7 +3,7 @@
 //
 // Fases:  AGUARDANDO → APRESENTACAO → REQUISITOS → ALTO_NIVEL → APROFUNDAMENTO → FECHAMENTO → ENCERRADA
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu uma pergunta, esperando a vez) → PERGUNTA_ATIVA (o Totti a disse; sem clique) → LIVRE
-import { INTERVALO_ENTRE_PERGUNTAS_S, inicioDoIntervaloEntrePerguntas, MAX_PERGUNTAS } from "@/lib/contracts";
+import { motivoDoRitmo, RITMO, type Ritmo } from "@/lib/interrupcao/politica";
 import type { Fase, RespostaAnalise } from "@/lib/sessao/cliente";
 
 export type CicloPlin = "LIVRE" | "PLIN_PENDENTE" | "PERGUNTA_ATIVA";
@@ -29,13 +29,21 @@ export type EstadoEntrevista = {
   ultimaRespostaEm: number | null;
   /** Quando o candidato clicou na última pergunta. Opcional: estados salvos antes deste campo não o têm. */
   ultimaPerguntaEm?: number | null;
+  /** Quando a dúvida pendente chegou (ela espera a próxima brecha e cai se ficar velha). */
+  pendenteDesde?: number | null;
+  /** Quando a entrevista começou (COMECAR) e quanto ela dura: o ritmo da política comum escala com isso. */
+  iniciadaEm?: number | null;
+  duracaoMin?: number;
 };
 
 export type EventoEntrevista =
-  | { tipo: "COMECAR" }
+  /** `duracaoMin`: soma dos tempos das fases (sem valor, a entrevista padrão de 35 min). */
+  | { tipo: "COMECAR"; duracaoMin?: number }
   | { tipo: "APRESENTACAO_TERMINOU" }
   | { tipo: "CANDIDATO_DESENHOU" }
   | { tipo: "CANDIDATO_CONTINUOU" }
+  /** O Totti acabou de responder ao candidato: a dúvida pendente fica para depois (não emenda uma na outra). */
+  | { tipo: "AGENTE_RESPONDEU" }
   | { tipo: "TEMPO_DA_FASE_ACABOU" }
   | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise }
   /** Só para demonstração: põe uma dúvida pendente ignorando fase, intervalo e limite. */
@@ -48,15 +56,8 @@ export type EventoEntrevista =
   | { tipo: "CANDIDATO_CONCLUIU" }
   | { tipo: "ENCERRAR" };
 
-export type Regras = {
-  intervaloEntrePerguntasMs: number;
-  maxPerguntas: number;
-};
-
-export const REGRAS_PADRAO: Regras = {
-  intervaloEntrePerguntasMs: INTERVALO_ENTRE_PERGUNTAS_S * 1000,
-  maxPerguntas: MAX_PERGUNTAS,
-};
+/** Duração da entrevista padrão (soma de TEMPOS_PADRAO no servidor), quando o COMECAR não diz. */
+export const DURACAO_PADRAO_MIN = 35;
 
 /** Tempo mínimo em ALTO_NIVEL antes de aceitar o sinal de prontidão do cérebro. */
 export const MIN_ALTO_NIVEL_MS = 30_000;
@@ -101,43 +102,54 @@ export function podeAnalisar(estado: EstadoEntrevista) {
   return fasesQueAnalisam.includes(estado.fase) && estado.plin !== "PERGUNTA_ATIVA";
 }
 
-/** Esta resposta da análise pode virar plin agora? */
-export function aceitaPlin(
-  estado: EstadoEntrevista,
-  resposta: RespostaAnalise,
-  agora: number,
-  regras: Regras = REGRAS_PADRAO,
-) {
+/**
+ * Esta resposta da análise pode virar pergunta agora? Fase, ciclo e o ritmo da política comum
+ * (lib/interrupcao/politica.ts), o mesmo que o servidor aplica. O MOMENTO de tomar a vez (pausa real) é do
+ * useEntrevista, quando a dúvida já está pendente.
+ */
+export function aceitaPlin(estado: EstadoEntrevista, resposta: RespostaAnalise, agora: number) {
   if (resposta.status === "ok" || !resposta.pergunta) return false;
   if (!PLINS_DA_FASE[estado.fase]?.includes(resposta.status)) return false;
   if (estado.plin === "PERGUNTA_ATIVA") return false;
-  // A pergunta de encerramento fica fora do limite de 5 e do intervalo entre perguntas, mas é uma só.
-  if (estado.fase === "FECHAMENTO") return !estado.perguntaFinalFeita;
-  // REQUISITOS aceita um único convite: não gasta a cota de 5, mas não se repete.
+  // A pergunta de encerramento e o convite de REQUISITOS ficam fora do orçamento, mas são únicos.
+  if (estado.fase === "FECHAMENTO" && estado.perguntaFinalFeita) return false;
   if (estado.fase === "REQUISITOS" && estado.conviteFeito) return false;
-  if (estado.perguntasFeitas >= regras.maxPerguntas) return false;
-  const inicioIntervalo = inicioDoIntervaloEntrePerguntas(estado.ultimaPerguntaEm, estado.ultimaRespostaEm);
-  if (inicioIntervalo !== null && agora - inicioIntervalo < regras.intervaloEntrePerguntasMs) {
-    return false;
-  }
-  return true;
+  const extra = estado.fase === "FECHAMENTO" || estado.fase === "REQUISITOS";
+  const ritmo = ritmoDoCliente(estado, agora);
+  return motivoDoRitmo(extra ? { ...ritmo, feitas: 0, marco: true } : ritmo) === null;
+}
+
+/** Situação do quadro para o ritmo da política comum (o mesmo que o servidor monta em `ritmoDoEstado`). */
+export function ritmoDoCliente(estado: EstadoEntrevista, agora: number): Ritmo {
+  return {
+    agora,
+    inicioEm: estado.iniciadaEm ?? estado.faseIniciadaEm ?? agora,
+    duracaoMin: estado.duracaoMin ?? DURACAO_PADRAO_MIN,
+    feitas: estado.perguntasFeitas,
+    ultimaEm: estado.ultimaPerguntaEm ?? null,
+    ultimaConversaFimEm: estado.ultimaRespostaEm,
+    marco: marcoDeFase(estado, agora),
+  };
+}
+
+/** A fase acabou de começar (aprofundamento, fechamento): é um marco. Igual a `marcoDeFase` do servidor. */
+export function marcoDeFase(estado: Pick<EstadoEntrevista, "fase" | "faseIniciadaEm">, agora: number): boolean {
+  return (estado.fase === "APROFUNDAMENTO" || estado.fase === "FECHAMENTO")
+    && estado.faseIniciadaEm !== null && agora - estado.faseIniciadaEm < RITMO.marcoDeFaseMs;
 }
 
 function mudarFase(estado: EstadoEntrevista, fase: Fase, agora: number): EstadoEntrevista {
   return { ...estado, fase, faseIniciadaEm: agora };
 }
 
-export function transicionar(
-  estado: EstadoEntrevista,
-  evento: EventoEntrevista,
-  agora: number,
-  regras: Regras = REGRAS_PADRAO,
-): EstadoEntrevista {
+export function transicionar(estado: EstadoEntrevista, evento: EventoEntrevista, agora: number): EstadoEntrevista {
   if (estado.fase === "ENCERRADA") return estado;
 
   switch (evento.tipo) {
     case "COMECAR":
-      return estado.fase === "AGUARDANDO" ? mudarFase(estado, "APRESENTACAO", agora) : estado;
+      return estado.fase === "AGUARDANDO"
+        ? { ...mudarFase(estado, "APRESENTACAO", agora), iniciadaEm: agora, duracaoMin: evento.duracaoMin ?? estado.duracaoMin }
+        : estado;
 
     case "APRESENTACAO_TERMINOU":
       return estado.fase === "APRESENTACAO" ? mudarFase(estado, "REQUISITOS", agora) : estado;
@@ -155,17 +167,25 @@ export function transicionar(
         : novo;
     }
 
-    case "CANDIDATO_CONTINUOU":
+    case "AGENTE_RESPONDEU":
       return estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo
-        ? { ...estado, plin: "LIVRE", perguntaPendente: null }
+        ? { ...estado, plin: "LIVRE", perguntaPendente: null, pendenteDesde: null }
+        : estado;
+
+    case "CANDIDATO_CONTINUOU":
+      // A dúvida espera a próxima brecha na fala; só cai se já ficou para trás (a análise seguinte também pode
+      // cancelá-la com "ok"). Sem isso, quem fala sem parar nunca recebia pergunta.
+      return estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo
+        && agora - (estado.pendenteDesde ?? agora) >= RITMO.pendenteValidaMs
+        ? { ...estado, plin: "LIVRE", perguntaPendente: null, pendenteDesde: null }
         : estado;
 
     case "ANALISE_RECEBIDA": {
       const { resposta } = evento;
       let novo = estado;
-      if (aceitaPlin(estado, resposta, agora, regras)) {
+      if (aceitaPlin(estado, resposta, agora)) {
         // Uma dúvida nova substitui a pendente: a mais recente é a mais relevante.
-        novo = { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta, pendenteDeDemo: false };
+        novo = { ...estado, plin: "PLIN_PENDENTE", perguntaPendente: resposta, pendenteDeDemo: false, pendenteDesde: agora };
       } else if (resposta.status === "ok" && estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo) {
         // O candidato resolveu sozinho antes de clicar: a dúvida pendente perdeu o sentido.
         novo = { ...estado, plin: "LIVRE", perguntaPendente: null };
@@ -215,16 +235,8 @@ export function transicionar(
 
     case "RESPOSTA_TERMINOU": {
       if (estado.plin !== "PERGUNTA_ATIVA") return estado;
-      const livre: EstadoEntrevista = {
-        ...estado,
-        plin: "LIVRE",
-        perguntaAtiva: null,
-        ultimaRespostaEm: agora,
-      };
-      // Atingiu o limite de perguntas no aprofundamento: vai para o fechamento.
-      return livre.fase === "APROFUNDAMENTO" && livre.perguntasFeitas >= regras.maxPerguntas
-        ? mudarFase(livre, "FECHAMENTO", agora)
-        : livre;
+      // Acabar o orçamento de perguntas não encerra o aprofundamento antes da hora: o relógio decide.
+      return { ...estado, plin: "LIVRE", perguntaAtiva: null, ultimaRespostaEm: agora };
     }
 
     case "ENCERRAR":

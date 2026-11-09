@@ -28,6 +28,8 @@ interface AnalystBookkeeping {
   lastCompletedT?: number;
   /** Pause adiado pela janela de 15 s: no máximo um por sessão (um novo substitui o anterior). */
   deferredTimer?: ReturnType<typeof setTimeout>;
+  /** Última "etapa concluída" usada como momento-chave: fase e quantos runs havia. Vale uma vez por etapa. */
+  ultimaEtapa?: { fase: string; runs: number };
 }
 
 type PauseEvent = Extract<SessionEvent, { type: "pause" }>;
@@ -98,9 +100,14 @@ export function detectKeyMoment(session: SessionState, trigger: SessionEvent): s
  * O candidato avisou na conversa que concluiu uma etapa: a próxima análise (só ela) trata isso como momento-chave,
  * para a pergunta seguinte já ser sobre o que vem depois.
  */
-function consumirEtapaConcluida(session: SessionState): string | undefined {
+function consumirEtapaConcluida(session: SessionState, book: AnalystBookkeeping): string | undefined {
   if (session.etapaConcluidaEm === undefined) return undefined;
   session.etapaConcluidaEm = undefined;
+  // Uma vez por etapa: sem run novo e na mesma fase, o "terminei" de cada conversa não vira marco de novo
+  // (medido: encadeava uma pergunta a cada minuto, furando o intervalo).
+  const etapa = { fase: faseDaEntrevista(session), runs: session.events.filter((e) => e.type === "run").length };
+  if (book.ultimaEtapa?.fase === etapa.fase && book.ultimaEtapa.runs === etapa.runs) return undefined;
+  book.ultimaEtapa = etapa;
   return "o candidato acabou de avisar que concluiu uma etapa (bom momento para olhar o que ele fez como um todo e o próximo passo, na fase em que ele está agora)";
 }
 
@@ -112,7 +119,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     return;
   }
   // Momento-chave não pula pelo código igual nem espera a janela de 15 s: o candidato tem o que falar.
-  const keyMoment = detectKeyMoment(session, trigger) ?? consumirEtapaConcluida(session);
+  const keyMoment = detectKeyMoment(session, trigger) ?? consumirEtapaConcluida(session, book);
   if (keyMoment === undefined && (trigger.type === "pause" || trigger.type === "paste") && code === book.lastCompletedCode) {
     session.analyst.lastOutcome = { t: trigger.t, text: "pulada: código igual à última análise" };
     return;

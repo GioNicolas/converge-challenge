@@ -6,6 +6,7 @@ import { isCovered, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoDaQuestao, empecilhoPublico, esperaDoEmpecilho, primeiraAdaptacao } from "@/lib/agents/empecilho";
 import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
+import { interrupcaoAtrasada, motivoDoMomento, motivoDoRitmo, orcamentoDeInterrupcoes, type Momento, type Ritmo } from "@/lib/interrupcao/politica";
 import { latestCode } from "@/lib/session/store";
 import type { QueuedQuestion, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -28,27 +29,17 @@ const KICKOFF_SKIP_IF_LINES_WRITTEN = 12;
 const KICKOFF_SKIP_IF_WORDS_SPOKEN = 15;
 /** Prioridade mínima, já com o boost de momento, pra uma pergunta virar blip. */
 const BLIP_THRESHOLD = 0.6;
-/** Perguntas com prioridade a partir daqui pulam a regra de 60 s entre blips (não as outras). */
-const HIGH_PRIORITY = 0.9;
+/** Interrupção atrasada (ver `interrupcaoAtrasada`): o limiar baixa esse tanto, para o agente não ficar calado. */
+const DESCONTO_ATRASO = 0.15;
+// Orçamento, cota, intervalo, respiro e a pausa necessária vêm da política comum (lib/interrupcao/politica.ts).
 /** Balão nunca aberto some sozinho depois desse tempo (a pergunta vira "ignorada"). */
 const BLIP_EXPIRY_MS = 80_000;
 /** Nenhum blip do Analyst nos primeiros 20 s da sessão. */
 const WARMUP_MS = 20_000;
-/** Intervalo mínimo entre o createdAt do último blip e o próximo. */
-const MIN_GAP_BETWEEN_BLIPS_MS = 60_000;
-/**
- * Intervalo mínimo depois da última conversa (a última fala de qualquer um dos dois, ou o fim do assunto). Com
- * 20 s, uma resposta emendava na próxima pergunta e ele não voltava para o código.
- */
-const MIN_GAP_AFTER_CONVERSATION_MS = 45_000;
-/** O mesmo intervalo para um momento-chave (o primeiro run verde, uma colagem): a hora dele passa rápido. */
-const KEY_MOMENT_GAP_AFTER_CONVERSATION_MS = 15_000;
 /** Escrevendo a primeira versão, a próxima pergunta espera ele escrever pelo menos isso de linhas novas. */
 const MIN_NEW_LINES_BETWEEN_QUESTIONS = 3;
 /** Uma fala dele com pelo menos tantas palavras depois de a pergunta nascer pode já ter respondido a ela. */
 const SPEECH_MAKES_STALE_WORDS = 12;
-/** Máximo de blips do Analyst por sessão (a abertura não conta). */
-const MAX_ANALYST_BLIPS = 10;
 /** Preferência da pergunta de foco da vaga na fila, para ela não ficar sempre atrás das perguntas sobre o código. */
 const FOCUS_QUESTION_BONUS = 0.1;
 /** Boost pro primeiro run com todos os casos passando: bom momento pra pergunta de complexidade. */
@@ -77,13 +68,6 @@ const IGNORED_RETRY_MS = 120_000;
 const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_closed", "session_started"]);
 /** Depois desse tempo sem evento novo, o candidato também conta como parado. */
 const IDLE_AFTER_MS = 8000;
-/**
- * Escrevendo a primeira versão, só interrompe quem parou de mexer no código há esse tempo. Curto porque a IDE
- * pede licença antes ("posso te perguntar uma coisa?") quando ele está no meio do código.
- */
-const IMPLEMENTING_IDLE_MS = 8_000;
-/** Mexendo para melhorar uma solução que já funciona: só interrompe depois desse tempo sem mexer. */
-const OPTIMIZING_IDLE_MS = 45_000;
 /** Pergunta que não virou balão nesse tempo fica velha: o candidato já está pensando em outra coisa. */
 const QUESTION_MAX_AGE_MS = 90_000;
 
@@ -222,30 +206,38 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
     return { blip: raise(session, kickoff, t), reason: `blip ${kickoff.id} (abertura)` };
   }
 
-  if (!isCandidateIdle(session, t)) return { reason: "esperando: candidato digitando" };
-  // Reta final: oferece uma vez a conversa de encerramento com o que ficou pendente.
+  // Sem a trava "candidato digitando" daqui: o momento da política comum espera uma pausa e, com paciência, aceita
+  // uma pausa curta, para quem digita sem parar também receber pergunta.
   const remaining = session.config.durationMin * 60_000 - t;
-  if (remaining <= CLOSING_BEFORE_END_MS && !session.queue.some((q) => q.kind === "encerramento")) {
+  // Encerramento e mudança no problema também só numa pausa (estão fora do orçamento). O encerramento ganha
+  // paciência como uma pergunta que espera desde a hora dele.
+  const momentoExtra = motivoDoMomento({ ...momentoDaSessao(session, t), esperandoHaMs: CLOSING_BEFORE_END_MS - remaining });
+  // Reta final: oferece uma vez a conversa de encerramento com o que ficou pendente.
+  if (remaining <= CLOSING_BEFORE_END_MS && !session.queue.some((q) => q.kind === "encerramento") && momentoExtra === null) {
     const closing = startClosing(session, t);
     if (closing) return { blip: closing, reason: `blip ${closing.id} (encerramento, faltam ${Math.ceil(remaining / 60_000)} min)` };
   }
   // Empecilho: uma mudança no problema, uma vez por sessão, quando chegar a hora (lib/agents/empecilho.ts).
-  if (esperaDoEmpecilho(session, t) === undefined) {
+  if (esperaDoEmpecilho(session, t) === undefined && momentoExtra === null) {
     const empecilho = raiseEmpecilho(session, t);
     if (empecilho) return { blip: empecilho, reason: `blip ${empecilho.id} (empecilho)` };
   }
+  // Depois do encerramento, a conversa de fechamento é a última: nenhuma pergunta nova do Analyst.
+  if (session.queue.some((q) => q.kind === "encerramento" && q.status !== "queued")) return { reason: "encerramento já oferecido" };
   // O polling não decide no meio de uma análise: ela pode trazer a pergunta do momento (ex.: o run que acabou de passar).
   if (session.analyst.state === "running") return { reason: "esperando: análise em andamento" };
 
-  const analystBlips = session.blips.filter((b) => !session.queue.some((q) => q.id === b.id && q.kickoff)).length;
-  // O limite não barra retorno de desafio nem critério da agenda ainda não explorado.
-  const overLimit = analystBlips >= MAX_ANALYST_BLIPS;
+  const orcamento = orcamentoDeInterrupcoes(session.config.durationMin);
+  // O orçamento não barra o retorno de um desafio que o candidato topou: ele fecha um assunto aberto.
+  const overLimit = baloesNoOrcamento(session) >= orcamento;
+  // Muito tempo sem interromper (e com cota livre): uma pergunta um pouco menos forte já vale.
+  const threshold = BLIP_THRESHOLD - (interrupcaoAtrasada(ritmoDaSessao(session, t)) ? DESCONTO_ATRASO : 0);
 
   const { boost, reason: boostReason } = momentBoost(session);
   const candidates = session.queue
     .filter((q) => q.status === "queued" && !isSnoozed(q, t))
-    .filter((q) => !overLimit || q.kind === "retorno" || !isCovered(session, q.criterionId))
-    .filter((q) => q.priority + boost + agendaBoost(session, q, t) >= BLIP_THRESHOLD)
+    .filter((q) => !overLimit || q.kind === "retorno")
+    .filter((q) => q.priority + boost + agendaBoost(session, q, t) >= threshold)
     // Momento-chave primeiro (o candidato tem certeza que há o que falar), depois a prioridade.
     .sort(
       (a, b) =>
@@ -253,7 +245,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
         b.priority + (b.focusArea ? FOCUS_QUESTION_BONUS : 0) - (a.priority + (a.focusArea ? FOCUS_QUESTION_BONUS : 0)),
     );
   if (candidates.length === 0) {
-    if (overLimit) return { reason: `limite de ${MAX_ANALYST_BLIPS} blips atingido` };
+    if (overLimit) return { reason: `orçamento de ${orcamento} balões usado` };
     const waiting = session.queue.filter((q) => q.status === "queued");
     if (waiting.length === 0) return { reason: "sem pergunta na fila" };
     const snoozed = waiting.filter((q) => isSnoozed(q, t));
@@ -261,7 +253,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
       const backAt = Math.min(...snoozed.map((q) => q.snoozedUntil ?? t));
       return { reason: `esperando: pergunta adiada (volta em ${Math.ceil((backAt - t) / 1000)} s)` };
     }
-    return { reason: `esperando: nenhuma pergunta acima de ${BLIP_THRESHOLD.toFixed(2)}` };
+    return { reason: `esperando: nenhuma pergunta acima de ${threshold.toFixed(2)}` };
   }
 
   for (const q of candidates) {
@@ -285,10 +277,6 @@ function agendaBoost(session: SessionState, q: QueuedQuestion, t: number): numbe
   return t >= session.config.durationMin * 60_000 * AGENDA_START_FRACTION ? BOOST_UNCOVERED : 0;
 }
 
-function isFinalStretchForAgenda(session: SessionState, q: QueuedQuestion, t: number): boolean {
-  if (q.criterionId === undefined || isCovered(session, q.criterionId)) return false;
-  return session.config.durationMin * 60_000 - t <= FINAL_STRETCH_MS;
-}
 
 /** Perguntas preparadas que entram no encerramento, no máximo. */
 const CLOSING_MAX_QUESTIONS = 2;
@@ -445,33 +433,27 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
   if (fase === "entendendo" && (q.kind === undefined || q.kind === "explicar" || q.kind === "sondar" || q.kind === "desafio") && q.keyMoment === undefined && session.config.durationMin * 60_000 - t > FINAL_STRETCH_MS) {
     return "esperando: ele ainda não começou a codar (a conversa do plano é da abertura)";
   }
-  const quiet = Math.floor((t - (session.codeHistory.at(-1)?.t ?? 0)) / 1000);
-  if (fase === "implementando" && q.keyMoment === undefined && quiet * 1000 < IMPLEMENTING_IDLE_MS) {
-    return `esperando: escrevendo a primeira versão (${quiet} s sem mexer, mín. ${IMPLEMENTING_IDLE_MS / 1000} s)`;
-  }
   // Pergunta de foco (processo, sem código) não corta quem ainda está fazendo o código funcionar.
   if (q.focusArea !== undefined && (fase === "implementando" || fase === "depurando") && session.config.durationMin * 60_000 - t > FINAL_STRETCH_MS) {
     return `esperando: pergunta de foco só depois que o código funcionar (fase ${fase})`;
   }
-  const exempt = q.kind === "retorno" || q.keyMoment !== undefined || isFinalStretchForAgenda(session, q, t);
-  if (fase === "otimizando" && !exempt && quiet * 1000 < OPTIMIZING_IDLE_MS) {
-    return `esperando: mexendo para melhorar a solução (${quiet} s sem mexer, mín. ${OPTIMIZING_IDLE_MS / 1000} s)`;
-  }
-
-  // Prioridade alta, momento-chave e critério não explorado na reta final pulam a regra de 60 s entre blips.
-  const skipsSpacing = q.priority >= HIGH_PRIORITY || q.keyMoment !== undefined || isFinalStretchForAgenda(session, q, t);
+  // Política comum (lib/interrupcao/politica.ts). Marco: ele acabou de chegar num ponto natural de conversa (ou é
+  // o retorno de um desafio que topou). Momento: pausa real, curta depois de marco ou quando a pergunta já esperou
+  // (quem digita sem parar também é perguntado), longa mexendo numa melhoria. Ritmo: orçamento, cota e intervalo.
+  const exempt = q.kind === "retorno" || q.keyMoment !== undefined;
+  const ritmo = ritmoDaSessao(session, t, exempt);
+  const momento = motivoDoMomento({
+    ...momentoDaSessao(session, t),
+    marco: exempt,
+    focado: fase === "otimizando",
+    esperandoHaMs: t - q.createdAt,
+    atrasada: interrupcaoAtrasada(ritmo),
+  });
+  if (momento) return `esperando: ${momento}`;
+  // O retorno fica fora do orçamento e da cota (fecha um assunto aberto), mas respeita o respiro.
+  const motivo = motivoDoRitmo(q.kind === "retorno" ? { ...ritmo, feitas: 0 } : ritmo);
+  if (motivo) return `esperando: ${motivo.texto}`;
   const lastBlip = session.blips.at(-1);
-  if (lastBlip && !skipsSpacing && t - lastBlip.createdAt < MIN_GAP_BETWEEN_BLIPS_MS) {
-    const elapsed = Math.floor((t - lastBlip.createdAt) / 1000);
-    return `esperando: ${elapsed} s desde o último blip (mín. ${MIN_GAP_BETWEEN_BLIPS_MS / 1000} s)`;
-  }
-
-  const endedAt = ultimaConversaEm(session);
-  const gap = q.keyMoment !== undefined || q.kind === "retorno" ? KEY_MOMENT_GAP_AFTER_CONVERSATION_MS : MIN_GAP_AFTER_CONVERSATION_MS;
-  if (endedAt !== undefined && t - endedAt < gap) {
-    const elapsed = Math.floor((t - endedAt) / 1000);
-    return `esperando: ${elapsed} s desde a última conversa (mín. ${gap / 1000} s)`;
-  }
   // Escrevendo a primeira versão: escreveu uma linha e já vinha outra pergunta. Ele precisa avançar no código antes.
   if (fase === "implementando" && !exempt && lastBlip) {
     const novas = linhasNovasDesde(session, lastBlip.createdAt);
@@ -521,6 +503,38 @@ function jaFoiPerguntada(session: SessionState, q: QueuedQuestion): boolean {
     const comuns = [...nova].filter((p) => antiga.has(p)).length;
     return comuns / nova.size >= 0.6;
   });
+}
+
+/** Balões que contam no orçamento: fora abertura, encerramento e mudança no problema. */
+function baloesNoOrcamento(session: SessionState): number {
+  return session.blips.filter((b) => {
+    const q = session.queue.find((x) => x.id === b.id);
+    return !q?.kickoff && q?.kind !== "encerramento" && q?.kind !== "empecilho";
+  }).length;
+}
+
+/** Situação da sessão para o ritmo da política comum. A última conversa inclui qualquer fala dos dois. */
+export function ritmoDaSessao(session: SessionState, t: number, marco = false): Ritmo {
+  return {
+    agora: t,
+    inicioEm: 0,
+    duracaoMin: session.config.durationMin,
+    feitas: baloesNoOrcamento(session),
+    ultimaEm: session.blips.at(-1)?.createdAt ?? null,
+    ultimaConversaFimEm: ultimaConversaEm(session) ?? null,
+    marco,
+  };
+}
+
+/** Atividade do candidato para o momento da política comum: digitar ou colar (mãos) e falar. */
+export function momentoDaSessao(session: SessionState, t: number): Momento {
+  let maos: number | undefined;
+  let fala: number | undefined;
+  for (const e of session.events) {
+    if (e.type === "snapshot" || e.type === "paste") maos = e.t;
+    if (e.type === "speech" && e.role === "candidate") fala = e.t;
+  }
+  return { maosParadasHaMs: maos === undefined ? Infinity : t - maos, falaHaMs: fala === undefined ? Infinity : t - fala };
 }
 
 /** A última conversa: a última fala de qualquer um dos dois ou o fim do último assunto, o que vier depois. */

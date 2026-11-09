@@ -1,8 +1,11 @@
 /**
  * Entrevistas simuladas, do início ao relatório, sem a IDE. Mede o agente antes e depois de mexer nos prompts.
  * O código de cada perfil é roteirizado; as falas do candidato vêm de um LLM com a persona.
- * Uso: npx tsx scripts/simulate.ts [--only otimiza,trava] [--out sim-runs] [--config config.json]
+ * Uso: npx tsx scripts/simulate.ts [--only otimiza,trava] [--out sim-runs] [--config config.json] [--duracao 30]
+ *      [--linha-do-tempo]
  * Com --config, a entrevista usa o JSON dado (mesma normalização do /api/events) em vez do DEFAULT_CONFIG.
+ * --linha-do-tempo: conta as interrupções (balões) e mostra quando e em que momento cada uma apareceu; pula o
+ * relatório (economiza a chamada do avaliador). A persona "constante" (30 min de trabalho contínuo) é a feita para isso.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -10,7 +13,9 @@ import { z } from "zod";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";
-import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
+import { faseDaEntrevista } from "@/lib/agents/fase";
+import { disparaAnalise } from "@/lib/agents/gatilhos";
+import { allPassed, decideBlip, enqueueKickoff } from "@/lib/agents/policy";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { normalizarConfig } from "@/lib/config/store";
 import { type Blip, type ChatMessage, InterviewConfig, type Report, type SessionEvent } from "@/lib/contracts";
@@ -28,12 +33,13 @@ type EventInput = DistributiveOmit<SessionEvent, "sessionId" | "t">;
 let CONFIG: InterviewConfig = DEFAULT_CONFIG;
 /** Duração do relógio simulado: 15 min, ou `CONFIG.durationMin` com --config. */
 let DURATION_MIN = 15;
+/** --linha-do-tempo: conta e mostra as interrupções, sem gerar o relatório. */
+let LINHA_DO_TEMPO = false;
 const TICK_MS = 5_000;
 const PAUSE_MS = 8_000;
 /** Cada fala (do candidato ou do agente) "custa" esse tempo de sessão. */
 const TURN_MS = 15_000;
 const MAX_TURNS = 8;
-const ANALYZED = new Set<SessionEvent["type"]>(["pause", "run", "paste", "blip_closed"]);
 
 // ---------------------------------------------------------------------------
 // Perfis
@@ -47,6 +53,16 @@ const BRUTE = `def two_sum(nums, target):
     return []
 `;
 const BRUTE_BUG = BRUTE.replace("range(i + 1, len(nums))", "range(len(nums))");
+const OUTER = `def two_sum(nums, target):
+    for i in range(len(nums)):
+        pass
+`;
+const HASH_PARCIAL = `def two_sum(nums, target):
+    vistos = {}
+    for i, n in enumerate(nums):
+        pass
+    return []
+`;
 const HASH = `def two_sum(nums, target):
     vistos = {}
     for i, n in enumerate(nums):
@@ -56,6 +72,8 @@ const HASH = `def two_sum(nums, target):
     return []
 `;
 
+const HASH_BORDA = HASH.replace("    vistos = {}\n", "    if len(nums) < 2:\n        return []\n    vistos = {}\n");
+
 interface Stage {
   /** ms de sessão; com `afterOptimizing`, ms depois de o candidato topar otimizar. */
   at: number;
@@ -63,6 +81,8 @@ interface Stage {
   run?: boolean;
   paste?: boolean;
   afterOptimizing?: boolean;
+  /** Antes de `at`, o candidato fica esse tempo digitando (um snapshot a cada tick): não está parado. */
+  typingMs?: number;
 }
 
 interface Persona {
@@ -167,6 +187,47 @@ const PERSONAS: Persona[] = [
       { label: "abordagem ≤ 2", pass: (score(r.report, "abordagem") ?? 4) <= 2 },
     ],
   },
+  {
+    key: "constante",
+    title: "Trabalho contínuo de 30 min: digita, erra, corrige, otimiza e trata casos de borda",
+    persona:
+      "Você pensa em voz alta só quando perguntado. Começa pela força bruta, erra o início do loop interno e corrige sozinho depois do teste. " +
+      "Sabe que é O(n²) e, se pedirem para melhorar, topa e chega no dicionário de vistos, O(n) de tempo e de memória. Respostas de 1 a 3 frases.",
+    stages: [
+      { at: 70_000, code: OUTER, typingMs: 30_000 },
+      { at: 140_000, code: BRUTE_BUG.replace("        if nums[i] + nums[j] == target:\n            return [i, j]\n", ""), typingMs: 40_000 },
+      { at: 200_000, code: BRUTE_BUG, typingMs: 30_000 },
+      { at: 215_000, code: BRUTE_BUG, run: true },
+      { at: 330_000, code: BRUTE, typingMs: 20_000 },
+      { at: 345_000, code: BRUTE, run: true },
+      { at: 120_000, code: HASH_PARCIAL, typingMs: 40_000, afterOptimizing: true },
+      { at: 240_000, code: HASH, typingMs: 50_000, afterOptimizing: true },
+      { at: 255_000, code: HASH, run: true, afterOptimizing: true },
+      { at: 1_200_000, code: HASH_BORDA, typingMs: 40_000 },
+      { at: 1_215_000, code: HASH_BORDA, run: true },
+    ],
+    opensBlips: 0.9,
+    checks: () => [],
+  },
+  {
+    key: "sem-parar",
+    title: "Digita o tempo todo, nunca para 8 s (só roda os testes de vez em quando)",
+    persona:
+      "Você fala pouco e volta logo para o código. Começa pela força bruta, corrige o loop interno depois do teste e, " +
+      "se pedirem para melhorar, chega no dicionário de vistos, O(n). Respostas de 1 a 2 frases.",
+    stages: [
+      { at: 240_000, code: BRUTE_BUG, typingMs: 210_000 },
+      { at: 250_000, code: BRUTE_BUG, run: true },
+      { at: 480_000, code: BRUTE, typingMs: 225_000 },
+      { at: 490_000, code: BRUTE, run: true },
+      { at: 900_000, code: HASH, typingMs: 405_000 },
+      { at: 910_000, code: HASH, run: true },
+      { at: 1_500_000, code: HASH_BORDA, typingMs: 585_000 },
+      { at: 1_510_000, code: HASH_BORDA, run: true },
+    ],
+    opensBlips: 1,
+    checks: () => [],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -212,6 +273,56 @@ interface SimResult {
   optimized: boolean;
   hints: number;
   unexplored: string[];
+  /** Linha do tempo das interrupções (balões que apareceram). */
+  interruptions: Interruption[];
+}
+
+interface Interruption {
+  t: number;
+  fase: string;
+  kind: string;
+  /** O que aconteceu logo antes: run verde, pausa, fim de conversa... */
+  moment: string;
+  /** O candidato tinha digitado há menos de 3 s. */
+  typing: boolean;
+  preview: string;
+  opened: boolean;
+}
+
+/** O que aconteceu logo antes do balão, para a linha do tempo. */
+function momentBefore(session: SessionState, t: number, keyMoment: string | undefined): string {
+  if (keyMoment) return `momento-chave: ${keyMoment.split(" (")[0]}`;
+  const last = session.events.filter((e) => e.type !== "speech" && e.type !== "blip_opened").at(-1);
+  if (!last) return "início";
+  const ago = Math.round((t - last.t) / 1000);
+  switch (last.type) {
+    case "run":
+      return `${ago} s depois de um run ${allPassed(last.result) ? "verde" : "vermelho"}`;
+    case "pause":
+      return `pausa (${Math.round((last.idleMs + (t - last.t)) / 1000)} s sem digitar)`;
+    case "blip_closed":
+      return `${ago} s depois de uma conversa`;
+    case "snapshot":
+      return `${ago} s depois de digitar`;
+    case "session_started":
+      return `${ago} s depois do início`;
+    default:
+      return `${ago} s depois de ${last.type}`;
+  }
+}
+
+/** Resumo da linha do tempo de uma sessão: uma linha por interrupção e os totais. */
+function renderTimeline(r: SimResult): string {
+  const gaps = r.interruptions.slice(1).map((i, k) => Math.round((i.t - r.interruptions[k].t) / 1000)).sort((a, b) => a - b);
+  const byFase = new Map<string, number>();
+  for (const i of r.interruptions) byFase.set(i.fase, (byFase.get(i.fase) ?? 0) + 1);
+  return [
+    `# ${r.persona.key} (${DURATION_MIN} min): ${r.interruptions.length} interrupções · ${[...byFase].map(([f, n]) => `${f} ${n}`).join(", ")}`,
+    `  intervalo entre elas: mín ${gaps[0] ?? "–"} s, mediana ${gaps[Math.floor(gaps.length / 2)] ?? "–"} s · digitando: ${r.interruptions.filter((i) => i.typing).length} · abertas ${r.interruptions.filter((i) => i.opened).length}`,
+    ...r.interruptions.map(
+      (i) => `  [${formatMs(i.t)}] ${i.fase.padEnd(11)} ${i.kind.padEnd(12)} ${i.moment}${i.typing ? " · DIGITANDO" : ""}${i.opened ? "" : " · (ignorado)"} — ${i.preview}`,
+    ),
+  ].join("\n");
 }
 
 function score(report: Report | undefined, id: string): number | undefined {
@@ -238,6 +349,7 @@ async function simulate(persona: Persona): Promise<SimResult> {
     optimized: false,
     hints: 0,
     unexplored: [],
+    interruptions: [],
   };
   const log = (line: string) => res.log.push(`[${formatMs(simT)}] ${line}`);
   const ide = IDE_PROBLEMS["two-sum"];
@@ -249,13 +361,14 @@ async function simulate(persona: Persona): Promise<SimResult> {
   let optimizingSince: number | undefined;
   const done = new Set<Stage>();
   let blipOnScreen: Blip | undefined;
+  let lastTypingAt: number | undefined;
 
   async function send(input: EventInput): Promise<void> {
     const event = { ...input, sessionId, t: simT } as SessionEvent;
     appendEvent(session, event);
     if (event.type === "session_started") enqueueKickoff(session, event.t);
-    if (event.type === "session_ended") startEvaluation(session);
-    if (ANALYZED.has(event.type)) await runAnalyst(session, event);
+    if (event.type === "session_ended" && !LINHA_DO_TEMPO) startEvaluation(session);
+    if (disparaAnalise(event, session)) await runAnalyst(session, event);
     handleBlip(decideBlip(session, simT));
   }
 
@@ -267,6 +380,16 @@ async function simulate(persona: Persona): Promise<SimResult> {
     if (r.blip) {
       blipOnScreen = r.blip;
       res.blips += 1;
+      const q = session.queue.find((x) => x.id === r.blip!.id);
+      res.interruptions.push({
+        t: simT,
+        fase: faseDaEntrevista(session),
+        kind: q?.kickoff ? "abertura" : (q?.kind ?? "pergunta"),
+        moment: momentBefore(session, simT, q?.keyMoment),
+        typing: lastTypingAt !== undefined && simT - lastTypingAt < 3_000,
+        preview: r.blip.preview,
+        opened: false,
+      });
       log(`BALÃO: ${r.blip.preview}`);
     }
   }
@@ -325,6 +448,20 @@ async function simulate(persona: Persona): Promise<SimResult> {
       }
     }
 
+    // Digitação em andamento (etapas com typingMs): um snapshot por tick, o candidato não está parado.
+    for (const stage of persona.stages) {
+      if (done.has(stage) || stage.typingMs === undefined) continue;
+      const due = stage.afterOptimizing ? (optimizingSince !== undefined ? optimizingSince + stage.at : Infinity) : stage.at;
+      if (simT >= due - stage.typingMs && simT < due) {
+        version += 1;
+        await send({ type: "snapshot", code: `${code}# digitando ${version}\n`, version, language: "python" });
+        lastTypingAt = simT;
+        lastEditAt = simT;
+        pausedSinceEdit = false;
+        break;
+      }
+    }
+
     // Pausa de 8 s depois de editar, como a IDE.
     if (!pausedSinceEdit && lastEditAt !== undefined && simT - lastEditAt >= PAUSE_MS) {
       pausedSinceEdit = true;
@@ -337,6 +474,8 @@ async function simulate(persona: Persona): Promise<SimResult> {
       const blip = blipOnScreen;
       blipOnScreen = undefined;
       if (Math.random() < persona.opensBlips) {
+        const ultima = res.interruptions.at(-1);
+        if (ultima) ultima.opened = true;
         log(`abriu o balão`);
         await conversation(blip);
       } else {
@@ -348,7 +487,7 @@ async function simulate(persona: Persona): Promise<SimResult> {
 
   await send({ type: "session_ended", reason: "timeout" });
   log("sessão encerrada");
-  const status = await waitForEvaluation(session);
+  const status = LINHA_DO_TEMPO ? undefined : await waitForEvaluation(session);
   res.report = status?.report;
   res.error = status?.error;
   res.hints = session.hintsUsed;
@@ -407,6 +546,8 @@ async function main(): Promise<void> {
     CONFIG = normalizarConfig(InterviewConfig.parse(raw));
     DURATION_MIN = CONFIG.durationMin;
   }
+  if (args.includes("--duracao")) DURATION_MIN = Number(args[args.indexOf("--duracao") + 1]) || DURATION_MIN;
+  LINHA_DO_TEMPO = args.includes("--linha-do-tempo");
   const personas = PERSONAS.filter((p) => !only || only.includes(p.key));
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -426,9 +567,19 @@ async function main(): Promise<void> {
         optimized: false,
         hints: 0,
         unexplored: [],
+        interruptions: [],
       })),
     ),
   );
+
+  if (LINHA_DO_TEMPO) {
+    const texto = results.map((r) => (r.error ? `# ${r.persona.key}: erro ${r.error}` : renderTimeline(r))).join("\n\n");
+    for (const r of results) writeFileSync(join(dir, `${r.persona.key}.md`), render(r));
+    writeFileSync(join(dir, "linha-do-tempo.txt"), texto);
+    console.log(texto);
+    console.log(`\ntranscrições em ${dir}/`);
+    return;
+  }
 
   const rows: string[] = [];
   let failed = 0;

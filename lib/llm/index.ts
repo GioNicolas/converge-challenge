@@ -54,8 +54,10 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     hedgeMs: 12_000,
   },
   fast: {
-    featherlessEnv: "FAST_MODEL",
-    featherlessDefault: "google/gemma-4-31B-it",
+    featherlessEnv: "FAST_FEATHERLESS_MODEL",
+    // O 31B passou de 8 s em toda análise com ~6 mil tokens (scripts/bench-quadro.ts); o 26B-A4B (MoE) é bem
+    // mais rápido com o mesmo tamanho de prompt.
+    featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "FAST_FALLBACK_MODEL",
     openrouterDefault: "openai/gpt-oss-120b",
     maxTokens: 800,
@@ -74,15 +76,16 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
   conversa: {
     // Responde à fala do candidato ao vivo (quadro e live coding). Medido com scripts/bench-conversa.ts:
     // gemini-3.5-flash-lite acertou 27/27 casos com p50 1,6 s e p95 2,0 s; o GLM na Featherless acerta, mas
-    // tem p95 de ~8 s. Por isso aqui o OpenRouter é o primário e o GLM, a reserva.
+    // tem p95 de ~8 s. Por isso aqui o OpenRouter é o primário.
+    // Reserva: gemma-4-26B-A4B na Featherless (scripts/bench-conversa.ts em 2026-11-09: acerta tanto quanto o
+    // gemini-3.5-flash-lite, 39/45, mas com p50 2,6 s e cauda de 4–8 s, por isso não é o primário). O GLM tinha p95 ~8 s.
+    // Variável nova para não herdar a antiga, que apontava o GLM.
     primario: "openrouter",
     openrouterEnv: "CONVERSA_AO_VIVO_MODEL",
     openrouterDefault: "google/gemini-3.5-flash-lite",
-    featherlessEnv: "CONVERSA_AO_VIVO_RESERVA_MODEL",
-    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    featherlessEnv: "CONVERSA_FEATHERLESS_MODEL",
+    featherlessDefault: "google/gemma-4-26B-A4B-it",
     maxTokens: 1500,
-    reasoningEffort: "low",
-    raciocinioSo: "featherless",
     hedgeMs: 2_500,
     // Mais baixa que o padrão: as regras de fala (devolver a vez, recusar, ficar quieto) variavam entre rodadas.
     temperatura: 0.3,
@@ -90,16 +93,17 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
   conversa_quadro: {
     // O Totti 2 no quadro (TOTTI_QUADRO=v2): o mesmo lugar do "conversa", com modelo próprio para medir pelo
     // placar (scripts/placar-quadro) sem mexer na pré-entrevista nem na IDE.
+    // Reserva: gemma-4-26B-A4B na Featherless (scripts/bench-conversa.ts em 2026-11-09: acerta tanto quanto o
+    // gemini-3.5-flash-lite, 39/45, mas com p50 2,6 s e cauda de 4–8 s, por isso não é o primário). O GLM tinha p95 ~8 s.
+    // Variável nova para não herdar a antiga, que apontava o GLM.
     primario: "openrouter",
     openrouterEnv: "CONVERSA_QUADRO_MODEL",
     openrouterDefault: "google/gemini-3.5-flash-lite",
-    featherlessEnv: "CONVERSA_QUADRO_RESERVA_MODEL",
-    featherlessDefault: "zai-org/GLM-5.3-Flash",
+    featherlessEnv: "CONVERSA_QUADRO_FEATHERLESS_MODEL",
+    featherlessDefault: "google/gemma-4-26B-A4B-it",
     maxTokens: 1500,
-    reasoningEffort: "low",
-    raciocinioSo: "featherless",
     // Sem hedge: com um modelo forte (Sonnet) a resposta passa de 2,5 s quase sempre, a reserva corria junto e
-    // ganhava, e duas "derrotas" abriam o disjuntor por 3 min. O Totti falava pelo GLM achando que era o Sonnet.
+    // ganhava, e duas "derrotas" abriam o disjuntor por 3 min. O Totti falava pela reserva achando que era o Sonnet.
     // A reserva agora só entra em erro (o log perguntar_llm mostra quem respondeu cada turno).
     temperatura: 0.5,
   },
@@ -116,35 +120,34 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     temperatura: 0,
   },
   codigo: {
-    // Análise do código no live coding (lib/agents/analyst.ts): decide o que perguntar e quando. Mesmo modelo
-    // e motivo da análise do quadro: o GLM na Featherless levava de 8 a 25 s e a pergunta do momento (o
-    // primeiro run verde, a colagem) chegava velha. A reserva é a Featherless (mensalidade fixa), então o
-    // hedge não custa nada a mais.
-    primario: "openrouter",
+    // Análise do código no live coding (lib/agents/analyst.ts): decide o que perguntar e quando. Mesmo modelo da
+    // análise do quadro. scripts/bench-analista.ts em 2026-11-09 (5 cenários × 3 rodadas, Analyst real):
+    // gemma-4-26B-A4B (Featherless) p50 3,3 s, ~US$ 0,0003 por análise, 0 spoiler; gemini-3.7-flash @low
+    // (OpenRouter) 10/10, p50 4,5 s, p95 5,6 s, ~US$ 0,004; GLM-5.3-Flash p50 15,6 s, p95 38 s (a pergunta do
+    // momento chegava velha). A Featherless vai primeiro (créditos); o gemini entra se ela passar de 8 s.
+    featherlessEnv: "ANALISE_CODIGO_FEATHERLESS_MODEL",
+    featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "ANALISE_CODIGO_MODEL",
     openrouterDefault: "google/gemini-3.7-flash",
-    featherlessEnv: "ANALYST_MODEL",
-    featherlessDefault: "zai-org/GLM-5.3-Flash",
     maxTokens: 4000,
-    // Para os dois provedores, como no quadro: sem isso o Gemini pensa por conta própria (+2,5 s).
+    // Só no Gemini (reserva): sem isso ele pensa por conta própria (+2,5 s). O gemma não usa raciocínio.
     reasoningEffort: "low",
+    raciocinioSo: "openrouter",
     hedgeMs: 8_000,
     temperatura: 0.3,
   },
   quadro: {
-    // Análise do desenho no quadro (decide se e o que perguntar), com prazo de 8 s. O GLM com raciocínio
-    // estourava o prazo em quase toda análise (a reserva só entrava aos 12 s). Medido com
-    // scripts/simular-conducao.ts: gemini-3.7-flash responde em 3–5 s e conduz melhor que os mais rápidos
-    // (o flash-lite falava os ids do grafo; o gpt-4.1-mini elogiava e juntava duas perguntas).
-    primario: "openrouter",
+    // Análise do desenho no quadro (decide se e o que perguntar), com prazo de 8 s, só com o grafo em texto.
+    // scripts/bench-quadro.ts em 2026-11-09: gemma-4-26B-A4B (Featherless) 7/8 simulações, p50 3–4 s,
+    // ~US$ 0,0005 por análise; gemini-3.7-flash 8/8, ~US$ 0,0055; GLM-5.3-Flash 2/3 com p50 5,3 s;
+    // Mistral-Small-3.2, Qwen3.6-35B e gemma-4-31B estouravam o prazo. O gemini entra se a Featherless passar de 6 s.
+    featherlessEnv: "ANALISE_QUADRO_FEATHERLESS_MODEL",
+    featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "ANALISE_QUADRO_MODEL",
     openrouterDefault: "google/gemini-3.7-flash",
-    featherlessEnv: "ANALYST_MODEL",
-    featherlessDefault: "zai-org/GLM-5.3-Flash",
     maxTokens: 4000,
-    // Vale para os dois: sem isso o Gemini pensa por conta própria (~400 tokens, +2,5 s) e a análise
-    // encostava no prazo de 8 s. Com "low" ele responde em ~3 s com o mesmo prompt.
     reasoningEffort: "low",
+    raciocinioSo: "openrouter",
     hedgeMs: 6_000,
     temperatura: 0.4,
   },
@@ -498,10 +501,7 @@ export async function completeJson<T>(opts: {
       featherless: process.env[cfg.featherlessEnv] || cfg.featherlessDefault,
       openrouter: process.env[cfg.openrouterEnv] || cfg.openrouterDefault,
     },
-    reasoning: {
-      featherless: !cfg.raciocinioSo || cfg.raciocinioSo === "featherless" ? cfg.reasoningEffort : undefined,
-      openrouter: !cfg.raciocinioSo || cfg.raciocinioSo === "openrouter" ? cfg.reasoningEffort : undefined,
-    },
+    reasoning: raciocinio(opts.role, cfg),
   };
 
   // Sem chave do OpenRouter: comportamento de antes, só Featherless.
@@ -512,6 +512,20 @@ export async function completeJson<T>(opts: {
   if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
   if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
   return callHedged(opts.role, call, cfg.hedgeMs, opts.signal);
+}
+
+/**
+ * `reasoningEffort` por provedor. `LLM_RACIOCINIO_<PAPEL>` (nenhum|low|medium|high) troca o do papel sem deploy de
+ * código, para os dois provedores (usado pelos benchmarks para comparar modelos de famílias diferentes).
+ */
+function raciocinio(role: LlmRole, cfg: RoleConfig): Record<LlmProviderName, ReasoningEffort | undefined> {
+  const env = process.env[`LLM_RACIOCINIO_${role.toUpperCase()}`];
+  if (env === "nenhum") return { featherless: undefined, openrouter: undefined };
+  if (env === "low" || env === "medium" || env === "high") return { featherless: env, openrouter: env };
+  return {
+    featherless: !cfg.raciocinioSo || cfg.raciocinioSo === "featherless" ? cfg.reasoningEffort : undefined,
+    openrouter: !cfg.raciocinioSo || cfg.raciocinioSo === "openrouter" ? cfg.reasoningEffort : undefined,
+  };
 }
 
 function errMsg(err: unknown): string {
