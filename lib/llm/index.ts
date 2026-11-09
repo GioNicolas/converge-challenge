@@ -79,15 +79,16 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // Relatório final da entrevista (live coding e quadro). Ninguém espera por ele na hora: vale qualidade e custo.
     // O GLM-5.2 na Featherless leva ~3 min (scripts/run-evaluator.ts sem OpenRouter: 177 s, US$ 0,014 em créditos);
     // com a reserva em 30 s o OpenRouter corria junto e era pago em toda entrevista (US$ 0,014–0,045, o maior custo
-    // dela). Agora a Featherless tem 3,5 min sozinha, numa tentativa só, e o OpenRouter só entra se ela não entregar,
-    // para o relatório sair dentro dos 300 s da função na Vercel. Com função mais longa: LLM_HEDGE_RELATORIO em ms.
+    // dela). Agora a Featherless tem 4,5 min sozinha, numa tentativa só, e o OpenRouter só entra se ela não entregar:
+    // o GLM-5.2 lá leva 5–19 s, então ainda cabe nos 300 s da função na Vercel (plano Hobby).
+    // Com função mais longa (Pro): LLM_HEDGE_RELATORIO em ms.
     featherlessEnv: "RELATORIO_MODEL",
     featherlessDefault: "zai-org/GLM-5.2",
     openrouterEnv: "RELATORIO_FALLBACK_MODEL",
     openrouterDefault: "z-ai/glm-5.2",
     maxTokens: 6000,
-    hedgeMs: 210_000,
-    tempoPorTentativaMs: 280_000,
+    hedgeMs: 270_000,
+    tempoPorTentativaMs: 290_000,
   },
   conversa: {
     // Responde à fala do candidato ao vivo (quadro e live coding). Medido com scripts/bench-conversa.ts:

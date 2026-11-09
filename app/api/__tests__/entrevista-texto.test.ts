@@ -308,7 +308,7 @@ describe("finalizar", () => {
     const ch = finais[0];
     assert.equal(ch.raciocinio, true);
     assert.equal(ch.maxTokens, 6000);
-    assert.equal(ch.timeoutMs, 280_000);
+    assert.equal(ch.timeoutMs, 290_000);
     assert.ok(ch.modelo);
     // guardas no caminho real: nota_geral recomputada e fala validada contra a conversa
     assert.equal(a.corpo.nota_geral, 3);

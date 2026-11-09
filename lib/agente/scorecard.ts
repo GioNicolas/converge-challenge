@@ -23,7 +23,7 @@ import { blocoDasRegras, regrasDoCriterio } from "../squad-memory/prompt";
 
 export const MODELO_FINAL_PADRAO = "anthropic/claude-opus-5.5";
 // Medido em produção (Vercel): o scorecard com raciocínio passou de 45 s e a geração estourava sem salvar nada.
-export const TIMEOUT_SCORECARD_MS = 280_000;
+export const TIMEOUT_SCORECARD_MS = 290_000;
 /** Teto configurável: cabe no maxDuration (300 s) da rota, com folga para salvar. */
 export const TIMEOUT_SCORECARD_MAX_MS = 290_000;
 export function timeoutScorecardMs(): number {
