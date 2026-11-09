@@ -28,6 +28,7 @@ import { contarComponentes, esperaDoEmpecilho } from "../lib/sessao/empecilho";
 import { interrupcaoAtrasada, motivoDoMomento, RITMO } from "../lib/interrupcao/politica";
 import { aceitaPlin, estadoInicial, marcoDeFase, podeAnalisar, ritmoDoCliente, transicionar, type EstadoEntrevista, type EventoEntrevista } from "../lib/sessao/estados";
 import { LIMITE_PADRAO_MS, PAUSA_PADRAO_MS } from "../lib/sessao/gatilho";
+import { instantaneo, resumoDoCusto } from "./custo";
 
 const TICK_MS = 500;
 /** Tempo que o Totti leva falando uma pergunta. */
@@ -424,15 +425,18 @@ async function main() {
   const resumos: string[] = [];
   for (const p of PERSONAS.filter((x) => !nomes || nomes.includes(x.nome))) {
     console.log(`\n# ${p.nome} (${modo})`);
+    const antes = instantaneo();
     const r = await simularQuadro(p, { llm: modo === "sempre" ? llmSempre() : criarClientePrincipal(), duracaoMin });
-    resumos.push(resumo(r));
+    resumos.push(`${resumo(r)}\n  custo de LLM (análise do quadro; sem a fala e o relatório):\n${resumoDoCusto(antes)}`);
   }
   console.log(`\n${resumos.join("\n")}`);
 }
 
 if (process.argv[1]?.endsWith("linha-do-tempo-quadro.ts")) {
-  main().catch((e) => {
-    console.error(e);
-    process.exitCode = 1;
-  });
+  main()
+    .catch((e) => {
+      console.error(e);
+      process.exitCode = 1;
+    })
+    .finally(() => process.exit());
 }

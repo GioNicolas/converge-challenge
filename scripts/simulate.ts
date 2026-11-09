@@ -14,8 +14,9 @@ import { runAnalyst } from "@/lib/agents/analyst";
 import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import { faseDaEntrevista } from "@/lib/agents/fase";
+import { resumoDoCusto } from "./custo";
 import { disparaAnalise } from "@/lib/agents/gatilhos";
-import { allPassed, decideBlip, enqueueKickoff } from "@/lib/agents/policy";
+import { allPassed, decideBlip, enqueueKickoff, lastBlipDecision } from "@/lib/agents/policy";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { normalizarConfig } from "@/lib/config/store";
 import { type Blip, type ChatMessage, InterviewConfig, type Report, type SessionEvent } from "@/lib/contracts";
@@ -35,6 +36,10 @@ let CONFIG: InterviewConfig = DEFAULT_CONFIG;
 let DURATION_MIN = 15;
 /** --linha-do-tempo: conta e mostra as interrupções, sem gerar o relatório. */
 let LINHA_DO_TEMPO = false;
+/** --com-relatorio: no modo linha do tempo, gera o relatório também (para medir o custo inteiro da entrevista). */
+let COM_RELATORIO = false;
+/** O relatório roda testes escondidos em Python: se travar, a simulação segue sem ele. */
+const PRAZO_RELATORIO_MS = 4 * 60_000;
 const TICK_MS = 5_000;
 const PAUSE_MS = 8_000;
 /** Cada fala (do candidato ou do agente) "custa" esse tempo de sessão. */
@@ -362,12 +367,13 @@ async function simulate(persona: Persona): Promise<SimResult> {
   const done = new Set<Stage>();
   let blipOnScreen: Blip | undefined;
   let lastTypingAt: number | undefined;
+  let ultimoMotivo = "";
 
   async function send(input: EventInput): Promise<void> {
     const event = { ...input, sessionId, t: simT } as SessionEvent;
     appendEvent(session, event);
     if (event.type === "session_started") enqueueKickoff(session, event.t);
-    if (event.type === "session_ended" && !LINHA_DO_TEMPO) startEvaluation(session);
+    if (event.type === "session_ended" && (!LINHA_DO_TEMPO || COM_RELATORIO)) startEvaluation(session);
     if (disparaAnalise(event, session)) await runAnalyst(session, event);
     handleBlip(decideBlip(session, simT));
   }
@@ -454,8 +460,12 @@ async function simulate(persona: Persona): Promise<SimResult> {
       const due = stage.afterOptimizing ? (optimizingSince !== undefined ? optimizingSince + stage.at : Infinity) : stage.at;
       if (simT >= due - stage.typingMs && simT < due) {
         version += 1;
+        // A rajada de digitação acontece 3 s antes da consulta da política (a IDE consulta a cada poucos segundos e
+        // quem digita sem parar ainda tem micro-pausas): sem isso a política só era consultada com a mão no teclado.
+        simT -= 3_000;
         await send({ type: "snapshot", code: `${code}# digitando ${version}\n`, version, language: "python" });
         lastTypingAt = simT;
+        simT += 3_000;
         lastEditAt = simT;
         pausedSinceEdit = false;
         break;
@@ -470,6 +480,12 @@ async function simulate(persona: Persona): Promise<SimResult> {
 
     // Polling do balão (GET /api/blip/pending).
     handleBlip(decideBlip(session, simT));
+    // DEBUG_POLITICA=1: registra cada motivo novo da política e o resultado de cada análise (para achar o que segura).
+    if (process.env.DEBUG_POLITICA) {
+      const motivo = `${lastBlipDecision(session) ?? ""} | análise: ${session.analyst.lastOutcome?.text ?? "-"}`;
+      if (motivo !== ultimoMotivo) log(`    · ${motivo}`);
+      ultimoMotivo = motivo;
+    }
     if (blipOnScreen) {
       const blip = blipOnScreen;
       blipOnScreen = undefined;
@@ -487,7 +503,9 @@ async function simulate(persona: Persona): Promise<SimResult> {
 
   await send({ type: "session_ended", reason: "timeout" });
   log("sessão encerrada");
-  const status = LINHA_DO_TEMPO ? undefined : await waitForEvaluation(session);
+  const status = LINHA_DO_TEMPO && !COM_RELATORIO
+    ? undefined
+    : await Promise.race([waitForEvaluation(session), new Promise<undefined>((r) => { (setTimeout(r, PRAZO_RELATORIO_MS) as unknown as { unref(): void }).unref(); })]);
   res.report = status?.report;
   res.error = status?.error;
   res.hints = session.hintsUsed;
@@ -548,6 +566,7 @@ async function main(): Promise<void> {
   }
   if (args.includes("--duracao")) DURATION_MIN = Number(args[args.indexOf("--duracao") + 1]) || DURATION_MIN;
   LINHA_DO_TEMPO = args.includes("--linha-do-tempo");
+  COM_RELATORIO = args.includes("--com-relatorio");
   const personas = PERSONAS.filter((p) => !only || only.includes(p.key));
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -577,6 +596,9 @@ async function main(): Promise<void> {
     for (const r of results) writeFileSync(join(dir, `${r.persona.key}.md`), render(r));
     writeFileSync(join(dir, "linha-do-tempo.txt"), texto);
     console.log(texto);
+    // Custo de LLM do processo inteiro: rode uma persona por vez (--only) para ter o custo de cada entrevista.
+    console.log(`\ncusto de LLM (${personas.map((p) => p.key).join(", ")}${COM_RELATORIO ? ", com o relatório" : ", sem o relatório"}):\n${resumoDoCusto()}`);
+    for (const r of results) if (COM_RELATORIO) console.log(`relatório ${r.persona.key}: ${r.report ? `${r.report.recommendation} · ${r.report.overallScore}/4` : `não saiu (${r.error ?? "prazo"})`}`);
     console.log(`\ntranscrições em ${dir}/`);
     return;
   }
@@ -602,7 +624,10 @@ async function main(): Promise<void> {
   console.log(`\ntranscrições em ${dir}/ · ${failed} checagem(ns) falhando`);
 }
 
-main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exitCode = 1;
-});
+// Sai explicitamente: timers do agente e da avaliação (Pyodide) seguravam o processo aberto depois do fim.
+main()
+  .catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
+  })
+  .finally(() => process.exit());

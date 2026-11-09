@@ -93,7 +93,7 @@ async function main() {
       console.log(JSON.stringify({ alvo, erro: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
     }
   }
-  console.table(linhas.map(({ falhas: _f, ...l }) => l));
+  console.table(linhas.map((l) => ({ ...l, falhas: l.falhas.length })));
 }
 
 main().catch((e) => {

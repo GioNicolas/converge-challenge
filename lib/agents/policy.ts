@@ -54,8 +54,23 @@ const LONG_PAUSE_MS = 30_000;
 const AGENDA_START_FRACTION = 0.4;
 /** Reforço de agenda: critério da recrutadora que ainda não foi explorado. */
 const BOOST_UNCOVERED = 0.15;
-/** Na reta final, pergunta de critério não explorado pula o intervalo entre blips e o limite de blips. */
-const FINAL_STRETCH_MS = 8 * 60_000;
+/**
+ * Reta final: os últimos ~27% da entrevista (8 min de 30). Proporcional à duração: numa entrevista de 10 min, 8 min
+ * fixos eram quase o tempo todo e liberavam pergunta de processo no meio da primeira versão.
+ */
+function retaFinalMs(session: SessionState): number {
+  return session.config.durationMin * 60_000 * (8 / 30);
+}
+
+/** Tempos pensados para 30 min, escalados pela duração (numa entrevista de 10 min, "faltam 5 min" era a metade). */
+function escalado(session: SessionState, ms: number): number {
+  return Math.round(ms * Math.min(1, session.config.durationMin / 30));
+}
+
+/** O encerramento entra faltando 3 min, ou 20% da entrevista se ela for curta (10 min: faltando 2 min). */
+function encerramentoAntesDoFimMs(session: SessionState): number {
+  return Math.min(CLOSING_BEFORE_END_MS, session.config.durationMin * 60_000 * 0.2);
+}
 /** Retorno de desafio: depois desse tempo volta mesmo sem o código mudar. */
 const CHECK_IN_MAX_WAIT_MS = 4 * 60_000;
 /** Retorno de desafio: com o código mudado, volta depois desse tempo sem digitar. */
@@ -211,9 +226,10 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   const remaining = session.config.durationMin * 60_000 - t;
   // Encerramento e mudança no problema também só numa pausa (estão fora do orçamento). O encerramento ganha
   // paciência como uma pergunta que espera desde a hora dele.
-  const momentoExtra = motivoDoMomento({ ...momentoDaSessao(session, t), esperandoHaMs: CLOSING_BEFORE_END_MS - remaining });
+  const antesDoFim = encerramentoAntesDoFimMs(session);
+  const momentoExtra = motivoDoMomento({ ...momentoDaSessao(session, t), esperandoHaMs: antesDoFim - remaining });
   // Reta final: oferece uma vez a conversa de encerramento com o que ficou pendente.
-  if (remaining <= CLOSING_BEFORE_END_MS && !session.queue.some((q) => q.kind === "encerramento") && momentoExtra === null) {
+  if (remaining <= antesDoFim && !session.queue.some((q) => q.kind === "encerramento") && momentoExtra === null) {
     const closing = startClosing(session, t);
     if (closing) return { blip: closing, reason: `blip ${closing.id} (encerramento, faltam ${Math.ceil(remaining / 60_000)} min)` };
   }
@@ -256,19 +272,25 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
     return { reason: `esperando: nenhuma pergunta acima de ${threshold.toFixed(2)}` };
   }
 
+  // Uma pergunta que precisa esperar (ex.: a de foco, que só sai com o código funcionando) não segura as outras:
+  // segue para a próxima da fila. Se nenhuma pode sair, o motivo é o da primeira.
+  let primeiraEspera: string | undefined;
   for (const q of candidates) {
     if (isStale(session, q, t)) {
       q.status = "stale";
       continue;
     }
     const wait = waitReason(session, t, q);
-    if (wait !== undefined) return { reason: wait };
+    if (wait !== undefined) {
+      primeiraEspera ??= wait;
+      continue;
+    }
     const agenda = agendaBoost(session, q, t);
     const label =
       (boost > 0 ? ` (boost +${boost.toFixed(2)}: ${boostReason})` : "") + (agenda > 0 ? ` (agenda +${agenda.toFixed(2)})` : "");
     return { blip: raise(session, q, t), reason: `blip ${q.id}${label}` };
   }
-  return { reason: "sem pergunta válida na fila (todas obsoletas)" };
+  return { reason: primeiraEspera ?? "sem pergunta válida na fila (todas obsoletas)" };
 }
 
 /** Reforço de agenda: critério da recrutadora ainda não explorado, depois de parte do tempo. */
@@ -305,7 +327,10 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
     .sort((a, b) => b.priority - a.priority);
   // A pergunta que estava na tela só entra se ainda faz sentido (um teste que já passou, um trecho que mudou: não).
   const pending = onScreen?.status === "blipped" && !onScreen.kickoff && !isStale(session, onScreen, t) ? [onScreen, ...fromQueue] : fromQueue;
-  const prepared = pending.slice(0, CLOSING_MAX_QUESTIONS);
+  // Os poucos pontos do encerramento vão para o que ainda não foi explorado: uma pergunta preparada sobre um
+  // critério já coberto repetia o assunto (medido: complexidade perguntada três vezes, bordas nenhuma).
+  const naoCobertos = new Set(uncoveredCriteria(session));
+  const prepared = pending.filter((q) => q.criterionId === undefined || naoCobertos.has(q.criterionId)).slice(0, CLOSING_MAX_QUESTIONS);
   const askedCriteria = new Set(prepared.map((q) => q.criterionId));
   const criteria = uncoveredCriteria(session)
     .filter((id) => !askedCriteria.has(id))
@@ -390,8 +415,10 @@ function enqueueDueCheckIns(session: SessionState, t: number): void {
         ? primeiraAdaptacao(session) !== undefined
         : lastChange !== undefined && session.events.some((e) => e.type === "run" && e.t >= lastChange.t);
     const idleAfterChange = lastChange !== undefined && t - lastChange.t >= CHECK_IN_IDLE_MS && isCandidateIdle(session, t);
-    const waitedLong = t - checkIn.createdAt >= CHECK_IN_MAX_WAIT_MS;
-    const endingSoon = session.config.durationMin * 60_000 - t <= CHECK_IN_BEFORE_END_MS;
+    const waitedLong = t - checkIn.createdAt >= escalado(session, CHECK_IN_MAX_WAIT_MS);
+    // Perto do fim volta de qualquer jeito, mas nunca logo depois de ele topar: precisa de tempo para tentar.
+    const endingSoon = session.config.durationMin * 60_000 - t <= escalado(session, CHECK_IN_BEFORE_END_MS)
+      && t - checkIn.createdAt >= CHECK_IN_IDLE_MS * 2;
     if (!ranAfterChange && !idleAfterChange && !waitedLong && !endingSoon) continue;
 
     checkIn.status = "na_fila";
@@ -430,11 +457,11 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
   const fase = faseDaEntrevista(session);
   // Antes da primeira linha de código, a conversa sobre o plano é da abertura: perguntas da análise ali viravam
   // um interrogatório (custo, bordas, tempo) antes de ele poder começar.
-  if (fase === "entendendo" && (q.kind === undefined || q.kind === "explicar" || q.kind === "sondar" || q.kind === "desafio") && q.keyMoment === undefined && session.config.durationMin * 60_000 - t > FINAL_STRETCH_MS) {
+  if (fase === "entendendo" && (q.kind === undefined || q.kind === "explicar" || q.kind === "sondar" || q.kind === "desafio") && q.keyMoment === undefined && session.config.durationMin * 60_000 - t > retaFinalMs(session)) {
     return "esperando: ele ainda não começou a codar (a conversa do plano é da abertura)";
   }
   // Pergunta de foco (processo, sem código) não corta quem ainda está fazendo o código funcionar.
-  if (q.focusArea !== undefined && (fase === "implementando" || fase === "depurando") && session.config.durationMin * 60_000 - t > FINAL_STRETCH_MS) {
+  if (q.focusArea !== undefined && (fase === "implementando" || fase === "depurando") && session.config.durationMin * 60_000 - t > retaFinalMs(session)) {
     return `esperando: pergunta de foco só depois que o código funcionar (fase ${fase})`;
   }
   // Política comum (lib/interrupcao/politica.ts). Marco: ele acabou de chegar num ponto natural de conversa (ou é

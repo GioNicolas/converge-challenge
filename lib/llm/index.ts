@@ -124,7 +124,7 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // análise do quadro. scripts/bench-analista.ts em 2026-11-09 (5 cenários × 3 rodadas, Analyst real):
     // gemma-4-26B-A4B (Featherless) p50 3,3 s, ~US$ 0,0003 por análise, 0 spoiler; gemini-3.7-flash @low
     // (OpenRouter) 10/10, p50 4,5 s, p95 5,6 s, ~US$ 0,004; GLM-5.3-Flash p50 15,6 s, p95 38 s (a pergunta do
-    // momento chegava velha). A Featherless vai primeiro (créditos); o gemini entra se ela passar de 8 s.
+    // momento chegava velha). A Featherless vai primeiro (créditos); o gemini entra se ela passar de 15 s.
     featherlessEnv: "ANALISE_CODIGO_FEATHERLESS_MODEL",
     featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "ANALISE_CODIGO_MODEL",
@@ -133,7 +133,9 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // Só no Gemini (reserva): sem isso ele pensa por conta própria (+2,5 s). O gemma não usa raciocínio.
     reasoningEffort: "low",
     raciocinioSo: "openrouter",
-    hedgeMs: 8_000,
+    // 15 s: a análise roda em segundo plano e a pergunta ainda espera a pausa dele. Com 8 s, numa entrevista
+    // simulada de 10 min o gemini entrou 4 vezes e custou metade da entrevista (US$ 0,017 de US$ 0,044).
+    hedgeMs: 15_000,
     temperatura: 0.3,
   },
   quadro: {
@@ -186,6 +188,12 @@ interface ProviderStore {
 interface RoleStore {
   consecutiveSlow: number;
   directUntil?: number;
+  /** Chamadas e custo do papel, por provedor (inclui as perdedoras do hedge, que também são cobradas). */
+  uso?: Record<LlmProviderName, { calls: number; costUsd: number }>;
+}
+
+function usoDoPapel(r: RoleStore): NonNullable<RoleStore["uso"]> {
+  return (r.uso ??= { featherless: { calls: 0, costUsd: 0 }, openrouter: { calls: 0, costUsd: 0 } });
 }
 
 interface LlmState {
@@ -235,6 +243,8 @@ export interface RoleStatsSnapshot {
   route: LlmProviderName;
   /** Epoch ms em que o breaker fecha; presente só enquanto ele está aberto. */
   directUntil?: number;
+  /** Chamadas e custo (USD informado pelo provedor) por provedor, desde que o processo subiu. */
+  uso: Record<LlmProviderName, { calls: number; costUsd: number }>;
 }
 
 export interface LlmStatsSnapshot {
@@ -255,8 +265,9 @@ function providerSnapshot(p: ProviderStore): ProviderStatsSnapshot {
 
 function roleSnapshot(role: LlmRole, r: RoleStore, now: number): RoleStatsSnapshot {
   const [primario, reserva] = ordem(role);
-  if (!breakerActive(r, now) || r.directUntil === undefined) return { route: primario };
-  return { route: reserva, directUntil: r.directUntil };
+  const uso = structuredClone(usoDoPapel(r));
+  if (!breakerActive(r, now) || r.directUntil === undefined) return { route: primario, uso };
+  return { route: reserva, directUntil: r.directUntil, uso };
 }
 
 /** [primário, reserva] do papel. `LLM_PRIMARIO_<PAPEL>` (featherless|openrouter) troca o primário sem deploy de código. */
@@ -296,13 +307,16 @@ function recordWin(name: LlmProviderName): void {
 }
 
 /** Uma chamada a um provedor, com contabilidade. Não decide quem venceu: isso é do chamador. */
-async function attempt<T>(provider: ProviderConfig, req: ChatRequest<T>): Promise<ChatJsonResult<T>> {
+async function attempt<T>(role: LlmRole, provider: ProviderConfig, req: ChatRequest<T>): Promise<ChatJsonResult<T>> {
   const stats = state.providers[provider.name];
+  const doPapel = usoDoPapel(state.roles[role])[provider.name];
   stats.calls += 1;
+  doPapel.calls += 1;
   const started = Date.now();
   try {
     const result = await chatJsonVia(provider, req);
     stats.costUsd += result.costUsd;
+    doPapel.costUsd += result.costUsd;
     stats.totalMs += result.durationMs;
     stats.timed += 1;
     return result;
@@ -314,7 +328,10 @@ async function attempt<T>(provider: ProviderConfig, req: ChatRequest<T>): Promis
     stats.failures += 1;
     stats.timed += 1;
     stats.totalMs += Date.now() - started;
-    if (err instanceof LlmProviderError) stats.costUsd += err.costUsd;
+    if (err instanceof LlmProviderError) {
+      stats.costUsd += err.costUsd;
+      doPapel.costUsd += err.costUsd;
+    }
     throw err;
   }
 }
@@ -322,6 +339,7 @@ async function attempt<T>(provider: ProviderConfig, req: ChatRequest<T>): Promis
 // ---- Roteamento ----
 
 interface RoleCall<T> {
+  role: LlmRole;
   base: Omit<ChatRequest<T>, "model" | "signal" | "reasoningEffort">;
   models: Record<LlmProviderName, string>;
   reasoning: Record<LlmProviderName, ReasoningEffort | undefined>;
@@ -336,7 +354,7 @@ type Settled<T> = { ok: true; value: ChatJsonResult<T> } | { ok: false; error: s
 /** Como attempt, mas nunca rejeita: devolve o erro já com o nome do provedor. */
 async function runSettled<T>(call: RoleCall<T>, name: LlmProviderName, signal?: AbortSignal): Promise<Settled<T>> {
   try {
-    return { ok: true, value: await attempt(PROVIDERS[name], requestFor(call, name, signal)) };
+    return { ok: true, value: await attempt(call.role, PROVIDERS[name], requestFor(call, name, signal)) };
   } catch (err) {
     return { ok: false, error: `${name}: ${errMsg(err)}` };
   }
@@ -462,7 +480,7 @@ async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: Ab
 }
 
 async function callOnly<T>(call: RoleCall<T>, name: LlmProviderName, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
-  const result = await attempt(PROVIDERS[name], requestFor(call, name, signal));
+  const result = await attempt(call.role, PROVIDERS[name], requestFor(call, name, signal));
   recordWin(name);
   return result;
 }
@@ -486,6 +504,7 @@ export async function completeJson<T>(opts: {
   const cfg = ROLE_CONFIG[opts.role];
   const fala = PAPEIS_DE_FALA.has(opts.role);
   const call: RoleCall<T> = {
+    role: opts.role,
     base: {
       system: opts.system,
       user: opts.user,
@@ -510,8 +529,9 @@ export async function completeJson<T>(opts: {
   // mandavam tudo para a Featherless (que falha na hora) por minutos.
   if (!process.env.FEATHERLESS_API_KEY) return callOnly(call, "openrouter", opts.signal);
   if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
-  if (cfg.hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
-  return callHedged(opts.role, call, cfg.hedgeMs, opts.signal);
+  const hedgeMs = hedgeDoPapel(opts.role, cfg);
+  if (hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
+  return callHedged(opts.role, call, hedgeMs, opts.signal);
 }
 
 /**
@@ -526,6 +546,17 @@ function raciocinio(role: LlmRole, cfg: RoleConfig): Record<LlmProviderName, Rea
     featherless: !cfg.raciocinioSo || cfg.raciocinioSo === "featherless" ? cfg.reasoningEffort : undefined,
     openrouter: !cfg.raciocinioSo || cfg.raciocinioSo === "openrouter" ? cfg.reasoningEffort : undefined,
   };
+}
+
+/**
+ * Ms até a reserva correr junto. `LLM_HEDGE_<PAPEL>` troca sem deploy (ms; "0" = sem hedge, só em erro). Ex.: o
+ * relatório (evaluator) leva ~3 min no GLM-5.2 da Featherless; com 30 s o OpenRouter corre junto e é pago em toda
+ * entrevista (scripts/simulate.ts --com-relatorio: US$ 0,014–0,045 por relatório).
+ */
+function hedgeDoPapel(role: LlmRole, cfg: RoleConfig): number | undefined {
+  const env = process.env[`LLM_HEDGE_${role.toUpperCase()}`];
+  if (env === undefined || env.trim() === "" || !Number.isFinite(Number(env))) return cfg.hedgeMs;
+  return Number(env) > 0 ? Number(env) : undefined;
 }
 
 function errMsg(err: unknown): string {
