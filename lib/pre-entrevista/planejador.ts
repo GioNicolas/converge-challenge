@@ -114,7 +114,16 @@ export interface PlanoEstado {
   tradeoffNaAbertura?: boolean;
   /** Ela não soube dizer o nível e a conversa segue com a estimativa do classificador, dito em voz alta. */
   nivelPorEstimativa?: boolean;
+  /** Quantas vezes o modelo adiou cada decisão pendente sem que ela decidisse (ver `MAX_ADIAMENTOS`). */
+  adiamentos?: Partial<Record<DecisaoPendente["tipo"], number>>;
 }
+
+/**
+ * Depois de tantos adiamentos seguidos de troca de formato ou de nível, o Totti segue com o caminho conservador
+ * (próxima etapa; estimativa do classificador), dizendo isso em voz alta, em vez de perguntar para sempre.
+ * A aprovação do resumo nunca é decidida por contagem.
+ */
+export const MAX_ADIAMENTOS = 2;
 
 export function planoInicial(): PlanoEstado {
   return { sinais: {}, perguntasPorTopico: {}, mudancasPerguntadas: [], resumos: 0, decisoesTradeoff: {} };
@@ -229,15 +238,6 @@ export function decidirResumo(sinais: Record<string, number>): "aprovou" | "muda
   return (sinais.aprovou_resumo ?? 0) >= LIMIAR ? "aprovou" : "incerto";
 }
 
-/**
- * O que a fala dela decide sobre o nível: o nível que ela disse, ou "incerto" quando não disse e o nível segue em
- * aberto. Com o nível já definido, não há o que decidir. Função pura.
- */
-export function decidirNivel(nivelDito: "nao_disse" | "junior" | "pleno" | "senior", emAberto: boolean): "junior" | "pleno" | "senior" | Incerto | undefined {
-  if (nivelDito !== "nao_disse") return nivelDito;
-  return emAberto ? "incerto" : undefined;
-}
-
 /** Uma decisão que o Totti pediu e que a resposta dela não fechou. */
 export type DecisaoPendente = { tipo: "troca"; oferta: OferecerTradeoffPasso } | { tipo: "nivel" } | { tipo: "resumo" };
 
@@ -260,7 +260,7 @@ export function decisaoPendente(e: EstadoPlanejamento, passo: Passo, nivelPergun
   if (passo.tipo === "responder_duvida") return undefined;
   const oferta = ofertaEmCurso(e);
   if (oferta && !e.decisoesTradeoff[oferta.area]) return { tipo: "troca", oferta };
-  if (passo.tipo === "perguntar_nivel" && nivelPerguntado && decidirNivel("nao_disse", e.nivelEmAberto === true) === "incerto") {
+  if (passo.tipo === "perguntar_nivel" && nivelPerguntado && e.nivelEmAberto === true) {
     return { tipo: "nivel" };
   }
   const emCurso = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;

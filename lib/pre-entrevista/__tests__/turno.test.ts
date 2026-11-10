@@ -264,6 +264,29 @@ describe("conduzirTurno: resposta que não é escolha nem aprovação vai ao mod
     assert.equal(ausente.sessao.plano.perguntasPorTopico.tradeoff_uso_ia, 1);
   });
 
+  it("troca: valor com maiúscula, espaço ou acento ainda vale", async () => {
+    const { sessao } = await conversar(
+      [{ ela: "a primeira", totti: comDecisao("Fechado.", " Próxima Etapa ") }, { ela: "-", totti: saida(PERGUNTA) }],
+      COM_IA,
+    );
+    assert.equal(sessao.plano.decisoesTradeoff.uso_ia, "proxima_etapa");
+  });
+
+  it("troca: depois de dois adiamentos segue para a próxima etapa, dizendo isso", async () => {
+    const adiar = comDecisao("Quer trocar, deixar pra próxima etapa ou seguir sem?", "adiar");
+    const { sessao, resultados } = await conversar(
+      [
+        { ela: "hmm", totti: adiar },
+        { ela: "sei lá", totti: adiar },
+        { ela: "-", totti: saida(PERGUNTA) },
+      ],
+      COM_IA,
+    );
+    assert.equal(resultados[0].movimento, "responder");
+    assert.equal(sessao.plano.decisoesTradeoff.uso_ia, "proxima_etapa");
+    assert.match(resultados[1].fala, /^Como não fechamos isso, deixo pra próxima etapa do processo\./);
+  });
+
   it("troca: falha do modelo não decide nada e sai a fala de reserva", async () => {
     const sessao = sessaoAberta([], COM_IA);
     const chat = async () => {

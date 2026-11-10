@@ -372,7 +372,7 @@ export function aberturaDoAgente(sessao: Sessao): string {
   const incerto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, r.confirmado.seniority);
   const nivel = SENIORIDADE_FALA[r.seniority];
   const focos = listar(rotulosDoFoco(r, 2));
-  const perguntaNivel = "é júnior, pleno ou sênior?";
+  const perguntaNivel = PERGUNTA_DE_NIVEL;
 
   if (sessao.classificacao.confirmar.includes("mode")) {
     frases.push(incerto ? `Olhando principalmente ${focos}.` : `A vaga é de nível ${nivel}, olhando principalmente ${focos}.`);
@@ -613,6 +613,15 @@ function instrucaoDaDecisao(pendente: DecisaoPendente, sessao: Sessao): string {
         `O RESUMO EM VIGOR: ${FORMATO_CURTO[r.mode]} pra nível ${SENIORIDADE_FALA[r.seniority]}. ${fraseLogistica(r, sessao.preferencias)}`
       );
   }
+}
+
+/** A pergunta do nível, como o Totti a faz na abertura e no passo `perguntar_nivel`. */
+const PERGUNTA_DE_NIVEL = "é júnior, pleno ou sênior?";
+const RE_PERGUNTA_DE_NIVEL = /j[úu]nior.*pleno.*s[êe]nior/i;
+
+/** O texto é uma pergunta que pede o nível. Fica junto de `PERGUNTA_DE_NIVEL` para os dois não se afastarem. Função pura. */
+export function pedeONivel(texto: string | undefined): boolean {
+  return RE_PERGUNTA_DE_NIVEL.test(texto ?? "");
 }
 
 /**
@@ -1099,7 +1108,9 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
   // Com movimento diferente de `seguir`, a fala não é um resumo (é uma resposta ou uma repetição) e fica como veio.
   // Com a aprovação pendente, a fala pode ser a resposta a "quanto tempo ficou mesmo?": a logística fica.
-  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao && !opcoes.pendente) {
+  // Pedido de mudança que o modelo leu (decisao "mudar") também é revisão: a logística só entra pelo estado.
+  const mudancaLidaPeloModelo = opcoes.pendente?.tipo === "resumo" && saida.decisao === "mudar";
+  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao && (!opcoes.pendente || mudancaLidaPeloModelo)) {
     aplicar("logistica_da_revisao", removerLogisticaDaRevisao(texto));
   }
   // Ela pediu para repetir o resumo: sai o último resumo como foi falado, sem montar outro.
