@@ -377,6 +377,61 @@ function checarRepeticao(sessao: Sessao): string[] {
 /** Soma do placar de fidelidade de todas as personas simuladas nesta rodada. */
 const totais = { passou: 0, total: 0 };
 
+/**
+ * O que a conversa fez fora do roteiro, somado em todas as personas da rodada: quantas vezes cada trava reescreveu a
+ * fala, quantas falas vieram com cada movimento, quantas decisões ficaram pendentes e o tempo de cada fala do Totti.
+ * A issue de fechamento da série (#28) usa isto para decidir que trava sai.
+ */
+const medidas = {
+  travas: new Map<string, number>(),
+  movimentos: new Map<string, number>(),
+  decisoes: new Map<string, number>(),
+  msPorFala: [] as number[],
+};
+
+const somar = (mapa: Map<string, number>, chave: string) => mapa.set(chave, (mapa.get(chave) ?? 0) + 1);
+
+function percentil(valores: number[], p: number): number {
+  if (valores.length === 0) return 0;
+  const ordenados = [...valores].sort((a, b) => a - b);
+  return ordenados[Math.min(ordenados.length - 1, Math.ceil((p / 100) * ordenados.length) - 1)];
+}
+
+const emLinha = (mapa: Map<string, number>) =>
+  [...mapa.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([nome, n]) => `${nome}=${n}`)
+    .join(", ") || "(nenhuma)";
+
+/** Travas, movimentos, decisões pendentes e tempo por fala de uma sessão. Soma em `medidas` e imprime o da sessão. */
+function imprimirConducao(sessao: Sessao, registros: Registro[]): void {
+  const daSessao = { travas: new Map<string, number>(), movimentos: new Map<string, number>(), decisoes: new Map<string, number>() };
+  console.log("\n--- condução da conversa (movimentos, travas e decisões pendentes) ---");
+  for (const e of sessao.logs) {
+    const dados = (e.dados ?? {}) as { trava?: string; antes?: string; depois?: string; movimento?: string; pendente?: { tipo: string }; decisao?: string };
+    if (e.tipo === "trava" && dados.trava) {
+      somar(daSessao.travas, dados.trava);
+      somar(medidas.travas, dados.trava);
+      console.log(`  trava ${dados.trava} (movimento ${dados.movimento ?? "?"}):\n      antes:  ${dados.antes}\n      depois: ${dados.depois}`);
+    }
+    if (e.tipo === "fala_agente" && dados.movimento) {
+      somar(daSessao.movimentos, dados.movimento);
+      somar(medidas.movimentos, dados.movimento);
+      if (dados.pendente) {
+        const chave = `${dados.pendente.tipo}:${dados.decisao ?? "sem campo"}`;
+        somar(daSessao.decisoes, chave);
+        somar(medidas.decisoes, chave);
+      }
+    }
+  }
+  const tempos = registros.map((r) => r.msTotti).filter((ms) => ms > 0);
+  medidas.msPorFala.push(...tempos);
+  console.log(`  movimentos: ${emLinha(daSessao.movimentos)}`);
+  console.log(`  travas que reescreveram a fala: ${emLinha(daSessao.travas)}`);
+  console.log(`  decisões pendentes (tipo:decisão do modelo): ${emLinha(daSessao.decisoes)}`);
+  console.log(`  tempo por fala do Totti: p50 ${percentil(tempos, 50)} ms | p95 ${percentil(tempos, 95)} ms (${tempos.length} falas com modelo)`);
+}
+
 async function simularPersona(persona: Persona): Promise<void> {
   const vaga = VAGAS.find((v) => v.id === persona.vagaId);
   if (!vaga) throw new Error(`vaga "${persona.vagaId}" não encontrada em fixtures/pre-entrevista/vagas.ts`);
@@ -421,6 +476,7 @@ async function simularPersona(persona: Persona): Promise<void> {
   imprimirTranscricao(persona, sessao, registros, erroFatal);
   const config = imprimirConfig(sessao);
   imprimirChecagens(sessao);
+  imprimirConducao(sessao, registros);
   if (config) {
     const placar = imprimirFidelidade(persona, verificarFidelidade(persona, sessao, config));
     totais.passou += placar.passou;
@@ -652,6 +708,12 @@ async function main(): Promise<void> {
   }
   console.log(`\n================================================================`);
   console.log(`placar total de fidelidade: ${totais.passou}/${totais.total}`);
+  console.log(`movimentos: ${emLinha(medidas.movimentos)}`);
+  console.log(`travas que reescreveram a fala: ${emLinha(medidas.travas)}`);
+  console.log(`decisões pendentes (tipo:decisão do modelo): ${emLinha(medidas.decisoes)}`);
+  console.log(
+    `tempo por fala do Totti: p50 ${percentil(medidas.msPorFala, 50)} ms | p95 ${percentil(medidas.msPorFala, 95)} ms (${medidas.msPorFala.length} falas com modelo)`,
+  );
 }
 
 main().catch((err) => {

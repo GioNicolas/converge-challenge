@@ -3,6 +3,11 @@
  *
  * O planejador (`planejador.ts`) escolhe o passo; aqui o modelo escreve a fala e diz que movimento de conversa ela é
  * (`movimento`: seguir o passo, repetir, esclarecer ou responder a algo que a recrutadora disse).
+ * Quando o Totti pediu uma decisão e a resposta dela não decidiu, o modelo recebe a decisão pendente no lugar do passo
+ * e devolve a escolha no campo `decisao`. Depois que a fala é escrita, as travas de `responder` conferem o que é
+ * inegociável (formato de voz, uma pergunta por fala, resumo montado do estado) e obedecem ao movimento: nenhuma
+ * reescreve uma fala que repete, esclarece ou responde. O contrato está em `docs/totti-v2-conversa.md`, seção 9.
+ *
  * A abertura sai sem LLM, a partir da classificação, para aparecer na hora. As falas seguintes
  * vêm do modelo: Featherless primeiro, OpenRouter depois, com 12 s por alvo.
  */

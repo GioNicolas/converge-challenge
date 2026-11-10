@@ -491,6 +491,12 @@ function movimentoDaUltimaFala(sessao: Sessao): string {
   return typeof movimento === "string" ? movimento : "(sem o campo)";
 }
 
+/** As travas que reescreveram a última fala do Totti, lidas do log da sessão. */
+function travasDaUltimaFala(sessao: Sessao): Array<{ trava: string; antes: string; depois: string }> {
+  const evento = [...sessao.logs].reverse().find((e) => e.tipo === "fala_agente");
+  return (evento?.dados as { travas?: Array<{ trava: string; antes: string; depois: string }> } | undefined)?.travas ?? [];
+}
+
 interface Rodada {
   desfecho: Desfecho;
   /** Espera da recrutadora pela fala testada (cobertura + resposta do modelo), em ms. Só quando a fala rodou. */
@@ -530,6 +536,8 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
     const depois = fotografar(sessao);
     console.log(`  >> Recrutadora: ${caso.fala}`);
     console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoDaUltimaFala(sessao)} | ${esperaMs} ms]: ${depois.fala}`);
+
+    for (const trava of travasDaUltimaFala(sessao)) console.log(`     trava ${trava.trava}: "${trava.antes}" -> "${trava.depois}"`);
 
     const checagens = caso.conferir({ antes, depois, passo, sessao });
     for (const c of checagens) console.log(`  ${c.ok ? "PASS" : "FAIL"} ${c.nome}${c.detalhe ? ` | ${c.detalhe}` : ""}`);
