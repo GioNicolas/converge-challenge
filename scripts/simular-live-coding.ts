@@ -6,6 +6,7 @@
 //
 // As falas do candidato entram como falas livres; cada pergunta que vira balão é dada como feita (aberta e
 // fechada 15 s depois), já que a resposta real foi a outra pergunta.
+import "./_gasto";
 import { readFileSync } from "node:fs";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { faseDaEntrevista } from "@/lib/agents/fase";

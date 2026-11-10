@@ -8,6 +8,7 @@
 //
 // --llm sempre: sem créditos; mostra o teto da política (o modelo quer perguntar em toda análise).
 // --llm real (padrão): usa créditos (papel "quadro", ~US$ 0,0005 por análise).
+import "./_gasto";
 import { analisar } from "../lib/agente/analisar";
 import { KIT_SYSTEM_DESIGN as kit } from "../lib/agente/kits/system-design";
 import type { LlmCliente } from "../lib/agente/llm/cliente";

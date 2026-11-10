@@ -3,6 +3,7 @@
  * Aceita a lista de eventos (fixtures/forca-bruta.json) ou o JSON baixado pela IDE (fixtures/session.json).
  * Uso: npx tsx scripts/run-evaluator.ts fixtures/forca-bruta.json [--json]
  */
+import "./_gasto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";

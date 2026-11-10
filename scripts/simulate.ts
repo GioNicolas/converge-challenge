@@ -7,6 +7,7 @@
  * --linha-do-tempo: conta as interrupções (balões) e mostra quando e em que momento cada uma apareceu; pula o
  * relatório (economiza a chamada do avaliador). A persona "constante" (30 min de trabalho contínuo) é a feita para isso.
  */
+import "./_gasto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";

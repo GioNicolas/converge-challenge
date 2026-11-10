@@ -5,6 +5,7 @@
 //   npx tsx --env-file-if-exists=.env.local scripts/bench-analista.ts featherless:google/gemma-4-26B-A4B-it featherless:zai-org/GLM-5.3-Flash@low
 //   (RODADAS=3 repete cada cenário; MOSTRAR=1 imprime as perguntas; sem argumentos, a lista padrão abaixo)
 // O sufixo @low|@medium|@high liga o reasoningEffort; sem sufixo, o modelo vai sem ele.
+import "./_gasto";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { runAnalyst } from "@/lib/agents/analyst";

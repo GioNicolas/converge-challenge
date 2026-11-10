@@ -2,6 +2,7 @@
  * Roda o Analyst sobre um fixture de sessão, sem a IDE.
  * Uso: npx tsx scripts/run-analyst.ts fixtures/forca-bruta.json --at 03:10
  */
+import "./_gasto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";

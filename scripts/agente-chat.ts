@@ -2,6 +2,7 @@
 //   npx tsx scripts/agente-chat.ts [--kit demo] [--fake]
 // Comandos: /grafo <arquivo>, /fase X, /tick, /tempo <segundos>, /plin, /estado, /ajuda, /sair.
 // Texto livre: fala do candidato (vai para o `perguntar`, ou é a resposta do plin ativo).
+import "./_gasto";
 import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";

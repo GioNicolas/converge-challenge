@@ -2,6 +2,7 @@
  * Conversas roteirizadas com o Interviewer, sem a IDE. Cada cenário é uma conversa nova.
  * Uso: npx tsx scripts/run-interviewer.ts
  */
+import "./_gasto";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import type { ChatMessage } from "@/lib/contracts";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";

@@ -3,6 +3,7 @@
 //   - cada fala do candidato vai para o /perguntar;
 //   - se o Totti não devolveu uma pergunta, roda a análise (como o quadro faz depois de uma resposta sem "?");
 //   - pergunta da análise que vira plin é clicada na hora e a próxima fala do candidato responde a ela.
+import "../_gasto";
 import { z } from "zod";
 import { analisar } from "../../lib/agente/analisar";
 import type { LlmCliente } from "../../lib/agente/llm/cliente";

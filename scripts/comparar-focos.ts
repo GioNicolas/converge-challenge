@@ -5,6 +5,7 @@
  * Precisa de FEATHERLESS_API_KEY (ou OPENROUTER_API_KEY) em .env.local.
  * Uso: npx tsx scripts/comparar-focos.ts [fixtures/forca-bruta.json] [--at 03:10] [--rodadas 2]
  */
+import "./_gasto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";

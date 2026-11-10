@@ -1,3 +1,4 @@
+import "./_gasto";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
 import { CENARIOS_SCORECARD, executarCenarioScorecard } from "../lib/dev/scorecard/cenarios";
 

@@ -4,6 +4,7 @@
  *
  *   npx tsx --env-file-if-exists=.env.local scripts/pre-entrevista/aberturas.ts
  */
+import "../_gasto";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { criarSessao } from "@/lib/pre-entrevista/sessoes";

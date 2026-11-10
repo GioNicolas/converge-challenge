@@ -1,6 +1,7 @@
 // Casos fixos do Totti no quadro: os que a equipe viu dar errado nos testes, com a checagem objetiva de cada um.
 // Usados pelo placar (scripts/placar-quadro) e pela bateria antiga (scripts/avaliar-totti-quadro.ts).
 // Só dados sintéticos.
+import "../_gasto";
 import { KIT_SYSTEM_DESIGN as kit } from "../../lib/agente/kits/system-design";
 import { estadoInicial, type EstadoSessao, type FalaRegistrada, type PerguntaFeita } from "../../lib/agente/sessao/estado";
 import type { Fase } from "../../lib/agente/sessao/tipos";
