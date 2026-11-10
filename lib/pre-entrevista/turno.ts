@@ -512,6 +512,8 @@ export async function conduzirTurno(
   // (encerramento, confirmação de tom, dicas e duração) sai sem aprovação ou pedido claro dela.
   let passoDaFala: Passo = pendente ? passoDaDecisao(pendente) : passo;
   let resposta: RespostaAgente;
+  // Falha do modelo com decisão pendente: não é uma resposta, então não conta como adiamento nem vai a `aplicarDecisaoDoModelo`.
+  let modeloFalhou = false;
   try {
     resposta = await responder(sessao, passoDaFala, { chat: deps.chat, pendente });
   } catch (err) {
@@ -527,7 +529,9 @@ export async function conduzirTurno(
       });
       throw err;
     }
-    // Decisão pendente e o modelo não respondeu: o comportamento conservador. Nada é decidido e a pergunta é refeita.
+    // Decisão pendente e o modelo não respondeu: nada é decidido e a pergunta é refeita. Não é adiamento: o modelo
+    // não devolveu decisão nenhuma, ele falhou, então a contagem fica como está.
+    modeloFalhou = true;
     registrarEvento(sessao, {
       tipo: "aviso",
       nivel: "aviso",
@@ -542,7 +546,7 @@ export async function conduzirTurno(
     // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
     // e o plano volta a ser o de antes.
     desfazerLeitura(sessao, antesDaFala, depoisDaLeitura);
-  } else if (pendente) {
+  } else if (pendente && !modeloFalhou) {
     const desfecho = aplicarDecisaoDoModelo(sessao, pendente, resposta.decisao);
     if (desfecho.tipo === "adiar") {
       // Nada decidido: a oferta, o nível ou o resumo continuam em aberto, e o passo não conta, seja qual for o movimento.
