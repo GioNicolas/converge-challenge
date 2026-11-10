@@ -330,22 +330,33 @@ resposta não decidiu", escritas como objetivos com o porquê.
 
 ### 9.2 Antes e depois
 
-**Pendente de medição.** A série foi escrita sem `.env.local`, e os dois comandos precisam do LLM e do Jev reais. A
-linha de base (`docs/placar-conversa/pre-entrevista-base.md`) também está pendente. Para preencher:
+**Antes: medido. Depois: pendente.** A linha de base foi medida em 2026-11-10 na branch `conversa/23-placar-casos`, com o
+LLM e o Jev reais e **sem `--pago`** (detalhes e leitura em `docs/placar-conversa/pre-entrevista-base.md`). O "depois"
+ainda não foi rodado.
+
+Para a comparação valer, o "depois" tem de rodar do mesmo jeito que o "antes". Os dois comandos têm limites sem `--pago`:
+
+- `pre:conversa` roda, mas os tempos não são os de produção: a fala que passa de 6 s na Featherless vira erro, sem
+  OpenRouter para onde cair. Compare só o resultado dos casos e trate o p50/p95 como indicativo.
+- `pre:simular` **não serve** sem `--pago`: depois de um timeout a Featherless fica 2 min fora e as personas param
+  depois de 0 a 3 falas. O número da linha de base (7/8 na `distraida`) é da configuração padrão, não da conversa. Para
+  comparar fidelidade, estilo e tempo, rode antes e depois **com `--pago`**, e só então preencha as células marcadas.
 
 ```bash
-git checkout conversa/23-placar-casos && npm run pre:conversa && npm run pre:simular   # antes
-git checkout conversa/28-fechamento && npm run pre:conversa && npm run pre:simular     # depois
+git checkout conversa/23-placar-casos && npm run pre:conversa                       # antes (feito)
+git checkout conversa/28-fechamento && npm run pre:conversa                         # depois
+git checkout conversa/23-placar-casos && npm run pre:simular -- --pago              # antes, com modelos de produção
+git checkout conversa/28-fechamento && npm run pre:simular -- --pago                # depois, com modelos de produção
 ```
 
 | medida | antes | depois |
 |---|---|---|
-| casos de conversa (`npm run pre:conversa`), 8 casos da linha de base | pendente | pendente |
+| casos de conversa (`npm run pre:conversa`), 8 casos da linha de base | 1 de 8 passou, 6 falharam, 1 com erro | pendente |
 | casos de resposta que não decide (5 casos novos, só existem a partir da #27) | não se aplica | pendente |
-| fidelidade do plano por persona (`npm run pre:simular`) | pendente | pendente |
-| fidelidade da persona `distraida` | pendente | pendente |
-| checagens de estilo e repetição | pendente | pendente |
-| tempo por fala do Totti (p50 / p95) | pendente | pendente |
+| fidelidade do plano por persona (`npm run pre:simular`) | sem medida válida (sem `--pago` a conversa parou) | pendente |
+| fidelidade da persona `distraida` | 7/8, só da configuração padrão (a conversa não aconteceu) | pendente |
+| checagens de estilo e repetição | sem medida válida | pendente |
+| tempo por fala do Totti (p50 / p95) | só da fala testada nos casos: 2518 / 4586 ms, sem `--pago` | pendente |
 
 O que os testes sem modelo já garantem (`npm run test:pre-entrevista`, com LLM e Jev falsos): depois de um
 aprofundamento, `repetir` deixa plano, foco, ênfase e preferências iguais e a resposta de verdade segue do mesmo
