@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Classificacao } from "../classificador";
 import { conduzirTurno } from "../turno";
+import { ErroChat } from "../llm";
 import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, type LeituraFalsa } from "./apoio";
 
 const PERGUNTA = "Se o tempo acabar, o que conta mais: uma solução funcionando ou o caminho bem explicado?";
@@ -181,6 +182,172 @@ describe("conduzirTurno: fala fixa só com aprovação ou pedido claro", () => {
     assert.equal(resultados[2].fala, resposta);
     assert.equal(falso.chamadas.length, 3);
     assert.match(falso.chamadas[2][1].content, /não aprovou nem pediu uma mudança clara/);
+    assert.equal(sessao.plano.resumos, 1);
+  });
+});
+
+describe("conduzirTurno: resposta que não é escolha nem aprovação vai ao modelo", () => {
+  /** IA aplicada pesa mais e live coding não a mede: a abertura já oferece a troca para system design. */
+  const COM_IA: Classificacao = {
+    ...CLASSIFICACAO,
+    focus: [
+      { area: "uso_ia", weight: 0.6 },
+      { area: "tecnico", weight: 0.4 },
+    ],
+  };
+  /** A vaga não diz o nível: a abertura pergunta. */
+  const SEM_NIVEL: Classificacao = { ...CLASSIFICACAO, nivelExplicito: 0.2, confirmar: ["seniority"] };
+  /** A saída do modelo com o campo `decisao`. */
+  const comDecisao = (fala: string, decisao: string, movimento = "responder") => JSON.stringify({ fala, movimento, decisao });
+
+  it("troca: 'hum, deixa eu pensar' espera, e a oferta continua aberta", async () => {
+    const { sessao, resultados, falso } = await conversar([{ ela: "hum, deixa eu pensar", totti: comDecisao("Claro, sem pressa.", "adiar") }], COM_IA);
+    assert.equal(resultados[0].fala, "Claro, sem pressa.");
+    assert.deepEqual(sessao.plano.decisoesTradeoff, {});
+    assert.equal(sessao.plano.ultimoPasso?.tipo, "oferecer_tradeoff");
+    assert.equal(sessao.plano.perguntasPorTopico.tradeoff_uso_ia, 1);
+    assert.match(falso.chamadas[0][1].content, /DECISÃO PENDENTE: troca de formato/);
+    assert.doesNotMatch(falso.chamadas[0][1].content, /PASSO DESTA FALA/);
+  });
+
+  it("troca: 'tanto faz, o que você recomenda?' recomenda e mantém a oferta aberta", async () => {
+    const recomendacao = "Se construir com IA é o centro da vaga, eu trocaria pra system design. Qual você prefere?";
+    const { sessao, resultados } = await conversar([{ ela: "tanto faz, o que você recomenda?", totti: comDecisao(recomendacao, "adiar") }], COM_IA);
+    assert.equal(resultados[0].fala, recomendacao);
+    assert.deepEqual(sessao.plano.decisoesTradeoff, {});
+  });
+
+  it("troca: escolha com outras palavras é aplicada, e a fala é a do passo seguinte", async () => {
+    const { sessao, resultados, falso } = await conversar(
+      [{ ela: "a primeira opção que você falou", totti: comDecisao("Fechado, a primeira.", "trocar") }, { ela: "-", totti: saida(PERGUNTA) }],
+      COM_IA,
+    );
+    assert.equal(sessao.plano.decisoesTradeoff.uso_ia, "trocou");
+    assert.equal(sessao.rascunho.mode, "system_design");
+    // Duas chamadas no primeiro turno: a que leu a decisão e a do passo seguinte, já sem decisão pendente.
+    assert.match(falso.chamadas[0][1].content, /DECISÃO PENDENTE: troca de formato/);
+    assert.match(falso.chamadas[1][1].content, /PASSO DESTA FALA/);
+    assert.equal(resultados[0].fala, PERGUNTA);
+    assert.equal(resultados[0].movimento, "seguir");
+  });
+
+  it("troca: escolha clara pelos sinais não passa pelo caminho novo", async () => {
+    const { sessao, falso } = await conversar([{ ela: "deixa pra próxima etapa", jev: { sinais: { escolheu_proxima_etapa: 1 } }, totti: saida(PERGUNTA) }], COM_IA);
+    assert.equal(sessao.plano.decisoesTradeoff.uso_ia, "proxima_etapa");
+    assert.equal(falso.chamadas.length, 1);
+    assert.doesNotMatch(falso.chamadas[0][1].content, /DECISÃO PENDENTE/);
+  });
+
+  it("troca: decisão que não existe ou campo ausente não decide nada", async () => {
+    const invalida = await conversar([{ ela: "sei lá", totti: comDecisao("Quer trocar, deixar pra próxima etapa ou seguir sem?", "talvez") }], COM_IA);
+    assert.deepEqual(invalida.sessao.plano.decisoesTradeoff, {});
+    const ausente = await conversar([{ ela: "sei lá", totti: saida("Quer trocar, deixar pra próxima etapa ou seguir sem?") }], COM_IA);
+    assert.deepEqual(ausente.sessao.plano.decisoesTradeoff, {});
+    assert.equal(ausente.resultados[0].movimento, "responder");
+    assert.equal(ausente.sessao.plano.perguntasPorTopico.tradeoff_uso_ia, 1);
+  });
+
+  it("troca: valor com maiúscula, espaço ou acento ainda vale", async () => {
+    const { sessao } = await conversar(
+      [{ ela: "a primeira", totti: comDecisao("Fechado.", " Próxima Etapa ") }, { ela: "-", totti: saida(PERGUNTA) }],
+      COM_IA,
+    );
+    assert.equal(sessao.plano.decisoesTradeoff.uso_ia, "proxima_etapa");
+  });
+
+  it("troca: depois de dois adiamentos segue para a próxima etapa, dizendo isso", async () => {
+    const adiar = comDecisao("Quer trocar, deixar pra próxima etapa ou seguir sem?", "adiar");
+    const { sessao, resultados } = await conversar(
+      [
+        { ela: "hmm", totti: adiar },
+        { ela: "sei lá", totti: adiar },
+        { ela: "-", totti: saida(PERGUNTA) },
+      ],
+      COM_IA,
+    );
+    assert.equal(resultados[0].movimento, "responder");
+    assert.equal(sessao.plano.decisoesTradeoff.uso_ia, "proxima_etapa");
+    assert.match(resultados[1].fala, /^Como não fechamos isso, deixo pra próxima etapa do processo\./);
+  });
+
+  it("troca: falha do modelo não decide nada e sai a fala de reserva", async () => {
+    const sessao = sessaoAberta([], COM_IA);
+    const chat = async () => {
+      throw new ErroChat("nenhum provedor respondeu", []);
+    };
+    const r = await conduzirTurno(sessao, "hum", { chat, ...jevFalso() });
+    assert.equal(r.fala, "Não peguei qual caminho você prefere: trocar pra system design, deixar pra próxima etapa ou seguir sem?");
+    assert.deepEqual(sessao.plano.decisoesTradeoff, {});
+    // A fala dela fica na transcrição: nada a reenviar.
+    assert.equal(sessao.transcricao.at(-2)?.text, "hum");
+  });
+
+  it("sem decisão pendente, a falha do modelo continua desfazendo a fala e subindo o erro", async () => {
+    const sessao = sessaoAberta();
+    const chat = async () => {
+      throw new ErroChat("nenhum provedor respondeu", []);
+    };
+    await assert.rejects(conduzirTurno(sessao, "isso", { chat, ...jevFalso({ cobertura: { confirmou_inicio: 1 } }) }), ErroChat);
+    assert.equal(sessao.transcricao.length, 1);
+  });
+
+  it("nível: 'não sei' segue com a estimativa, dito em voz alta, sem perguntar de novo", async () => {
+    const { sessao, resultados } = await conversar(
+      [{ ela: "não sei, o gestor não me falou", totti: comDecisao("Tranquilo.", "estimativa") }, { ela: "-", totti: saida("É isso, ou quer focar em outra coisa?") }],
+      SEM_NIVEL,
+    );
+    assert.match(resultados[0].fala, /^Sigo com nível pleno então; dá pra mudar na revisão\. /);
+    assert.equal(sessao.plano.nivelPorEstimativa, true);
+    assert.equal(sessao.plano.perguntasPorTopico.nivel, undefined);
+    assert.equal(sessao.rascunho.seniority, "pleno");
+  });
+
+  it("nível: dito com outras palavras é registrado", async () => {
+    const { sessao } = await conversar(
+      [{ ela: "alguém já bem experiente", totti: comDecisao("Sênior, então.", "senior") }, { ela: "-", totti: saida("É isso, ou quer focar em outra coisa?") }],
+      SEM_NIVEL,
+    );
+    assert.equal(sessao.rascunho.seniority, "senior");
+    assert.equal(sessao.rascunho.confirmado.seniority, true);
+  });
+
+  it("nível: 'é pleno' continua resolvido pelos sinais, sem o caminho novo", async () => {
+    const { sessao, falso } = await conversar([{ ela: "é pleno", jev: { nivelDito: "pleno" }, totti: saida("É isso, ou quer focar em outra coisa?") }], SEM_NIVEL);
+    assert.equal(sessao.rascunho.confirmado.seniority, true);
+    assert.doesNotMatch(falso.chamadas[0][1].content, /DECISÃO PENDENTE/);
+  });
+
+  it("resumo: 'peraí, deixa eu ler aqui na tela' espera, sem novo resumo", async () => {
+    const { sessao, resultados, falso } = await conversar([...ATE_O_RESUMO, { ela: "peraí, deixa eu ler aqui na tela", totti: comDecisao("Claro, sem pressa.", "adiar") }]);
+    assert.equal(resultados[2].fala, "Claro, sem pressa.");
+    assert.equal(sessao.plano.resumos, 1);
+    assert.match(falso.chamadas[2][1].content, /DECISÃO PENDENTE: aprovação do resumo/);
+  });
+
+  it("resumo: 'acho que sim… a duração ficou quanto mesmo?' responde a duração e pergunta de novo", async () => {
+    const resposta = "Ficou em quarenta minutos. Posso finalizar?";
+    const { sessao, resultados } = await conversar([...ATE_O_RESUMO, { ela: "acho que sim… a duração ficou quanto mesmo?", totti: comDecisao(resposta, "adiar") }]);
+    assert.equal(resultados[2].fala, resposta);
+    assert.notEqual(resultados[2].passo.tipo, "encerrar");
+    assert.equal(sessao.plano.resumos, 1);
+  });
+
+  it("resumo: aprovação com outras palavras encerra com a fala fixa", async () => {
+    const { resultados } = await conversar([...ATE_O_RESUMO, { ela: "manda bala", totti: comDecisao("Fechado.", "finalizar") }]);
+    assert.equal(resultados[2].passo.tipo, "encerrar");
+    assert.notEqual(resultados[2].fala, "Fechado.");
+  });
+
+  it("resumo: mudança lida pelo modelo conta como resumo de verdade", async () => {
+    const { sessao, resultados } = await conversar([...ATE_O_RESUMO, { ela: "ah, e ele pode usar o Google", totti: comDecisao("Anotado: ele pode consultar o Google. Posso finalizar?", "mudar") }]);
+    assert.deepEqual(resultados[2].passo, { tipo: "resumo_final", revisao: true });
+    assert.equal(sessao.plano.resumos, 2);
+  });
+
+  it("resumo: muitas falas sem aprovação não encerram a conversa", async () => {
+    const espera = { ela: "pera", totti: comDecisao("Sem pressa.", "adiar") };
+    const { sessao, resultados } = await conversar([...ATE_O_RESUMO, espera, espera, espera, espera, espera]);
+    assert.ok(resultados.every((r) => r.passo.tipo !== "encerrar"));
     assert.equal(sessao.plano.resumos, 1);
   });
 });
