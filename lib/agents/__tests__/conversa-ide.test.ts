@@ -249,3 +249,25 @@ test("filtro de fala: só roda quando a fala pode entregar algo (código, númer
     assert.equal(podeEntregarAlgo(fala, code), true, fala);
   }
 });
+
+test("abertura: quem digita sem parar 8 s recebe a pergunta numa pausa curta, e ela não some com o código crescendo", async () => {
+  const { decideBlip, enqueueKickoff } = await import("@/lib/agents/policy");
+  const { getOrCreateSession, appendEvent } = await import("@/lib/session/store");
+  const { DEFAULT_CONFIG } = await import("@/lib/config/default");
+  const s = getOrCreateSession(`abertura-rapido-${Date.now()}`, DEFAULT_CONFIG);
+  let agora = 0;
+  s.clock = () => agora;
+  appendEvent(s, { type: "session_started", sessionId: s.sessionId, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
+  enqueueKickoff(s, 0);
+  // Digita direto: um snapshot a cada 2 s, sem nenhum evento de pausa, até umas 25 linhas.
+  let codigo = "def f(nums, target):\n";
+  for (let i = 0; i < 25; i++) {
+    codigo += `    linha_${i} = ${i}\n`;
+    appendEvent(s, { type: "snapshot", sessionId: s.sessionId, t: 40_000 + i * 2_000, code: codigo, version: i + 1, language: "python" });
+    agora = 40_000 + i * 2_000 + 500;
+    assert.equal(decideBlip(s, agora).blip, undefined);
+  }
+  // Para 3 s: a abertura sai, mesmo com 25 linhas.
+  agora = 40_000 + 24 * 2_000 + 3_100;
+  assert.equal(decideBlip(s, agora).blip?.id, s.queue.find((q) => q.kickoff)?.id);
+});
