@@ -1,3 +1,4 @@
+import { AUDIO_DO_MICROFONE } from "../presenca/microfone";
 /** Captura somente áudio. Um stream recebido pertence ao chamador e nunca é encerrado aqui. */
 export async function capturarAudio({ stream, signal, aoAudio }: {
   stream?: MediaStream | null;
@@ -6,7 +7,7 @@ export async function capturarAudio({ stream, signal, aoAudio }: {
 }) {
   const proprio = !stream;
   const midia = stream ?? await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+    audio: { ...AUDIO_DO_MICROFONE, channelCount: 1 },
   });
   let contexto: AudioContext | undefined;
   let fonte: MediaStreamAudioSourceNode | undefined;

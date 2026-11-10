@@ -4,6 +4,7 @@
 // A câmera é SÓ local: aparece na janela de chamada e não é enviada, gravada nem analisada.
 // O microfone mede o volume e fornece o mesmo stream à transcrição.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AUDIO_DO_MICROFONE } from "./microfone";
 
 export type ErroMidia = "camera" | "microfone" | null;
 
@@ -35,7 +36,7 @@ export function useMidiaLocal() {
     const pedido = (async () => {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
+          audio: AUDIO_DO_MICROFONE,
         });
         if (versaoRef.current !== versao) {
           s.getTracks().forEach((t) => t.stop());
