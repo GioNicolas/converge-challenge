@@ -15,6 +15,7 @@
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
+import { isDeepStrictEqual } from "node:util";
 import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
 import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
@@ -305,6 +306,47 @@ function copiarEstadoLido(sessao: Sessao): EstadoLido {
   });
 }
 
+const CAMPOS_LIDOS: (keyof EstadoLido)[] = [
+  "plano", "rascunho", "preferencias", "enfaseEstado", "origemPreferencias", "eliminatorioFalas", "naoAvaliado", "pesosDetalhe",
+];
+
+const ehObjetoSimples = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Merge de três vias de um valor: `antes` (antes de ler a fala dela), `depois` (logo depois da leitura e do
+ * planejamento) e `atual` (agora). Devolve `atual` com a leitura desfeita, sem pisar no que mudou por outro caminho.
+ * Valor ainda igual a `depois` volta a `antes`; objeto simples desce chave a chave, em qualquer profundidade; lista
+ * que só ganhou itens no fim mantém os itens novos e perde os da leitura; o resto mudou por outro caminho e fica.
+ */
+export function desfazerValor(atual: unknown, antes: unknown, depois: unknown): unknown {
+  if (isDeepStrictEqual(atual, depois)) return antes;
+  if (ehObjetoSimples(atual) && ehObjetoSimples(antes) && ehObjetoSimples(depois)) {
+    const novo: Record<string, unknown> = { ...atual };
+    for (const chave of new Set([...Object.keys(atual), ...Object.keys(antes), ...Object.keys(depois)])) {
+      const valor = desfazerValor(atual[chave], antes[chave], depois[chave]);
+      if (valor === undefined) delete novo[chave];
+      else novo[chave] = valor;
+    }
+    return novo;
+  }
+  if (Array.isArray(atual) && Array.isArray(antes) && Array.isArray(depois)) {
+    const cresceuNoFim = atual.length > depois.length && isDeepStrictEqual(atual.slice(0, depois.length), depois);
+    if (cresceuNoFim) return [...antes, ...atual.slice(depois.length)];
+  }
+  return atual;
+}
+
+/**
+ * Desfaz o que a leitura da fala dela mudou (`antes` -> `depois`), sem pisar no que mudou por outro caminho desde então.
+ * A extração em segundo plano do turno anterior pode gravar na sessão enquanto o turno espera o modelo: voltar a cópia
+ * inteira de `antes` perderia o que ela extraiu. Ver `desfazerValor` para a regra.
+ */
+function desfazerLeitura(sessao: Sessao, antes: EstadoLido, depois: EstadoLido): void {
+  const alvo = sessao as unknown as Record<string, unknown>;
+  for (const campo of CAMPOS_LIDOS) alvo[campo] = desfazerValor(alvo[campo], antes[campo], depois[campo]);
+}
+
 /** O passo em curso de cada decisão pendente: é ele que o modelo recebe, com a decisão no lugar da instrução. */
 function passoDaDecisao(pendente: DecisaoPendente): Passo {
   if (pendente.tipo === "troca") return pendente.oferta;
@@ -462,6 +504,9 @@ export async function conduzirTurno(
   const nivelPerguntado = pedeONivel(perguntaEmAberto(sessao.transcricao));
   await lerFalaDela(sessao, texto, deps);
   const { passo, pendente } = planejar(sessao, "turno", nivelPerguntado);
+  // Como a sessão ficou depois de ler a fala dela e planejar (os dois gravam nela), antes de esperar o modelo:
+  // `desfazerLeitura` compara com isto para não pisar no que outra escrita mudar durante a espera.
+  const depoisDaLeitura = copiarEstadoLido(sessao);
 
   // Com decisão pendente, o modelo recebe o passo em curso e a decisão no lugar da instrução. Nenhuma fala fixa
   // (encerramento, confirmação de tom, dicas e duração) sai sem aprovação ou pedido claro dela.
@@ -496,7 +541,7 @@ export async function conduzirTurno(
   if (movimento === "repetir" || movimento === "esclarecer") {
     // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
     // e o plano volta a ser o de antes.
-    Object.assign(sessao, antesDaFala);
+    desfazerLeitura(sessao, antesDaFala, depoisDaLeitura);
   } else if (pendente) {
     const desfecho = aplicarDecisaoDoModelo(sessao, pendente, resposta.decisao);
     if (desfecho.tipo === "adiar") {

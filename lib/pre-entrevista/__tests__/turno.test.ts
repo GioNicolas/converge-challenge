@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Classificacao } from "../classificador";
-import { conduzirTurno } from "../turno";
+import { conduzirTurno, desfazerValor } from "../turno";
 import { ErroChat } from "../llm";
 import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, type LeituraFalsa } from "./apoio";
 
@@ -76,6 +76,23 @@ describe("conduzirTurno: repetir e esclarecer não mudam o plano", () => {
     const seguinte = await conduzirTurno(sessao, "a solução funcionando", { chat: chatFalso(saida(CONTEXTO)).chat, ...jev });
     assert.equal(seguinte.passo.tipo, "perguntar_contexto");
     assert.deepEqual(sessao.plano.perguntasPorTopico, { confirmou_inicio: 1, criterio_tecnico: 1, contexto: 1 });
+  });
+
+  it("o que a extração gravou enquanto o Totti respondia sobrevive ao desfazer do repetir", async () => {
+    const { sessao } = await conversar(ATE_APROFUNDAR);
+    const falso = chatFalso(saida(PERGUNTA, "repetir"));
+    // A extração do turno anterior grava no rascunho durante a espera do modelo.
+    const chat: typeof falso.chat = async (op) => {
+      sessao.rascunho = { ...sessao.rascunho, eliminatorios: ["copiar sem entender"] } as typeof sessao.rascunho;
+      return falso.chat(op);
+    };
+    const antesPlano = structuredClone(sessao.plano);
+    await conduzirTurno(sessao, "desculpa, pode repetir a pergunta", {
+      chat,
+      ...jevFalso({ sinais: { dispensa_tecnico: 1 } }),
+    });
+    assert.deepEqual((sessao.rascunho as { eliminatorios?: unknown }).eliminatorios, ["copiar sem entender"]);
+    assert.deepEqual(sessao.plano, antesPlano);
   });
 
   it("'quarenta e cinco minutos' dito dentro de um pedido de repetição não vira duração", async () => {
@@ -349,5 +366,31 @@ describe("conduzirTurno: resposta que não é escolha nem aprovação vai ao mod
     const { sessao, resultados } = await conversar([...ATE_O_RESUMO, espera, espera, espera, espera, espera]);
     assert.ok(resultados.every((r) => r.passo.tipo !== "encerrar"));
     assert.equal(sessao.plano.resumos, 1);
+  });
+});
+
+describe("desfazerValor: desfaz a leitura sem pisar no que outro caminho gravou", () => {
+  it("valor ainda igual ao de depois volta ao de antes", () => {
+    assert.deepEqual(desfazerValor({ a: 1 }, { a: 0 }, { a: 1 }), { a: 0 });
+  });
+
+  it("lista que ganhou itens no fim mantém os novos e perde os da leitura", () => {
+    assert.deepEqual(desfazerValor(["lido", "extraido"], [], ["lido"]), ["extraido"]);
+    assert.deepEqual(desfazerValor(["velho", "lido", "extraido"], ["velho"], ["velho", "lido"]), ["velho", "extraido"]);
+  });
+
+  it("objeto aninhado: cada sub-chave decide sozinha, em qualquer profundidade", () => {
+    const antes = { pesos: { a: 1, b: 1 } };
+    const depois = { pesos: { a: 2, b: 1 } }; // a leitura mexeu em `a`
+    const atual = { pesos: { a: 2, b: 5 } }; // a extração mexeu em `b`
+    assert.deepEqual(desfazerValor(atual, antes, depois), { pesos: { a: 1, b: 5 } });
+  });
+
+  it("chave que a leitura criou some, e a que outro caminho criou fica", () => {
+    assert.deepEqual(desfazerValor({ lida: 1, extraida: 2 }, {}, { lida: 1 }), { extraida: 2 });
+  });
+
+  it("escalar mudado por outro caminho fica", () => {
+    assert.equal(desfazerValor("extraido", "antes", "lido"), "extraido");
   });
 });

@@ -1,5 +1,8 @@
 /**
- * Planejador da conversa: o código decide o próximo passo do Totti, e o modelo só escreve a fala.
+ * Planejador da conversa: o código escolhe o próximo passo do Totti, e o modelo escreve a fala e diz que movimento de
+ * conversa ela é. O planejador obedece ao modelo: quando a fala dela pede outra coisa (repetir, esclarecer, responder),
+ * o modelo faz isso no lugar do passo, e o passo não conta como feito (`aplicarPasso` só é chamado para a fala que
+ * executa o passo, ver `conduzirTurno` em `turno.ts`). O contrato está em `docs/totti-v2-conversa.md`, seção 9.
  *
  * `proximoPasso` é função pura: recebe o foco, a cobertura, os sinais e o que já foi perguntado,
  * e devolve um `Passo`. Regras:

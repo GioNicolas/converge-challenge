@@ -275,3 +275,126 @@ inventou um prazo de retorno.
 A primeira rodada (flash-lite) saiu contaminada pelo limite de créditos da OpenRouter: um juiz e os casos sem nota.
 Sinal preliminar: validou caiu de 13 para 2, sem dica, sem vazamento e sem enlatado; repetiu pergunta subiu para 3. Falta
 refazer com crédito, e com Sonnet 5.5 no Conversador.
+
+---
+
+## 9. Passo intermediário na pré-entrevista: o planejador obedece ao modelo (série da issue #22)
+
+Antes da troca de arquitetura das seções 4 a 6, a pré-entrevista ganhou um passo menor na mesma direção. O planejador
+e as travas **ficam**, mas quem decide a conversa passa a ser o modelo: ele escreve a fala e declara o que fez, e o
+código confere só o inegociável. O motivo era um caso concreto: a recrutadora dizia "pode repetir a pergunta?" e o
+Totti passava para a pergunta seguinte ou para o resumo.
+
+### 9.1 O contrato
+
+O modelo responde em JSON: `{ "fala": "...", "movimento": "...", "decisao": "..." }`. Texto puro continua válido, e os
+dois campos são opcionais.
+
+**`movimento`** diz que movimento de conversa a fala é (ausente vale `seguir`):
+
+| valor | quando | o que o código faz |
+|---|---|---|
+| `repetir` | ela pediu para repetir e a fala traz a mesma pergunta (ou o mesmo resumo) que estava em aberto | desfaz o que foi lido da fala dela; o passo em curso continua em curso; depois do resumo, sai o último resumo como foi falado |
+| `esclarecer` | ela não entendeu a pergunta e a fala a reformula ou explica o que se quer saber, em palavras de RH | o mesmo de `repetir` |
+| `responder` | a fala responde a algo que ELA perguntou ou comentou (dúvida, "tá me ouvindo?", pedido de tempo) | mantém o que foi lido da fala dela; o passo escolhido não conta como feito |
+| `seguir` | todo o resto: executar o passo do planejador | o de sempre: o passo conta como feito |
+
+Duas regras valem para tudo:
+
+- **nenhuma trava reescreve uma fala cujo `movimento` é `repetir`, `esclarecer` ou `responder`**. As exceções são formato
+  de voz, não conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, e "uma pergunta só" vale para `repetir` e
+  `esclarecer`;
+- **uma fala com `repetir` ou `esclarecer` não fecha o passo em curso nem muda o plano**: a pergunta continua em aberto,
+  nenhuma contagem anda, e a rota não agenda a extração.
+
+Reserva para o modelo rápido, que às vezes não declara o campo: fala que traz quase a mesma pergunta em aberto, quando
+o planejador tinha escolhido outra pergunta, conta como `repetir` (`movimentoDaFala` em `conversa.ts`).
+
+**`decisao`** só existe quando o Totti pediu uma decisão e a resposta dela não é escolha nem recusa. Nesses casos o
+código deixou de escolher por ela: a entrada traz `DECISÃO PENDENTE` no lugar do passo, e o modelo lê a fala.
+
+| decisão pendente | quando | valores de `decisao` |
+|---|---|---|
+| troca de formato | a oferta está em curso e nenhum sinal de escolha passa do limiar | `trocar`, `proxima_etapa`, `seguir_sem`, `adiar` |
+| nível | o Totti perguntou o nível e ela não disse | `junior`, `pleno`, `senior`, `estimativa`, `adiar` |
+| aprovação do resumo | depois do resumo, ela não aprovou nem pediu mudança | `finalizar`, `mudar`, `adiar` |
+
+A escolha é aplicada pelas mesmas funções que aplicam a escolha lida pelos sinais, e o planejador escolhe o passo
+seguinte. Com `adiar`, sem o campo ou com valor que não existe, nada é decidido e as contagens não andam. Se o modelo
+falhar, nada é decidido e sai uma fala de reserva curta que refaz a pergunta. Respostas claras ("vamos de system
+design", "pode finalizar", "é pleno") continuam resolvidas pelos sinais do Jev, sem o campo.
+
+O que o modelo recebe a mais: a linha `PERGUNTA SUA EM ABERTO` (a parte terminada em "?" da última fala dele que tem
+pergunta) e, no prompt de sistema, as seções "Quando a conversa sai do roteiro" e "Quando você pediu uma decisão e a
+resposta não decidiu", escritas como objetivos com o porquê.
+
+### 9.2 Antes e depois
+
+**Antes: medido. Depois: pendente.** A linha de base foi medida em 2026-11-10 na branch `conversa/23-placar-casos`, com o
+LLM e o Jev reais e **sem `--pago`** (detalhes e leitura em `docs/placar-conversa/pre-entrevista-base.md`). O "depois"
+ainda não foi rodado.
+
+Para a comparação valer, o "depois" tem de rodar do mesmo jeito que o "antes". Os dois comandos têm limites sem `--pago`:
+
+- `pre:conversa` roda, mas os tempos não são os de produção: a fala que passa de 6 s na Featherless vira erro, sem
+  OpenRouter para onde cair. Compare só o resultado dos casos e trate o p50/p95 como indicativo.
+- `pre:simular` **não serve** sem `--pago`: depois de um timeout a Featherless fica 2 min fora e as personas param
+  depois de 0 a 3 falas. O número da linha de base (7/8 na `distraida`) é da configuração padrão, não da conversa. Para
+  comparar fidelidade, estilo e tempo, rode antes e depois **com `--pago`**, e só então preencha as células marcadas.
+
+```bash
+git checkout conversa/23-placar-casos && npm run pre:conversa                       # antes (feito)
+git checkout conversa/28-fechamento && npm run pre:conversa                         # depois
+git checkout conversa/23-placar-casos && npm run pre:simular -- --pago              # antes, com modelos de produção
+git checkout conversa/28-fechamento && npm run pre:simular -- --pago                # depois, com modelos de produção
+```
+
+| medida | antes | depois |
+|---|---|---|
+| casos de conversa (`npm run pre:conversa`), 8 casos da linha de base | 1 de 8 passou, 6 falharam, 1 com erro | pendente |
+| casos de resposta que não decide (5 casos novos, só existem a partir da #27) | não se aplica | pendente |
+| fidelidade do plano por persona (`npm run pre:simular`) | sem medida válida (sem `--pago` a conversa parou) | pendente |
+| fidelidade da persona `distraida` | 7/8, só da configuração padrão (a conversa não aconteceu) | pendente |
+| checagens de estilo e repetição | sem medida válida | pendente |
+| tempo por fala do Totti (p50 / p95) | só da fala testada nos casos: 2518 / 4586 ms, sem `--pago` | pendente |
+
+O que os testes sem modelo já garantem (`npm run test:pre-entrevista`, com LLM e Jev falsos): depois de um
+aprofundamento, `repetir` deixa plano, foco, ênfase e preferências iguais e a resposta de verdade segue do mesmo
+ponto; "quarenta e cinco minutos" dentro de um pedido de repetição não vira duração; `esclarecer` depois de uma oferta
+de troca não registra decisão; três repetições do resumo não encerram e `resumos` continua 1; os cinco exemplos da
+issue #27 se comportam como esperado. Falta ver se o modelo real declara o movimento certo.
+
+### 9.3 Travas: o que saiu e o que ficou
+
+**Nenhuma trava saiu.** A regra da série era remover só o que a medição mostrasse morto, e a medição não foi feita.
+Todas ficam, obedecendo ao movimento, e cada reescrita vira um evento `trava` no log da sessão, com a fala antes e
+depois. O simulador soma esses eventos por persona e no total (bloco "condução da conversa"), junto com os movimentos,
+as decisões pendentes e o p50/p95 por fala. É com essa saída que a decisão deve ser tomada.
+
+| trava (nome no log) | o que segura | critério para sair |
+|---|---|---|
+| `reconhecimento_inicial` | "Certo.", "Entendi," no começo da fala | nunca disparou, ou o prompt novo já evita |
+| `cortar_na_primeira_pergunta` | duas perguntas na mesma fala | nunca disparou nas simulações |
+| `pergunta_do_banco` | pergunta no molde óbvio ("o que separa um ótimo de um fraco?") | nunca disparou, ou a troca piorou a fala |
+| `pergunta_de_contexto` | pergunta de contexto sem "?" ou no molde óbvio | idem |
+| `pergunta_no_fim` | confirmação do início ou resposta a dúvida sem devolver a decisão | nunca disparou |
+| `reescrita_do_resumo` | resumo do modelo com mais de 2 frases (custa uma chamada a mais) | nunca disparou |
+| `logistica_da_revisao` | tom, dicas e duração ditos pelo modelo na revisão, em vez de vir do estado | nunca disparou |
+| `resumo_repetido` | não é trava de conteúdo: troca a repetição do modelo pelo último resumo falado | fica |
+
+No planejador, também para decidir com a medição: `MAX_DUVIDAS_SEGUIDAS` e o passo `responder_duvida`, se o movimento
+`responder` cobrir o mesmo caso. O padrão "próxima etapa" de `decidirTradeoff` já saiu na #27 (virou `incerto`).
+
+### 9.4 O que isto adianta das fases 0 e 1
+
+- **Fase 0 (placar)**: os casos de ouro da conversa existem (`scripts/pre-entrevista/validar-conversa.ts`, 13 casos) e o
+  simulador mede tempo por fala (p50/p95), movimentos e travas. Faltam o juiz de conversa e a latência por etapa.
+- **Fase 1 (cérebro)**: o modelo já pode sair do roteiro e já decide o que o código decidia sozinho (repetir, esclarecer,
+  responder, e as três decisões pendentes). O prompt ganhou seções de objetivos com o porquê. O planejador e o Jev
+  continuam no caminho da fala; tirá-los de lá é o que falta da fase 1.
+
+### 9.5 O que fica para a série seguinte
+
+Levar o mesmo contrato (`movimento` e pergunta em aberto) para as entrevistas com o candidato: live coding
+(`lib/agents`, `components/ide`) e quadro (`lib/agente`, `lib/sessao`), incluindo o pedido de licença
+(`lib/conversa/licenca.ts`). Elas ficaram fora desta série de propósito.
