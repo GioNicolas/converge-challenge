@@ -5,10 +5,12 @@
  *
  *   npm run pre:conversa                       # todos os casos
  *   npm run pre:conversa -- repetir-resumo     # só um (ou vários ids)
+ *   npm run pre:conversa -- --estrito          # caso não montado também conta como falha
  *
  * Cada caso leva a conversa até o ponto desejado com um histórico de falas dela. Como o caminho depende do modelo,
- * o caso confere antes o passo em que a conversa está: se não chegou lá, sai como "não montado", sem contar como falha.
- * O script lista todas as falhas, sem parar na primeira, e sai com erro se houver alguma.
+ * o caso confere antes o passo em que a conversa está: se não chegou lá, sai como "não montado", sem contar como falha
+ * (a não ser com `--estrito`, ou quando nenhum caso chegou ao ponto). O script lista todas as falhas, sem parar na
+ * primeira, sai com erro se houver alguma, e imprime o tempo de espera pela fala testada de cada caso (p50 / p95).
  *
  * Precisa de `.env.local` com FEATHERLESS_API_KEY e TYPESAFE_API_KEY. A OpenRouter (modelos pagos de produção) só
  * entra com `--pago`, e aí precisa também de OPENROUTER_API_KEY (ver `scripts/_gasto.ts`).
@@ -16,7 +18,7 @@
 import { pago } from "../_gasto";
 import { isDeepStrictEqual } from "node:util";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
-import { sobreposicao } from "@/lib/agente/guardas";
+import { normalizar, sobreposicao } from "@/lib/agente/guardas";
 import { classificarVaga, type Classificacao, type Vaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias, type ResultadoCompetencias } from "@/lib/pre-entrevista/competencias";
 import { contarFrases } from "@/lib/pre-entrevista/conversa";
@@ -24,7 +26,7 @@ import { normalizarTexto } from "@/lib/pre-entrevista/frases";
 import { descreverPasso, nivelEmAberto, type Passo } from "@/lib/pre-entrevista/planejador";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa, conduzirTurno } from "@/lib/pre-entrevista/turno";
-import { checarEstilo } from "./checagens";
+import { checarEstilo, descreverTempos } from "./checagens";
 
 /** Quanto a pergunta nova precisa ter das palavras da anterior para contar como a mesma pergunta. */
 const LIMIAR_MESMA_PERGUNTA = 0.5;
@@ -34,6 +36,8 @@ const MAX_PALAVRAS_FALA_CURTA = 30;
 /** O estado que um pedido de repetição não pode mudar. */
 interface Foto {
   ultimoPasso?: Passo;
+  /** O passo em curso: o último, ou o que a dúvida respondida retomou (ver `emCurso`). */
+  emCurso?: Passo;
   perguntasPorTopico: Record<string, number>;
   resumos: number;
   decisoesTradeoff: Sessao["plano"]["decisoesTradeoff"];
@@ -49,6 +53,7 @@ interface Foto {
 function fotografar(sessao: Sessao): Foto {
   return structuredClone({
     ultimoPasso: sessao.plano.ultimoPasso,
+    emCurso: emCurso(sessao),
     perguntasPorTopico: sessao.plano.perguntasPorTopico,
     resumos: sessao.plano.resumos,
     decisoesTradeoff: sessao.plano.decisoesTradeoff,
@@ -91,9 +96,32 @@ interface Caso {
 // Checagens reutilizadas pelos casos
 // ---------------------------------------------------------------------------
 
-/** A parte da fala que é a pergunta: a última frase terminada em "?". */
+/**
+ * A parte da fala que é a pergunta: a última frase terminada em "?". Frase só termina em pontuação seguida de espaço
+ * ou do fim, para "R$ 1.000" ou "3.5" não cortarem a pergunta no meio.
+ */
 function perguntaDe(fala: string): string {
-  return fala.match(/[^.!?]*\?/g)?.at(-1)?.trim() ?? "";
+  return fala.split(/(?<=[.!?])\s+/).filter((f) => f.trim().endsWith("?")).at(-1)?.trim() ?? "";
+}
+
+/** Palavras curtas e conectivos que não dizem de que a pergunta trata. */
+const VAZIAS = new Set("como qual quais quando onde porque para pela pelo voce isso esse essa este esta mais muito sobre entao".split(" "));
+
+/**
+ * Semelhança entre duas falas. É a `sobreposicao` das guardas, mas sem o mínimo de 3 palavras de conteúdo: aqui a
+ * pergunta curta repetida ("E o pagamento duplicado?") precisa contar como a mesma.
+ */
+function semelhanca(a: string, b: string): number {
+  const s = sobreposicao(a, b);
+  if (s > 0) return s;
+  const conteudo = (t: string) => new Set(normalizar(t).split(" ").filter((p) => p.length > 2 && !VAZIAS.has(p)));
+  const ta = conteudo(a);
+  const tb = conteudo(b);
+  const menor = Math.min(ta.size, tb.size);
+  if (menor === 0) return 0;
+  let comum = 0;
+  for (const t of ta) if (tb.has(t)) comum++;
+  return comum / menor;
 }
 
 function palavras(fala: string): number {
@@ -107,7 +135,7 @@ const terminaEmPergunta = (r: Resultado): Checagem => ({
 
 /** A pergunta da fala nova tem as palavras da pergunta que estava em aberto. */
 function mesmaPergunta(r: Resultado, nome = "traz de novo a pergunta que estava em aberto"): Checagem {
-  const s = sobreposicao(perguntaDe(r.depois.fala), perguntaDe(r.antes.fala));
+  const s = semelhanca(perguntaDe(r.depois.fala), perguntaDe(r.antes.fala));
   return { nome, ok: s >= LIMIAR_MESMA_PERGUNTA, detalhe: `sobreposição ${s.toFixed(2)} (limiar ${LIMIAR_MESMA_PERGUNTA})` };
 }
 
@@ -118,11 +146,14 @@ function planoIgual(r: Resultado): Checagem {
   return { nome: "foco, ênfase e preferências iguais aos de antes", ok: mudaram.length === 0, detalhe: mudaram.length ? `mudou: ${mudaram.join(", ")}` : undefined };
 }
 
-/** O passo em curso não avançou: mesmo último passo, mesmas contagens de pergunta e de resumo. */
+/**
+ * O passo em curso não avançou: mesmo passo em curso, mesmas contagens de pergunta e de resumo. Responder a fala
+ * como dúvida e retomar o mesmo passo (`responder_duvida`) não conta como avanço.
+ */
 function passoNaoAvanca(r: Resultado): Checagem {
   const diferencas: string[] = [];
-  if (!isDeepStrictEqual(r.antes.ultimoPasso, r.depois.ultimoPasso)) {
-    diferencas.push(`passo foi de ${descrever(r.antes.ultimoPasso)} para ${descrever(r.depois.ultimoPasso)}`);
+  if (!isDeepStrictEqual(r.antes.emCurso, r.depois.emCurso)) {
+    diferencas.push(`passo foi de ${descrever(r.antes.emCurso)} para ${descrever(r.depois.emCurso)}`);
   }
   if (!isDeepStrictEqual(r.antes.perguntasPorTopico, r.depois.perguntasPorTopico)) {
     diferencas.push(`perguntas por tópico: ${JSON.stringify(r.antes.perguntasPorTopico)} -> ${JSON.stringify(r.depois.perguntasPorTopico)}`);
@@ -140,7 +171,7 @@ function falaCurta(r: Resultado): Checagem {
 /** Sem pergunta nova: ou não pergunta nada, ou a pergunta é a que já estava em aberto. */
 function semPerguntaNova(r: Resultado): Checagem {
   const pergunta = perguntaDe(r.depois.fala);
-  const s = pergunta ? sobreposicao(pergunta, perguntaDe(r.antes.fala)) : 1;
+  const s = pergunta ? semelhanca(pergunta, perguntaDe(r.antes.fala)) : 1;
   return { nome: "sem pergunta nova", ok: !pergunta || s >= LIMIAR_MESMA_PERGUNTA, detalhe: pergunta ? `pergunta: "${pergunta}" (sobreposição ${s.toFixed(2)})` : undefined };
 }
 
@@ -154,10 +185,13 @@ function semJargaoNemRotulo(r: Resultado): Checagem {
   };
 }
 
-function contem(r: Resultado, nome: string, trechos: string[]): Checagem {
+/** A fala tem cada trecho. Um trecho em lista vale se qualquer uma das formas aparecer ("minutos" ou "hora"). */
+function contem(r: Resultado, nome: string, trechos: Array<string | string[]>): Checagem {
   const fala = normalizarTexto(r.depois.fala);
-  const faltam = trechos.filter((t) => !fala.includes(normalizarTexto(t)));
-  return { nome, ok: faltam.length === 0, detalhe: faltam.length ? `falta: ${faltam.join(", ")}` : undefined };
+  const faltam = trechos
+    .map((t) => (Array.isArray(t) ? t : [t]))
+    .filter((formas) => !formas.some((f) => fala.includes(normalizarTexto(f))));
+  return { nome, ok: faltam.length === 0, detalhe: faltam.length ? `falta: ${faltam.map((f) => f.join(" ou ")).join(", ")}` : undefined };
 }
 
 const descrever = (passo: Passo | undefined) => (passo ? descreverPasso(passo) : "(nenhum)");
@@ -205,8 +239,8 @@ const CASOS: Caso[] = [
       passoNaoAvanca(r),
       {
         nome: "o passo seguinte não é a pergunta de contexto nem o resumo",
-        ok: !["perguntar_contexto", "resumo_final"].includes(r.depois.ultimoPasso?.tipo ?? ""),
-        detalhe: `passo em curso depois da fala: ${descrever(r.depois.ultimoPasso)}`,
+        ok: !["perguntar_contexto", "resumo_final"].includes(r.depois.emCurso?.tipo ?? ""),
+        detalhe: `passo em curso depois da fala: ${descrever(r.depois.emCurso)}`,
       },
     ],
   },
@@ -220,7 +254,7 @@ const CASOS: Caso[] = [
       terminaEmPergunta(r),
       // Reformular troca as palavras: basta ser sobre o mesmo assunto, com um limiar mais baixo que o da repetição.
       (() => {
-        const s = sobreposicao(r.depois.fala, r.antes.fala);
+        const s = semelhanca(r.depois.fala, r.antes.fala);
         return { nome: "é sobre o mesmo assunto", ok: s >= 0.25, detalhe: `sobreposição com a fala anterior ${s.toFixed(2)} (limiar 0.25)` };
       })(),
       semJargaoNemRotulo(r),
@@ -306,9 +340,12 @@ const CASOS: Caso[] = [
       { nome: "não encerra", ok: r.passo.tipo !== "encerrar" && r.depois.ultimoPasso?.tipo !== "encerrar", detalhe: `passo: ${descrever(r.passo)}` },
       { nome: "não conta outro resumo", ok: r.depois.resumos === r.antes.resumos, detalhe: `resumos: ${r.antes.resumos} -> ${r.depois.resumos}` },
       passoNaoAvanca(r),
-      contem(r, "a fala traz o formato e a duração de novo", [r.antes.modo === "system_design" ? "system design" : "live coding", "minutos"]),
+      contem(r, "a fala traz o formato e a duração de novo", [
+        r.antes.modo === "system_design" ? ["system design", "desenho", "quadro"] : ["live coding", "codigo ao vivo", "programando"],
+        ["minutos", "min", "hora"],
+      ]),
       (() => {
-        const s = sobreposicao(r.depois.fala, r.antes.fala);
+        const s = semelhanca(r.depois.fala, r.antes.fala);
         return { nome: "a fala traz o resumo de novo (formato, foco e duração)", ok: s >= LIMIAR_MESMA_PERGUNTA, detalhe: `sobreposição com o resumo ${s.toFixed(2)}` };
       })(),
       planoIgual(r),
@@ -379,10 +416,17 @@ function prepararVaga(ref: Caso["vaga"]) {
 function movimentoDaUltimaFala(sessao: Sessao): string {
   const evento = [...sessao.logs].reverse().find((e) => e.tipo === "fala_agente");
   const movimento = (evento?.dados as { movimento?: unknown } | undefined)?.movimento;
+  // O campo só existe a partir da issue #24: na linha de base sai sempre "(sem o campo)", e isso é esperado.
   return typeof movimento === "string" ? movimento : "(sem o campo)";
 }
 
-async function rodarCaso(caso: Caso): Promise<Desfecho> {
+interface Rodada {
+  desfecho: Desfecho;
+  /** Espera da recrutadora pela fala testada (cobertura + resposta do modelo), em ms. Só quando a fala rodou. */
+  esperaMs?: number;
+}
+
+async function rodarCaso(caso: Caso): Promise<Rodada> {
   console.log(`\n================================================================`);
   console.log(`caso: ${caso.id}`);
   console.log(`situação: ${caso.situacao.descricao}`);
@@ -402,22 +446,26 @@ async function rodarCaso(caso: Caso): Promise<Desfecho> {
       console.log(`  Totti [${descreverPasso(passo)}]: ${sessao.transcricao.at(-1)?.text}`);
     }
     if (!caso.situacao.chegou(sessao)) {
-      console.log(`  NÃO MONTADO: a conversa não chegou ao ponto (passo em curso: ${descrever(sessao.plano.ultimoPasso)})`);
-      return "nao_montado";
+      console.log(`  NÃO MONTADO: a conversa não chegou ao ponto (passo em curso: ${descrever(emCurso(sessao))})`);
+      return { desfecho: "nao_montado" };
     }
 
     const antes = fotografar(sessao);
+    const inicio = performance.now();
     const { passo } = await conduzirTurno(sessao, caso.fala);
+    const esperaMs = Math.round(performance.now() - inicio);
+    // A extração também roda depois da fala testada: ela pode mudar foco e preferências, e `planoIgual` precisa ver isso.
+    await extrairAgora(sessao);
     const depois = fotografar(sessao);
     console.log(`  >> Recrutadora: ${caso.fala}`);
-    console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoDaUltimaFala(sessao)}]: ${depois.fala}`);
+    console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoDaUltimaFala(sessao)} | ${esperaMs} ms]: ${depois.fala}`);
 
     const checagens = caso.conferir({ antes, depois, passo, sessao });
     for (const c of checagens) console.log(`  ${c.ok ? "PASS" : "FAIL"} ${c.nome}${c.detalhe ? ` | ${c.detalhe}` : ""}`);
-    return checagens.every((c) => c.ok) ? "passou" : "falhou";
+    return { desfecho: checagens.every((c) => c.ok) ? "passou" : "falhou", esperaMs };
   } catch (err) {
     console.log(`  ERRO: ${err instanceof Error ? err.message : String(err)}`);
-    return "erro";
+    return { desfecho: "erro" };
   }
 }
 
@@ -426,15 +474,18 @@ async function main(): Promise<void> {
   if (faltam.length > 0) throw new Error(`faltam chaves no .env.local: ${faltam.join(", ")}`);
   silenciarLogsDoServidor();
 
-  const filtros = process.argv.slice(2);
+  // --estrito: caso não montado conta como falha (sem ele, só conta quando nenhum caso chegou ao ponto).
+  const estrito = process.argv.includes("--estrito");
+  const filtros = process.argv.slice(2).filter((a) => a !== "--estrito");
   const desconhecidos = filtros.filter((f) => !CASOS.some((c) => c.id === f));
   if (desconhecidos.length > 0) {
     throw new Error(`caso(s) "${desconhecidos.join(", ")}" não existe(m): ${CASOS.map((c) => c.id).join(", ")}`);
   }
   const casos = filtros.length ? CASOS.filter((c) => filtros.includes(c.id)) : CASOS;
 
-  const desfechos: Array<[string, Desfecho]> = [];
-  for (const caso of casos) desfechos.push([caso.id, await rodarCaso(caso)]);
+  const rodadas: Array<[string, Rodada]> = [];
+  for (const caso of casos) rodadas.push([caso.id, await rodarCaso(caso)]);
+  const desfechos = rodadas.map(([id, r]) => [id, r.desfecho] as const);
 
   const ROTULO: Record<Desfecho, string> = { passou: "PASSOU", falhou: "FALHOU", nao_montado: "NÃO MONTADO", erro: "ERRO" };
   console.log(`\n================================================================`);
@@ -442,7 +493,14 @@ async function main(): Promise<void> {
   for (const [id, d] of desfechos) console.log(`  ${ROTULO[d].padEnd(11)} ${id}`);
   const contar = (d: Desfecho) => desfechos.filter(([, x]) => x === d).length;
   console.log(`  ${contar("passou")} passou | ${contar("falhou")} falhou | ${contar("erro")} com erro | ${contar("nao_montado")} não montado`);
-  if (contar("falhou") + contar("erro") > 0) process.exit(1);
+  const esperas = rodadas.flatMap(([, r]) => (r.esperaMs === undefined ? [] : [r.esperaMs]));
+  console.log(`  espera pela fala testada (cobertura + Totti): ${descreverTempos(esperas)}${pago ? "" : " | sem --pago: NÃO são os tempos de produção"}`);
+
+  const testados = casos.length - contar("nao_montado");
+  if (testados === 0) console.log("  nenhum caso chegou ao ponto: nada foi testado, e isso conta como falha");
+  else if (contar("nao_montado") > 0 && !estrito) console.log("  há casos não montados: com --estrito, eles contam como falha");
+  const falhou = contar("falhou") + contar("erro") > 0 || testados === 0 || (estrito && contar("nao_montado") > 0);
+  if (falhou) process.exit(1);
 }
 
 main().catch((err) => {

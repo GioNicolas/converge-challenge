@@ -14,11 +14,11 @@ import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { chat, type Mensagem } from "@/lib/pre-entrevista/llm";
 import { descreverPasso } from "@/lib/pre-entrevista/planejador";
-import { normalizarTexto } from "@/lib/pre-entrevista/pesos";
+import { normalizarTexto } from "@/lib/pre-entrevista/frases";
 import { DURACAO_PADRAO, paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa, atualizarNaoAvaliado, conduzirTurno } from "@/lib/pre-entrevista/turno";
-import { checarEstilo } from "./checagens";
+import { checarEstilo, descreverTempos } from "./checagens";
 
 /** Teto de falas da recrutadora por conversa (segurança). */
 const MAX_FALAS_RECRUTADORA = 14;
@@ -469,6 +469,11 @@ function imprimirTranscricao(persona: Persona, sessao: Sessao, registros: Regist
   console.log(
     `  totais: ${registros.length} falas da recrutadora | Totti ${totalTotti} ms | cobertura ${totalCob} ms | extração ${totalExt} ms`,
   );
+  // Falas fixas (sem modelo) saem com 0 ms e ficam fora: o que interessa é a espera pela resposta do modelo.
+  const comModelo = registros.filter((r) => r.msTotti > 0);
+  console.log(`  tempo por fala do Totti: ${descreverTempos(comModelo.map((r) => r.msTotti))}`);
+  // A cobertura roda antes da resposta, no mesmo turno: a recrutadora espera as duas.
+  console.log(`  espera por fala (cobertura + Totti): ${descreverTempos(comModelo.map((r) => r.msTotti + r.msCobertura))}`);
   console.log(`  perguntas por tópico: ${JSON.stringify(sessao.plano.perguntasPorTopico)}`);
   console.log(`  resumos: ${sessao.plano.resumos}`);
 }

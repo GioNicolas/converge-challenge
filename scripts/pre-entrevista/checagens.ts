@@ -1,6 +1,6 @@
 /**
- * Checagens de estilo da fala do Totti, usadas pelo simulador (`simular.ts`) e pelos casos fixos de conversa
- * (`validar-conversa.ts`). Funções puras.
+ * Checagens de estilo e medidas de tempo da fala do Totti, usadas pelo simulador (`simular.ts`) e pelos casos fixos
+ * de conversa (`validar-conversa.ts`). Funções puras.
  */
 import { perguntaObvia } from "@/lib/pre-entrevista/perguntas";
 import type { Turno } from "@/lib/pre-entrevista/rascunho";
@@ -26,4 +26,17 @@ export function checarEstilo(transcricao: Turno[]): string[] {
     if (i > 0 && frases > 4) avisos.push(`fala ${i + 1} tem ${frases} frases`);
   }
   return avisos;
+}
+
+/** Percentil `p` (0 a 100) pelo método do posto mais próximo; `undefined` sem amostras. */
+export function percentil(amostras: number[], p: number): number | undefined {
+  if (amostras.length === 0) return undefined;
+  const ordenadas = [...amostras].sort((a, b) => a - b);
+  return ordenadas[Math.max(0, Math.ceil((p / 100) * ordenadas.length) - 1)];
+}
+
+/** "p50 X ms | p95 Y ms (n falas)" para o placar de tempo. */
+export function descreverTempos(amostras: number[]): string {
+  const ms = (v: number | undefined) => (v === undefined ? "-" : `${v} ms`);
+  return `p50 ${ms(percentil(amostras, 50))} | p95 ${ms(percentil(amostras, 95))} (${amostras.length} fala(s))`;
 }

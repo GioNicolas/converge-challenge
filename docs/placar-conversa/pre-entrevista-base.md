@@ -7,32 +7,39 @@ comporta **antes** de qualquer mudança de prompt, trava ou planejador, para a �
 
 A linha de base ainda não foi medida. Os casos e a persona foram escritos sem `.env.local`, e os dois comandos
 precisam do LLM e do Jev reais (`FEATHERLESS_API_KEY`, `TYPESAFE_API_KEY`; com `--pago`, também
-`OPENROUTER_API_KEY`). Sem `--pago` os dois rodam só na Featherless e os tempos não são os de produção: a linha de
-base e a medição final precisam ser feitas do mesmo jeito para a comparação valer.
+`OPENROUTER_API_KEY`). Sem `--pago` os dois rodam só na Featherless e os tempos não são os de produção. Como a
+latência é uma das medidas que a série não pode piorar, a linha de base e a medição final devem rodar **com `--pago`**,
+do mesmo jeito, para a comparação de tempo valer.
 
 Para medir, na branch `conversa/23-placar-casos` (ou em qualquer commit anterior à issue #24):
 
 ```bash
-npm run pre:conversa
-npm run pre:simular -- distraida
+npm run pre:conversa -- --pago
+npm run pre:simular -- distraida --pago
 ```
 
 e preencher as duas tabelas abaixo com o que sair.
 
 ## Casos fixos (`npm run pre:conversa`)
 
-| caso | situação | fala dela | resultado | fala que saiu |
-|---|---|---|---|---|
-| `repetir-aprofundamento` | último passo: `aprofundar` | "desculpa, pode repetir a pergunta" | pendente | |
-| `nao-entendeu` | último passo: `aprofundar` | "como assim, não entendi o que você quer saber" | pendente | |
-| `pede-tempo` | último passo: `aprofundar` | "pera, deixa eu abrir a descrição da vaga aqui" | pendente | |
-| `checagem-audio` | logo depois da abertura | "tá me ouvindo?" | pendente | |
-| `repetir-nivel` | a abertura perguntou o nível | "oi? não ouvi" | pendente | |
-| `repetir-oferta-troca` | a abertura ofereceu a troca | "não entendi, quais eram as opções mesmo" | pendente | |
-| `repetir-resumo` | último passo: `resumo_final` | "pode repetir o resumo" | pendente | |
-| `duvida-fora-da-entrevista` | último passo: `aprofundar` | "antes disso, o candidato vai ver essa conversa" | pendente | |
+| caso | situação | fala dela | resultado | espera (ms) | fala que saiu |
+|---|---|---|---|---|---|
+| `repetir-aprofundamento` | último passo: `aprofundar` | "desculpa, pode repetir a pergunta" | pendente | | |
+| `nao-entendeu` | último passo: `aprofundar` | "como assim, não entendi o que você quer saber" | pendente | | |
+| `pede-tempo` | último passo: `aprofundar` | "pera, deixa eu abrir a descrição da vaga aqui" | pendente | | |
+| `checagem-audio` | logo depois da abertura | "tá me ouvindo?" | pendente | | |
+| `repetir-nivel` | a abertura perguntou o nível | "oi? não ouvi" | pendente | | |
+| `repetir-oferta-troca` | a abertura ofereceu a troca | "não entendi, quais eram as opções mesmo" | pendente | | |
+| `repetir-resumo` | último passo: `resumo_final` | "pode repetir o resumo" | pendente | | |
+| `duvida-fora-da-entrevista` | último passo: `aprofundar` | "antes disso, o candidato vai ver essa conversa" | pendente | | |
 
 Resultado é `passou`, `falhou` (com as checagens que falharam) ou `não montado` (a conversa não chegou ao ponto).
+Espera é o tempo da fala testada (cobertura + resposta do modelo); o placar também imprime o p50 / p95 dos casos. Na
+linha de base o `movimento` sai sempre "(sem o campo)": o campo só entra com a issue #24.
+
+| medida | valor |
+|---|---|
+| espera pela fala testada (p50 / p95) | pendente |
 
 ## Persona `distraida` (`npm run pre:simular -- distraida`)
 
@@ -41,6 +48,7 @@ Resultado é `passou`, `falhou` (com as checagens que falharam) ou `não montado
 | fidelidade do plano | pendente |
 | checagens de estilo e repetição | pendente |
 | tempo por fala do Totti (p50 / p95) | pendente |
+| espera por fala, cobertura + Totti (p50 / p95) | pendente |
 
 ## O que a leitura do código prevê
 
