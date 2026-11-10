@@ -121,8 +121,21 @@ class FalhaRecuperavel extends Error {}
  */
 class FilaCheia extends FalhaRecuperavel {}
 
-function esperar(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function esperar(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const concluir = () => {
+      signal?.removeEventListener("abort", abortar);
+      resolve();
+    };
+    const abortar = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abortar);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(concluir, ms);
+    signal?.addEventListener("abort", abortar, { once: true });
+  });
 }
 
 async function tentarAlvo(
@@ -133,13 +146,13 @@ async function tentarAlvo(
   if (!chave) throw new FalhaRecuperavel(`${CHAVES[alvo.provedor]} não definida`);
 
   const limite = alvo.timeoutMs ?? o.timeoutMs;
+  // Uma fala tem um único prazo para fila, envio e esperas de 503 deste alvo.
+  const prazoFala = o.prioridade === "fala" ? AbortSignal.timeout(limite) : undefined;
   for (let tentativa = 0; ; tentativa++) {
     let res: Response;
     let corpo: string;
-    // Uma tentativa. Fala: o prazo (`limite`) nasce antes da fila e cobre fila + envio, então a fala não espera sem
-    // limite. Fundo: o prazo nasce no envio, a espera na fila não conta.
+    // Fala: o prazo inclui fila e envio. Fundo: o prazo começa no envio, sem contar a fila.
     const chegada = Date.now();
-    const prazoFala = o.prioridade === "fala" ? AbortSignal.timeout(limite) : undefined;
     let enviado = false;
     // Um envio à HTTP: resposta e corpo juntos, porque o provedor gera tudo antes de responder.
     const enviar = async () => {
@@ -171,7 +184,7 @@ async function tentarAlvo(
           ? await comVagaNoProvedor("featherless", o.prioridade, enviar, prazoFala)
           : await enviar());
       if (res.status === 503 && tentativa < ESPERAS_503_MS.length) {
-        await esperar(ESPERAS_503_MS[tentativa]);
+        await esperar(ESPERAS_503_MS[tentativa], prazoFala);
         continue;
       }
     } catch (err) {

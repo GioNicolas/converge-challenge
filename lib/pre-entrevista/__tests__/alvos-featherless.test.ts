@@ -1,4 +1,4 @@
-// Ordem dos alvos (Featherless antes da OpenRouter), fila da Featherless com prioridade e o `chat` passando por ela.
+// Ordem dos alvos, fila da Featherless com prioridade e o `chat` passando por ela.
 // Sem rede: o fetch é falso, e a chave da Featherless é só do processo do teste.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -59,22 +59,23 @@ test("competências: Featherless primeiro, OpenRouter por último", () => {
   assert.equal(ALVOS_COMPETENCIAS.at(-1)?.provedor, "openrouter");
 });
 
-test("conversa: OpenRouter primeiro (gemini-3.5-flash-lite), Featherless de reserva, uma OpenRouter só", (t) => {
-  fixarEnv(t, { PRE_CONVERSA_MODEL: undefined, CONVERSA_MODEL: undefined });
+test("conversa: Featherless primeiro, uma única reserva OpenRouter", (t) => {
+  fixarEnv(t, { CONVERSA_FALLBACK_MODEL: undefined, CONVERSA_MODEL: undefined });
   const alvos = alvosDaConversa();
+  assert.ok(featherlessAntesDaOpenrouter(alvos));
   assert.deepEqual(
     alvos.map((a) => [a.provedor, a.model]),
     [
-      ["openrouter", "google/gemini-3.5-flash-lite"],
       ["featherless", "google/gemma-4-26B-A4B-it"],
+      ["openrouter", "google/gemini-2.5-flash-lite"],
     ],
   );
   assert.equal(alvos.filter((a) => a.provedor === "openrouter").length, 1, "uma reserva só");
 
-  fixarEnv(t, { PRE_CONVERSA_MODEL: "google/gemini-2.5-flash-lite", CONVERSA_MODEL: "outro/modelo" });
+  fixarEnv(t, { CONVERSA_FALLBACK_MODEL: "google/gemini-3.5-flash-lite", CONVERSA_MODEL: "outro/modelo" });
   const trocados = alvosDaConversa();
-  assert.equal(trocados[0].model, "google/gemini-2.5-flash-lite", "PRE_CONVERSA_MODEL troca o modelo da OpenRouter");
-  assert.equal(trocados[1].model, "outro/modelo", "CONVERSA_MODEL troca o da Featherless");
+  assert.equal(trocados[0].model, "outro/modelo", "CONVERSA_MODEL troca o da Featherless");
+  assert.equal(trocados[1].model, "google/gemini-3.5-flash-lite", "CONVERSA_FALLBACK_MODEL troca o da OpenRouter");
 });
 
 test("corpo do pedido: OpenRouter com gemini fixa o Google AI Studio; outros modelos e a Featherless não", async (t) => {
@@ -277,4 +278,29 @@ test("chat, fala: estoura o prazo na fila, passa para a reserva e a Featherless 
   const z = await seguinte;
   assert.equal(z.provedor, "featherless", "o alvo não ficou de descanso");
   assert.deepEqual(fila(), { ativas: 0, fundo: 0, esperando: 0 });
+});
+
+test("chat, fala: 503 respeita o prazo do alvo antes de passar à reserva", async (t) => {
+  fixarEnv(t, { FEATHERLESS_API_KEY: "chave-ficticia", OPENROUTER_API_KEY: "chave-ficticia" });
+  const enviados: string[] = [];
+  t.mock.method(globalThis, "fetch", (url: unknown) => {
+    enviados.push(String(url));
+    return Promise.resolve(
+      String(url).includes("featherless")
+        ? new Response("indisponível", { status: 503 })
+        : Response.json({ choices: [{ message: { content: "reserva" } }] }),
+    );
+  });
+
+  const inicio = Date.now();
+  const resposta = await chat({
+    alvos: [
+      { provedor: "featherless", model: "modelo-503-prazo", timeoutMs: 50 },
+      { provedor: "openrouter", model: "reserva-503-prazo", timeoutMs: 5_000 },
+    ],
+    messages: mensagens("503"),
+  });
+  assert.equal(resposta.provedor, "openrouter");
+  assert.equal(enviados.filter((url) => url.includes("featherless")).length, 1);
+  assert.ok(Date.now() - inicio < 1_500, "o retry não espera 2 s depois que o prazo termina");
 });
