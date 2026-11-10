@@ -16,10 +16,13 @@ export type CriterioDoCartao = {
 
 /** O que aparece ao passar o mouse sobre o resultado: tudo o que a tech lead precisa sem abrir o relatório. */
 export type CartaoDoResultado = {
+  /** Como a entrevista foi. */
   resumo: string;
+  /** O que o candidato propôs no desenho. Ausente quando o scorecard é antigo. */
+  solucao?: string;
   pontosFortes: string[];
   pontosFracos: string[];
-  /** O que explorar na próxima etapa. */
+  /** O que explorar na próxima etapa (só a sugestão do briefing). */
   proximosPassos: string[];
   criterios: CriterioDoCartao[];
 };

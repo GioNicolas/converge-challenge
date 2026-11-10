@@ -50,6 +50,8 @@ type Scorecard = {
   pontos_fortes: string[];
   pontos_a_aprofundar: string[];
   briefing_para_proxima_etapa: string;
+  resumo_da_solucao?: string;
+  resumo_da_entrevista?: string;
   origem: string;
   ajustes: string[];
 };
@@ -561,6 +563,8 @@ function PainelScorecard({ sc }: { sc: Scorecard }) {
         <div><h3 className="font-semibold">Pontos fortes</h3><ul className="list-inside list-disc">{sc.pontos_fortes.map((p) => <li key={p}>{p}</li>)}</ul></div>
         <div><h3 className="font-semibold">A aprofundar</h3><ul className="list-inside list-disc">{sc.pontos_a_aprofundar.map((p) => <li key={p}>{p}</li>)}</ul></div>
       </div>
+      {sc.resumo_da_solucao && <div><h3 className="font-semibold">O que o candidato propôs</h3><p>{sc.resumo_da_solucao}</p></div>}
+      {sc.resumo_da_entrevista && <div><h3 className="font-semibold">Resumo da entrevista</h3><p>{sc.resumo_da_entrevista}</p></div>}
       <div><h3 className="font-semibold">Briefing para a próxima etapa</h3><p>{sc.briefing_para_proxima_etapa}</p></div>
       {sc.ajustes.length > 0 && (
         <details><summary className="cursor-pointer text-xs">Correções automáticas aplicadas ({sc.ajustes.length})</summary>

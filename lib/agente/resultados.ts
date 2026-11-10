@@ -41,17 +41,30 @@ export async function listarDoIndice(kv: Kv): Promise<ResumoDoQuadro[]> {
 const MAX_JUSTIFICATIVA = 420;
 const corta = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
 
-/** O cartão do painel a partir do scorecard (nomes dos critérios vêm do kit). */
+const MAX_PONTOS_FRACOS = 3;
+
+/** O cartão do painel a partir do scorecard (nomes dos critérios vêm do kit). Só usa o briefing para a próxima etapa. */
 export function cartaoDoScorecard(sc: Scorecard, kit: Kit): CartaoDoResultado {
+  const criterios = sc.criterios.map((c) => ({
+    nome: kit.criterios.find((k) => k.id === c.criterio)?.nome ?? c.criterio,
+    nota: c.nota,
+    justificativa: corta(c.justificativa, MAX_JUSTIFICATIVA),
+  }));
+  // Com nota: o mais fraco primeiro. Sem nota não entra em nada disto.
+  const avaliados = sc.criterios.filter((c) => c.nota !== null).sort((a, b) => a.nota! - b.nota!);
+  // Scorecard antigo: os "pontos a aprofundar" são temas, não o que aconteceu. Usa a justificativa dos critérios fracos.
+  const comResumoNovo = Boolean(sc.resumo_da_entrevista?.trim() || sc.resumo_da_solucao?.trim());
+  const fracosPelaNota = avaliados.filter((c) => c.nota! <= 2).slice(0, MAX_PONTOS_FRACOS).map((c) => corta(c.justificativa, MAX_JUSTIFICATIVA));
+  const pontosFracos = comResumoNovo && sc.pontos_a_aprofundar.length > 0 ? sc.pontos_a_aprofundar : fracosPelaNota;
+  // Sem resumo escrito, a justificativa do critério mais fraco; nunca o briefing da próxima etapa.
+  const resumo = sc.resumo_da_entrevista?.trim() || (avaliados[0] ? corta(avaliados[0].justificativa, MAX_JUSTIFICATIVA) : "");
+  const proximoPasso = sc.briefing_para_proxima_etapa.trim();
   return {
-    resumo: sc.briefing_para_proxima_etapa,
+    resumo,
+    solucao: sc.resumo_da_solucao?.trim() ?? "",
     pontosFortes: sc.pontos_fortes,
-    pontosFracos: sc.pontos_a_aprofundar,
-    proximosPassos: [],
-    criterios: sc.criterios.map((c) => ({
-      nome: kit.criterios.find((k) => k.id === c.criterio)?.nome ?? c.criterio,
-      nota: c.nota,
-      justificativa: corta(c.justificativa, MAX_JUSTIFICATIVA),
-    })),
+    pontosFracos,
+    proximosPassos: proximoPasso ? [proximoPasso] : [],
+    criterios,
   };
 }

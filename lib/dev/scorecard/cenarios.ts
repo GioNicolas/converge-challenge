@@ -83,6 +83,7 @@ export async function executarCenarioScorecard(c: CenarioScorecard, modeloReal?:
         : [{ tipo: "fala", horario: horarioDesenho, texto: falas[i], elementos: [], imagem: null }],
     })),
     pontos_fortes: [], pontos_a_aprofundar: [], briefing_para_proxima_etapa: "Aprofundar os critérios com cobertura limitada.",
+    resumo_da_solucao: "", resumo_da_entrevista: "",
   };
   const llm = criarClienteFalso(args => args.nomeSchema === "scorecard_entrevista" ? resposta
     : { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes });

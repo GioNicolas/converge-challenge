@@ -51,6 +51,8 @@ function saida(parcial: Partial<SaidaScorecardLlm> = {}): SaidaScorecardLlm {
     pontos_fortes: ["a"],
     pontos_a_aprofundar: ["b"],
     briefing_para_proxima_etapa: "x",
+    resumo_da_solucao: "Um banco e uma API.",
+    resumo_da_entrevista: "Boa base.",
     ...parcial,
   };
 }
@@ -291,6 +293,19 @@ describe("scorecard: regressões de proveniência", () => {
     assert.equal(sc.criterios[0].criterio, "requisitos");
     assert.equal(sc.criterios[0].evidencias[0].texto, literal);
     assert.ok(sc.ajustes.some(a => a.includes("Referências técnicas")));
+  });
+
+  it("resumo da solução e da entrevista passam pelo texto legível; o resumo da entrevista sai se as guardas corrigiram as notas", () => {
+    const f = fontes().f;
+    const s = saida({ resumo_da_solucao: "Um cache com e1 na frente do Postgres.", resumo_da_entrevista: "Boa base em dados_consistencia." });
+    const sc = aplicarGuardas(s, { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(sc.resumo_da_solucao, "Um cache com Postgres na frente do Postgres.");
+    assert.equal(sc.resumo_da_entrevista, "Boa base em Dados e consistência.");
+    // Nota de critério sem prova: as guardas mexem nos critérios, então o resumo escrito antes não vale.
+    const corrigido = aplicarGuardas({ ...s, criterios: s.criterios.map((c, i) => i === 0 ? { ...c, evidencias: [] } : c) },
+      { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(corrigido.resumo_da_entrevista, "");
+    assert.equal(corrigido.resumo_da_solucao, "Um cache com Postgres na frente do Postgres.");
   });
 
   it("falso usa nomes da rubrica nos pontos a aprofundar", () => {

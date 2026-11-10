@@ -80,6 +80,10 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
     "Estratégia de cache: o que entra, por quanto tempo e como invalida.",
     "Trade-offs não apareceram: vale perguntar consistência × disponibilidade.",
   ],
+  resumoDaSolucao:
+    "Um encurtador com API de criação e redirecionamento. Os links ficam num banco relacional, e a leitura passa por um cache na frente do banco. A geração do código é um contador com codificação em base 62.",
+  resumoDaEntrevista:
+    "Levantou os requisitos antes de desenhar e explicou as decisões enquanto desenhava. Faltou estimar o volume de leituras e comparar consistência com disponibilidade. Na mudança de 10x no volume, foi direto ao banco e à réplica de leitura, mas não revisou o cache.",
   briefing:
     "Boa base e ótimo levantamento de requisitos. Na próxima conversa, aprofunde cache e trade-offs de consistência: foi onde ela precisou de ajuda.",
   desenhoFinal: null,

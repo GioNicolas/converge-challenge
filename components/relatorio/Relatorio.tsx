@@ -242,6 +242,15 @@ function Adaptacao({ a, ordem, aoAbrirImagem }: { a: AdaptacaoVista; ordem: numb
   );
 }
 
+function Resumo({ titulo, texto }: { titulo: string; texto: string }) {
+  return (
+    <section className="flex flex-col gap-3 rounded-padrao bg-superficie p-6 shadow-padrao">
+      <h2 className="text-sm font-medium text-texto-suave">{titulo}</h2>
+      <p className="leading-relaxed text-pretty">{texto}</p>
+    </section>
+  );
+}
+
 function Lista({ titulo, icone, itens, vazio }: { titulo: string; icone: "check" | "aprofundar"; itens: string[]; vazio: string }) {
   return (
     <section className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao">
@@ -388,6 +397,15 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
             </div>
           </section>
         </Surgir>
+
+        {(r.resumoDaEntrevista || r.resumoDaSolucao) && (
+          <Surgir ordem={2}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {r.resumoDaEntrevista && <Resumo titulo="Como foi a entrevista" texto={r.resumoDaEntrevista} />}
+              {r.resumoDaSolucao && <Resumo titulo="O que o candidato propôs" texto={r.resumoDaSolucao} />}
+            </div>
+          </Surgir>
+        )}
 
         {r.desenhoFinal && (
           <Surgir ordem={3}>

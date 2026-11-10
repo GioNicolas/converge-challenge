@@ -131,50 +131,49 @@ function LinhaDeResultado({ e, posicao }: { e: EntrevistaReal; posicao?: number 
 // ---------------------------------------------------------------------------
 
 export function CartaoEnxuto({ e, cartao }: { e: EntrevistaReal; cartao: CartaoDoResultado }) {
-  const [detalhes, setDetalhes] = useState(false);
   return (
     <div className="flex flex-col gap-5 text-[13.5px] leading-relaxed text-texto">
       {cartao.resumo && <p className="text-texto/90">{cartao.resumo}</p>}
+      {cartao.solucao && (
+        <section className="flex flex-col gap-1.5">
+          <h3 className="rotulo text-texto-suave">O que o candidato propôs</h3>
+          <p className="text-texto/90">{cartao.solucao}</p>
+        </section>
+      )}
       <div className="grid gap-5 sm:grid-cols-2">
         <ListaDePontos titulo="Pontos fortes" itens={cartao.pontosFortes} vazio="Nenhum ponto forte registrado." marca="+" />
         <ListaDePontos titulo="Pontos fracos" itens={cartao.pontosFracos} vazio="Nenhum ponto fraco registrado." marca="–" />
       </div>
 
-      {detalhes && (
-        <>
-          {cartao.criterios.length > 0 && (
-            <section className="flex flex-col gap-2.5">
-              <h3 className="rotulo text-texto-suave">Critérios e por que cada nota</h3>
-              <ul className="flex flex-col gap-3.5">
-                {[...cartao.criterios]
-                  .sort((x, y) => (y.nota ?? -1) - (x.nota ?? -1))
-                  .map((c) => (
-                    <li key={c.nome} className="flex flex-col gap-1.5">
-                      <div className="grid grid-cols-[minmax(0,1fr)_72px_44px] items-center gap-3">
-                        <span className={`truncate font-medium ${c.nota === null ? "text-texto-suave" : ""}`} title={c.nome}>
-                          {c.nome}
-                        </span>
-                        <BarraDaNota nota={c.nota} />
-                        <span className="numero text-right text-[13px]">
-                          {c.nota === null ? <span className="text-texto-suave">—</span> : <>{c.nota}<span className="text-texto-suave">/4</span></>}
-                        </span>
-                      </div>
-                      <p className="text-[12.5px] text-texto-suave">
-                        {c.nota === null ? "Não explorado na entrevista." : c.justificativa || "Sem justificativa registrada."}
-                      </p>
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          )}
-          {cartao.proximosPassos.length > 0 && <ListaDePontos titulo="Para a próxima etapa" itens={cartao.proximosPassos} vazio="" marca="→" />}
-        </>
+      {cartao.criterios.length > 0 && (
+        <section className="flex flex-col gap-2.5">
+          <h3 className="rotulo text-texto-suave">Critérios e por que cada nota</h3>
+          <ul className="flex flex-col gap-3.5">
+            {[...cartao.criterios]
+              .sort((x, y) => (y.nota ?? -1) - (x.nota ?? -1))
+              .map((c) => (
+                <li key={c.nome} className="flex flex-col gap-1.5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_72px_44px] items-center gap-3">
+                    <span className={`truncate font-medium ${c.nota === null ? "text-texto-suave" : ""}`} title={c.nome}>
+                      {c.nome}
+                    </span>
+                    <BarraDaNota nota={c.nota} />
+                    <span className="numero text-right text-[13px]">
+                      {c.nota === null ? <span className="text-texto-suave">—</span> : <>{c.nota}<span className="text-texto-suave">/4</span></>}
+                    </span>
+                  </div>
+                  <p className="text-[12.5px] text-texto-suave">
+                    {c.nota === null ? "Não explorado na entrevista." : c.justificativa || "Sem justificativa registrada."}
+                  </p>
+                </li>
+              ))}
+          </ul>
+        </section>
       )}
 
+      {cartao.proximosPassos.length > 0 && <ListaDePontos titulo="Para a próxima etapa" itens={cartao.proximosPassos} vazio="" marca="→" />}
+
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
-        <button type="button" aria-expanded={detalhes} onClick={() => setDetalhes((v) => !v)} className="text-texto underline decoration-texto/25 underline-offset-4 hover:decoration-texto">
-          {detalhes ? "Esconder detalhes" : "Ver detalhes das notas"}
-        </button>
         <Link href={e.href} className="inline-flex items-center gap-1 text-texto-suave underline decoration-texto/25 underline-offset-4 hover:text-texto">
           Ver a entrevista ({e.formato === "system_design" ? "quadro e conversa" : "código e conversa"}) <ArrowRight size={13} />
         </Link>
