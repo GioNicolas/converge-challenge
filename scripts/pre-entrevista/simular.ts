@@ -19,6 +19,7 @@ import { DURACAO_PADRAO, paraInterviewConfig } from "@/lib/pre-entrevista/rascun
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa, atualizarNaoAvaliado, conduzirTurno } from "@/lib/pre-entrevista/turno";
 import { checarEstilo, descreverTempos } from "./checagens";
+import { decisoesDoModelo } from "./decisoes";
 
 /** Teto de falas da recrutadora por conversa (segurança). */
 const MAX_FALAS_RECRUTADORA = 14;
@@ -416,8 +417,6 @@ interface DadosDeConducao {
   antes?: string;
   depois?: string;
   movimento?: string;
-  pendente?: { tipo: string };
-  decisao?: string;
 }
 
 /** Travas, movimentos, decisões pendentes e tempo por fala de uma sessão. Soma em `medidas` e imprime o da sessão. */
@@ -434,12 +433,12 @@ function imprimirConducao(sessao: Sessao, registros: Registro[]): void {
     if (e.tipo === "fala_agente" && dados.movimento) {
       somar(daSessao.movimentos, dados.movimento);
       somar(medidas.movimentos, dados.movimento);
-      if (dados.pendente) {
-        const chave = `${dados.pendente.tipo}:${dados.decisao || "sem campo"}`;
-        somar(daSessao.decisoes, chave);
-        somar(medidas.decisoes, chave);
-      }
     }
+  }
+  // A decisão vem do evento que a aplica, não da fala: a fala dita pode ser a pergunta seguinte ou o encerramento.
+  for (const chave of decisoesDoModelo(sessao.logs)) {
+    somar(daSessao.decisoes, chave);
+    somar(medidas.decisoes, chave);
   }
   const tempos = registros.map((r) => r.msTotti).filter((ms) => ms > 0);
   medidas.msPorFala.push(...tempos);
