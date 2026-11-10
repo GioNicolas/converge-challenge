@@ -11,7 +11,8 @@ const Corpo = z.object({ text: z.string().trim().min(1, "fala vazia").max(2000, 
 
 /**
  * Fala da recrutadora. O turno (`conduzirTurno`) registra a fala, mede a cobertura, escolhe o passo e
- * gera a fala do Totti. Só então agenda a extração em segundo plano. Se o Totti falhar, a fala sai da
+ * gera a fala do Totti. Só então agenda a extração em segundo plano (menos quando o Totti só repetiu ou esclareceu a
+ * pergunta). Se o Totti falhar, a fala sai da
  * transcrição e volta 502, para a recrutadora reenviar sem duplicar nada.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,8 +28,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ erro: "o Totti ainda está respondendo a fala anterior" }, { status: 409 });
   }
   try {
+    let movimento: Awaited<ReturnType<typeof conduzirTurno>>["movimento"];
     try {
-      await conduzirTurno(sessao, lido.data.text);
+      ({ movimento } = await conduzirTurno(sessao, lido.data.text));
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : String(err);
       return NextResponse.json(
@@ -36,7 +38,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         { status: 502 },
       );
     }
-    agendarExtracao(sessao);
+    // Repetição e esclarecimento: a fala dela não trouxe nada novo para extrair.
+    if (movimento !== "repetir" && movimento !== "esclarecer") agendarExtracao(sessao);
     return NextResponse.json(estadoDaSessao(sessao));
   } finally {
     liberar(id);

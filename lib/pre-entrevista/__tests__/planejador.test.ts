@@ -16,9 +16,14 @@ import { montarGuia } from "@/lib/pre-entrevista/guia";
 import { lerDuracao, perguntouSobreTempo } from "@/lib/pre-entrevista/duracao";
 import {
   aplicarPasso,
+  decidirResumo,
+  decidirTradeoff,
   decisaoDaOferta,
+  decisaoPendente,
   decisoesAposTroca,
   MAX_APROFUNDAMENTOS,
+  MAX_RESUMOS,
+  nivelEmAberto,
   planoInicial,
   proximoPasso,
   trocaPedida,
@@ -315,7 +320,8 @@ describe("troca de formato: oferta, volta e resumo", () => {
 
   it("pedir o formato oferecido é aceitar a troca, mesmo sem o sinal de escolha", () => {
     assert.equal(decisaoDaOferta({ pediu_system_design: 1 }, oferta, "live_coding"), "trocou");
-    assert.equal(decisaoDaOferta({}, oferta, "live_coding"), "proxima_etapa");
+    // Sem sinal nenhum, o código não escolhe por ela: a oferta fica aberta e a fala vai ao modelo.
+    assert.equal(decisaoDaOferta({}, oferta, "live_coding"), "incerto");
     assert.equal(decisaoDaOferta({ escolheu_seguir_sem: 1 }, oferta, "live_coding"), "seguir_sem");
   });
 
@@ -486,5 +492,67 @@ describe("semDispensaContrariada", () => {
 
     const dispensou = acumularEnfase(respondeu, { tecnico: "dispensou" }, "Pode tirar a parte técnica.");
     assert.equal(semDispensaContrariada(sinais, dispensou), sinais);
+  });
+});
+
+describe("decisões: escolha, recusa ou incerto", () => {
+  const oferta = { tipo: "oferecer_tradeoff" as const, area: "uso_ia" as const, modoAlternativo: "system_design" as const };
+
+  it("troca de formato: os três caminhos pelos sinais, e incerto quando nenhum passa do limiar", () => {
+    assert.equal(decidirTradeoff({ escolheu_trocar_formato: 0.9 }), "trocou");
+    assert.equal(decidirTradeoff({ escolheu_proxima_etapa: 0.9 }), "proxima_etapa");
+    assert.equal(decidirTradeoff({ escolheu_seguir_sem: 0.9 }), "seguir_sem");
+    assert.equal(decidirTradeoff({ escolheu_trocar_formato: 0.3, escolheu_proxima_etapa: 0.4 }), "incerto");
+    assert.equal(decidirTradeoff({}), "incerto");
+  });
+
+  it("resumo: aprovou, pediu mudança (que vale sobre a aprovação) ou incerto", () => {
+    assert.equal(decidirResumo({ aprovou_resumo: 1 }), "aprovou");
+    assert.equal(decidirResumo({ pediu_mudanca: 1 }), "mudanca");
+    assert.equal(decidirResumo({ aprovou_resumo: 1, pediu_mudanca: 1 }), "mudanca");
+    assert.equal(decidirResumo({ aprovou_resumo: 0.2 }), "incerto");
+  });
+
+  it("oferta em curso sem decisão fica pendente; com decisão ou com dúvida dela, não", () => {
+    const base = estado({ focus: [{ area: "tecnico", weight: 1 }], mode: "live_coding", ultimoPasso: oferta, perguntasPorTopico: { confirmou_inicio: 1, tradeoff_uso_ia: 1 } });
+    assert.deepEqual(decisaoPendente(base, proximoPasso(base), false), { tipo: "troca", oferta });
+    const decidida = { ...base, decisoesTradeoff: { uso_ia: "proxima_etapa" as const } };
+    assert.equal(decisaoPendente(decidida, proximoPasso(decidida), false), undefined);
+    const comDuvida = { ...base, sinais: { fez_pergunta: 1 } };
+    assert.equal(proximoPasso(comDuvida).tipo, "responder_duvida");
+    assert.equal(decisaoPendente(comDuvida, proximoPasso(comDuvida), false), undefined);
+  });
+
+  it("nível perguntado e não dito fica pendente; sem a pergunta feita, o planejador pergunta", () => {
+    const base = estado({ focus: [{ area: "tecnico", weight: 1 }], mode: "live_coding", nivelEmAberto: true, ultimoPasso: { tipo: "perguntar_nivel" } });
+    assert.deepEqual(proximoPasso(base), { tipo: "perguntar_nivel" });
+    assert.deepEqual(decisaoPendente(base, proximoPasso(base), true), { tipo: "nivel" });
+    assert.equal(decisaoPendente(base, proximoPasso(base), false), undefined);
+  });
+
+  it("depois do resumo, fala que não aprova nem pede mudança fica pendente e nunca encerra", () => {
+    const base = estado({ focus: [{ area: "tecnico", weight: 1 }], mode: "live_coding", perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 }, ultimoPasso: { tipo: "resumo_final" } });
+    for (const resumos of [1, MAX_RESUMOS, MAX_RESUMOS + 2]) {
+      const e = { ...base, resumos };
+      assert.deepEqual(proximoPasso(e), { tipo: "resumo_final", revisao: true });
+      assert.deepEqual(decisaoPendente(e, proximoPasso(e), false), { tipo: "resumo" });
+    }
+  });
+
+  it("aprovação e pedido de mudança claros continuam resolvidos pelos sinais", () => {
+    const base = estado({ focus: [{ area: "tecnico", weight: 1 }], mode: "live_coding", perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1 }, ultimoPasso: { tipo: "resumo_final" }, resumos: 1 });
+    const aprovou = { ...base, sinais: { aprovou_resumo: 1 } };
+    assert.deepEqual(proximoPasso(aprovou), { tipo: "encerrar" });
+    assert.equal(decisaoPendente(aprovou, proximoPasso(aprovou), false), undefined);
+    const mudou = { ...base, sinais: { pediu_mudanca: 1 } };
+    assert.deepEqual(proximoPasso(mudou), { tipo: "resumo_final", revisao: true });
+    assert.equal(decisaoPendente(mudou, proximoPasso(mudou), false), undefined);
+    // O limite conta só resumos de verdade: no terceiro, um pedido de mudança encerra.
+    assert.deepEqual(proximoPasso({ ...mudou, resumos: MAX_RESUMOS }), { tipo: "encerrar" });
+  });
+
+  it("nível por estimativa deixa de estar em aberto", () => {
+    assert.equal(nivelEmAberto(planoInicial(), ["seniority"], false), true);
+    assert.equal(nivelEmAberto({ ...planoInicial(), nivelPorEstimativa: true }, ["seniority"], false), false);
   });
 });

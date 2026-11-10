@@ -17,6 +17,8 @@ export type TipoEvento =
   | "extracao"
   | "cobertura"
   | "plano"
+  /** Uma trava reescreveu a fala do modelo: `dados` traz `{ trava, antes, depois, movimento, passo }`. */
+  | "trava"
   | "rascunho_atualizado"
   | "finalizacao"
   | "erro"
