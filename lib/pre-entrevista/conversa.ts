@@ -127,33 +127,72 @@ const SaidaDoModelo = z.object({
 /** JSON cortado no meio (limite de tokens): ainda dá para aproveitar o que veio do campo "fala". */
 const RE_FALA_EM_JSON_CORTADO = /"fala"\s*:\s*"((?:[^"\\]|\\.)*)/;
 
+/** Resposta que começa como objeto JSON (com ou sem cerca de código). */
+const RE_COMECA_COMO_JSON = /^\s*(```(json)?\s*)?\{/i;
+
+/** Chaves que o modelo às vezes usa no lugar de "fala". */
+const CHAVES_DA_FALA = ["fala", "texto", "text", "resposta"] as const;
+
+/** Desfaz os escapes de uma string JSON cortada no meio (inclusive \uXXXX); um escape incompleto no fim é descartado. */
+function desescaparStringJson(trecho: string): string {
+  const semEscapeIncompleto = trecho.replace(/\\u[0-9a-fA-F]{0,3}$/, "");
+  try {
+    return JSON.parse(`"${semEscapeIncompleto}"`) as string;
+  } catch {
+    return semEscapeIncompleto.replace(/\\(["\\/])/g, "$1");
+  }
+}
+
 /**
  * Lê a resposta do modelo: o JSON `{ fala, movimento }`, com ou sem cerca de código. Texto puro continua válido
- * (a resposta inteira é a fala), e sem o campo `movimento` vale `seguir`. Função pura.
+ * (a resposta inteira é a fala), e sem o campo `movimento` vale `seguir`. Um JSON de onde não sai fala nenhuma
+ * devolve fala vazia (quem chama trata como erro), para o JSON cru nunca ir para a voz. Função pura.
  */
 export function lerSaidaDoModelo(conteudo: string): { fala: string; movimento: Movimento } {
+  let objeto: unknown;
   try {
-    const lida = SaidaDoModelo.safeParse(extrairJson(conteudo));
-    if (lida.success) return { fala: lida.data.fala, movimento: lida.data.movimento ?? "seguir" };
+    objeto = extrairJson(conteudo);
   } catch {
-    // Não é JSON: segue como texto puro, ou como JSON cortado.
+    // Não é JSON inteiro: segue como JSON cortado ou como texto puro.
+  }
+  if (objeto !== undefined) {
+    const lida = SaidaDoModelo.safeParse(objeto);
+    if (lida.success) return { fala: lida.data.fala, movimento: lida.data.movimento ?? "seguir" };
+    // JSON válido com a fala noutra chave ou de outro tipo: aproveita a chave que der, ou fala vazia.
+    const registro = typeof objeto === "object" && objeto !== null ? (objeto as Record<string, unknown>) : {};
+    const fala = CHAVES_DA_FALA.map((chave) => registro[chave]).find((v): v is string => typeof v === "string") ?? "";
+    const movimento = Movimento.safeParse(registro.movimento);
+    return { fala, movimento: movimento.success ? movimento.data : "seguir" };
   }
   const cortado = conteudo.match(RE_FALA_EM_JSON_CORTADO);
-  if (cortado && /^\s*(```(json)?\s*)?\{/i.test(conteudo)) {
-    return { fala: cortado[1].replace(/\\(["\\/])/g, "$1").replace(/\\n/g, " "), movimento: "seguir" };
-  }
+  if (cortado) return { fala: desescaparStringJson(cortado[1]).replace(/\s*\n\s*/g, " ").trim(), movimento: "seguir" };
+  if (RE_COMECA_COMO_JSON.test(conteudo)) return { fala: "", movimento: "seguir" };
   return { fala: conteudo, movimento: "seguir" };
 }
 
 /**
- * A pergunta do Totti que ficou sem resposta: a parte terminada em "?" da última fala dele que tem pergunta
+ * Última pergunta de uma fala: a última frase terminada em "?". Frase acaba em ".", "!" ou "?" seguido de espaço,
+ * para não cortar em "Node.js" nem em "R$ 1.000". Função pura.
+ */
+export function ultimaPergunta(texto: string): string | undefined {
+  return texto
+    .split(/(?<=[.!?])\s+/)
+    .map((frase) => frase.trim())
+    .filter((frase) => frase.endsWith("?"))
+    .at(-1);
+}
+
+/**
+ * A pergunta do Totti que ficou sem resposta: a última pergunta da última fala dele que tem pergunta
  * (depois de um resumo, a pergunta de fechamento). Uma fala sem pergunta ("Claro, sem pressa.") não fecha a
- * pergunta de antes. Função pura.
+ * pergunta de antes; a fala de encerramento fecha, porque só vem depois que ela aprovou o resumo. Função pura.
  */
 export function perguntaEmAberto(transcricao: Turno[]): string | undefined {
-  for (const turno of [...transcricao].reverse()) {
+  for (let i = transcricao.length - 1; i >= 0; i--) {
+    const turno = transcricao[i];
     if (turno.role !== "agente") continue;
-    const pergunta = turno.text.match(/[^.!?]+\?/g)?.at(-1)?.trim();
+    if (FALAS_DE_ENCERRAMENTO.includes(turno.text)) return undefined;
+    const pergunta = ultimaPergunta(turno.text);
     if (pergunta) return pergunta;
   }
   return undefined;
@@ -837,10 +876,13 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
       alvos: alvosDaConversa(),
       messages: [
         ...mensagens,
-        { role: "assistant", content: texto },
+        // A resposta anterior volta no mesmo formato JSON que o sistema pede, para o modelo não aprender o contrário.
+        { role: "assistant", content: JSON.stringify({ fala: texto, movimento }) },
         {
           role: "user",
-          content: `Reescreva em no máximo ${teto} frases curtas, mantendo o conteúdo. Não fale de tom, duração nem dicas, e não faça pergunta.`,
+          content:
+            `Reescreva em no máximo ${teto} frases curtas, mantendo o conteúdo. Não fale de tom, duração nem dicas, e não faça pergunta. ` +
+            "Responda no mesmo formato JSON.",
         },
       ],
       temperature: TEMPERATURA_CONVERSA,

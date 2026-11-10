@@ -26,6 +26,21 @@ describe("perguntaEmAberto", () => {
     assert.equal(perguntaEmAberto(transcricao), "O que reprova direto pra vocês?");
   });
 
+  it("ponto dentro de palavra ou número não corta a pergunta", () => {
+    assert.equal(perguntaEmAberto([totti("Prefere testar Node.js ou Go?")]), "Prefere testar Node.js ou Go?");
+    assert.equal(perguntaEmAberto([totti("Vale até R$ 1.000 por mês? Ou mais?")]), "Ou mais?");
+  });
+
+  it("a fala de encerramento fecha a pergunta de antes", () => {
+    const transcricao = [
+      totti("Quer mudar algo ou posso finalizar?"),
+      ela("pode finalizar"),
+      totti("Agora é só revisar na tela e confirmar."),
+      ela("o que você acha?"),
+    ];
+    assert.equal(perguntaEmAberto(transcricao), undefined);
+  });
+
   it("sem pergunta nenhuma do Totti: undefined", () => {
     assert.equal(perguntaEmAberto([]), undefined);
     assert.equal(perguntaEmAberto([totti("Agora é só revisar na tela e confirmar."), ela("o que você acha?")]), undefined);
@@ -88,6 +103,32 @@ describe("lerSaidaDoModelo", () => {
 
   it("movimento que não existe conta como ausente", () => {
     assert.deepEqual(lerSaidaDoModelo('{"fala": "Oi.", "movimento": "improvisar"}'), { fala: "Oi.", movimento: "seguir" });
+  });
+
+  it("JSON válido com a fala noutra chave aproveita a chave", () => {
+    assert.deepEqual(lerSaidaDoModelo('{"texto": "O que reprova direto?", "movimento": "repetir"}'), {
+      fala: "O que reprova direto?",
+      movimento: "repetir",
+    });
+  });
+
+  it("JSON sem fala nenhuma devolve fala vazia, nunca o JSON cru", () => {
+    assert.deepEqual(lerSaidaDoModelo('{"fala": null, "movimento": "seguir"}'), { fala: "", movimento: "seguir" });
+    assert.deepEqual(lerSaidaDoModelo('{"movimento": "seguir", "obs'), { fala: "", movimento: "seguir" });
+  });
+
+  it("JSON cortado depois de um preâmbulo aproveita a fala", () => {
+    assert.deepEqual(lerSaidaDoModelo('Aqui está: {"fala": "O que pesa mais pra vocês'), {
+      fala: "O que pesa mais pra vocês",
+      movimento: "seguir",
+    });
+  });
+
+  it("JSON cortado desfaz escapes unicode e descarta o escape incompleto", () => {
+    assert.deepEqual(lerSaidaDoModelo('{"fala": "Voc\\u00ea prefere\\nqual? Voc\\u00'), {
+      fala: "Você prefere qual? Voc",
+      movimento: "seguir",
+    });
   });
 
   it("JSON cortado no meio aproveita a fala", () => {
