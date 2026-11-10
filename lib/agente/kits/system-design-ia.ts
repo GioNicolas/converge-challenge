@@ -39,9 +39,9 @@ export const KIT_SYSTEM_DESIGN_IA: Kit = {
       id: "chatbot_atendimento_ia",
       titulo: "Chatbot de atendimento com IA",
       enunciado:
-        "Projete o atendimento automático de uma empresa: um chatbot com modelo de linguagem que responde clientes usando a base de conhecimento da empresa e passa para um atendente humano quando precisa.",
+        "Projete o atendimento automático de uma empresa: um chatbot com modelo de linguagem que responde clientes usando a base de conhecimento da empresa e passa para um atendente humano quando precisa. No quadro, mostre a arquitetura de ponta a ponta: as peças do sistema (clientes, serviços, bancos de dados, filas), como elas se ligam e o caminho de uma pergunta do cliente, até a resposta ou o atendente. Não precisa desenhar telas.",
       falaDoDesafio:
-        "Hoje a conversa é sobre um chatbot de atendimento que usa um modelo de linguagem: o cliente pergunta, o bot responde com base no que a empresa sabe, e quando não dá conta passa pra uma pessoa. Muita coisa ficou de fora do enunciado de propósito, então pergunte o que quiser antes de desenhar. E vá pensando em voz alta, que é o seu raciocínio que eu quero acompanhar.",
+        "Hoje a conversa é sobre um chatbot de atendimento que usa um modelo de linguagem: o cliente pergunta, o bot responde com base no que a empresa sabe, e quando não dá conta passa pra uma pessoa. O que eu quero ver no quadro é a arquitetura por trás disso: as peças do sistema, como elas se ligam e o caminho que uma pergunta do cliente faz de ponta a ponta. Não precisa desenhar as telas. Muita coisa ficou de fora do enunciado de propósito, então pergunte o que quiser antes de desenhar. E vá pensando em voz alta, que é o seu raciocínio que eu quero acompanhar.",
       ficha: [
         { pergunta: "Volume?", resposta: "200 mil conversas por dia, picos de 300 conversas simultâneas por segundo no horário comercial" },
         { pergunta: "Base de conhecimento?", resposta: "~50 mil documentos (políticas, manuais, FAQ), atualizados todo dia" },

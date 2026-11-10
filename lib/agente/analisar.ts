@@ -1,6 +1,7 @@
 // Análise do desenho (o "/analisar"): portão de entrada -> prompt -> LLM -> guardas -> máquina de estados.
 // Nunca lança por causa do LLM: em erro/timeout devolve `ok` (o quadro descarta análises lentas de
 // qualquer jeito). Só metadados vão para o log (nada de grafo, fala ou chave).
+import { PRAZO_ANALISE_DO_DESENHO_MS } from "../contracts";
 import { eQuaseDuplicada, sobreposicao, LIMIAR_DUPLICADA, trocarIdsPorNomes } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
@@ -27,7 +28,6 @@ export type DepsAnalisar = {
   problema: Problema;
   regras?: Regras;
   modelo?: string;
-  /** Padrão: 8000 ms, o prazo do quadro. */
   maxTokens?: number;
   log?: LogMeta;
 };
@@ -100,6 +100,7 @@ export async function analisar(
       nomeSchema: NOME_SCHEMA_ANALISE,
       modelo: deps.modelo,
       maxTokens: deps.maxTokens,
+      timeoutMs: PRAZO_ANALISE_DO_DESENHO_MS,
       sinal,
       imagem: pedido.imagem_base64 ?? null,
     });

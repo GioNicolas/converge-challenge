@@ -3,7 +3,7 @@
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
 import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_S } from "../../contracts";
 import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
-import { mapearAcoesVisuais } from "../../presenca/acoesVisuais";
+import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
 import { FASES, type Fase, type RespostaAnalise, type StatusAnalise } from "./tipos";
 
@@ -52,7 +52,9 @@ export function ritmoDoEstado(estado: EstadoSessao, agora: number): Ritmo {
     feitas: estado.perguntasFeitas,
     ultimaEm: estado.ultimaPerguntaEm,
     ultimaConversaFimEm: estado.ultimaRespostaEm,
-    marco: marcoDeFase(estado.fase, estado.faseIniciadaEm, agora),
+    // Ele acabou de dizer que terminou: é a hora natural de perguntar, como no começo de uma fase.
+    marco: marcoDeFase(estado.fase, estado.faseIniciadaEm, agora)
+      || (estado.ultimaConclusaoEm != null && agora - estado.ultimaConclusaoEm < RITMO.marcoDeConclusaoMs),
   };
 }
 
@@ -167,8 +169,11 @@ export function motivoBloqueioPlin(
   // A bola está com o candidato: depois de qualquer fala solta do agente (resposta, comentário, continuação) ele
   // não pergunta de novo até o candidato agir (falar ou mexer no desenho). Sem ação dele, só um silêncio de verdade
   // (o mesmo limite que já quebra o silêncio) libera a pergunta.
+  // Exceção: ele acabou de dizer que terminou e o Totti só avisou que ia olhar o desenho. Ali a pergunta é esperada.
   const fala = estado.ultimaFalaDoAgenteEm;
-  if (fala != null && candidato.paradoHaS !== undefined) {
+  const acabouDeConcluir = estado.ultimaConclusaoEm != null && agora - estado.ultimaConclusaoEm < RITMO.marcoDeConclusaoMs
+    && (fala == null || fala <= estado.ultimaConclusaoEm);
+  if (!acabouDeConcluir && fala != null && candidato.paradoHaS !== undefined) {
     const agiuDepois = agora - candidato.paradoHaS * 1000 > fala;
     const silencioS = estado.fase === "REQUISITOS" ? SILENCIO_REQUISITOS_S : SILENCIO_S;
     if (!agiuDepois && agora - fala < silencioS * 1000) return "BOLA_COM_O_CANDIDATO";
@@ -236,6 +241,9 @@ function filtrarPlin(
   }
   const nota = cortar((resposta.nota?.trim() || pergunta).trim(), regras.maxCaracteresNota);
   const elementos = [...new Set(resposta.elementos)].filter((id) => idsDoGrafo.has(id));
-  return { ...resposta, pergunta, nota, elementos,
-    ...(resposta.visual ? { visual: mapearAcoesVisuais(resposta.visual, (id) => idsDoGrafo.has(id) ? id : null) } : {}) };
+  // A pergunta que fala de uma peça sempre a marca (o modelo às vezes manda `visual: []` com elementos citados).
+  const visual = garantirMarca(
+    resposta.visual ? mapearAcoesVisuais(resposta.visual, (id) => idsDoGrafo.has(id) ? id : null) : undefined,
+    elementos, estado.perguntasFeitas);
+  return { ...resposta, pergunta, nota, elementos, ...(visual ? { visual } : {}) };
 }

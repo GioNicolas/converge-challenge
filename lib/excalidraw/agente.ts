@@ -189,6 +189,16 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
         if (letra === "\n") pausa += 90;
         await esperar(pausa);
       }
+      // A largura do texto é medida a cada letra. Se a fonte ainda estava carregando (o primeiro texto do quadro,
+      // o título do enunciado), a medida sai curta e o fim aparece cortado ("Chat em tempo re"): mede de novo
+      // quando a fonte chegar.
+      const fonte = `${o.tamanho ?? 20}px Excalifont`;
+      void (typeof document !== "undefined" && document.fonts ? document.fonts.load(fonte) : Promise.resolve())
+        .then(() => {
+          const atual = oficiais.get(o.id);
+          if (!o.sinal?.aborted && atual && !atual.isDeleted) aplicar([criarTexto(o, completo, atual.version + 1)]);
+        })
+        .catch(() => {});
     },
 
     tracar(o) {

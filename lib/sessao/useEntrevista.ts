@@ -37,7 +37,7 @@ import { interrupcaoAtrasada, motivoDoMomento, pausaDasMaosParaFalarMs, RITMO } 
 import { LICENCA_DE_NOVO_MS, LICENCA_SEM_RESPOSTA_MS, liberouAPergunta, pedeParaEncerrar } from "@/lib/conversa/licenca";
 import {
   estadoInicial,
-  marcoDeFase,
+  marcoDoCliente,
   podeAnalisar,
   ritmoDoCliente,
   transicionar,
@@ -500,7 +500,11 @@ export function useEntrevista(
         if (resposta.status !== "ok") colagem.current = null;
         enviar({ tipo: "ANALISE_RECEBIDA", resposta });
       },
-      aoErro: (erro) => console.warn("[análise] ignorada:", erro),
+      aoErro: (erro) => {
+        console.warn("[análise] ignorada:", erro);
+        // Fica na linha do tempo: sem isso, uma análise perdida (prazo, rede) não deixava rastro nenhum.
+        registrar("analise_falhou", { motivo: erro instanceof Error ? erro.message.slice(0, 200) : "desconhecido" });
+      },
     });
     gatilho.current = g;
     return () => {
@@ -621,7 +625,7 @@ export function useEntrevista(
       // parar também é perguntado). Logo depois da mudança no problema, um respiro para ele absorvê-la.
       const esperandoHaMs = agora - (e.pendenteDesde ?? agora);
       const momento = motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current,
-        marco: marcoDeFase(e, agora), esperandoHaMs,
+        marco: marcoDoCliente(e, agora), esperandoHaMs,
         atrasada: interrupcaoAtrasada(ritmoDoCliente(e, agora)) });
       const respiroDaMudanca = agora - empecilhoAnunciadoEm.current >= RITMO.respiroMs;
       // Pediu licença e ele não respondeu: está concentrado, a pergunta espera e a licença não é pedida de novo logo.
@@ -974,8 +978,18 @@ export function useEntrevista(
         agendarFimDaResposta(texto, SILENCIO_FIM_DO_SEGUIMENTO_MS);
       } else if (atual.plin === "PERGUNTA_ATIVA" && (r.responder || r.concluiu)) terminarResposta(texto, false);
       else if (atual.plin === "PERGUNTA_ATIVA") agendarFimDaResposta(texto);
-      // O Totti respondeu: a dúvida pendente espera a próxima brecha (não emenda uma pergunta na resposta).
-      if (r.responder && r.texto) enviar({ tipo: "AGENTE_RESPONDEU" });
+      // O Totti respondeu com uma pergunta dele: a dúvida pendente cai (não emenda uma pergunta na outra). Se a
+      // resposta foi só um fato ou uma reação, a pendente fica e sai na próxima brecha: antes ela era descartada, e
+      // uma pergunta concreta sobre o desenho dava lugar a um "quer detalhar algo?".
+      if (r.responder && r.texto.trim().endsWith("?")) enviar({ tipo: "AGENTE_RESPONDEU" });
+      // Ele disse que terminou e já há uma pergunta pronta sobre o desenho: ela é a resposta, no lugar do aviso.
+      const perguntaPronta = r.concluiu && !r.texto.trim().endsWith("?") && estadoAtual.current.plin === "PLIN_PENDENTE";
+      if (perguntaPronta) {
+        enviar({ tipo: "CANDIDATO_CONCLUIU" });
+        enviar({ tipo: "PLIN_CLICADO" });
+        setMensagens((m) => [...m, ...novas]);
+        return { requisito: null };
+      }
       if (r.responder && r.texto) {
         conversa.current.push({ quem: "agente", texto: r.texto });
         const alvos = [...new Set((mapearAcoesVisuais(r.visual, (id) => conversor.current.idReal(id)) ?? []).flatMap(alvosDaAcao))];
@@ -1003,8 +1017,8 @@ export function useEntrevista(
       }
       if (r.concluiu) {
         // "Pronto": no alto nível segue para o aprofundamento (que já reanalisa); nas outras fases só reanalisa.
-        if (atual.fase === "ALTO_NIVEL") enviar({ tipo: "CANDIDATO_CONCLUIU" });
-        else if (atual.fase === "APROFUNDAMENTO" || atual.fase === "FECHAMENTO") {
+        enviar({ tipo: "CANDIDATO_CONCLUIU" });
+        if (atual.fase === "APROFUNDAMENTO" || atual.fase === "FECHAMENTO") {
           setTimeout(() => gatilho.current?.dispararAgora(), 0);
         }
       }

@@ -7,6 +7,7 @@
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu dúvida) → PERGUNTA_ATIVA (candidato clicou) → LIVRE
 //
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
+import { sobreposicao } from "../guardas";
 import type { PlanoDaSessao } from "../plano";
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
 import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
@@ -118,6 +119,9 @@ export type EstadoSessao = {
   conversa: FalaRegistrada[];
   /** Mudança no problema já anunciada. Ausente/null: ainda não (estados antigos não têm o campo). */
   empecilho?: EmpecilhoAnunciado | null;
+  /** Quantas vezes o candidato disse que terminou ("pronto", "acho que é isso") e quando foi a última. */
+  conclusoes?: number;
+  ultimaConclusaoEm?: number | null;
 };
 
 export type EventoSessao =
@@ -140,6 +144,8 @@ export type EventoSessao =
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
   /** `perguntou`: a fala do Conversador terminou numa pergunta (v2); conta no intervalo antes do próximo plin. */
   | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
+  /** O candidato disse que terminou (a etapa ou o desenho todo). É um marco: a próxima pergunta não espera o intervalo. */
+  | { tipo: "CANDIDATO_CONCLUIU" }
   /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
   | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
   /** O Totti emendou uma pergunta de continuação na resposta: o fio segue ativo. */
@@ -242,11 +248,23 @@ function mudarFase(estado: EstadoSessao, fase: Fase, agora: number): Transicao {
   return { estado: novo, efeitos };
 }
 
+/** Sobreposição de palavras a partir da qual duas evidências do mesmo critério e sinal são a mesma observação. */
+export const LIMIAR_OBSERVACAO_REPETIDA = 0.6;
+
 function registrarObservacoes(
   estado: EstadoSessao,
   observacoes: Observacao[],
   agora: number,
 ): EstadoSessao {
+  // A mesma observação de novo (mesmo critério, mesmo sinal, quase as mesmas palavras) não entra: o modelo repetia
+  // "desenhou telas sem alinhar requisitos" a cada análise, e o livro (e o relatório) ficavam com 4 cópias dela.
+  const novas: Observacao[] = [];
+  for (const o of observacoes) {
+    const repetida = [...estado.observacoes, ...novas].some((a) =>
+      a.criterio === o.criterio && a.sinal === o.sinal && sobreposicao(a.evidencia, o.evidencia) >= LIMIAR_OBSERVACAO_REPETIDA);
+    if (!repetida) novas.push(o);
+  }
+  observacoes = novas;
   if (observacoes.length === 0) return estado;
   const cobertura = { ...estado.cobertura };
   for (const o of observacoes) {
@@ -451,6 +469,9 @@ export function transicionar(
         },
         efeitos: [],
       };
+
+    case "CANDIDATO_CONCLUIU":
+      return { estado: { ...estado, conclusoes: (estado.conclusoes ?? 0) + 1, ultimaConclusaoEm: agora }, efeitos: [] };
 
     case "AGENTE_FALOU":
       return {

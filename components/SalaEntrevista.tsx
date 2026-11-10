@@ -135,11 +135,14 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
 
   // Cada requisito combinado é escrito pelo agente no próprio quadro, abaixo do enunciado.
   const requisitosEscritos = useRef(0);
+  const mudancaRef = useRef<string | null>(null);
   useEffect(() => {
     if (!quadro) return;
     while (requisitosEscritos.current < demo.requisitos.length) {
       const indice = requisitosEscritos.current++;
-      void anotarRequisito({ quadro, cursor: cursor.current, texto: demo.requisitos[indice].texto, indice }).catch((erro) =>
+      const texto = demo.requisitos[indice].texto;
+      // A mudança no problema leva a vista até ela: o candidato precisa ver o que mudou.
+      void anotarRequisito({ quadro, cursor: cursor.current, texto, indice, focar: texto === mudancaRef.current }).catch((erro) =>
         console.warn("[requisitos]", erro),
       );
     }
@@ -148,7 +151,9 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const { combinar: combinarRequisito } = demo;
   const requisitoDaMudanca = entrevista.empecilho?.requisito;
   useEffect(() => {
-    if (requisitoDaMudanca) combinarRequisito(requisitoDaMudanca);
+    if (!requisitoDaMudanca) return;
+    mudancaRef.current = requisitoDaMudanca;
+    combinarRequisito(requisitoDaMudanca);
   }, [requisitoDaMudanca, combinarRequisito]);
   const [confirmandoFim, setConfirmandoFim] = useState(false);
   const cancelarFim = useCallback(() => setConfirmandoFim(false), []);

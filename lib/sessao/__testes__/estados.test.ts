@@ -175,7 +175,8 @@ test("no máximo o orçamento da entrevista, e acabar o orçamento não pula par
 });
 
 test("a cota proporcional ao tempo não deixa gastar o orçamento no começo", () => {
-  const comeco = { ...noMeio(), iniciadaEm: 0, perguntasFeitas: 2 };
+  // Aos 4 de 35 min a cota é 3 (orçamento de 18, mais a folga).
+  const comeco = { ...noMeio(), iniciadaEm: 0, perguntasFeitas: 3 };
   assert.equal(analisar(comeco, 4 * 60_000), "LIVRE");
 });
 

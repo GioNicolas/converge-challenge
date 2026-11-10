@@ -34,6 +34,8 @@ export type EstadoEntrevista = {
   /** Quando a entrevista começou (COMECAR) e quanto ela dura: o ritmo da política comum escala com isso. */
   iniciadaEm?: number | null;
   duracaoMin?: number;
+  /** Quando o candidato disse pela última vez que terminou: um marco, a pergunta seguinte não espera o intervalo. */
+  ultimaConclusaoEm?: number | null;
 };
 
 export type EventoEntrevista =
@@ -52,7 +54,7 @@ export type EventoEntrevista =
   | { tipo: "RESPOSTA_TERMINOU" }
   /** O Totti emendou uma pergunta de continuação na resposta: o mesmo fio segue ativo, com a fala nova. */
   | { tipo: "SEGUIMENTO"; pergunta: string }
-  /** O candidato disse "pronto"/"terminei" no alto nível: segue para o aprofundamento sem esperar. */
+  /** O candidato disse "pronto"/"terminei": é um marco; no alto nível, segue para o aprofundamento sem esperar. */
   | { tipo: "CANDIDATO_CONCLUIU" }
   | { tipo: "ENCERRAR" };
 
@@ -128,8 +130,14 @@ export function ritmoDoCliente(estado: EstadoEntrevista, agora: number): Ritmo {
     feitas: estado.perguntasFeitas,
     ultimaEm: estado.ultimaPerguntaEm ?? null,
     ultimaConversaFimEm: estado.ultimaRespostaEm,
-    marco: marcoDeFase(estado, agora),
+    marco: marcoDoCliente(estado, agora),
   };
+}
+
+/** Marco de fase ou o candidato acabou de dizer que terminou. Igual ao `ritmoDoEstado` do servidor. */
+export function marcoDoCliente(estado: Pick<EstadoEntrevista, "fase" | "faseIniciadaEm" | "ultimaConclusaoEm">, agora: number): boolean {
+  return marcoDeFase(estado, agora)
+    || (estado.ultimaConclusaoEm != null && agora - estado.ultimaConclusaoEm < RITMO.marcoDeConclusaoMs);
 }
 
 /** A fase acabou de começar (aprofundamento, fechamento): é um marco. Igual a `marcoDeFase` do servidor. */
@@ -204,10 +212,12 @@ export function transicionar(estado: EstadoEntrevista, evento: EventoEntrevista,
       return novo;
     }
 
-    case "CANDIDATO_CONCLUIU":
+    case "CANDIDATO_CONCLUIU": {
+      const comMarco = { ...estado, ultimaConclusaoEm: agora };
       return estado.fase === "ALTO_NIVEL" && estado.plin !== "PERGUNTA_ATIVA"
-        ? mudarFase(estado, "APROFUNDAMENTO", agora)
-        : estado;
+        ? mudarFase(comMarco, "APROFUNDAMENTO", agora)
+        : comMarco;
+    }
 
     case "PLIN_DEMO":
       if (estado.fase === "AGUARDANDO" || estado.plin === "PERGUNTA_ATIVA") return estado;
