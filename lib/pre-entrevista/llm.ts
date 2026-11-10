@@ -4,6 +4,7 @@
  *  - OpenRouter (plano B): chave em `OPENROUTER_API_KEY`.
  * Só roda no servidor.
  */
+import { comVagaNoProvedor, type Prioridade } from "@/lib/llm/openaiCompat";
 
 const URLS = {
   featherless: "https://api.featherless.ai/v1/chat/completions",
@@ -69,6 +70,11 @@ export interface ChatOpcoes {
   temperature?: number;
   /** Timeout por tentativa HTTP, em ms. */
   timeoutMs?: number;
+  /**
+   * Fila da Featherless: "fala" (resposta ao vivo) passa na frente; "fundo" (extração em segundo plano, competências)
+   * nunca ocupa a última vaga. Padrão: "fala".
+   */
+  prioridade?: Prioridade;
 }
 
 /** Uma tentativa contra um provedor/modelo. Quem não respondeu traz `erro`. */
@@ -115,34 +121,41 @@ function esperar(ms: number): Promise<void> {
 
 async function tentarAlvo(
   alvo: Alvo,
-  o: Required<Pick<ChatOpcoes, "messages" | "maxTokens" | "timeoutMs">> & Pick<ChatOpcoes, "temperature">,
+  o: Required<Pick<ChatOpcoes, "messages" | "maxTokens" | "timeoutMs">> & Pick<ChatOpcoes, "temperature"> & { prioridade: Prioridade },
 ): Promise<string> {
   const chave = process.env[CHAVES[alvo.provedor]];
   if (!chave) throw new FalhaRecuperavel(`${CHAVES[alvo.provedor]} não definida`);
 
   const limite = alvo.timeoutMs ?? o.timeoutMs;
+  // Um envio à HTTP: resposta e corpo juntos, porque o provedor gera tudo antes de responder.
+  const enviar = async () => {
+    const res = await fetch(URLS[alvo.provedor], {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
+      body: JSON.stringify({
+        model: alvo.model,
+        messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
+        max_tokens: o.maxTokens,
+        temperature: o.temperature,
+        ...alvo.extraBody,
+      }),
+      // O timeout nasce com o envio: a espera na fila da Featherless não gasta o tempo do alvo.
+      signal: AbortSignal.timeout(limite),
+    });
+    return { res, corpo: await res.text() };
+  };
   for (let tentativa = 0; ; tentativa++) {
     let res: Response;
     let corpo: string;
-    // Cabeçalhos e corpo entram no mesmo try: o timeout pode disparar durante a leitura do corpo.
     try {
-      res = await fetch(URLS[alvo.provedor], {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
-        body: JSON.stringify({
-          model: alvo.model,
-          messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
-          max_tokens: o.maxTokens,
-          temperature: o.temperature,
-          ...alvo.extraBody,
-        }),
-        signal: AbortSignal.timeout(limite),
-      });
+      // Featherless: cada envio ocupa uma vaga da fila do provedor, a mesma da entrevista. A espera do 503 fica
+      // fora da vaga, para não segurar a fila dormindo. OpenRouter não passa pela fila: a entrevista tem a dela.
+      ({ res, corpo } =
+        alvo.provedor === "featherless" ? await comVagaNoProvedor("featherless", o.prioridade, enviar) : await enviar());
       if (res.status === 503 && tentativa < ESPERAS_503_MS.length) {
         await esperar(ESPERAS_503_MS[tentativa]);
         continue;
       }
-      corpo = await res.text();
     } catch (err) {
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
         throw new FalhaRecuperavel(`sem resposta completa em ${limite} ms`);
@@ -179,6 +192,7 @@ export async function chat({
   maxTokens = 4000,
   temperature,
   timeoutMs = TIMEOUT_PADRAO_MS,
+  prioridade = "fala",
 }: ChatOpcoes): Promise<ChatResposta> {
   if (alvos.length === 0) throw new ErroChat("chat: nenhum alvo configurado", []);
   const inicio = Date.now();
@@ -191,7 +205,7 @@ export async function chat({
   for (const alvo of disponiveis.length > 0 ? disponiveis : alvos) {
     const inicioAlvo = Date.now();
     try {
-      const content = await tentarAlvo(alvo, { messages, maxTokens, timeoutMs, temperature });
+      const content = await tentarAlvo(alvo, { messages, maxTokens, timeoutMs, temperature, prioridade });
       const ms = Date.now() - inicioAlvo;
       descansoAte.delete(chaveAlvo(alvo));
       tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms });

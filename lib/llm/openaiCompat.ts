@@ -3,6 +3,8 @@
  * Cada provedor é um ProviderConfig; o pedido, os retries e o parse do JSON são compartilhados.
  */
 import type { z } from "zod";
+import { featherless } from "./featherless";
+import { openrouter } from "./openrouter";
 
 export type LlmProviderName = "featherless" | "openrouter";
 
@@ -257,6 +259,16 @@ async function withSlot<R>(
     if (prioridade === "fundo") sem.fundo--;
     distribuir(sem, provider.concurrency);
   }
+}
+
+const PROVEDORES: Record<LlmProviderName, ProviderConfig> = { featherless, openrouter };
+
+/**
+ * Roda `fn` numa vaga do provedor, pela mesma fila das chamadas de `chatJsonVia`. Quem não usa `chatJsonVia`
+ * (a pré-entrevista) passa por aqui para dividir as vagas com a entrevista e respeitar a prioridade.
+ */
+export function comVagaNoProvedor<R>(nome: LlmProviderName, prioridade: Prioridade, fn: () => Promise<R>): Promise<R> {
+  return withSlot(PROVEDORES[nome], prioridade, undefined, fn);
 }
 
 function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
