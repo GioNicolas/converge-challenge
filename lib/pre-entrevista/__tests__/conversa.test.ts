@@ -218,6 +218,16 @@ describe("responder: as travas obedecem ao movimento", () => {
     assert.equal(semMovimento.texto, "Vamos lá. Posso seguir assim?");
   });
 
+  it("fala `esclarecer` ou `repetir` também mantém a palavra de reconhecimento do começo", async () => {
+    const sessao = sessaoAberta([ela("como assim?")]);
+    const fala = "Claro, quis dizer o critério de desempate. Qual pesa mais?";
+    for (const movimento of ["esclarecer", "repetir"]) {
+      const r = await responder(sessao, { tipo: "confirmar_inicio" }, { chat: chatFalso(saida(fala, movimento)).chat });
+      assert.equal(r.texto, fala, movimento);
+      assert.deepEqual(r.travas, [], movimento);
+    }
+  });
+
   it("a limpeza de markdown, aspas e prefixo vale com qualquer movimento", async () => {
     const sessao = sessaoAberta([ela("tá me ouvindo?")]);
     const r = await responder(sessao, { tipo: "confirmar_inicio" }, { chat: chatFalso(saida("Totti: **Tô sim**, pode falar.", "responder")).chat });
@@ -270,6 +280,21 @@ describe("movimentoDaFala: reserva para quando o modelo não declara o movimento
   it("pergunta diferente da que estava em aberto segue como seguir", () => {
     const sessao = depoisDoAprofundamento("a solução funcionando");
     assert.equal(movimentoDaFala("seguir", "Tem algo que reprova direto pra vocês?", sessao, { tipo: "perguntar_contexto" }), "seguir");
+  });
+
+  it("vale a pergunta que vai para a voz (a primeira), não a última da fala", () => {
+    const sessao = depoisDoAprofundamento("a solução funcionando");
+    const novaDepoisAntiga = `Tem algo que reprova direto pra vocês? ${PERGUNTA}`;
+    assert.equal(movimentoDaFala("seguir", novaDepoisAntiga, sessao, { tipo: "perguntar_contexto" }), "seguir");
+    const antigaDepoisNova = `${PERGUNTA} Tem algo que reprova direto pra vocês?`;
+    assert.equal(movimentoDaFala("seguir", antigaDepoisNova, sessao, { tipo: "perguntar_contexto" }), "repetir");
+  });
+
+  it("número com ponto na pergunta não parte a pergunta ao meio", () => {
+    const pergunta = "Com 2.5 horas de prova, o que pesa mais: a solução funcionando ou o caminho bem explicado?";
+    const sessao = sessaoAberta([ela("isso"), totti(pergunta), ela("pode repetir?")]);
+    sessao.plano = aplicarPasso(sessao.plano, APROFUNDAR);
+    assert.equal(movimentoDaFala("seguir", pergunta, sessao, { tipo: "perguntar_contexto" }), "repetir");
   });
 
   it("movimento declarado nunca é trocado", () => {

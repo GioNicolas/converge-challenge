@@ -803,7 +803,7 @@ const RE_RECONHECIMENTO_INICIAL =
 /**
  * Tira o que não pode ir para a voz: markdown, aspas em volta, prefixo "Totti:" e palavra de concordância no começo
  * (a capital volta na nova primeira letra). Único ponto por onde passa a fala do modelo.
- * Com `manterReconhecimento` (fala de movimento `responder`), a palavra do começo fica: ali ela é a resposta natural.
+ * Com `manterReconhecimento` (fala cujo movimento não é `seguir`), a palavra do começo fica: ali ela é a reação natural.
  */
 export function limparFala(texto: string, opcoes: { manterReconhecimento?: boolean } = {}): string {
   const limpo = texto
@@ -884,7 +884,8 @@ export function movimentoDaFala(declarado: Movimento, fala: string, sessao: Sess
   if (passo.tipo === "responder_duvida" || passo.tipo === "perguntar_nivel") return declarado;
   if (mesmaPerguntaDoPasso(passo, passoEmCurso(sessao))) return declarado;
   const aberta = perguntaEmAberto(sessao.transcricao);
-  const daFala = fala.match(/[^.!?]+\?/g)?.at(-1);
+  // A pergunta que vai para a voz: com `seguir`, a fala é cortada na primeira pergunta (`cortar_na_primeira_pergunta`).
+  const daFala = ultimaPergunta(cortarNaPrimeiraPergunta(fala));
   if (!aberta || !daFala) return declarado;
   return sobreposicao(daFala, aberta) >= LIMIAR_DUPLICADA ? "repetir" : declarado;
 }
@@ -898,8 +899,9 @@ export interface OpcoesResponder {
  * Gera a fala do Totti para o passo escolhido. Lança `ErroChat` se nenhum alvo responder.
  *
  * As travas abaixo conferem a fala depois que o modelo a escreve, e obedecem ao `movimento` que ele declarou:
- * nenhuma reescreve uma fala `repetir`, `esclarecer` ou `responder`, com duas exceções que são formato de voz e não
- * conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, e "uma pergunta só" vale para `repetir` e `esclarecer`.
+ * nenhuma reescreve uma fala `repetir`, `esclarecer` ou `responder` (nem tira o "Certo," do começo), com duas exceções
+ * que são formato de voz e não conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, e "uma pergunta só" vale
+ * para `repetir` e `esclarecer`.
  * Cada reescrita vira um evento `trava` no log da sessão.
  */
 export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResponder = {}): Promise<RespostaAgente> {
@@ -942,8 +944,9 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
     texto = depois;
   };
 
-  // Palavra de reconhecimento no começo ("Certo.", "Entendi,"): numa fala `responder` ela é a resposta natural e fica.
-  if (texto && movimento !== "responder") aplicar("reconhecimento_inicial", limparFala(texto));
+  // Palavra de reconhecimento no começo ("Certo.", "Entendi,"): só sai numa fala que executa o passo. Ao responder,
+  // repetir ou esclarecer, ela é a reação natural ao que ela disse e fica.
+  if (texto && segue) aplicar("reconhecimento_inicial", limparFala(texto));
   // O modelo escreve até 2 frases do resumo (ou 3 numa revisão). Se passou, pede para reescrever uma vez.
   const teto = resumoCompleto ? 2 : 3;
   if (texto && segue && passo.tipo === "resumo_final" && contarFrases(texto) > teto) {
