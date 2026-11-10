@@ -45,6 +45,35 @@ describe("perguntar", () => {
     assert.equal(turno.ms, 3200);
     assert.equal(turno.custo_usd, 0.002);
   });
+  it("devolve o uso do turno (tokens, custo e tamanho de cada bloco do prompt) para a rota gravar", async () => {
+    const falso = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false }]);
+    const llm = {
+      ...falso,
+      async completarJson<T>(args: Parameters<typeof falso.completarJson<T>>[0]) {
+        const r = await falso.completarJson(args);
+        return { ...r, modelo: "google/gemini-3.5-flash-lite", provedor: "openrouter", uso: { entrada: 5000, saida: 80, cache: 3000, custo: 0.0011 } };
+      },
+    };
+    const comConversa = { ...estado, fase: "ALTO_NIVEL" as const, conversa: [{ quem: "candidato" as const, texto: "Vou pôr um cache.", em: AGORA }] };
+    const r = await perguntar({ llm, kit: kitDemo, problema, log: () => {}, versao: "v2" }, comConversa, {
+      fase: "ALTO_NIVEL", texto: "E o banco atrás.", grafo: "- [r1] Cache", mudancas: "+ [r1] Cache", imagemBase64: "data:image/jpeg;base64,AAAA",
+    }, AGORA);
+    assert.ok(r.uso, "faltou o uso do turno");
+    assert.equal(r.uso.tokens_entrada, 5000);
+    assert.equal(r.uso.tokens_cache, 3000);
+    assert.equal(r.uso.custo_usd, 0.0011);
+    assert.equal(r.uso.foto, "data:image/jpeg;base64,AAAA".length);
+    assert.equal(r.uso.falas_no_prompt, 1);
+    assert.ok(r.uso.blocos.grafo > 0 && r.uso.blocos.mudancas > 0 && r.uso.blocos.conversa > 0 && r.uso.blocos.resto > 0);
+    const dinamico = falso.chamadas[0].sistema.dinamico ?? "";
+    assert.equal(r.uso.blocos.grafo + r.uso.blocos.mudancas + r.uso.blocos.conversa + r.uso.blocos.resto, dinamico.length);
+  });
+  it("sem resposta do modelo, não há uso a gravar", async () => {
+    const llm = criarClienteFalso([new ErroLlm("http", "caiu")]);
+    const r = await perguntar(deps(llm), estado, { fase: "REQUISITOS", texto: "Oi" }, AGORA);
+    assert.equal(r.falhou, true);
+    assert.equal(r.uso, undefined);
+  });
   it("resposta e feedback recebem o desenho e a pergunta ativa no loop rápido", async () => {
     const llm = criarClienteFalso([{ responder: true, texto: "Você separou as leituras da escrita.", requisito: null, concluiu: false }]);
     const r = await perguntar(deps(llm), { ...estado, fase: "ALTO_NIVEL" }, {

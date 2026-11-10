@@ -340,6 +340,10 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       PRAZO_ANALISE_MS,
       null,
     );
+    if (r?.uso) {
+      // Custo e tamanho do prompt de cada turno ficam na linha do tempo da sessão (issue #63). Não segura a fala.
+      await ctx.repositorio.anexarEventos(id, [{ horario: new Date(agora).toISOString(), tipo: "perguntar_uso", dados: r.uso }]).catch(() => undefined);
+    }
     if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
     resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu,
       ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),

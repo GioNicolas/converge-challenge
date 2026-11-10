@@ -13,7 +13,8 @@ import {
   montarSistemaEstaticoPerguntar,
   NOME_SCHEMA_PERGUNTAR,
 } from "./prompts/entrevistador";
-import { montarSistemaDinamicoPerguntarV2, montarSistemaEstaticoPerguntarV2, NOME_SCHEMA_PERGUNTAR_V2 } from "./prompts/entrevistador-v2";
+import { blocosDoSistemaDinamicoPerguntarV2, FALAS_NO_PROMPT_V2, montarSistemaEstaticoPerguntarV2, NOME_SCHEMA_PERGUNTAR_V2, tamanhoDosBlocos, type NomeDoBloco } from "./prompts/entrevistador-v2";
+import { historicoDaConversa } from "./prompts/contexto";
 import { MAX_SEGUIMENTOS, transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
 import type { Fase, FalaRecente } from "./sessao/tipos";
 import { logPadrao, type LogMeta } from "./analisar";
@@ -73,7 +74,27 @@ export type ResultadoPerguntar = {
   visual?: AcaoVisual[];
   /** A fala terminou numa pergunta do Conversador (v2): conta no intervalo do plin. */
   perguntou?: boolean;
+  /** Custo e tamanho do prompt deste turno, quando o modelo respondeu (a rota grava por sessão). */
+  uso?: UsoPerguntar;
   estado: EstadoSessao;
+};
+
+/** O que um turno do /perguntar gastou e de que se compôs o prompt dinâmico (issue #63). */
+export type UsoPerguntar = {
+  modelo: string;
+  provedor: string;
+  ms?: number;
+  tokens_entrada?: number;
+  tokens_saida?: number;
+  /** Tokens de entrada servidos do cache do provedor, quando ele informa. */
+  tokens_cache?: number;
+  custo_usd?: number;
+  /** Caracteres de cada parte do prompt dinâmico (no v1, tudo em `resto`). */
+  blocos: Record<NomeDoBloco, number>;
+  /** Tamanho da foto do quadro enviada (caracteres do data URL; 0 sem foto). */
+  foto: number;
+  /** Falas da conversa que foram no prompt. */
+  falas_no_prompt: number;
 };
 
 /** Ele disse que terminou: o Totti avisa que vai olhar o desenho, e a pergunta seguinte vem da análise. */
@@ -96,6 +117,19 @@ export async function perguntar(
   agora: number,
   sinal?: AbortSignal,
 ): Promise<ResultadoPerguntar> {
+  const medida: { uso?: UsoPerguntar } = {};
+  const r = await responderFala(deps, estado, entrada, agora, sinal, medida);
+  return medida.uso ? { ...r, uso: medida.uso } : r;
+}
+
+async function responderFala(
+  deps: DepsPerguntar,
+  estado: EstadoSessao,
+  entrada: EntradaPerguntar,
+  agora: number,
+  sinal: AbortSignal | undefined,
+  medida: { uso?: UsoPerguntar },
+): Promise<ResultadoPerguntar> {
   const log = deps.log ?? logPadrao;
   // A fala entra na conversa antes de o LLM ver o histórico (ele recebe a fala como mensagem).
   const comFala = transicionar(
@@ -112,16 +146,14 @@ export async function perguntar(
   const v2 = (deps.versao ?? versaoTottiQuadro()) === "v2";
   let saida;
   try {
+    const blocos = v2
+      ? blocosDoSistemaDinamicoPerguntarV2(estado, deps.kit, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora))
+      : [{ bloco: "resto" as const, texto: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora)) }];
     const r = await deps.llm.completarJson({
-      sistema: v2
-        ? {
-            estatico: `${montarSistemaEstaticoPerguntarV2(deps.kit, deps.problema)}\n\n${REGRA_DADOS}`,
-            dinamico: montarSistemaDinamicoPerguntarV2(estado, deps.kit, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora)),
-          }
-        : {
-            estatico: `${montarSistemaEstaticoPerguntar(deps.kit, deps.problema)}\n\n${REGRA_DADOS}`,
-            dinamico: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora)),
-          },
+      sistema: {
+        estatico: `${v2 ? montarSistemaEstaticoPerguntarV2(deps.kit, deps.problema) : montarSistemaEstaticoPerguntar(deps.kit, deps.problema)}\n\n${REGRA_DADOS}`,
+        dinamico: blocos.map((b) => b.texto).join(""),
+      },
       // A fala vai como está (é o que o modelo responde), só sem etiqueta falsa.
       mensagens: [{ role: "user", content: neutralizar(entrada.texto) }],
       schema: EsquemaSaidaPerguntar,
@@ -134,16 +166,19 @@ export async function perguntar(
     saida = r.dados;
     // Quem respondeu de fato este turno: com reserva e disjuntor no `lib/llm`, o modelo configurado nem sempre é
     // o que fala. Sem isso não dá para saber se o Totti "burro" era o modelo forte ou a reserva.
-    log("perguntar_llm", {
-      sessao_id: entrada.sessao_id,
-      versao: v2 ? "v2" : "v1",
+    medida.uso = {
       modelo: r.modelo ?? "desconhecido",
       provedor: r.provedor ?? "desconhecido",
       ms: r.ms,
       tokens_entrada: r.uso?.entrada,
       tokens_saida: r.uso?.saida,
+      ...(r.uso?.cache !== undefined ? { tokens_cache: r.uso.cache } : {}),
       custo_usd: r.uso?.custo,
-    });
+      blocos: tamanhoDosBlocos(blocos),
+      foto: entrada.imagemBase64?.length ?? 0,
+      falas_no_prompt: historicoDaConversa(estado.conversa, entrada.conversaDoQuadro, v2 ? FALAS_NO_PROMPT_V2 : undefined).length,
+    };
+    log("perguntar_llm", { sessao_id: entrada.sessao_id, versao: v2 ? "v2" : "v1", ...medida.uso });
   } catch (e) {
     log("perguntar_falhou", {
       sessao_id: entrada.sessao_id,
