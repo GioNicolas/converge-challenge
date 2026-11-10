@@ -29,8 +29,8 @@ import { afirmacaoDaMemoria, pedidoDaRegra, perguntaDaMemoria, regrasDoFormato, 
 
 const TEMPERATURA_CONVERSA = 0.5;
 const MAX_TOKENS_CONVERSA = 400;
-/** A fala vai para a voz: a Featherless tem 6 s (fila incluída), depois a OpenRouter tem 8 s. */
-const TIMEOUT_FEATHERLESS_MS = 6_000;
+/** A fala vai para a voz: a Featherless tem 8 s (fila incluída), depois a OpenRouter tem 8 s. */
+const TIMEOUT_FEATHERLESS_MS = 8_000;
 const TIMEOUT_OPENROUTER_MS = 8_000;
 
 /**
