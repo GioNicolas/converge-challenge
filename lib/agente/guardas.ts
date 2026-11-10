@@ -198,3 +198,40 @@ export function semPerguntaNoFimV2(texto: string): string {
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
   return frases.length ? frases.join(" ") : CONVITES[t.length % CONVITES.length];
 }
+
+/** A partir daqui a pergunta nova é a mesma de uma já feita. Mais baixo que LIMIAR_DUPLICADA: é a pergunta inteira, não a nota. */
+export const LIMIAR_PERGUNTA_REPETIDA = 0.5;
+
+/**
+ * A fala termina numa pergunta que o Totti já fez (ou no assunto de uma): numa entrevista real ele perguntou como o
+ * banco aguentava o volume, ouviu a resposta e perguntou como escalar a mesma ida ao banco. O candidato reclamou.
+ */
+export function perguntaJaFeita(fala: string, anteriores: string[]): boolean {
+  const pergunta = frasesDe(fala.trim()).filter((f) => f.trim().endsWith("?")).at(-1);
+  if (!pergunta) return false;
+  return anteriores.some((a) => sobreposicao(pergunta, a) >= LIMIAR_PERGUNTA_REPETIDA || sobreposicao(fala, a) >= LIMIAR_PERGUNTA_REPETIDA);
+}
+
+/** O que o Totti diz quando o candidato já disse mais de uma vez que terminou e não há mais pergunta: oferece fechar. */
+export const OFERTA_DE_ENCERRAR = "Por mim, a gente pode encerrar por aqui. Quer acrescentar alguma coisa antes, ou posso encerrar?";
+
+/** Resposta curta à oferta de encerrar que não traz assunto novo ("nada", "pode", "não quero", "já falei tudo"). */
+export function aceitaEncerrar(fala: string): boolean {
+  const t = normalizar(fala);
+  if (!t) return false;
+  if (/\b(encerr\w*|finaliz\w*|fech\w*)\b/.test(t)) return true;
+  if (t.split(" ").length > 8) return false;
+  return /^(nada|nao|pode|sim|isso|so isso|e isso|ok|beleza|tranquilo|claro|quero nao|por mim)\b/.test(t) || /\b(nada|ja falei|terminei|acabei|e isso)\b/.test(t);
+}
+
+/**
+ * Pergunta que só devolve a condução ao candidato ("quer detalhar algo?", "o que mais você gostaria de adicionar?",
+ * "quer seguir para outra parte?"). O prompt proíbe, e o modelo rápido faz mesmo assim: quem acabou de dizer que
+ * terminou ouve isso e não sabe o que fazer. Estrutural: verbo de vontade + verbo de condução, sem assunto.
+ */
+const CONDUCAO = /\b(quer|queria|gostaria|prefere|deseja|o que mais|algo mais|mais alguma coisa|alguma outra|qual (parte|ponto)|outra parte)\b[^?]*\b(detalhar|adicionar|acrescentar|seguir|continuar|pontuar|aprofundar|revisar|mudar|ajustar|olhar|explorar|comentar|falar)\b[^?]*\?\s*$/i;
+
+export function perguntaDeConducao(fala: string): boolean {
+  const pergunta = frasesDe(fala.trim()).filter((f) => f.trim().endsWith("?")).at(-1);
+  return !!pergunta && CONDUCAO.test(pergunta);
+}

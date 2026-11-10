@@ -104,7 +104,31 @@ export type OpcoesRequisito = {
   texto: string;
   /** Posição do item na lista (0 = primeiro, que também escreve o título). */
   indice: number;
+  /** Leva a vista até o item antes de escrever (a mudança no problema: ele precisa ver o que mudou). */
+  focar?: boolean;
 };
+
+/** Espaço que a lista de requisitos reserva: título e alguns itens. */
+const LARGURA_DOS_REQUISITOS = 560;
+const ALTURA_DE_UM_REQUISITO = 30;
+
+function seCruzam(a: Caixa, b: Caixa): boolean {
+  return a.x < b.x + b.largura && b.x < a.x + a.largura && a.y < b.y + b.altura && b.y < a.y + a.altura;
+}
+
+/**
+ * Onde a linha de um requisito pode ser escrita sem cair em cima do desenho do candidato: no lugar de sempre
+ * (abaixo do enunciado) se estiver livre; senão, na mesma altura, à direita de tudo o que ele desenhou ali.
+ * Numa entrevista real a mudança no problema foi escrita por cima do desenho.
+ */
+export function lugarLivreParaALinha(linha: Caixa, doCandidato: readonly Caixa[]): Caixa {
+  const noCaminho = doCandidato.filter((c) => seCruzam(linha, c));
+  if (!noCaminho.length) return linha;
+  // Tudo o que está na faixa horizontal da linha, mesmo mais à direita: a linha vai depois da última peça.
+  const naFaixa = doCandidato.filter((c) => c.y < linha.y + linha.altura && linha.y < c.y + c.altura);
+  const direita = Math.max(...naFaixa.map((c) => c.x + c.largura));
+  return { ...linha, x: direita + 48 };
+}
 
 /**
  * Escreve um requisito combinado no quadro, abaixo do enunciado, e desenha um check ao lado.
@@ -115,13 +139,33 @@ export function anotarRequisito(o: OpcoesRequisito) {
     const { quadro, cursor, indice } = o;
     const grupo = "requisitos";
     const enunciado = quadro.api.getSceneElements().find((e) => e.id === "agente-enunciado-texto");
-    const x = enunciado?.x ?? 40;
+    let x = enunciado?.x ?? 40;
     const topo = enunciado ? enunciado.y + enunciado.height + 34 : 260;
     const linha = topo + 34 + indice * 30;
-    const textoX = x + 30;
+    let textoX = x + 30;
+
+    // A linha desvia do desenho do candidato (o título e os itens anteriores ficam onde estão).
+    const doCandidato = quadro.api.getSceneElements()
+      .filter((e) => !e.isDeleted && e.customData?.autor !== "agente")
+      .flatMap((e) => caixaDosElementos([e], 8) ?? []);
+    const livre = lugarLivreParaALinha({ x, y: indice === 0 ? topo : linha, largura: LARGURA_DOS_REQUISITOS,
+      altura: (indice === 0 ? linha - topo : 0) + ALTURA_DE_UM_REQUISITO }, doCandidato);
+    const desvio = livre.x - x;
+    x += desvio;
+    textoX += desvio;
 
     const naTela = (p: Ponto) => cenaParaTela(p, vistaDe(quadro));
-    const visivel = estaVisivel({ x, y: topo, largura: 320, altura: linha - topo + 30 }, vistaDe(quadro), 0);
+    const area = { x, y: topo, largura: 320, altura: linha - topo + 30 };
+    if (o.focar && !estaVisivel(area, vistaDe(quadro), 60)) {
+      const inicial = vistaDe(quadro);
+      const para = scrollParaCentralizar({ x, y: linha - 60, largura: LARGURA_DOS_REQUISITOS, altura: 120 }, inicial);
+      await quadro.agente.esperarCandidatoLivre();
+      await animar(420, (p) => {
+        const k = suavizar(p);
+        quadro.agente.rolar(inicial.scrollX + (para.scrollX - inicial.scrollX) * k, inicial.scrollY + (para.scrollY - inicial.scrollY) * k);
+      });
+    }
+    const visivel = estaVisivel(area, vistaDe(quadro), 0);
     const mover = async (para: Ponto, semente: number) => {
       if (!cursor || !visivel) return;
       const de = cursor.posicao() ?? { x: innerWidth - 180, y: innerHeight - 160 };

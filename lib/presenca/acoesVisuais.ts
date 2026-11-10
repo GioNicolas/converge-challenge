@@ -32,6 +32,42 @@ export function mapearAcoesVisuais(plano: AcaoVisual[] | undefined, resolver: (i
   });
 }
 
+/** Gestos que deixam tinta em cima de uma peça. */
+const MARCAS = ["circular", "sublinhar", "enquadrar", "colchetes"] as const;
+
+/**
+ * Toda pergunta sobre uma peça do desenho marca essa peça. O modelo devolvia `visual: []` mesmo citando elementos, e
+ * o candidato nunca via de que parte o Totti falava. Sem nenhuma marca no plano, entra uma na primeira peça citada
+ * (variando o tipo); o que o modelo compôs fica como está.
+ */
+export function garantirMarca(plano: AcaoVisual[] | undefined, elementos: readonly string[], variacao = 0): AcaoVisual[] | undefined {
+  if (!elementos.length) return plano;
+  // "Percorrer" é um gesto pensado (acompanha um fluxo): fica como o modelo compôs. Só anotar ou apontar não marca nada.
+  const temMarca = (plano ?? []).some((a) => a.tipo !== "anotar" && a.tipo !== "apontar");
+  if (temMarca) return plano;
+  const tipo = MARCAS[Math.abs(variacao) % MARCAS.length];
+  return [{ tipo, alvo: elementos[0] }, ...(plano ?? [])].slice(0, 5);
+}
+
+/**
+ * Peças do grafo citadas pelo nome numa fala, na ordem em que aparecem nela. Só nomes com 4 letras ou mais e, para
+ * nomes longos (texto escrito dentro da caixa), as primeiras palavras.
+ */
+export function pecasCitadas(fala: string, grafo: string): string[] {
+  const plano = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const texto = ` ${plano(fala)} `;
+  const achadas: { id: string; em: number }[] = [];
+  for (const linha of grafo.split("\n")) {
+    const m = linha.match(/^\s*-\s*\[([a-z]\d+)\]\s+(.+?)(?:\s+\((?:retângulo|elipse|losango|texto|moldura|imagem)[^)]*\))?\s*(?:—.*)?$/i);
+    if (!m || /[→—]/.test(m[2]) || /^[sf]\d/i.test(m[1])) continue;
+    const nome = plano(m[2]).split(" ").slice(0, 3).join(" ");
+    if (nome.length < 4) continue;
+    const em = texto.indexOf(` ${nome} `);
+    if (em >= 0) achadas.push({ id: m[1], em });
+  }
+  return achadas.sort((a, b) => a.em - b.em).map((a) => a.id);
+}
+
 export type MemoriaVisual = { recentes: string[]; ultimoGesto?: string; rodada: number };
 export const criarMemoriaVisual = (): MemoriaVisual => ({ recentes: [], rodada: 0 });
 

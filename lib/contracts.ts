@@ -462,3 +462,10 @@ export const SILENCIO_REPETIR_S = 30;
 // Ritmo das perguntas do agente: vem da política comum de interrupção (lib/interrupcao/politica.ts), a mesma no
 // quadro (navegador e servidor) e no live coding, escalada pela duração da entrevista.
 // ---------------------------------------------------------------------------
+
+/**
+ * Prazo de uma análise do desenho, no quadro e no servidor. A análise roda em segundo plano e a pergunta ainda espera
+ * a pausa do candidato, então vale mais esperar a resposta do que perdê-la: com 8 s, numa entrevista real 7 de 21
+ * análises estouraram o prazo, todas com o candidato desenhando, e ele ficou minutos sem ouvir pergunta.
+ */
+export const PRAZO_ANALISE_DO_DESENHO_MS = 15_000;

@@ -112,8 +112,8 @@ describe("motivoBloqueioPlin (política comum: orçamento, cota e intervalo)", (
   });
 
   it("cota proporcional ao tempo: não gasta o orçamento no começo", () => {
-    // Aos 4 de 35 min, a cota é 2.
-    assert.equal(motivoBloqueioPlin(estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA - 4 * MIN, perguntasFeitas: 2 }), AGORA), "COTA_DO_TEMPO");
+    // Aos 4 de 35 min, a cota é 3.
+    assert.equal(motivoBloqueioPlin(estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA - 4 * MIN, perguntasFeitas: 3 }), AGORA), "COTA_DO_TEMPO");
   });
 
   it("começo do aprofundamento é marco: basta o respiro curto", () => {
@@ -143,7 +143,8 @@ describe("filtrarResposta", () => {
 
   it("deixa passar uma resposta válida", () => {
     const r = filtrarResposta(e, resposta(), IDS, AGORA);
-    assert.deepEqual(r, { ...resposta(), avancar_fase: false });
+    // A pergunta cita uma peça e o modelo não pediu gesto: a peça é marcada mesmo assim.
+    assert.deepEqual(r, { ...resposta(), visual: [{ tipo: "circular", alvo: "e1" }], avancar_fase: false });
   });
 
   it("avancar_fase só vale em ALTO_NIVEL, mesmo quando o plin é rebaixado", () => {

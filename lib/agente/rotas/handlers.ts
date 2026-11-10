@@ -28,6 +28,7 @@ import {
   type RespostaAnalise,
 } from "../sessao/tipos";
 import { kvPadrao } from "@/lib/storage/kv";
+import { PRAZO_ANALISE_DO_DESENHO_MS } from "@/lib/contracts";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
 import { contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
 import { registrarNoIndice } from "../resultados";
@@ -35,6 +36,7 @@ import { contexto } from "./contexto";
 import { devHabilitado, finalizarEmSegundoPlano } from "./scorecard";
 import { criarLimitador, erro, ipDe, json, lerJsonValidado, type ParamsId } from "./http";
 
+/** Prazo de uma fala ao vivo (o /perguntar). A análise do desenho tem o dela: PRAZO_ANALISE_DO_DESENHO_MS. */
 export const PRAZO_ANALISE_MS = 8000;
 export const MAX_ANALISES_POR_SESSAO = 200;
 export const MAX_CORPO_JSON = 64 * 1024;
@@ -217,12 +219,12 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   let origem = "sem_llm";
 
   if (ctx.llm) {
-    const sinal = AbortSignal.timeout(PRAZO_ANALISE_MS);
+    const sinal = AbortSignal.timeout(PRAZO_ANALISE_DO_DESENHO_MS);
     const r = await comPrazo(
       analisar({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema }, estado, pedido, t0, sinal).catch(
         () => null,
       ),
-      PRAZO_ANALISE_MS,
+      PRAZO_ANALISE_DO_DESENHO_MS,
       null,
     );
     if (r) {
@@ -349,6 +351,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const atual = (await ctx.repositorio.obter(id))?.estado ?? sessao.estado;
   let novo = semSubstituida(sincronizarFase(atual, fase, agora));
   novo = transicionar(novo, { tipo: "CANDIDATO_FALOU", texto, fimDeResposta: false }, agora).estado;
+  if (resposta.concluiu) novo = transicionar(novo, { tipo: "CANDIDATO_CONCLUIU" }, agora).estado;
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto, ...(resposta.perguntou ? { perguntou: true } : {}) }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
   const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);

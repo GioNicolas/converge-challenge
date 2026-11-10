@@ -189,6 +189,9 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     // Primeiro desenho: sai de REQUISITOS. Em ALTO_NIVEL a dúvida vale (o modelo decide quando falar).
     const d1 = diffGrafo("COMPONENTES\nCONEXÕES", GRAFO_RUIM);
     await eventos(id, [{ tipo: "fase", dados: { fase: "ALTO_NIVEL" } }, { tipo: "desenho", dados: { grafo: GRAFO_RUIM, mudancas: d1.texto, ids: d1.ids } }]);
+    // A análise vem depois do evento do desenho (o segundo do lote, 1 ms à frente): a observação dela é a que fica
+    // (as repetições seguintes não entram de novo no livro) e precisa da âncora desse desenho.
+    relogio += 10;
     const alto = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0);
     respostas.push(alto);
     assert.equal(alto.status, "duvida");

@@ -9,6 +9,7 @@
 // - Análise que passa de `limiteMs` é ignorada; tenta de novo no próximo gatilho.
 //
 // O gatilho não decide se a resposta vira plin: isso é da máquina de estados.
+import { PRAZO_ANALISE_DO_DESENHO_MS } from "@/lib/contracts";
 import { RITMO } from "@/lib/interrupcao/politica";
 import type { PedidoAnalise, RespostaAnalise } from "@/lib/sessao/cliente";
 
@@ -26,7 +27,7 @@ export type OpcoesGatilho = {
   montarPedido: (forcar: boolean) => PedidoAnalise | null;
   analisar: (pedido: PedidoAnalise, sinal: AbortSignal) => Promise<RespostaAnalise>;
   aoResultado: (resposta: RespostaAnalise, pedido: PedidoAnalise) => void;
-  aoErro?: (erro: unknown) => void;
+  aoErro?: (erro: unknown, pedido: PedidoAnalise) => void;
 };
 
 export type Gatilho = {
@@ -38,7 +39,7 @@ export type Gatilho = {
 };
 
 export const PAUSA_PADRAO_MS = 3_500;
-export const LIMITE_PADRAO_MS = 8_000;
+export const LIMITE_PADRAO_MS = PRAZO_ANALISE_DO_DESENHO_MS;
 const REAGENDAR_MS = 1_000;
 
 export function criarGatilho(opcoes: OpcoesGatilho): Gatilho {
@@ -95,7 +96,7 @@ export function criarGatilho(opcoes: OpcoesGatilho): Gatilho {
       ]);
       if (!parado) opcoes.aoResultado(resposta, pedido);
     } catch (erro) {
-      opcoes.aoErro?.(erro);
+      opcoes.aoErro?.(erro, pedido);
     } finally {
       clearTimeout(prazo);
       rodando = false;

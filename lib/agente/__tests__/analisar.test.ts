@@ -71,7 +71,7 @@ describe("analisar", () => {
     const json = JSON.stringify(r.resposta);
     for (const f of problema.ficha) assert.ok(!json.includes(f.resposta));
     for (const c of kitDemo.criterios) for (const n of [1, 2, 3, 4] as const) assert.ok(!json.includes(c.niveis[n]));
-    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "pergunta", "status"]);
+    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "pergunta", "status", "visual"]);
   });
 
   it("ok cancela a dúvida pendente", async () => {

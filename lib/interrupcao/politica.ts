@@ -13,11 +13,14 @@
  */
 
 export const RITMO = {
-  /** Em média, uma interrupção a cada tantos minutos de entrevista. */
-  minutosPorInterrupcao: 3,
-  orcamentoMinimo: 3,
-  orcamentoMaximo: 12,
-  /** Intervalo mínimo entre duas interrupções comuns, como fração do ritmo médio (~1,5 min). */
+  /**
+   * Em média, uma interrupção a cada tantos minutos de entrevista. Com 3, numa entrevista real de quadro o candidato
+   * desenhou 7 minutos e ouviu uma pergunta só: a entrevista é a conversa sobre o que ele está fazendo.
+   */
+  minutosPorInterrupcao: 2,
+  orcamentoMinimo: 4,
+  orcamentoMaximo: 20,
+  /** Intervalo mínimo entre duas interrupções comuns, como fração do ritmo médio (~1 min). */
   fracaoDoRitmoEntreInterrupcoes: 0.5,
   /**
    * Respiro mínimo desde o começo e o fim da última conversa (a última fala de qualquer um dos dois). Com 45 s, numa
@@ -66,6 +69,8 @@ export const RITMO = {
   esperaParaQualquerRespiroMs: 30_000,
   /** Um marco de fase (começo do aprofundamento, do fechamento) vale por esse tempo. */
   marcoDeFaseMs: 20_000,
+  /** O candidato disse que terminou: a pergunta seguinte é esperada, e o marco vale por esse tempo. */
+  marcoDeConclusaoMs: 45_000,
 } as const;
 
 /** Interrupções que a entrevista comporta (fora abertura, encerramento e mudança no problema). */
