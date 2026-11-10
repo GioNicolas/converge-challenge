@@ -537,7 +537,7 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
     if (movimentoTestado !== "repetir" && movimentoTestado !== "esclarecer") await extrairAgora(sessao);
     const depois = fotografar(sessao);
     console.log(`  >> Recrutadora: ${caso.fala}`);
-    console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoDaUltimaFala(sessao)} | ${esperaMs} ms]: ${depois.fala}`);
+    console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoTestado} | ${esperaMs} ms]: ${depois.fala}`);
 
     for (const trava of travasDaUltimaFala(sessao)) console.log(`     trava ${trava.trava}: "${trava.antes}" -> "${trava.depois}"`);
 

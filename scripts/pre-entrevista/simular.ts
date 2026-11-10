@@ -411,12 +411,21 @@ const emLinha = (mapa: Map<string, number>) =>
     .map(([nome, n]) => `${nome}=${n}`)
     .join(", ") || "(nenhuma)";
 
+interface DadosDeConducao {
+  trava?: string;
+  antes?: string;
+  depois?: string;
+  movimento?: string;
+  pendente?: { tipo: string };
+  decisao?: string;
+}
+
 /** Travas, movimentos, decisões pendentes e tempo por fala de uma sessão. Soma em `medidas` e imprime o da sessão. */
 function imprimirConducao(sessao: Sessao, registros: Registro[]): void {
   const daSessao = { travas: new Map<string, number>(), movimentos: new Map<string, number>(), decisoes: new Map<string, number>() };
   console.log("\n--- condução da conversa (movimentos, travas e decisões pendentes) ---");
   for (const e of sessao.logs) {
-    const dados = (e.dados ?? {}) as { trava?: string; antes?: string; depois?: string; movimento?: string; pendente?: { tipo: string }; decisao?: string };
+    const dados = (e.dados ?? {}) as DadosDeConducao;
     if (e.tipo === "trava" && dados.trava) {
       somar(daSessao.travas, dados.trava);
       somar(medidas.travas, dados.trava);
@@ -426,7 +435,7 @@ function imprimirConducao(sessao: Sessao, registros: Registro[]): void {
       somar(daSessao.movimentos, dados.movimento);
       somar(medidas.movimentos, dados.movimento);
       if (dados.pendente) {
-        const chave = `${dados.pendente.tipo}:${dados.decisao ?? "sem campo"}`;
+        const chave = `${dados.pendente.tipo}:${dados.decisao || "sem campo"}`;
         somar(daSessao.decisoes, chave);
         somar(medidas.decisoes, chave);
       }
@@ -716,6 +725,7 @@ async function main(): Promise<void> {
   }
   console.log(`\n================================================================`);
   console.log(`placar total de fidelidade: ${totais.passou}/${totais.total}`);
+  if (!pago) console.log("(sem --pago: recrutadora na Featherless; contagens e tempos NÃO são os de produção)");
   console.log(`movimentos: ${emLinha(medidas.movimentos)}`);
   console.log(`travas que reescreveram a fala: ${emLinha(medidas.travas)}`);
   console.log(`decisões pendentes (tipo:decisão do modelo): ${emLinha(medidas.decisoes)}`);

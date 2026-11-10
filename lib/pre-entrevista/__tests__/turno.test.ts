@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Classificacao } from "../classificador";
-import { conduzirTurno } from "../turno";
+import { conduzirTurno, desfazerValor } from "../turno";
 import { ErroChat } from "../llm";
 import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, type LeituraFalsa } from "./apoio";
 
@@ -366,5 +366,31 @@ describe("conduzirTurno: resposta que não é escolha nem aprovação vai ao mod
     const { sessao, resultados } = await conversar([...ATE_O_RESUMO, espera, espera, espera, espera, espera]);
     assert.ok(resultados.every((r) => r.passo.tipo !== "encerrar"));
     assert.equal(sessao.plano.resumos, 1);
+  });
+});
+
+describe("desfazerValor: desfaz a leitura sem pisar no que outro caminho gravou", () => {
+  it("valor ainda igual ao de depois volta ao de antes", () => {
+    assert.deepEqual(desfazerValor({ a: 1 }, { a: 0 }, { a: 1 }), { a: 0 });
+  });
+
+  it("lista que ganhou itens no fim mantém os novos e perde os da leitura", () => {
+    assert.deepEqual(desfazerValor(["lido", "extraido"], [], ["lido"]), ["extraido"]);
+    assert.deepEqual(desfazerValor(["velho", "lido", "extraido"], ["velho"], ["velho", "lido"]), ["velho", "extraido"]);
+  });
+
+  it("objeto aninhado: cada sub-chave decide sozinha, em qualquer profundidade", () => {
+    const antes = { pesos: { a: 1, b: 1 } };
+    const depois = { pesos: { a: 2, b: 1 } }; // a leitura mexeu em `a`
+    const atual = { pesos: { a: 2, b: 5 } }; // a extração mexeu em `b`
+    assert.deepEqual(desfazerValor(atual, antes, depois), { pesos: { a: 1, b: 5 } });
+  });
+
+  it("chave que a leitura criou some, e a que outro caminho criou fica", () => {
+    assert.deepEqual(desfazerValor({ lida: 1, extraida: 2 }, {}, { lida: 1 }), { extraida: 2 });
+  });
+
+  it("escalar mudado por outro caminho fica", () => {
+    assert.equal(desfazerValor("extraido", "antes", "lido"), "extraido");
   });
 });
