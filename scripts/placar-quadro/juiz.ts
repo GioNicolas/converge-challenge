@@ -1,6 +1,7 @@
 // Juiz do placar: um modelo forte lê a conversa e dá nota a cada fala do Totti (e à entrevista inteira).
 // Mede o que as regex não pegam: se ele ouviu, se a pergunta valia a pena, se soou como gente.
 // Ainda não calibrado com notas humanas: use para comparar versões entre si, não como verdade absoluta.
+import "../_gasto";
 import { z } from "zod";
 import { chatJsonVia } from "../../lib/llm/openaiCompat";
 import { featherless } from "../../lib/llm/featherless";

@@ -243,6 +243,8 @@ Cada fase entrega algo que dá para testar sozinho. A ordem é sugestão; o Níc
 O quadro já tem a forma Conversador + Pensador (`perguntar` responde à fala; `analisar` observa o desenho e decide as
 perguntas por iniciativa). Por isso o teste começa por ele: mudar só o Conversador e medir.
 
+> Os scripts de medição só chamam a OpenRouter com `--pago` (ver `scripts/_gasto.ts`). Sem a flag, rodam só na Featherless e os tempos não são os de produção.
+
 **Placar** (`npm run placar:quadro -- --rotulo <nome>`, em `scripts/placar-quadro/`):
 - 18 casos fixos com checagem objetiva;
 - 3 entrevistas simuladas (um LLM faz o candidato: sênior claro, júnior nervoso, vago que testa atalhos);

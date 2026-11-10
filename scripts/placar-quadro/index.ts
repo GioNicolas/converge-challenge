@@ -9,6 +9,7 @@
 //   npm run placar:quadro -- --rotulo v2 --personas senior_claro,junior_nervoso --so conversas
 //   npm run placar:quadro -- --rejulgar test-results/placar-quadro/A.json   (só o juiz, sobre as falas salvas)
 //   npm run placar:quadro -- --comparar test-results/placar-quadro/A.json test-results/placar-quadro/B.json
+import "../_gasto";
 import fs from "node:fs";
 import path from "node:path";
 import { criarClientePrincipal } from "../../lib/agente/llm/principal";

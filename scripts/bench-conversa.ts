@@ -2,6 +2,7 @@
 // Usa créditos dos provedores. Uso:
 //   npx tsx --env-file-if-exists=.env.local scripts/bench-conversa.ts openrouter:anthropic/claude-haiku-5.5 featherless:google/gemma-4-26B-A4B-it
 //   (sem argumentos: a lista padrão abaixo; RODADAS=2 repete os casos)
+import "./_gasto";
 import { z } from "zod";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
 import { featherless } from "../lib/llm/featherless";

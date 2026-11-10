@@ -1,5 +1,6 @@
 // Smoke test pago e explícito: texto sintético → TTS real → Scribe Realtime real.
 // A chave vem apenas do ambiente. Nenhum token ou credencial é impresso.
+import { pago } from "./_gasto";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { NextRequest } from "next/server";
@@ -7,6 +8,11 @@ import { Scribe, RealtimeEvents } from "@elevenlabs/client";
 import { POST as sintetizar } from "../app/api/falar/route";
 import { POST as autorizar } from "../app/api/transcricao/sessao/route";
 import { iniciarScribe } from "../lib/transcricao/scribe";
+
+if (!pago) {
+  console.error("Este script gasta crédito do ElevenLabs (voz e transcrição). Rode com --pago para confirmar.");
+  process.exit(1);
+}
 
 async function main() {
   if (!process.env.ELEVENLABS_API_KEY) throw new Error("Configure ELEVENLABS_API_KEY no ambiente.");

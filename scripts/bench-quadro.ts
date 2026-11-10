@@ -3,6 +3,7 @@
 // Usa créditos dos provedores. Uso:
 //   npx tsx --env-file-if-exists=.env.local scripts/bench-quadro.ts featherless:mistralai/Mistral-Small-3.2-24B-Instruct-2506 openrouter:google/gemini-3.7-flash@low
 //   (RODADAS=3 repete a simulação; sem argumentos, a lista padrão abaixo)
+import "./_gasto";
 import { featherless } from "../lib/llm/featherless";
 import { completeJson } from "../lib/llm";
 import { chatJsonVia, type LlmProviderName, type ReasoningEffort } from "../lib/llm/openaiCompat";

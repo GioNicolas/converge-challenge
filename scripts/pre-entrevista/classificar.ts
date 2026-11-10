@@ -4,6 +4,7 @@
  *   npm run pre:classificar            # todas as vagas
  *   npm run pre:classificar -- ia-pleno # só uma
  */
+import "../_gasto";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 

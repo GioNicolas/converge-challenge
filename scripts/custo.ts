@@ -1,5 +1,6 @@
 // Resumo do custo de LLM de uma simulação: por papel e por provedor, a partir de getLlmStats (lib/llm).
 // Use `instantaneo()` antes e `resumoDoCusto(antes)` depois para ter só o que aquela entrevista gastou.
+import "./_gasto";
 import { getLlmStats, type LlmRole } from "../lib/llm";
 
 type Uso = Record<string, Record<string, { calls: number; costUsd: number }>>;

@@ -7,6 +7,7 @@
  *   npm run pre:simular -- muda_foco                     # só uma
  *   npm run pre:simular -- questionadora muda_foco       # várias
  */
+import "../_gasto";
 import type { FocusArea, InterviewConfig } from "@/lib/contracts";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";

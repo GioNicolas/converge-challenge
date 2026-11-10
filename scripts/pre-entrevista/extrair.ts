@@ -6,6 +6,7 @@
  *   npm run pre:extrair                       # todas as transcrições
  *   npm run pre:extrair -- ia-pleno           # só uma
  */
+import "../_gasto";
 import { TRANSCRICOES } from "@/fixtures/pre-entrevista/transcricoes";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";

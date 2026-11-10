@@ -1,5 +1,6 @@
 // Smoke test explícito com o LLM real. Só dados sintéticos; usa créditos do provedor.
 // npx tsx --env-file-if-exists=.env.local scripts/validar-conversa.ts
+import "./_gasto";
 import assert from "node:assert/strict";
 import { KIT_SYSTEM_DESIGN as kit } from "../lib/agente/kits/system-design";
 import type { LlmCliente } from "../lib/agente/llm/cliente";

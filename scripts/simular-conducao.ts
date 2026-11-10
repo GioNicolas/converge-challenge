@@ -2,6 +2,7 @@
 // diz "não sei" às duas primeiras perguntas. Confere se o Totti muda de assunto e não pergunta pelo que já está
 // desenhado. Usa créditos do provedor.
 // npx tsx --env-file-if-exists=.env.local scripts/simular-conducao.ts
+import "./_gasto";
 import { analisar, type DepsAnalisar } from "../lib/agente/analisar";
 import { KIT_SYSTEM_DESIGN as kit } from "../lib/agente/kits/system-design";
 import type { LlmCliente } from "../lib/agente/llm/cliente";

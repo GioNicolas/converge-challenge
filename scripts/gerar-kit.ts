@@ -3,6 +3,7 @@
 // --fake: LLM falso, sem rede. --analisar: depois de gerar, roda UM `analisar` ao vivo com um grafo
 // falho escrito à mão para a área (prova que o prompt funciona em áreas diferentes).
 // A chave vem de OPENROUTER_API_KEY (ambiente ou .env.local/.env). Ela nunca é impressa.
+import "./_gasto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { analisar } from "../lib/agente/analisar";

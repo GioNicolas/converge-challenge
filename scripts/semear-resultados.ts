@@ -2,6 +2,7 @@
 // "Ver resultados" funcionando sem fazer entrevistas. Vaga: "Backend de pagamentos" (config-backend-pagamentos).
 //   npm run dev:semear     (com ARMAZENAMENTO=memoria no servidor não aparece: o servidor precisa ler data/)
 // Apagar depois:  npm run dev:semear -- --limpar
+import "./_gasto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { criarConvite, salvarConvite } from "@/lib/convites/store";

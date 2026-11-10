@@ -1,6 +1,7 @@
 // Smoke test do entrevistador do live coding com o LLM real (microfone aberto, conversa livre e balão).
 // Só dados sintéticos; usa créditos do provedor.
 // npx tsx --env-file-if-exists=.env.local scripts/validar-conversa-ide.ts
+import "./_gasto";
 import assert from "node:assert/strict";
 import { getProblem } from "../problems";
 import { runInterviewerTurn } from "@/lib/agents/interviewer";

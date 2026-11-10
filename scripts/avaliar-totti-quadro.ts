@@ -4,6 +4,7 @@
 //   npx tsx --env-file-if-exists=.env.local scripts/avaliar-totti-quadro.ts            (todos, 1 rodada)
 //   RODADAS=3 SO=analise npx tsx --env-file-if-exists=.env.local scripts/avaliar-totti-quadro.ts
 // Os casos ficam em scripts/placar-quadro/casos.ts (o placar usa os mesmos).
+import "./_gasto";
 import { gerarAbertura } from "../lib/agente/abertura";
 import { analisar } from "../lib/agente/analisar";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
