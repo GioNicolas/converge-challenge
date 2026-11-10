@@ -11,9 +11,11 @@ import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
 import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
-import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
+import { registrarEvento } from "./log";
+import { descreverPasso, nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
+import { LIMIAR_DUPLICADA, sobreposicao } from "@/lib/agente/guardas";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
 import { DURACAO_PADRAO, duracaoDoRascunho, listar, type Rascunho, type Turno } from "./rascunho";
@@ -753,7 +755,7 @@ function confirmacaoDeterministica(sessao: Sessao): string | undefined {
 
 /** Resposta sem modelo: mesma forma de `RespostaAgente`, com o provedor "fixa". */
 function respostaFixa(texto: string): RespostaAgente {
-  return { texto, movimento: "seguir", provedor: "fixa", model: "-", ms: 0, fallback: false, tentativas: [], mensagens: [], respostaCrua: "" };
+  return { texto, movimento: "seguir", travas: [], provedor: "fixa", model: "-", ms: 0, fallback: false, tentativas: [], mensagens: [], respostaCrua: "" };
 }
 
 function formatarTranscricao(turnos: Turno[]): string {
@@ -801,14 +803,16 @@ const RE_RECONHECIMENTO_INICIAL =
 /**
  * Tira o que não pode ir para a voz: markdown, aspas em volta, prefixo "Totti:" e palavra de concordância no começo
  * (a capital volta na nova primeira letra). Único ponto por onde passa a fala do modelo.
+ * Com `manterReconhecimento` (fala de movimento `responder`), a palavra do começo fica: ali ela é a resposta natural.
  */
-export function limparFala(texto: string): string {
+export function limparFala(texto: string, opcoes: { manterReconhecimento?: boolean } = {}): string {
   const limpo = texto
     .replace(/^\s*totti\s*:\s*/i, "")
     .replace(/[*_#`]/g, "")
     .trim()
     .replace(/^["“]|["”]$/g, "")
     .trim();
+  if (opcoes.manterReconhecimento) return limpo;
   let semReconhecimento = limpo;
   let anterior: string;
   do {
@@ -819,10 +823,19 @@ export function limparFala(texto: string): string {
   return semReconhecimento.charAt(0).toUpperCase() + semReconhecimento.slice(1);
 }
 
+/** Uma trava que reescreveu a fala do modelo: o nome dela e a fala antes e depois. */
+export interface TravaAplicada {
+  trava: string;
+  antes: string;
+  depois: string;
+}
+
 export interface RespostaAgente {
   texto: string;
   /** O movimento de conversa que o modelo declarou (`seguir` quando não declarou, e nas falas fixas). */
   movimento: Movimento;
+  /** Travas que reescreveram a fala, na ordem (cada uma também vira um evento `trava` no log da sessão). */
+  travas: TravaAplicada[];
   provedor: string;
   model: string;
   /** Tempo somado das tentativas. */
@@ -835,7 +848,6 @@ export interface RespostaAgente {
   respostaCrua: string;
 }
 
-/** Gera a fala do Totti para o passo escolhido. Lança `ErroChat` se nenhum alvo responder. */
 /** Número de frases de uma fala (pelos sinais de pontuação). */
 export function contarFrases(texto: string): number {
   return texto.split(/[.!?]+/).filter((s) => s.trim()).length;
@@ -846,7 +858,51 @@ export function falaFormatoIndisponivel(modo: Rascunho["mode"]): string {
   return `System design ainda não está disponível nesta versão, então a entrevista segue em ${FORMATO_CURTO[modo]}. Prefere seguir assim ou mudar alguma coisa?`;
 }
 
-export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaAgente> {
+/** O passo em curso: o último que o Totti executou (a dúvida respondida não conta, vale o passo que ela retomou). */
+function passoEmCurso(sessao: Sessao): Passo | undefined {
+  const ultimo = sessao.plano.ultimoPasso;
+  return ultimo?.tipo === "responder_duvida" ? ultimo.retomar : ultimo;
+}
+
+/** Os dois passos fazem a mesma pergunta: mesmo tipo e, quando há área, a mesma área. */
+function mesmaPerguntaDoPasso(a: Passo, b: Passo | undefined): boolean {
+  if (!b || a.tipo !== b.tipo) return false;
+  if ((a.tipo === "aprofundar" || a.tipo === "oferecer_tradeoff") && (b.tipo === "aprofundar" || b.tipo === "oferecer_tradeoff")) {
+    return a.area === b.area;
+  }
+  return true;
+}
+
+/**
+ * Reserva para o modelo rápido, que às vezes não declara o movimento: se a fala traz quase a mesma pergunta que estava
+ * em aberto e o planejador tinha escolhido outra pergunta, o modelo repetiu, e a fala conta como `repetir`.
+ * Não vale quando a repetição é o próprio passo: nova tentativa da mesma pergunta, resposta a dúvida (que retoma a
+ * pergunta) e pergunta de nível (sempre as mesmas palavras, inclusive quando a abertura já a fez). Função pura.
+ */
+export function movimentoDaFala(declarado: Movimento, fala: string, sessao: Sessao, passo: Passo): Movimento {
+  if (declarado !== "seguir") return declarado;
+  if (passo.tipo === "responder_duvida" || passo.tipo === "perguntar_nivel") return declarado;
+  if (mesmaPerguntaDoPasso(passo, passoEmCurso(sessao))) return declarado;
+  const aberta = perguntaEmAberto(sessao.transcricao);
+  const daFala = fala.match(/[^.!?]+\?/g)?.at(-1);
+  if (!aberta || !daFala) return declarado;
+  return sobreposicao(daFala, aberta) >= LIMIAR_DUPLICADA ? "repetir" : declarado;
+}
+
+export interface OpcoesResponder {
+  /** Cliente de LLM. Os testes passam um falso; sem ele, vale o `chat` de verdade. */
+  chat?: typeof chat;
+}
+
+/**
+ * Gera a fala do Totti para o passo escolhido. Lança `ErroChat` se nenhum alvo responder.
+ *
+ * As travas abaixo conferem a fala depois que o modelo a escreve, e obedecem ao `movimento` que ele declarou:
+ * nenhuma reescreve uma fala `repetir`, `esclarecer` ou `responder`, com duas exceções que são formato de voz e não
+ * conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, e "uma pergunta só" vale para `repetir` e `esclarecer`.
+ * Cada reescrita vira um evento `trava` no log da sessão.
+ */
+export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResponder = {}): Promise<RespostaAgente> {
   if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
   if (passo.tipo === "informar_formato_indisponivel") return respostaFixa(falaFormatoIndisponivel(sessao.rascunho.mode));
   // Revisão de tom, dicas ou duração: a confirmação sai pronta. Mudança de foco ou de critério segue com o modelo.
@@ -854,9 +910,10 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     const confirmacao = confirmacaoDeterministica(sessao);
     if (confirmacao) return respostaFixa(confirmacao);
   }
+  const conversar = opcoes.chat ?? chat;
   const resumoCompleto = passo.tipo === "resumo_final" && !passo.revisao;
   const mensagens = montarMensagensConversa(sessao, passo);
-  let resposta = await chat({
+  let resposta = await conversar({
     alvos: alvosDaConversa(),
     messages: mensagens,
     temperature: TEMPERATURA_CONVERSA,
@@ -864,15 +921,33 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
   });
   // A reescrita do resumo, abaixo, não muda o movimento: vale o que o modelo declarou na primeira resposta.
   const saida = lerSaidaDoModelo(resposta.content);
-  const movimento = saida.movimento;
-  let texto = limparFala(saida.fala);
+  // Formato de voz (markdown, aspas, prefixo) sai sempre, antes de qualquer trava.
+  let texto = limparFala(saida.fala, { manterReconhecimento: true });
+  const movimento = movimentoDaFala(saida.movimento, texto, sessao, passo);
+  const segue = movimento === "seguir";
   let ms = resposta.ms;
   let tentativas = resposta.tentativas;
   let respostaCrua = resposta.content;
+
+  const travas: TravaAplicada[] = [];
+  /** Aplica o resultado de uma trava e, se a fala mudou, registra. */
+  const aplicar = (trava: string, depois: string) => {
+    if (depois === texto) return;
+    travas.push({ trava, antes: texto, depois });
+    registrarEvento(sessao, {
+      tipo: "trava",
+      resumo: `${trava} | ${descreverPasso(passo)} | movimento ${movimento}`,
+      dados: { trava, antes: texto, depois, movimento, passo },
+    });
+    texto = depois;
+  };
+
+  // Palavra de reconhecimento no começo ("Certo.", "Entendi,"): numa fala `responder` ela é a resposta natural e fica.
+  if (texto && movimento !== "responder") aplicar("reconhecimento_inicial", limparFala(texto));
   // O modelo escreve até 2 frases do resumo (ou 3 numa revisão). Se passou, pede para reescrever uma vez.
   const teto = resumoCompleto ? 2 : 3;
-  if (texto && passo.tipo === "resumo_final" && contarFrases(texto) > teto) {
-    const reescrita = await chat({
+  if (texto && segue && passo.tipo === "resumo_final" && contarFrases(texto) > teto) {
+    const reescrita = await conversar({
       alvos: alvosDaConversa(),
       messages: [
         ...mensagens,
@@ -888,33 +963,37 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
       temperature: TEMPERATURA_CONVERSA,
       maxTokens: MAX_TOKENS_CONVERSA,
     });
-    texto = limparFala(lerSaidaDoModelo(reescrita.content).fala) || texto;
+    aplicar("reescrita_do_resumo", limparFala(lerSaidaDoModelo(reescrita.content).fala) || texto);
     ms += reescrita.ms;
     tentativas = [...tentativas, ...reescrita.tentativas];
     respostaCrua = `${respostaCrua}\n[reescrita]\n${reescrita.content}`;
     resposta = reescrita;
   }
   // Uma pergunta por fala: corta a parte do modelo antes de qualquer sufixo que o código acrescente.
-  if (texto) texto = cortarNaPrimeiraPergunta(texto);
+  // Numa fala `responder` não corta: ela pode responder à dúvida dela e depois retomar a pergunta em aberto.
+  if (texto && movimento !== "responder") aplicar("cortar_na_primeira_pergunta", cortarNaPrimeiraPergunta(texto));
   // Pergunta no molde óbvio ("o que separa um ótimo de um fraco?"): troca pela pergunta do banco, sem nova chamada.
+  // Só quando a fala executa o passo: uma repetição, um esclarecimento ou uma resposta não viram outra pergunta.
   const areaAprofundada = passo.tipo === "aprofundar" ? passo.area : passo.tipo === "confirmar_mudanca_foco" ? passo.proximo?.area : undefined;
-  if (texto && areaAprofundada && perguntaObvia(texto)) {
+  if (texto && segue && areaAprofundada && perguntaObvia(texto)) {
     const doBanco = perguntasDoBanco(sessao, areaAprofundada)[0];
-    if (doBanco) texto = trocarPergunta(texto, doBanco.texto);
+    if (doBanco) aplicar("pergunta_do_banco", trocarPergunta(texto, doBanco.texto));
   }
-  if (texto && passo.tipo === "perguntar_contexto" && (!texto.includes("?") || perguntaObvia(texto))) {
-    texto = trocarPergunta(texto, PERGUNTA_CONTEXTO);
+  if (texto && segue && passo.tipo === "perguntar_contexto" && (!texto.includes("?") || perguntaObvia(texto))) {
+    aplicar("pergunta_de_contexto", trocarPergunta(texto, PERGUNTA_CONTEXTO));
   }
   // Confirmação do início e resposta a dúvida devolvem a decisão para ela: sem pergunta, o código acrescenta uma.
-  if (texto && !texto.includes("?") && (passo.tipo === "confirmar_inicio" || passo.tipo === "responder_duvida")) {
-    texto = `${texto} ${passo.tipo === "confirmar_inicio" ? "Prefere seguir assim ou mudar alguma coisa?" : "O que você prefere?"}`;
+  // Fora do `seguir` não acrescenta: um "Claro, sem pressa." viraria cobrança.
+  if (texto && segue && !texto.includes("?") && (passo.tipo === "confirmar_inicio" || passo.tipo === "responder_duvida")) {
+    aplicar("pergunta_no_fim", `${texto} ${passo.tipo === "confirmar_inicio" ? "Prefere seguir assim ou mudar alguma coisa?" : "O que você prefere?"}`);
   }
   // No resumo, o código acrescenta o que fica de fora, duração, tom e dicas (do estado) e a pergunta final, em variações.
   // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
-  if (texto && passo.tipo === "resumo_final" && passo.revisao) {
-    texto = removerLogisticaDaRevisao(texto);
+  // Com movimento diferente de `seguir`, a fala não é um resumo (é uma resposta ou uma repetição) e fica como veio.
+  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao) {
+    aplicar("logistica_da_revisao", removerLogisticaDaRevisao(texto));
   }
-  if (texto && resumoCompleto) {
+  if (texto && segue && resumoCompleto) {
     const variante = Math.floor(Math.random() * 3);
     texto = [
       texto,
@@ -931,6 +1010,7 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
   return {
     texto,
     movimento,
+    travas,
     provedor: resposta.provedor,
     model: resposta.model,
     ms,

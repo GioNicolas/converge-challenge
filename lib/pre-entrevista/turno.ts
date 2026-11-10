@@ -327,8 +327,8 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
       fallback: resposta.fallback,
       dados: {
         passo,
-        // Por enquanto só registrado: ninguém age sobre o movimento ainda.
         movimento: resposta.movimento,
+        travas: resposta.travas,
         mensagens: resposta.mensagens,
         respostaCrua: resposta.respostaCrua,
         tentativas: resposta.tentativas,

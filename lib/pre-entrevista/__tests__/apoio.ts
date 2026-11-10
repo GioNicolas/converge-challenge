@@ -1,6 +1,7 @@
 // Apoio dos testes da conversa: uma sessão já aberta, sem modelo e sem Jev.
 import type { Classificacao } from "../classificador";
 import type { ResultadoCompetencias } from "../competencias";
+import type { ChatOpcoes, ChatResposta, Mensagem } from "../llm";
 import type { Turno } from "../rascunho";
 import { criarSessao, type Sessao } from "../sessoes";
 import { abrirConversa } from "../turno";
@@ -30,3 +31,17 @@ export function sessaoAberta(falas: Turno[] = [], classificacao: Classificacao =
 
 export const totti = (text: string): Turno => ({ role: "agente", text });
 export const ela = (text: string): Turno => ({ role: "recrutadora", text });
+
+/** LLM falso: devolve as respostas na ordem, uma por chamada (a última vale para as chamadas seguintes). */
+export function chatFalso(...respostas: string[]) {
+  const chamadas: Mensagem[][] = [];
+  const chat = async ({ messages }: ChatOpcoes): Promise<ChatResposta> => {
+    chamadas.push(messages);
+    const content = respostas[Math.min(chamadas.length - 1, respostas.length - 1)];
+    return { content, ms: 1, provedor: "featherless", model: "falso", tentativas: [{ provedor: "featherless", model: "falso", ms: 1 }] };
+  };
+  return { chat, chamadas };
+}
+
+/** A saída do modelo no formato pedido pelo prompt. */
+export const saida = (fala: string, movimento?: string) => JSON.stringify(movimento ? { fala, movimento } : { fala });
