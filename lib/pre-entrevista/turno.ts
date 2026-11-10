@@ -448,14 +448,35 @@ function adiar(sessao: Sessao, pendente: DecisaoPendente): Desfecho {
 }
 
 /**
- * Aplica a decisão que o modelo devolveu para a decisão pendente, pelas mesmas funções que aplicam a escolha lida
- * pelos sinais. Valor ausente ou que não existe conta como "adiar".
+ * O que aconteceu, no turno, com uma decisão pendente que foi ao modelo. Vai nos dados da `fala_agente` do turno
+ * (`leituraDaDecisao`), porque a fala dita pode não ser a do modelo (a pergunta seguinte ou a fala fixa de encerramento).
+ * - `falhou`: o modelo não respondeu; nada decidido, saiu a fala de reserva.
+ * - `nao_lida`: o modelo repetiu ou esclareceu; a fala dela não era resposta e nada foi decidido.
+ * - `aplicada`: a decisão aplicada (`decisao`; valor ausente ou inválido vira "adiar", com `valida` falso).
  */
-function aplicarDecisaoDoModelo(sessao: Sessao, pendente: DecisaoPendente, devolvida: string | undefined): Desfecho {
+export type LeituraDaDecisao =
+  | { tipo: "falhou" }
+  | { tipo: "nao_lida"; movimento: Movimento }
+  | { tipo: "aplicada"; decisao: string; valida: boolean };
+
+/** A decisão que vale para o valor devolvido pelo modelo: o valor normalizado, ou "adiar" se ausente ou inválido. */
+function lerDecisaoDevolvida(pendente: DecisaoPendente, devolvida: string | undefined): { decisao: string; valida: boolean } {
   // "Trocar", " próxima etapa " e "seguir sem" valem como "trocar", "proxima_etapa" e "seguir_sem".
   const normalizada = devolvida === undefined ? undefined : normalizarTexto(devolvida).trim().replace(/[\s-]+/g, "_");
-  const valida = (VALORES_DE_DECISAO[pendente.tipo] as readonly string[]).includes(normalizada ?? "");
-  const decisao = valida ? normalizada : "adiar";
+  const valida = normalizada !== undefined && (VALORES_DE_DECISAO[pendente.tipo] as readonly string[]).includes(normalizada);
+  return { decisao: valida ? normalizada : "adiar", valida };
+}
+
+/**
+ * Aplica a decisão que o modelo devolveu para a decisão pendente, pelas mesmas funções que aplicam a escolha lida
+ * pelos sinais. `lida` vem de `lerDecisaoDevolvida`.
+ */
+function aplicarDecisaoDoModelo(
+  sessao: Sessao,
+  pendente: DecisaoPendente,
+  devolvida: string | undefined,
+  { decisao, valida }: { decisao: string; valida: boolean },
+): Desfecho {
   registrarEvento(sessao, {
     tipo: "plano",
     resumo: `decisão pendente (${pendente.tipo}): o modelo devolveu ${devolvida ?? "(nada)"}${valida ? "" : ", vale adiar"}`,
@@ -514,6 +535,7 @@ export async function conduzirTurno(
   let resposta: RespostaAgente;
   // Falha do modelo com decisão pendente: não é uma resposta, então não conta como adiamento nem vai a `aplicarDecisaoDoModelo`.
   let modeloFalhou = false;
+  let leituraDaDecisao: LeituraDaDecisao | undefined;
   try {
     resposta = await responder(sessao, passoDaFala, { chat: deps.chat, pendente });
   } catch (err) {
@@ -539,15 +561,21 @@ export async function conduzirTurno(
       dados: { etapa: "decisao_pendente", pendente, ...dadosDoErro },
     });
     resposta = { ...respostaFixa(falaDeReserva(pendente)), movimento: "responder" };
+    leituraDaDecisao = { tipo: "falhou" };
   }
+  // Guardado antes de `resposta` ser trocada pela fala do passo seguinte ou pela fala fixa de encerramento.
+  const decisaoDevolvida = resposta.decisao;
 
   let movimento = resposta.movimento;
   if (movimento === "repetir" || movimento === "esclarecer") {
     // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
     // e o plano volta a ser o de antes.
     desfazerLeitura(sessao, antesDaFala, depoisDaLeitura);
+    if (pendente) leituraDaDecisao = { tipo: "nao_lida", movimento };
   } else if (pendente && !modeloFalhou) {
-    const desfecho = aplicarDecisaoDoModelo(sessao, pendente, resposta.decisao);
+    const lida = lerDecisaoDevolvida(pendente, decisaoDevolvida);
+    leituraDaDecisao = { tipo: "aplicada", ...lida };
+    const desfecho = aplicarDecisaoDoModelo(sessao, pendente, decisaoDevolvida, lida);
     if (desfecho.tipo === "adiar") {
       // Nada decidido: a oferta, o nível ou o resumo continuam em aberto, e o passo não conta, seja qual for o movimento.
       if (movimento === "seguir") movimento = "responder";
@@ -601,7 +629,7 @@ export async function conduzirTurno(
       dados: {
         passo: passoDaFala,
         movimento,
-        ...(pendente ? { pendente, decisao: resposta.decisao } : {}),
+        ...(pendente ? { pendente, decisao: decisaoDevolvida, leituraDaDecisao } : {}),
         travas: resposta.travas,
         mensagens: resposta.mensagens,
         respostaCrua: resposta.respostaCrua,
