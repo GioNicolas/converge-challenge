@@ -221,6 +221,11 @@ export const Blip = z.object({
    * a IDE a descarta em vez de pedir licença. Retorno, encerramento e mudança no problema não perdem.
    */
   perdeAVez: z.boolean().optional(),
+  /**
+   * Pergunta que não espera o assunto aberto acabar (ele colou um bloco de código): se o Totti está esperando a
+   * resposta de outra pergunta, a IDE fecha aquela e faz esta.
+   */
+  passaNaFrente: z.boolean().optional(),
 });
 export type Blip = z.infer<typeof Blip>;
 

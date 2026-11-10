@@ -7,6 +7,7 @@ import {
   motivoDoMomento,
   motivoDoRitmo,
   orcamentoDeInterrupcoes,
+  pausaDasMaosParaFalarMs,
   RITMO,
 } from "../politica";
 
@@ -54,8 +55,9 @@ test("momento: nunca no meio da fala; mãos paradas, curta depois de marco, long
 
 test("atraso: muito tempo sem interromper com cota livre", () => {
   const base = { inicioEm: 0, duracaoMin: 30, feitas: 2, ultimaEm: 5 * MIN };
-  assert.equal(interrupcaoAtrasada({ ...base, agora: 9 * MIN }), false);
-  assert.equal(interrupcaoAtrasada({ ...base, agora: 9 * MIN + 40_000 }), true);
+  // Um ritmo (3 min numa entrevista de 30) sem interromper já é atraso.
+  assert.equal(interrupcaoAtrasada({ ...base, agora: 7 * MIN + 30_000 }), false);
+  assert.equal(interrupcaoAtrasada({ ...base, agora: 8 * MIN + 10_000 }), true);
   // Sem cota livre não é atraso.
   assert.equal(interrupcaoAtrasada({ ...base, feitas: 10, agora: 25 * MIN }), false);
 });
@@ -67,4 +69,15 @@ test("paciência: quem não para de digitar ou desenhar também recebe pergunta 
   assert.equal(motivoDoMomento({ ...ocupado, atrasada: true }), null);
   // Mesmo com paciência, nunca no meio da fala.
   assert.match(motivoDoMomento({ ...ocupado, falaHaMs: 500, esperandoHaMs: 60_000 }) ?? "", /falando/);
+});
+
+test("pausa das mãos para falar: ponto natural e espera encurtam, para quem trabalha sem parar também ser perguntado", () => {
+  assert.equal(pausaDasMaosParaFalarMs({ esperandoHaMs: 0 }), RITMO.pausaDasMaosMs);
+  // Acabou uma linha (ou soltou uma peça no quadro): uma pausa curta já serve.
+  assert.equal(pausaDasMaosParaFalarMs({ esperandoHaMs: 0, pontoNatural: true }), RITMO.pausaDasMaosNoPontoNaturalMs);
+  // A pergunta já espera: a mesma pausa curta, em qualquer ponto.
+  assert.equal(pausaDasMaosParaFalarMs({ esperandoHaMs: RITMO.esperaParaPausaCurtaMs }), RITMO.pausaDasMaosNoPontoNaturalMs);
+  // Esperou demais: qualquer respiro entre duas teclas.
+  assert.equal(pausaDasMaosParaFalarMs({ esperandoHaMs: RITMO.esperaParaQualquerRespiroMs }), RITMO.pausaDasMaosNoLimiteMs);
+  assert.ok(RITMO.pausaDasMaosNoLimiteMs < RITMO.pausaDasMaosNoPontoNaturalMs && RITMO.pausaDasMaosNoPontoNaturalMs < RITMO.pausaDasMaosMs);
 });

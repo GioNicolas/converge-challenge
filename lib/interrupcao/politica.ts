@@ -19,31 +19,51 @@ export const RITMO = {
   orcamentoMaximo: 12,
   /** Intervalo mínimo entre duas interrupções comuns, como fração do ritmo médio (~1,5 min). */
   fracaoDoRitmoEntreInterrupcoes: 0.5,
-  /** Respiro mínimo desde o começo e o fim da última conversa (a última fala de qualquer um dos dois). */
-  respiroMs: 45_000,
+  /**
+   * Respiro mínimo desde o começo e o fim da última conversa (a última fala de qualquer um dos dois). Com 45 s, numa
+   * entrevista de 15 min a primeira pergunta sobre o código saía aos 3:40.
+   */
+  respiroMs: 30_000,
   /** Depois de um marco (primeiro run verde, colagem, começo de fase), a hora passa rápido: respiro curto. */
   respiroDeMarcoMs: 15_000,
   /** A cota pode estar adiantada em até tantas interrupções em relação ao tempo decorrido. */
   folgaDaCota: 1,
-  /** Pausa real: tanto tempo sem digitar nem desenhar (mãos paradas)... */
-  pausaRealMs: 8_000,
+  /**
+   * Pausa real: tanto tempo sem digitar nem desenhar (mãos paradas)... Com 8 s o agente só falava com o candidato
+   * parado de vez: quem programa ou desenha direto, com pausas de 3 a 5 s, quase não era perguntado.
+   */
+  pausaRealMs: 4_000,
   /** ...e essa brecha na fala. Silêncio total longo é raro numa conversa por voz: quem fala muito nunca teria vez. */
   brechaNaFalaMs: 1_500,
   /** Depois de um marco (ou quando a pergunta já esperou demais), basta não estar no meio de uma ação. */
-  pausaCurtaMs: 2_000,
+  pausaCurtaMs: 1_500,
   /**
    * Paciência: a pergunta que já espera há tanto tempo (ou a interrupção atrasada) se contenta com a pausa curta.
    * Sem isso, quem digita ou desenha sem parar nunca recebia pergunta.
    */
-  pacienciaMs: 20_000,
-  /** Mesmo sem nenhuma pausa, a análise roda pelo menos uma vez nesse tempo de trabalho contínuo. */
-  analiseMaximaSemPausaMs: 45_000,
+  pacienciaMs: 12_000,
+  /**
+   * Mesmo sem nenhuma pausa, a análise roda pelo menos uma vez nesse tempo de trabalho contínuo: a pergunta precisa
+   * estar pronta quando a pausa curta chegar.
+   */
+  analiseMaximaSemPausaMs: 30_000,
   /** Mexendo numa melhoria que ele mesmo começou: só uma pausa longa. */
   pausaFocadoMs: 30_000,
   /** Uma dúvida pendente mais velha que isso cai quando o candidato volta a falar (ficou para trás). */
   pendenteValidaMs: 45_000,
   /** Sem interrupção há tantos ritmos (e com cota livre): a interrupção está atrasada. */
-  atrasoEmRitmos: 1.5,
+  atrasoEmRitmos: 1,
+  /**
+   * Pausa das mãos (digitar, desenhar) que a tela exige antes de o agente falar a pergunta que já tem pronta:
+   * a de sempre; a de um ponto natural (acabou uma linha, soltou uma peça) ou de uma pergunta que já espera; e a de
+   * uma pergunta que esperou demais (qualquer respiro entre duas teclas).
+   */
+  pausaDasMaosMs: 2_500,
+  pausaDasMaosNoPontoNaturalMs: 1_200,
+  pausaDasMaosNoLimiteMs: 600,
+  /** A pergunta pronta espera isso para valer a pausa curta, e isso para valer qualquer respiro. */
+  esperaParaPausaCurtaMs: 12_000,
+  esperaParaQualquerRespiroMs: 30_000,
   /** Um marco de fase (começo do aprofundamento, do fechamento) vale por esse tempo. */
   marcoDeFaseMs: 20_000,
 } as const;
@@ -144,4 +164,16 @@ export function interrupcaoAtrasada(r: Ritmo): boolean {
   if (motivoDoRitmo({ ...r, marco: true }) !== null) return false;
   const desde = r.agora - (r.ultimaEm ?? r.inicioEm);
   return desde >= RITMO.atrasoEmRitmos * ritmoMs(r.duracaoMin);
+}
+
+/**
+ * Quanto tempo as mãos precisam estar paradas para o agente falar a pergunta que já está pronta (na tela, depois de
+ * o ritmo e o momento já terem deixado). Não é só "quando ele parar": um ponto natural do trabalho (terminou uma
+ * linha, soltou uma peça no quadro) já serve, e a exigência cai conforme a pergunta espera, para quem trabalha sem
+ * parar também ser perguntado.
+ */
+export function pausaDasMaosParaFalarMs(o: { esperandoHaMs: number; pontoNatural?: boolean }): number {
+  if (o.esperandoHaMs >= RITMO.esperaParaQualquerRespiroMs) return RITMO.pausaDasMaosNoLimiteMs;
+  if (o.pontoNatural || o.esperandoHaMs >= RITMO.esperaParaPausaCurtaMs) return RITMO.pausaDasMaosNoPontoNaturalMs;
+  return RITMO.pausaDasMaosMs;
 }

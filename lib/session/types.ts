@@ -13,8 +13,20 @@ import type { LlmStatsSnapshot } from "@/lib/llm";
  * código funcionando. retorno: voltar a um desafio que o candidato topou ("e aí, como foi?").
  * encerramento: a última conversa, quando o candidato pede para finalizar, com o que ficou pendente.
  * empecilho: o Totti traz uma mudança no problema (lib/agents/empecilho.ts); a primeira fala é o anúncio.
+ * cola: ele colou um bloco de código de uma vez; o Totti sempre pede para explicar (lib/agents/policy.ts).
  */
-export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento" | "empecilho";
+export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento" | "empecilho" | "cola";
+
+/** O bloco que o candidato colou, guardado com a pergunta sobre ele. */
+export interface Cola {
+  /** Linhas coladas, como entraram (para saber se o trecho ainda está no código). */
+  trecho: string;
+  linhas: number;
+  /** O que ele tinha escrito antes de colar (linhas dele, fora o código inicial). Vazio se não tinha nada. */
+  antes: string;
+  /** A colagem tomou o lugar do que ele vinha escrevendo. */
+  substituiu: boolean;
+}
 
 /** Como o candidato se saiu ao ser sondado num critério (ou se mostrou sozinho). */
 export type ProbeKind = "espontaneo" | "respondeu_bem" | "parcial" | "errou" | "nao_conseguiu" | "com_dica" | "recusou";
@@ -90,6 +102,8 @@ export interface QueuedQuestion {
   fase?: Fase;
   /** Encerramento: o que ainda falta perguntar, na ordem (perguntas preparadas e critérios não explorados). */
   closingTopics?: string[];
+  /** Pergunta sobre um bloco colado (kind "cola"). */
+  cola?: Cola;
 }
 
 /** Observação pra rubrica, acumulada ao longo da sessão (o Evaluator lê tudo). */

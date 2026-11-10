@@ -33,7 +33,7 @@ import { criarLinhaDoTempo } from "@/lib/sessao/eventos";
 import { FilaDoAgente, type Descartado, type MotivoDoDescarte, type OrigemDaFala } from "@/lib/audio/filaDoAgente";
 import { apontarEAnotar } from "@/lib/presenca/coreografia";
 import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
-import { interrupcaoAtrasada, motivoDoMomento, RITMO } from "@/lib/interrupcao/politica";
+import { interrupcaoAtrasada, motivoDoMomento, pausaDasMaosParaFalarMs, RITMO } from "@/lib/interrupcao/politica";
 import { LICENCA_DE_NOVO_MS, LICENCA_SEM_RESPOSTA_MS, liberouAPergunta, pedeParaEncerrar } from "@/lib/conversa/licenca";
 import {
   estadoInicial,
@@ -53,7 +53,13 @@ import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff"
  * Parou de desenhar há pelo menos isso: uma pausa de quem parou para pensar. Ali o Totti pergunta direto, como no
  * live coding, sem o "posso te perguntar uma coisa sobre o desenho?" fixo (soava como robô).
  */
-const PAUSA_NO_DESENHO_MS = 4_000;
+/**
+ * Peças que entram no quadro numa única mudança a partir das quais o desenho veio pronto (colado ou duplicado), não
+ * desenhado ali. Desenhando à mão entra uma peça por vez (duas, com o rótulo).
+ */
+const PECAS_DE_UMA_COLAGEM = 6;
+/** A colagem ainda sem pergunta acompanha as análises por esse tempo. */
+const COLAGEM_VALE_MS = 3 * 60_000;
 
 interface OpcoesDeFala {
   /** Quem pediu a fala; define quando ela ainda vale depois de esperar. Padrão: "sempre" (abertura, desafio, despedida). */
@@ -321,6 +327,10 @@ export function useEntrevista(
   const ultimaAtividade = useRef(Date.now());
   /** Último traço do candidato no quadro (as "mãos" da política comum de interrupção). */
   const ultimoDesenhoEm = useRef(0);
+  /** Quantas peças do candidato havia na última mudança (null: ainda não contou). */
+  const pecasDoCandidato = useRef<number | null>(null);
+  /** Peças que chegaram de uma vez e ainda não viraram pergunta. */
+  const colagem = useRef<{ pecas: number; em: number } | null>(null);
   /** Pedido de licença no ar: quando terminou de ser dito (Infinity enquanto toca), ou null. */
   const licencaPedidaEm = useRef<number | null>(null);
   /** Ele pediu para esperar (ou não respondeu): não pede licença de novo antes disso. */
@@ -404,7 +414,12 @@ export function useEntrevista(
         const elementos = quadro.api.getSceneElements();
         const r = conversor.current.converter(elementos);
         if (!forcar && !houveMudancaRelevante(ultimoInstantaneo.current, r.instantaneo)) return null;
-        const mudancas = descreverMudancas(ultimoInstantaneo.current, r.instantaneo);
+        const mudou = descreverMudancas(ultimoInstantaneo.current, r.instantaneo);
+        // Peças que chegaram de uma vez: a análise fica sabendo até uma pergunta sair (princípio 17 do avaliador).
+        const colou = colagem.current && Date.now() - colagem.current.em < COLAGEM_VALE_MS ? colagem.current : null;
+        const mudancas = colou
+          ? `${mudou}${mudou ? "\n" : ""}! COLAGEM: ${colou.pecas} peças entraram no quadro de uma só vez (desenho trazido pronto, não desenhado aqui) e ele ainda não explicou.`
+          : mudou;
         ultimoInstantaneo.current = r.instantaneo;
         const pedido: PedidoAnalise = {
           sessao_id: sessao.sessao_id,
@@ -481,6 +496,8 @@ export function useEntrevista(
         // A pessoa continuou a explicação: uma intervenção calculada antes disso ficou velha.
         if (ultimaFalaEm.current > falaAoAnalisar || revisaoDaConversa.current !== conversaAoAnalisar
           || pedidosEmAndamento.current > 0) return;
+        // A análise que sabia da colagem trouxe uma pergunta: a colagem já teve a vez dela.
+        if (resposta.status !== "ok") colagem.current = null;
         enviar({ tipo: "ANALISE_RECEBIDA", resposta });
       },
       aoErro: (erro) => console.warn("[análise] ignorada:", erro),
@@ -599,11 +616,12 @@ export function useEntrevista(
     const id = setInterval(() => {
       const agora = Date.now();
       const e = estadoAtual.current;
-      // Política comum (lib/interrupcao/politica.ts): só numa pausa real (sem desenhar há 8 s e com uma brecha na
+      // Política comum (lib/interrupcao/politica.ts): só numa pausa real (sem desenhar há 4 s e com uma brecha na
       // fala), ou numa pausa curta depois de um marco ou quando a pergunta já esperou demais (quem desenha sem
       // parar também é perguntado). Logo depois da mudança no problema, um respiro para ele absorvê-la.
+      const esperandoHaMs = agora - (e.pendenteDesde ?? agora);
       const momento = motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current,
-        marco: marcoDeFase(e, agora), esperandoHaMs: agora - (e.pendenteDesde ?? agora),
+        marco: marcoDeFase(e, agora), esperandoHaMs,
         atrasada: interrupcaoAtrasada(ritmoDoCliente(e, agora)) });
       const respiroDaMudanca = agora - empecilhoAnunciadoEm.current >= RITMO.respiroMs;
       // Pediu licença e ele não respondeu: está concentrado, a pergunta espera e a licença não é pedida de novo logo.
@@ -617,9 +635,12 @@ export function useEntrevista(
       if (!respiroDaMudanca || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) return;
-      // Pausa real, ou, para quem desenha sem parar, uma pausa curta de alguns segundos: pergunta direto.
-      if (agora - ultimoDesenhoEm.current < PAUSA_NO_DESENHO_MS) return;
-      const pausaCurta = motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current, marco: true }) === null;
+      // Não é só "quando ele parar de desenhar": a pausa das mãos que a pergunta exige cai conforme ela espera
+      // (a mesma regra do live coding, lib/interrupcao/politica.ts). Com 4 s fixos, quem desenhava direto podia
+      // passar a entrevista sem ouvir pergunta. Nunca no meio de uma fala.
+      const maosParadasHaMs = agora - ultimoDesenhoEm.current;
+      const pausaCurta = maosParadasHaMs >= pausaDasMaosParaFalarMs({ esperandoHaMs })
+        && agora - ultimaFalaEm.current >= RITMO.brechaNaFalaMs;
       if (momento === null || pausaCurta) enviar({ tipo: "PLIN_CLICADO" });
     }, 150);
     return () => clearInterval(id);
@@ -753,6 +774,14 @@ export function useEntrevista(
   const desenhoMudou = useCallback(() => {
     ultimaAtividade.current = Date.now();
     ultimoDesenhoEm.current = Date.now();
+    if (quadro) {
+      const pecas = quadro.api.getSceneElements().filter((e) => e.customData?.autor !== "agente").length;
+      // A primeira contagem é a base (o desenho salvo que volta ao recarregar a página não é colagem).
+      if (pecasDoCandidato.current !== null && pecas - pecasDoCandidato.current >= PECAS_DE_UMA_COLAGEM) {
+        colagem.current = { pecas: pecas - pecasDoCandidato.current, em: Date.now() };
+      }
+      pecasDoCandidato.current = pecas;
+    }
     // Um risco solto não encerra os requisitos: precisa de pelo menos 2 elementos significativos.
     if (estadoAtual.current.fase !== "REQUISITOS" || (quadro && elementosSignificativos(quadro.api.getSceneElements()) >= 2)) {
       enviar({ tipo: "CANDIDATO_DESENHOU" });

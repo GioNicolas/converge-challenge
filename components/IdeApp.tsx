@@ -20,6 +20,7 @@ import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
+import { pausaDasMaosParaFalarMs } from "@/lib/interrupcao/politica";
 import { esperaDoFimDaFala } from "@/lib/audio/fimDaFala";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import Legenda from "./Legenda";
@@ -59,11 +60,6 @@ export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" |
 /** Logo no começo o agente se apresenta, diz quanto tempo dura e como funciona (lib/conversa/instrucoes.ts). */
 /** Espera depois de a sessão começar, para a saudação não atropelar o carregamento da tela. */
 const ATRASO_SAUDACAO_MS = 1500;
-/**
- * Digitou há menos que isso: o agente não abre uma pergunta no meio da digitação. É a pausa de quem parou para
- * pensar; com ela o Totti pergunta direto, sem o "posso te perguntar uma coisa?" fixo (soava como robô).
- */
-const PAUSA_DIGITACAO_MS = 4000;
 /** Volume do microfone acima disso conta como alguém falando (segura a vez do agente). */
 const VOLUME_DE_FALA = 0.08;
 /** Sem voz (desligada ou bloqueada pelo navegador), a fala do agente fica na legenda por esse tempo. */
@@ -126,6 +122,9 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const ultimaFalaEmRef = useRef(0);
   const falaParcialRef = useRef(false);
   const ultimaDigitacaoEmRef = useRef(0);
+  /** A última tecla fechou uma linha (Enter): um ponto natural para o Totti perguntar, mesmo sem ele parar de vez. */
+  const fimDeLinhaRef = useRef(false);
+  const linhasDoCodigoRef = useRef(0);
   const vozFalar = voz.falar;
   /** Fala do agente: sintetiza já, com a escuta ligada, e só toca quando o candidato faz uma pausa. */
   const falarNaVez = useCallback((texto: string) => vozFalar(texto, {
@@ -299,6 +298,8 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const tirarBalao = session.setIncomingBlip;
   const abrirFio = conversa.abrirFio;
   const ocupada = conversa.ocupada;
+  const soEsperandoResposta = conversa.soEsperandoResposta;
+  const fecharFio = conversa.fecharFio;
   const fioRef = conversa.fioRef;
   const ultimaFalaDoAgenteEmRef = conversa.ultimaFalaDoAgenteEmRef;
   const enviarEvento = session.sendEvent;
@@ -316,10 +317,16 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         void enviarEvento({ type: "blip_closed", blipId: balao.id, reason: "agent" });
         return;
       }
+      // A pergunta da colagem não espera o assunto aberto: se o Totti só aguardava a resposta de outra pergunta,
+      // aquela fecha (a resposta, se vier, ainda chega como fala livre) e esta sai.
+      if (balao.passaNaFrente && fioRef.current && soEsperandoResposta()) fecharFio("agent", true);
       if (!saudacaoTerminadaEmRef.current || fioRef.current || ocupada() || vozEstadoRef.current !== "inativa" || bufferFalaRef.current) return;
       if (agora - saudacaoTerminadaEmRef.current < LEITURA_DEPOIS_DA_APRESENTACAO_MS) return;
       if (agora - ultimaFalaDoAgenteEmRef.current < PAUSA_ENTRE_FALAS_MS) return;
-      if (!balao.empecilho && agora - ultimaDigitacaoEmRef.current < PAUSA_DIGITACAO_MS) return;
+      // Não é só "quando ele parar": o fim de uma linha já serve, e a pausa exigida cai conforme a pergunta espera
+      // (lib/interrupcao/politica.ts). Com 4 s fixos, quem programava direto podia não ouvir pergunta nenhuma.
+      const pausaDasMaos = pausaDasMaosParaFalarMs({ esperandoHaMs: agora - chegouEm, pontoNatural: fimDeLinhaRef.current });
+      if (!balao.empecilho && agora - ultimaDigitacaoEmRef.current < pausaDasMaos) return;
       if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEmRef.current, falaParcial: falaParcialRef.current, ...estadoTurnoRef.current })) return;
       clearInterval(id);
       tirarBalao(null);
@@ -330,7 +337,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       void abrirFio(balao);
     }, 150);
     return () => clearInterval(id);
-  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, ocupada, fioRef, ultimaFalaDoAgenteEmRef, enviarEvento]);
+  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, ocupada, soEsperandoResposta, fecharFio, fioRef, ultimaFalaDoAgenteEmRef, enviarEvento]);
 
   /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
   async function forcarEmpecilho() {
@@ -474,6 +481,9 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
               readOnly={session.ended}
               onChange={(codigo: string) => {
                 ultimaDigitacaoEmRef.current = Date.now();
+                const linhas = codigo.split("\n").length;
+                fimDeLinhaRef.current = linhas === linhasDoCodigoRef.current + 1;
+                linhasDoCodigoRef.current = linhas;
                 capture.onCodeChange(codigo);
               }}
               onPaste={capture.onPaste}

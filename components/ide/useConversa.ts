@@ -57,10 +57,6 @@ export interface ConversaDeps {
 export const RECONHECIMENTOS = ["Uhum, entendi.", "Legal, hmm.", "Hum, certo.", "Uhum, saquei.", "Tá, entendi."];
 /** Falas mais curtas que isso ("tá", "ok") já são um reconhecimento: o Totti não responde com outro. */
 const MIN_PALAVRAS_RECONHECER = 4;
-/** Fora de uma conversa, só falas com pelo menos isso de palavras ganham o "uhum". */
-const MIN_PALAVRAS_RECONHECER_FORA_DA_CONVERSA = 8;
-/** Uma conversa recente: o Totti falou há menos que isso. */
-const CONVERSA_RECENTE_MS = 60_000;
 /**
  * No máximo um "uhum" nesse intervalo, e nem sempre (CHANCE_DE_RECONHECER): um a cada fala ficava "entendi,
  * entendi, entendi". A resposta que vem depois dele não abre com outro (o servidor tira, ver /api/chat).
@@ -277,12 +273,15 @@ export function useConversa(deps: ConversaDeps) {
     filaRef.current?.adicionar(texto);
   }, []);
 
-  /** O "uhum" logo que ele termina de falar com o Totti (respondendo, perguntando, explicando). */
+  /**
+   * O "uhum" logo que ele termina de responder a uma pergunta do Totti. Só dentro de uma pergunta em aberto: fora
+   * dela o microfone pega quem pensa em voz alta, resmunga ou fala com outra pessoa, e o Totti respondia "uhum,
+   * entendi" a um sussurro. Se a fala livre era mesmo com ele, quem responde é o entrevistador.
+   */
   const reconhecer = (texto: string) => {
     const n = palavras(texto);
     const agora = Date.now();
-    const emConversa = fioRef.current !== null || agora - ultimaFalaDoAgenteEmRef.current < CONVERSA_RECENTE_MS;
-    if (n < MIN_PALAVRAS_RECONHECER || (!emConversa && n < MIN_PALAVRAS_RECONHECER_FORA_DA_CONVERSA)) return;
+    if (fioRef.current === null || n < MIN_PALAVRAS_RECONHECER) return;
     if (agora - reconheceuEmRef.current < ENTRE_RECONHECIMENTOS_MS || depsRef.current.vozTocando()) return;
     if (Math.random() >= CHANCE_DE_RECONHECER) return;
     reconheceuEmRef.current = agora;
@@ -375,6 +374,16 @@ export function useConversa(deps: ConversaDeps) {
     [],
   );
 
+  /**
+   * O Totti fez a pergunta do assunto aberto e só espera a resposta: nada em voo, ninguém falando. Uma pergunta que
+   * passa na frente (a da colagem) pode fechar esse assunto.
+   */
+  const soEsperandoResposta = useCallback(
+    () => fioRef.current !== null && semRespostaDesdeRef.current !== null && pedidosEmVooRef.current === 0
+      && !filaRef.current?.emAndamento && pendenteRef.current === null && !depsRef.current.falandoAgora?.(),
+    [],
+  );
+
   /** Encerrou a entrevista: nada mais vai ao entrevistador. */
   const parar = useCallback(() => {
     filaRef.current?.limpar();
@@ -384,5 +393,5 @@ export function useConversa(deps: ConversaDeps) {
     semRespostaDesdeRef.current = null;
   }, []);
 
-  return { fio, pensando, ouvir, abrirFio, pedirLicenca, fecharFio, dizer, ocupada, parar, ultimaFalaDoAgenteEmRef, fioRef };
+  return { fio, pensando, ouvir, abrirFio, pedirLicenca, fecharFio, dizer, ocupada, soEsperandoResposta, parar, ultimaFalaDoAgenteEmRef, fioRef };
 }

@@ -46,7 +46,7 @@ Use o que ele já disse: não pergunte de novo o que ele já respondeu; se ele c
 
 # O momento certo para cada pergunta (o roteiro de um bom entrevistador)
 A entrevista tem um arco. Pergunte o que serve ao momento dele E ao que a vaga quer descobrir; fora disso, devolva "questions": [].
-- Escreveu (ou colou) um bloco grande de uma vez: peça para ele explicar ESSE trecho com as palavras dele, na ordem (kind "explicar", priority 0.9). É o que mostra se ele entende o que está ali.
+- Escreveu um bloco grande de uma vez: peça para ele explicar ESSE trecho com as palavras dele, na ordem (kind "explicar", priority 0.9). É o que mostra se ele entende o que está ali. Bloco COLADO (os eventos dizem "colou N linhas"): o entrevistador já pergunta sozinho de onde veio e como funciona; não gaste uma pergunta sua com isso, e registre em evidence que o trecho foi colado.
 - Escrevendo a primeira versão: só pergunte sobre uma DECISÃO que já está escrita e não é óbvia (a estrutura que escolheu, uma condição, uma função auxiliar), e nunca no meio de uma linha pela metade.
 - Testes falhando: não pergunte no primeiro erro, ele está olhando. Se ele continua falhando ou parou, pergunte o que ele está investigando, falando do RESULTADO que ele viu de forma neutra ("Vi que rodou de novo e não passou. O que você está olhando agora?"), nunca nomeando o erro nem a linha.
 - Primeiro run com tudo passando: é o momento principal. Na ordem: (1) o custo de tempo e memória, se ainda não apareceu; (2) se a solução não é a melhor abordagem conhecida, o desafio de melhorar; (3) se já é a melhor, uma pergunta que leve além: o porquê de uma escolha que está no código (a direção de um mapeamento, a ordem de duas checagens) ou uma variação ligada ao trabalho da vaga (ex.: num front-end, "se isso validasse um campo enquanto a pessoa digita, a cada tecla, o que mudaria?"), sem entregar como.
@@ -95,7 +95,7 @@ A mensagem traz os critérios AINDA NÃO EXPLORADOS e o tempo restante. Todos os
 - Não repita perguntas já feitas nem pergunte o que ele já respondeu nas conversas anteriores.
 - Se numa conversa anterior ele disse que não sabe, não conhece ou não lembra de um assunto (com quaisquer palavras), esse assunto está fechado: não volte a ele, nem reformulado, nem pelo mesmo trecho do código. Escolha outro critério ou outro trecho; insistir só trava a entrevista.
 - Não pergunte se ou onde ele faria algo que já está escrito no código: pergunte o porquê do que está lá.
-- priority de 0 a 1: 0.9+ para colagem grande sem explicação, abordagem fechada e nunca justificada, ou desafio logo depois do primeiro run verde; 0.6–0.8 para perguntas boas; abaixo disso, não vale interromper.
+- priority de 0 a 1: 0.9+ para abordagem fechada e nunca justificada, ou desafio logo depois do primeiro run verde; 0.6–0.8 para perguntas boas; abaixo disso, não vale interromper.
 - startLine/endLine apontam a região sobre a qual a pergunta fala (para grifar), usando os números de linha do código.
 - evidence: observações para o relatório, cada uma com o criterionId. spontaneous = true só quando o candidato mostrou aquilo POR CONTA PRÓPRIA, sem o entrevistador perguntar (no código, ou numa fala que NÃO responde a uma pergunta do entrevistador). Resposta a pergunta é spontaneous = false: o entrevistador já registra como ele se saiu.
 - suspiciousLines e evidence são de uso interno, seja objetivo.
@@ -143,6 +143,8 @@ export interface AnalystTurnInput {
   hasWorkingSolution: boolean;
   /** Mudança no problema que o entrevistador já anunciou (empecilho), se houver. */
   mudanca?: string;
+  /** O entrevistador está há muito tempo sem perguntar nada ("04:10"): esta análise precisa trazer uma pergunta. */
+  semPerguntaHa?: string;
 }
 
 export function buildAnalystUser(input: AnalystTurnInput): string {
@@ -153,12 +155,15 @@ export function buildAnalystUser(input: AnalystTurnInput): string {
   const foco = guide
     ? `\nFOCO PENDENTE: ${input.focoPendente}. Objetivo da pergunta: ${guide.objetivo}. Estilo (não copie): ${guide.exemplos.map((e) => `"${e}"`).join(" · ")}\n`
     : "";
+  const atraso = input.semPerguntaHa
+    ? `\nSEM PERGUNTA HÁ ${input.semPerguntaHa}: o entrevistador está calado há tempo demais e a entrevista precisa andar. Traga UMA pergunta concreta sobre o que ele escreveu por último (uma decisão que já está no código, com as linhas), priority 0.7 ou mais, que ele consiga responder sem parar o que está fazendo. Lista vazia só se o código ainda não tem nenhuma ideia escrita.\n`
+    : "";
   return `Tempo de sessão: ${input.elapsedLabel} (faltam ${input.remainingLabel}). Gatilho desta análise: ${input.trigger}. Linguagem: ${input.language}.
 
 FASE: ${input.fase}. ${GUIA_DA_FASE[input.fase]}
 Trecho que acabou de mudar: ${input.changedRegion ?? "(nada mudou desde a última análise)"}
 Na análise anterior, ele parecia estar: ${dadoEmLinha("hipotese", input.previousThinking ?? "", "(primeira análise)")}
-${keyMoment}${foco}
+${keyMoment}${foco}${atraso}
 Critérios ainda não explorados:
 ${input.uncovered.length ? input.uncovered.map((c) => `- ${c}`).join("\n") : "(todos já explorados)"}
 Desafio liberado: ${input.hasWorkingSolution ? "sim (já passou em todos os testes visíveis)" : "não (ainda não passou em todos os testes visíveis)"}

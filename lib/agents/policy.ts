@@ -8,7 +8,7 @@ import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
 import { interrupcaoAtrasada, motivoDoMomento, motivoDoRitmo, orcamentoDeInterrupcoes, type Momento, type Ritmo } from "@/lib/interrupcao/politica";
 import { latestCode } from "@/lib/session/store";
-import type { QueuedQuestion, SessionState } from "@/lib/session/types";
+import type { Cola, QueuedQuestion, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
 // Afinação do ritmo dos blips. Tempos em ms de sessão.
@@ -108,6 +108,17 @@ const IDLE_EVENT_TYPES = new Set<SessionEvent["type"]>(["pause", "run", "blip_cl
 const IDLE_AFTER_MS = 8000;
 /** Pergunta que não virou balão nesse tempo fica velha: o candidato já está pensando em outra coisa. */
 const QUESTION_MAX_AGE_MS = 90_000;
+/**
+ * Bloco colado a partir desse tanto de linhas vira pergunta sempre: de onde veio e como funciona. Antes a colagem só
+ * era um "momento-chave" da análise, e a pergunta dela podia nunca sair (outro assunto aberto, o Finalizar logo depois).
+ */
+export const COLA_MIN_LINES = 5;
+/** Linhas do grifo da colagem, no máximo (mais que isso já é o arquivo, não um trecho). */
+const COLA_MAX_LINHAS_GRIFO = 12;
+/** Das linhas coladas, a fração que já existia no código antes: acima disso ele só moveu código dele de lugar. */
+const COLA_FRACAO_JA_EXISTENTE = 0.7;
+/** Das linhas coladas, a fração que precisa continuar no código para a pergunta ainda valer. */
+const COLA_FRACAO_QUE_FICOU = 0.5;
 
 const NO_BOOST = { boost: 0, reason: "" };
 
@@ -186,10 +197,10 @@ export function lastBlipDecision(session: SessionState): string | undefined {
  * `dismissBlipId`: o balão anterior expirou nesta chamada e a IDE deve tirá-lo da tela.
  */
 export function decideBlip(session: SessionState, t: number): { blip?: Blip; dismissBlipId?: string } {
-  const dismissBlipId = expireBlip(session, t);
-  const { blip, reason } = pickBlip(session, t);
-  decisions.set(session, dismissBlipId ? `balão ${dismissBlipId.slice(0, 8)} expirou · ${reason}` : reason);
-  return { blip, dismissBlipId };
+  const expirado = expireBlip(session, t);
+  const { blip, reason, dismissBlipId: cedeu } = pickBlip(session, t);
+  decisions.set(session, expirado ? `balão ${expirado.slice(0, 8)} expirou · ${reason}` : reason);
+  return { blip, dismissBlipId: expirado ?? cedeu };
 }
 
 /** Balão aberto e nunca clicado há BLIP_EXPIRY_MS vira ignorado. Devolve o id que sai da tela, se houver. */
@@ -199,8 +210,8 @@ function expireBlip(session: SessionState, t: number): string | undefined {
   const found = findBlipQuestion(session, pendingId);
   if (!found || found.question.status !== "blipped") return undefined;
   if (t - found.blip.createdAt < BLIP_EXPIRY_MS) return undefined;
-  // O empecilho não expira: a IDE abre a conversa dele sozinha.
-  if (found.question.kind === "empecilho") return undefined;
+  // O empecilho e a pergunta da colagem não expiram: a IDE abre a conversa deles sozinha.
+  if (found.question.kind === "empecilho" || found.question.kind === "cola") return undefined;
 
   found.question.status = "ignored";
   session.pendingBlipId = undefined;
@@ -221,9 +232,13 @@ function expireBlip(session: SessionState, t: number): string | undefined {
   return pendingId;
 }
 
-function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: string } {
+function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: string; dismissBlipId?: string } {
   if (session.ended) return { reason: "sessão encerrada" };
   enqueueDueCheckIns(session, t);
+  // Colou um bloco: a pergunta sobre ele passa na frente de tudo, até de um assunto aberto (ver `colaNaVez`).
+  const cola = session.queue.find((q) => q.kind === "cola" && q.status === "queued");
+  const daCola = cola ? colaNaVez(session, cola, t) : undefined;
+  if (daCola) return daCola;
   if (session.pendingBlipId) return { reason: "esperando: outro blip já aberto ou pendente" };
 
   const kickoff = session.queue.find((q) => q.kickoff && q.status === "queued");
@@ -277,7 +292,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
 
   const { boost, reason: boostReason } = momentBoost(session);
   const candidates = session.queue
-    .filter((q) => q.status === "queued" && !isSnoozed(q, t))
+    .filter((q) => q.status === "queued" && !isSnoozed(q, t) && q.kind !== "cola")
     .filter((q) => !overLimit || q.kind === "retorno")
     .filter((q) => q.priority + boost + agendaBoost(session, q, t) >= threshold)
     // Momento-chave primeiro (o candidato tem certeza que há o que falar), depois a prioridade.
@@ -356,13 +371,22 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
   // Os poucos pontos do encerramento vão para o que ainda não foi explorado: uma pergunta preparada sobre um
   // critério já coberto repetia o assunto (medido: complexidade perguntada três vezes, bordas nenhuma).
   const naoCobertos = new Set(uncoveredCriteria(session));
-  const prepared = pending.filter((q) => q.criterionId === undefined || naoCobertos.has(q.criterionId)).slice(0, CLOSING_MAX_QUESTIONS);
+  // Um bloco colado que ele ainda não explicou vem primeiro, sempre: numa sessão real ele colou a solução, clicou
+  // em Finalizar 7 s depois e o encerramento perguntou do plano inicial, sem tocar na colagem.
+  const colas = colasSemExplicacao(session);
+  const prepared = pending.filter((q) => q.kind !== "cola" && (q.criterionId === undefined || naoCobertos.has(q.criterionId))).slice(0, CLOSING_MAX_QUESTIONS);
   const askedCriteria = new Set(prepared.map((q) => q.criterionId));
   const criteria = uncoveredCriteria(session)
     .filter((id) => !askedCriteria.has(id))
     .map((id) => session.config.criteria.find((c) => c.id === id)!)
-    .map((c) => `critério ${c.id} (${c.name}): ${c.description}`);
+    .map((c) => {
+      // O que ele já mostrou nesse critério vai junto: sem isso o encerramento perguntava de novo o plano que ele
+      // tinha contado no começo ("como você pensou na abordagem antes de começar?").
+      const jaMostrou = session.evidence.filter((e) => e.criterionId === c.id).slice(-2).map((e) => e.note);
+      return `critério ${c.id} (${c.name}): ${c.description}${jaMostrou.length ? ` [ele já mostrou: ${jaMostrou.join("; ")}. Não pergunte isso de novo: pergunte outra coisa do critério, sobre o código de agora]` : ""}`;
+    });
   const topics = [
+    ...colas.map((q) => `trecho colado${q.highlight ? ` [linhas ${q.highlight.startLine}-${q.highlight.endLine}]` : " [sem linhas]"}: ele colou ${q.cola?.linhas ?? "várias"} linhas de uma vez${q.cola?.substituiu ? ", no lugar do que vinha escrevendo," : ""} e ainda não explicou. Pergunte de onde veio e peça para ele explicar o que o trecho faz.`),
     // Cada ponto leva as próprias linhas: com uma linha só para a conversa toda, o grifo da pergunta seguinte
     // aparecia na primeira (que não era sobre código) e a seguinte falava de "esse trecho grifado" sem grifar.
     ...prepared.map((q) => `pergunta preparada${q.criterionId ? ` (critério ${q.criterionId})` : ""}${q.highlight ? ` [linhas ${q.highlight.startLine}-${q.highlight.endLine}]` : " [sem linhas]"}: ${q.question}`),
@@ -372,6 +396,8 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
 
   // O que entrou no encerramento sai da fila; o balão que estava na tela vira esta conversa.
   for (const q of prepared) q.status = "stale";
+  // A colagem que entrou no encerramento não volta como pergunta solta (a já feita e sem resposta fica como está).
+  for (const q of colas) if (q.status !== "asked") q.status = "stale";
   session.pendingBlipId = undefined;
   const closing: QueuedQuestion = {
     id: `q-${session.queue.length + 1}`,
@@ -472,6 +498,111 @@ function enqueueDueCheckIns(session: SessionState, t: number): void {
   }
 }
 
+type PasteEvent = Extract<SessionEvent, { type: "paste" }>;
+
+const linhasComConteudo = (texto: string) => texto.split("\n").map((l) => l.trim()).filter(Boolean);
+
+/**
+ * Ele colou um bloco de código: entra na fila, na hora e sem LLM, a pergunta sobre ele (de onde veio e como funciona).
+ * A fala em si é escrita pelo entrevistador olhando o código (lib/agents/interviewer.ts); o texto daqui é a reserva.
+ * Devolve true se a colagem virou pergunta. Código dele mesmo movido de lugar não conta.
+ */
+export function enqueueCola(session: SessionState, event: PasteEvent): boolean {
+  if (session.ended || event.lines < COLA_MIN_LINES) return false;
+  // Já na conversa de encerramento: não cabe assunto novo.
+  if (session.queue.some((q) => q.kind === "encerramento")) return false;
+  const code = latestCode(session);
+  const linhas = code.split("\n");
+  const inicio = Math.min(Math.max(1, event.startLine), linhas.length);
+  const fim = Math.min(linhas.length, inicio + event.lines - 1);
+  const trecho = linhas.slice(inicio - 1, fim).join("\n");
+  const coladas = linhasComConteudo(trecho);
+  if (coladas.length < COLA_MIN_LINES) return false;
+
+  const starter = getProblem(session.config.problemId).public.starters[session.language] ?? "";
+  // A versão de antes da colagem: a última diferente do código de agora (o snapshot com o bloco chega antes do evento).
+  const anterior = session.codeHistory.findLast((v) => v.code !== code)?.code ?? starter;
+  const tinha = new Set(linhasComConteudo(anterior));
+  if (coladas.filter((l) => tinha.has(l)).length / coladas.length >= COLA_FRACAO_JA_EXISTENTE) return false;
+
+  const doStarter = new Set(linhasComConteudo(starter));
+  const dele = linhasComConteudo(anterior).filter((l) => !doStarter.has(l));
+  const agora = new Set(linhasComConteudo(code));
+  const substituiu = dele.length >= 2 && dele.filter((l) => agora.has(l)).length / dele.length < 0.5;
+  const cola: Cola = { trecho, linhas: event.lines, antes: dele.join("\n"), substituiu };
+  const dados = {
+    question: substituiu
+      ? "Esse trecho entrou de uma vez e é bem diferente do que você vinha escrevendo. De onde ele veio, e como ele funciona?"
+      : "Esse trecho entrou de uma vez. De onde ele veio, e o que ele faz, parte por parte?",
+    highlight: { startLine: inicio, endLine: Math.min(fim, inicio + COLA_MAX_LINHAS_GRIFO - 1) },
+    keyMoment: `colou ${event.lines} linhas de uma vez`,
+    cola,
+  };
+  // Colou de novo antes de a pergunta sair: a mesma pergunta, agora sobre o bloco novo.
+  const naFila = session.queue.find((q) => q.kind === "cola" && q.status === "queued");
+  if (naFila) {
+    Object.assign(naFila, dados);
+    return true;
+  }
+  session.queue.push({
+    id: `q-${session.queue.length + 1}`,
+    followUpTopic: "se ele entende o trecho que colou: de onde veio, o que cada parte faz e por que resolve o problema, com as palavras dele",
+    topicLabel: "o trecho que você colou",
+    priority: 1,
+    createdAt: event.t,
+    status: "queued",
+    kind: "cola",
+    fase: faseDaEntrevista(session),
+    ...dados,
+  });
+  return true;
+}
+
+/** O trecho colado saiu do código (ele apagou ou reescreveu quase tudo): a pergunta sobre ele perde o sentido. */
+function colaSumiu(session: SessionState, q: QueuedQuestion): boolean {
+  if (!q.cola) return false;
+  const coladas = linhasComConteudo(q.cola.trecho);
+  if (coladas.length === 0) return true;
+  const agora = new Set(linhasComConteudo(latestCode(session)));
+  return coladas.filter((l) => agora.has(l)).length / coladas.length < COLA_FRACAO_QUE_FICOU;
+}
+
+/** Colagens que ainda estão no código e que ele não explicou: nunca perguntadas, ou perguntadas e sem resposta. */
+function colasSemExplicacao(session: SessionState): QueuedQuestion[] {
+  const respondeu = (id: string) => session.events.some((e) => e.type === "speech" && e.role === "candidate" && e.blipId === id);
+  return session.queue.filter(
+    (q) => q.kind === "cola" && !colaSumiu(session, q) && (q.status === "queued" || q.status === "blipped" || (q.status === "asked" && !respondeu(q.id))),
+  );
+}
+
+/**
+ * A pergunta da colagem na vez dela. Fora do orçamento e do intervalo (como a mudança no problema): só espera ele
+ * tirar a mão do teclado e não estar falando. Um balão ainda não aberto cede o lugar; com um assunto aberto, ela sai
+ * assim mesmo e a IDE fecha o outro se o Totti estava só esperando resposta (`passaNaFrente`). Devolve undefined
+ * quando não é com ela (encerramento em curso, mudança no problema na tela): a decisão segue o caminho normal.
+ */
+function colaNaVez(session: SessionState, cola: QueuedQuestion, t: number): { blip?: Blip; reason: string; dismissBlipId?: string } | undefined {
+  if (colaSumiu(session, cola)) {
+    cola.status = "stale";
+    return undefined;
+  }
+  if (session.queue.some((q) => q.kind === "encerramento")) return undefined;
+  const naTela = session.pendingBlipId ? findBlipQuestion(session, session.pendingBlipId)?.question : undefined;
+  if (naTela?.kind === "empecilho" || naTela?.kind === "cola") return undefined;
+  const momento = motivoDoMomento({ ...momentoDaSessao(session, t), marco: true });
+  if (momento) return { reason: `esperando (pergunta da colagem): ${momento}` };
+
+  let dismissBlipId: string | undefined;
+  if (naTela?.status === "blipped") {
+    naTela.status = "stale";
+    dismissBlipId = naTela.id;
+  }
+  // Ele colou a solução antes da abertura: a pergunta da colagem é a abertura que faz sentido agora.
+  for (const q of session.queue) if (q.kickoff && q.status === "queued") q.status = "stale";
+  session.pendingBlipId = undefined;
+  return { blip: raise(session, cola, t), dismissBlipId, reason: `blip ${cola.id} (colagem)` };
+}
+
 /** Pergunta adiada pelo candidato ("agora não") que ainda não voltou. */
 function isSnoozed(q: QueuedQuestion, t: number): boolean {
   return q.snoozedUntil !== undefined && q.snoozedUntil > t;
@@ -527,6 +658,8 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
  * pergunta adiada pelo candidato não envelhecem pelo tempo.
  */
 function isStale(session: SessionState, q: QueuedQuestion, t: number): boolean {
+  // A pergunta da colagem só perde o sentido se ele tirou o trecho do código.
+  if (q.kind === "cola") return colaSumiu(session, q);
   const ageless = q.kind === "retorno" || q.focusArea !== undefined || q.snoozedUntil !== undefined;
   if (!ageless) {
     const momentPassed = (q.fase === "depurando" || q.fase === "entendendo") && q.fase !== faseDaEntrevista(session);
@@ -560,11 +693,11 @@ function jaFoiPerguntada(session: SessionState, q: QueuedQuestion): boolean {
   });
 }
 
-/** Balões que contam no orçamento: fora abertura, encerramento e mudança no problema. */
+/** Balões que contam no orçamento: fora abertura, encerramento, mudança no problema e pergunta de colagem. */
 function baloesNoOrcamento(session: SessionState): number {
   return session.blips.filter((b) => {
     const q = session.queue.find((x) => x.id === b.id);
-    return !q?.kickoff && q?.kind !== "encerramento" && q?.kind !== "empecilho";
+    return !q?.kickoff && q?.kind !== "encerramento" && q?.kind !== "empecilho" && q?.kind !== "cola";
   }).length;
 }
 
@@ -638,7 +771,8 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
   };
   const empecilho = q.kind === "empecilho" ? empecilhoDaQuestao(session) : undefined;
   if (empecilho) blip.empecilho = empecilhoPublico(session, empecilho);
-  if (q.kind !== "retorno" && q.kind !== "encerramento" && q.kind !== "empecilho") blip.perdeAVez = true;
+  if (q.kind !== "retorno" && q.kind !== "encerramento" && q.kind !== "empecilho" && q.kind !== "cola") blip.perdeAVez = true;
+  if (q.kind === "cola") blip.passaNaFrente = true;
   session.blips.push(blip);
   session.pendingBlipId = blip.id;
   return blip;
@@ -650,6 +784,7 @@ function previewFor(q: QueuedQuestion): string {
   if (q.kind === "empecilho") return "Mudou uma coisa no problema";
   if (q.kind === "retorno") return q.topicLabel === "como ficou a mudança" ? "E aí, como ficou a mudança?" : "E aí, como foi o desafio?";
   if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";
+  if (q.kind === "cola") return "Quero entender o trecho que você colou";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
 }
 
@@ -660,7 +795,7 @@ function previewFor(q: QueuedQuestion): string {
  * pergunta duas vezes. Retorno, mudança no problema e encerramento sempre valem.
  */
 export function perdeuAVez(session: SessionState, q: QueuedQuestion, blipCreatedAt: number): string | undefined {
-  if (q.kind === "retorno" || q.kind === "empecilho" || q.kind === "encerramento") return undefined;
+  if (q.kind === "retorno" || q.kind === "empecilho" || q.kind === "encerramento" || q.kind === "cola") return undefined;
   if (q.kickoff) {
     // O entrevistador já fez uma pergunta (numa fala livre, ex.: "como você pretende começar?"): a abertura sobra.
     const perguntou = session.events.some((e) => e.type === "speech" && e.role === "agent" && e.text.trim().endsWith("?") && !/posso (te )?(perguntar|interromper)/i.test(e.text));

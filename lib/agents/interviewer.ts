@@ -95,7 +95,8 @@ async function turno(
   }
   // A abertura é escrita na hora, sobre o que ele começou a escrever (o modelo vê o código); as outras perguntas
   // preparadas já foram escritas pela análise para este momento e saem como estão.
-  if (found && req.messages.length === 0 && found.question.kind !== "encerramento" && !found.question.kickoff) {
+  // A pergunta da colagem também é escrita na hora: o modelo vê o trecho colado e o que havia antes dele.
+  if (found && req.messages.length === 0 && found.question.kind !== "encerramento" && found.question.kind !== "cola" && !found.question.kickoff) {
     const grifo = found.question.highlight;
     const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
     return { reply: found.question.question, commands: highlightCommands(util ? grifo : undefined), end: false };
@@ -135,6 +136,7 @@ async function turno(
         ? anunciado?.empecilho.clarifications.map((c) => `"${c.question}" → ${c.answer}`)
         : undefined,
     closingTopics: question?.closingTopics,
+    cola: question?.cola ? { linhas: question.cola.linhas, antes: question.cola.antes, substituiu: question.cola.substituiu } : undefined,
     questionHighlight: found?.question.highlight,
     availableHint: hint,
     uncovered: uncoveredCriteria(session)
@@ -194,12 +196,26 @@ async function turno(
       registrarEvidencia(session, output);
       return { reply: "", commands: [], end: false, listening: true };
     }
+    // Fala livre em que ele não perguntou nada nem respondia a uma pergunta do Totti, e a resposta só reconhece
+    // ("Entendi, você está separando as contagens."): não há por que falar. Era o Totti dizendo "entendi" para quem
+    // pensava em voz alta. O que ele mostrou fica registrado do mesmo jeito.
+    if (!found && reacaoDesnecessaria(output, req.messages, perguntou)) {
+      console.info(`[interviewer] trava: reacaoDesnecessaria`, { antes: output.reply });
+      registrarEvidencia(session, output);
+      if (output.probeOutcome) recordOutcome(session, { t: elapsedMs(session), ...output.probeOutcome, source: "interviewer" });
+      return { reply: "", commands: [], end: false, listening: true };
+    }
     if (opening && output.reply.trim() === "") output = { ...output, reply: found.question.question, highlight: found.question.highlight ?? null };
+    // A pergunta da colagem sempre aponta o trecho colado, mesmo que o modelo não tenha mandado o grifo.
+    if (opening && question?.kind === "cola" && !output.highlight) output = { ...output, highlight: question.highlight ?? null };
     // Filtro de fala: aponta bug, entrega solução ou confirma acerto? Gera de novo sabendo o motivo.
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
     // Fala curta que só reconhece e devolve a vez (sem pergunta) não tem o que entregar: vai sem o filtro, que
     // custava mais de um segundo em cada resposta.
-    if (!(opening && isAboutTheSame(output.reply, found.question.question)) && !falaSoDeReconhecer(output.reply)
+    // A primeira fala sobre uma colagem pergunta de onde veio o trecho que ele mesmo trouxe: não há solução a
+    // entregar ali, e o filtro custava ~1,5 s numa pergunta que precisa sair logo depois da colagem.
+    const aberturaDaColagem = opening && question?.kind === "cola";
+    if (!aberturaDaColagem && !(opening && isAboutTheSame(output.reply, found.question.question)) && !falaSoDeReconhecer(output.reply)
       && podeEntregarAlgo(output.reply, code)) {
       const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
       session.analyst.costUsd += verdict.costUsd;
@@ -356,6 +372,25 @@ function anunciarEmpecilho(session: SessionState, blipId: string): string {
     empecilhoId: empecilho.id,
   });
   return empecilho.announcement;
+}
+
+/** A última fala do candidato veio logo depois de uma pergunta do Totti (ele está respondendo). */
+export function respondendoAoTotti(messages: ChatMessage[]): boolean {
+  const i = messages.findLastIndex((m) => m.role === "candidate");
+  if (i < 0) return false;
+  const anterior = messages.slice(0, i).findLast((m) => m.role === "agent");
+  return anterior?.text.trim().endsWith("?") === true;
+}
+
+/**
+ * Fora de uma pergunta do Totti, uma resposta que só reconhece o que ele disse é desnecessária: ele não perguntou,
+ * não respondia a nada, não pediu ajuda, não avisou que terminou uma etapa e não chamou o Totti pelo nome.
+ */
+export function reacaoDesnecessaria(output: InterviewerOutput, messages: ChatMessage[], perguntou: boolean): boolean {
+  if (output.reply.includes("?") || output.concluded === true || output.gaveHint === true || output.finish === true) return false;
+  if (perguntou || travado(messages) || respondendoAoTotti(messages)) return false;
+  const ultima = messages.findLast((m) => m.role === "candidate")?.text ?? "";
+  return !/\btotti\b/i.test(ultima);
 }
 
 /** Fechamentos que devolvem a vez para o código, variados. */
@@ -545,7 +580,20 @@ async function generate(session: SessionState, system: string, user: string, pra
     signal: AbortSignal.timeout(Math.max(500, prazoMs)),
   });
   session.analyst.costUsd += result.costUsd;
-  return result.data;
+  return { ...result.data, reply: pedidoViraPergunta(result.data.reply) };
+}
+
+const PEDIDO_DE_EXPLICACAO = /\b(me (conta|explica|fala|diz|mostra)|explica (pra|para) mim|conta (pra|para) mim)\b/i;
+
+/**
+ * "E me conta o que esse laço faz, passo a passo." é uma pergunta, mas o modelo às vezes a fecha com ponto. Sem o "?",
+ * o servidor entendia que a fala não devolvia a vez e fechava o assunto antes de ele responder.
+ */
+export function pedidoViraPergunta(reply: string): string {
+  const texto = reply.trim();
+  if (!texto.endsWith(".") || texto.endsWith("...")) return reply;
+  const ultima = texto.split(/(?<=[.!?])\s+/).at(-1) ?? "";
+  return PEDIDO_DE_EXPLICACAO.test(ultima) ? `${texto.slice(0, -1)}?` : reply;
 }
 
 function words(text: string): string[] {

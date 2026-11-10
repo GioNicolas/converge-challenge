@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { faseDaEntrevista } from "@/lib/agents/fase";
-import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
+import { decideBlip, enqueueCola, enqueueKickoff } from "@/lib/agents/policy";
 import { resolveConfig } from "@/lib/config/store";
 import type { RunResult, SessionEvent } from "@/lib/contracts";
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
@@ -81,6 +81,7 @@ async function main() {
       else if (e.type === "run") console.log(`${fmt(t)}  · rodou ${e.result.passed}/${e.result.total}`);
       else if (e.type === "snapshot") console.log(`${fmt(t)}  · código com ${e.code.split("\n").length} linhas`);
       const analisa = ["pause", "run", "paste"].includes(e.type) || (e.type === "speech" && e.text.split(/\s+/).length >= 12);
+      if (e.type === "paste") enqueueCola(session, e);
       if (analisa) await runAnalyst(session, e).catch((err) => console.error("análise falhou:", err));
     }
     const { blip } = decideBlip(session, t);

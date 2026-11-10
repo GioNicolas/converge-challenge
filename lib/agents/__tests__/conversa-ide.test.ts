@@ -271,3 +271,13 @@ test("abertura: quem digita sem parar 8 s recebe a pergunta numa pausa curta, e 
   agora = 40_000 + 24 * 2_000 + 3_100;
   assert.equal(decideBlip(s, agora).blip?.id, s.queue.find((q) => q.kickoff)?.id);
 });
+
+test("pedido de explicação fechado com ponto vira pergunta: o assunto não fecha antes de ele responder", async () => {
+  const { pedidoViraPergunta } = await import("@/lib/agents/interviewer");
+  assert.equal(pedidoViraPergunta("Entendi. E me conta com as suas palavras o que esse laço faz passo a passo."), "Entendi. E me conta com as suas palavras o que esse laço faz passo a passo?");
+  assert.equal(pedidoViraPergunta("Me explica essa linha."), "Me explica essa linha?");
+  // Fala que não pede nada, pergunta já com "?" e frase em aberto ficam como estão.
+  assert.equal(pedidoViraPergunta("Beleza, pode seguir."), "Beleza, pode seguir.");
+  assert.equal(pedidoViraPergunta("Me conta: por que esse caminho?"), "Me conta: por que esse caminho?");
+  assert.equal(pedidoViraPergunta("Você me conta depois. Pode seguir."), "Você me conta depois. Pode seguir.");
+});

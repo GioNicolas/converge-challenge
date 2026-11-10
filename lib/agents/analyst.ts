@@ -9,7 +9,8 @@ import { mudancaParaPrompt } from "@/lib/agents/empecilho";
 import { conversasFeitas, faseDaEntrevista, formatarConversas, regiaoAlterada } from "@/lib/agents/fase";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
 import { focoPendente } from "@/lib/agents/focoQuota";
-import { allPassed } from "@/lib/agents/policy";
+import { allPassed, COLA_MIN_LINES, ritmoDaSessao } from "@/lib/agents/policy";
+import { interrupcaoAtrasada } from "@/lib/interrupcao/politica";
 import { checkQuestion } from "@/lib/agents/spoilerFilter";
 import { PRIORIDADE_FOCO } from "@/lib/agents/focoQuota";
 import type { FocusArea, LineRange, SessionEvent } from "@/lib/contracts";
@@ -36,8 +37,6 @@ type PauseEvent = Extract<SessionEvent, { type: "pause" }>;
 type RunEvent = Extract<SessionEvent, { type: "run" }>;
 
 const PAUSE_MIN_GAP_MS = 15_000;
-/** Colagem a partir desse tanto de linhas é momento-chave: o candidato acabou de trazer código pra conversa. */
-const KEY_PASTE_LINES = 5;
 
 // Em globalThis, como o store: o Next em dev recarrega o módulo ao compilar outra rota, e um
 // WeakMap local zeraria no meio da sessão (já causou ids de pergunta repetidos).
@@ -81,7 +80,10 @@ export async function runAnalyst(session: SessionState, trigger: SessionEvent): 
  */
 export function detectKeyMoment(session: SessionState, trigger: SessionEvent): string | undefined {
   if (trigger.type === "paste") {
-    return trigger.lines >= KEY_PASTE_LINES ? `acabou de colar um trecho de ${trigger.lines} linhas` : undefined;
+    // A colagem grande já tem a pergunta dela na fila (policy.enqueueCola), feita pelo entrevistador: a análise
+    // segue normal, sem escrever outra pergunta sobre o mesmo momento.
+    if (session.queue.some((q) => q.kind === "cola" && (q.status === "queued" || q.status === "blipped"))) return undefined;
+    return trigger.lines >= COLA_MIN_LINES ? `acabou de colar um trecho de ${trigger.lines} linhas` : undefined;
   }
   if (trigger.type !== "run") return undefined;
 
@@ -173,6 +175,10 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
       }),
       hasWorkingSolution: hasWorkingSolution(session),
       mudanca: mudancaParaPrompt(session, formatElapsed),
+      // Sem pergunta há um ritmo inteiro (e com cota livre): a análise não pode voltar de mãos vazias.
+      semPerguntaHa: interrupcaoAtrasada(ritmoDaSessao(session, trigger.t))
+        ? formatElapsed(trigger.t - (session.blips.at(-1)?.createdAt ?? 0))
+        : undefined,
     });
 
     // Papel "codigo": gemini-3.7-flash no OpenRouter, com o GLM da Featherless de reserva (ver lib/llm/index.ts).
