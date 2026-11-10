@@ -107,4 +107,20 @@ describe("conduzirTurno: o Jev falha e a leitura é desfeita", () => {
     await conduzirTurno(sessao, "quero quarenta e cinco minutos de entrevista", deps);
     assert.equal(sessao.preferencias.duracaoMin, undefined);
   });
+
+  it("a troca de formato pedida na fala não fica quando o Jev falha e o Totti repete", async () => {
+    const sessao = await conversar(ATE_APROFUNDAR);
+    const antesPlano = structuredClone(sessao.plano);
+    const antesModo = sessao.rascunho.mode;
+    const falso = chatFalso(saida(PERGUNTA, "repetir"));
+    const deps: DepsDoTurno = {
+      chat: falso.chat,
+      avaliarCobertura: async () => {
+        throw new Error("jev fora do ar");
+      },
+    };
+    await conduzirTurno(sessao, "vamos de quadro", deps);
+    assert.deepEqual(sessao.plano, antesPlano);
+    assert.equal(sessao.rascunho.mode, antesModo);
+  });
 });

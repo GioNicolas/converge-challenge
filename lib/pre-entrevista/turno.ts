@@ -374,10 +374,12 @@ async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Pr
     return antes;
   };
   let antes: EstadoLido | undefined;
-  // Se o Jev falhar, `atualizarCobertura` não chama o callback: a captura cai no `??` logo depois.
+  // Se o Jev falhar, `atualizarCobertura` não chama o callback: a captura cai no `??=` logo depois. Em qualquer caso,
+  // é feita antes de qualquer escrita da leitura de formato e troca, que vêm depois.
   await atualizarCobertura(sessao, deps, () => {
     antes = capturar();
   });
+  antes ??= capturar();
   // Formato pedido com as palavras da tela ("vamos de quadro", "no Excalidraw", "código ao vivo") vale como pedido,
   // mesmo quando o classificador não reconhece: sem isso o plano ficava no formato errado depois de ela confirmar.
   const formato = lerFormato(texto);
@@ -387,7 +389,7 @@ async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Pr
   }
   resolverTradeoff(sessao);
   resolverPedidoDeFormato(sessao);
-  return antes ?? capturar();
+  return antes;
 }
 
 /**
