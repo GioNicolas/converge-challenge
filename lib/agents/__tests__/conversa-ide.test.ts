@@ -158,3 +158,75 @@ test("fim da entrevista: 'já terminei' encerra; travado ou perguntando, a pergu
   const conversa = [{ role: "agent" as const, text: "O que acontece aqui?" }, c("eu não sei o que fazer, não entendi porque tá quebrando")];
   assert.equal(limitarPerguntas(saida, undefined, conversa, false).end, false);
 });
+
+test("abertura: espera a leitura e não sai se ele já contou o plano enquanto ela esperava a pausa", async () => {
+  const { decideBlip, perdeuAVez, enqueueKickoff } = await import("@/lib/agents/policy");
+  const { getOrCreateSession, appendEvent } = await import("@/lib/session/store");
+  const { DEFAULT_CONFIG } = await import("@/lib/config/default");
+  const s = getOrCreateSession(`abertura-${Date.now()}`, DEFAULT_CONFIG);
+  let agora = 0;
+  s.clock = () => agora;
+  appendEvent(s, { type: "session_started", sessionId: s.sessionId, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
+  enqueueKickoff(s, 0);
+  // Ainda na apresentação (~30 s): nada de pergunta.
+  agora = 20_000;
+  assert.equal(decideBlip(s, agora).blip, undefined);
+  agora = 46_000;
+  const blip = decideBlip(s, agora).blip;
+  assert.ok(blip?.id);
+  const q = s.queue.find((x) => x.id === blip.id)!;
+  assert.equal(perdeuAVez(s, q, blip.createdAt), undefined);
+  // Enquanto a IDE esperava a pausa, ele contou o plano sozinho: a abertura perdeu a vez.
+  appendEvent(s, { type: "speech", sessionId: s.sessionId, t: 60_000, role: "candidate", text: "então eu vou percorrer a lista guardando o menor preço até agora e calculando o lucro de vender em cada dia" });
+  assert.match(perdeuAVez(s, q, blip.createdAt) ?? "", /contou o plano/);
+});
+
+test("a abertura que perdeu a vez não é falada: a conversa fecha sem fala", async () => {
+  const { runInterviewerTurn } = await import("@/lib/agents/interviewer");
+  const { decideBlip, enqueueKickoff } = await import("@/lib/agents/policy");
+  const { getOrCreateSession, appendEvent } = await import("@/lib/session/store");
+  const { DEFAULT_CONFIG } = await import("@/lib/config/default");
+  const s = getOrCreateSession(`abertura-chat-${Date.now()}`, DEFAULT_CONFIG);
+  let agora = 0;
+  s.clock = () => agora;
+  appendEvent(s, { type: "session_started", sessionId: s.sessionId, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
+  enqueueKickoff(s, 0);
+  agora = 46_000;
+  const blip = decideBlip(s, agora).blip!;
+  appendEvent(s, { type: "speech", sessionId: s.sessionId, t: 50_000, role: "candidate", text: "minha ideia é usar um dicionário para guardar o que eu já vi e achar o complemento numa passada só" });
+  agora = 70_000;
+  const res = await runInterviewerTurn(s, { blipId: blip.id, messages: [] });
+  assert.equal(res.reply, "");
+  assert.equal(res.end, true);
+  assert.equal(s.queue.find((x) => x.id === blip.id)?.status, "stale");
+});
+
+test("encerramento: uma pergunta por ponto pendente e, depois do último, fecha despedindo (sem 'pode seguir')", async () => {
+  const { limitarPerguntas } = await import("@/lib/agents/interviewer");
+  const saida = (reply: string) => ({ respond: true, concluded: false, finish: false, reply, highlight: { startLine: 2, endLine: 2 }, end: false, gaveHint: false, evidence: null, challenge: null, probeOutcome: null });
+  const encerramento = { kind: "encerramento", closingTopics: ["ponto 1", "ponto 2"] };
+  const conversa = [
+    { role: "agent" as const, text: "Antes de você encerrar, queria fechar uns pontos rápidos. Qual o custo de tempo?" },
+    { role: "candidate" as const, text: "é linear, passo uma vez só" },
+  ];
+  // Segundo ponto: ainda cabe.
+  assert.equal(limitarPerguntas(saida("Saquei. E se a lista vier vazia?"), encerramento, conversa, false).end, false);
+  const depois = [...conversa, { role: "agent" as const, text: "E se a lista vier vazia?" }, { role: "candidate" as const, text: "devolve zero" }];
+  const fechou = limitarPerguntas(saida("Entendi. E a memória, como fica?"), encerramento, depois, false);
+  assert.equal(fechou.end, true);
+  assert.ok(!fechou.reply.includes("?"), fechou.reply);
+  assert.ok(!/seguir|continuar|código/i.test(fechou.reply), fechou.reply);
+  // Mesmo perguntando algo, depois do último ponto o encerramento fecha.
+  const perguntou = [...depois.slice(0, -1), { role: "candidate" as const, text: "devolve zero, isso conta como caso de borda?" }];
+  assert.equal(limitarPerguntas(saida("Conta sim. E a memória?"), encerramento, perguntou, false).end, true);
+});
+
+test("licença: 'pode encerrar' não libera a pergunta (é pedido para fechar a entrevista)", async () => {
+  const { pedeParaEncerrar } = await import("@/lib/conversa/licenca");
+  for (const fala of ["pode encerrar", "não, pode encerrar a entrevista", "vamos finalizar", "tenho que sair"]) {
+    assert.equal(liberouAPergunta(fala), false, fala);
+    assert.equal(pedeParaEncerrar(fala), true, fala);
+  }
+  assert.equal(liberouAPergunta("pode falar"), true);
+  assert.equal(pedeParaEncerrar("pode falar"), false);
+});

@@ -35,6 +35,18 @@ export interface Mensagem {
   content: string;
 }
 
+/**
+ * No OpenRouter, o prompt de sistema grande vai marcado para o cache do provedor: o Gemini lá não usa cache
+ * implícito, e o mesmo prompt era cobrado cheio a cada fala da recrutadora (ver lib/llm/openaiCompat.ts).
+ */
+function comCacheDoSistema(messages: Mensagem[]): unknown[] {
+  return messages.map((m) =>
+    m.role === "system" && m.content.length >= 4_000
+      ? { role: "system", content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }] }
+      : m,
+  );
+}
+
 /** Um provedor + modelo da lista ordenada de tentativas. */
 export interface Alvo {
   provedor: Provedor;
@@ -119,7 +131,7 @@ async function tentarAlvo(
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
         body: JSON.stringify({
           model: alvo.model,
-          messages: o.messages,
+          messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
           max_tokens: o.maxTokens,
           temperature: o.temperature,
           ...alvo.extraBody,

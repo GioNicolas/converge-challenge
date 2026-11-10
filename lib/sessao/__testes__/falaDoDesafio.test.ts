@@ -6,7 +6,7 @@ const problema = { titulo: "Encurtador de URL", enunciado: "Projete um serviço 
 
 test("usa a fala natural do cérebro, aparada, em vez de ler o enunciado", () => {
   const fala = montarFalaDoDesafio({ ...problema, fala_do_desafio: "  Hoje a conversa é sobre links.  " });
-  assert.equal(fala, "Hoje a conversa é sobre links.");
+  assert.equal(fala, "Hoje a conversa é sobre links. O enunciado está no quadro: dá uma lida com calma.");
   assert.ok(!fala.includes(problema.enunciado));
 });
 
@@ -16,4 +16,9 @@ test("sem fala natural (ou em branco), monta uma do título e do enunciado", () 
     assert.ok(fala.includes(problema.titulo));
     assert.ok(fala.includes(problema.enunciado));
   }
+});
+
+test("o convite para ler não se repete se a fala já pede calma", () => {
+  const fala = montarFalaDoDesafio({ ...problema, fala_do_desafio: "Hoje é sobre links. Lê com calma." });
+  assert.equal(fala, "Hoje é sobre links. Lê com calma.");
 });

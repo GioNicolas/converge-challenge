@@ -21,8 +21,12 @@ const KICKOFF_FOLLOW_UP = "a ideia geral dele";
 const KICKOFF_TOPIC_LABEL = "seu plano de ataque";
 /** Prioridade da abertura (alta, mas ela tem regras próprias). */
 const KICKOFF_PRIORITY = 0.95;
-/** Tempo pra ler o enunciado antes de a abertura aparecer. */
-const KICKOFF_READING_MS = 14_000;
+/**
+ * Tempo de sessão antes de a abertura aparecer. A apresentação falada leva ~30 s e a IDE ainda espera a leitura
+ * depois dela (LEITURA_DEPOIS_DA_APRESENTACAO_MS em components/IdeApp.tsx). Com 14 s o balão nascia no meio da
+ * apresentação e a pergunta saía uns 15 s depois de ela acabar: o candidato ainda estava lendo o enunciado.
+ */
+const KICKOFF_READING_MS = 45_000;
 /** Se o candidato já escreveu esse tanto de linhas além do código inicial, ele escolheu codar primeiro: a abertura é descartada. */
 const KICKOFF_SKIP_IF_LINES_WRITTEN = 12;
 /** Se o candidato já falou esse tanto (contou o plano sozinho, depois da apresentação), a abertura é descartada. */
@@ -337,7 +341,9 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
     .map((id) => session.config.criteria.find((c) => c.id === id)!)
     .map((c) => `critério ${c.id} (${c.name}): ${c.description}`);
   const topics = [
-    ...prepared.map((q) => `pergunta preparada${q.criterionId ? ` (critério ${q.criterionId})` : ""}: ${q.question}`),
+    // Cada ponto leva as próprias linhas: com uma linha só para a conversa toda, o grifo da pergunta seguinte
+    // aparecia na primeira (que não era sobre código) e a seguinte falava de "esse trecho grifado" sem grifar.
+    ...prepared.map((q) => `pergunta preparada${q.criterionId ? ` (critério ${q.criterionId})` : ""}${q.highlight ? ` [linhas ${q.highlight.startLine}-${q.highlight.endLine}]` : " [sem linhas]"}: ${q.question}`),
     ...criteria,
   ].slice(0, CLOSING_MAX_TOPICS);
   if (topics.length === 0) return undefined;
@@ -351,7 +357,7 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
     followUpTopic: "os pontos que ficaram pendentes",
     topicLabel: "uns pontos antes de encerrar",
     priority: 1,
-    highlight: prepared[0]?.highlight,
+    // O grifo de cada ponto vai no texto do ponto (closingTopics), não na conversa inteira.
     createdAt: t,
     status: "queued",
     kind: "encerramento",
@@ -622,6 +628,25 @@ function previewFor(q: QueuedQuestion): string {
   if (q.kind === "retorno") return q.topicLabel === "como ficou a mudança" ? "E aí, como ficou a mudança?" : "E aí, como foi o desafio?";
   if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
+}
+
+/**
+ * A pergunta já levantada perdeu a vez antes de ser feita: o balão espera uma pausa para ser falado e, nesse meio
+ * tempo, o candidato pode ter contado o plano sozinho, começado a codar ou já ter ouvido a mesma pergunta. Sem isso
+ * a abertura ("como você está pensando em resolver?") saía depois de ele já ter explicado, e ele ouvia a mesma
+ * pergunta duas vezes. Retorno, mudança no problema e encerramento sempre valem.
+ */
+export function perdeuAVez(session: SessionState, q: QueuedQuestion, blipCreatedAt: number): string | undefined {
+  if (q.kind === "retorno" || q.kind === "empecilho" || q.kind === "encerramento") return undefined;
+  if (q.kickoff) {
+    if (palavrasFaladas(session) >= KICKOFF_SKIP_IF_WORDS_SPOKEN) return "abertura descartada: candidato já contou o plano falando";
+    if (linesWrittenBeyondStarter(session) >= KICKOFF_SKIP_IF_LINES_WRITTEN) return "abertura descartada: candidato já começou a codar";
+    if (jaFoiPerguntada(session, q)) return "abertura descartada: pergunta parecida já feita";
+    return undefined;
+  }
+  if (falouDepois(session, blipCreatedAt)) return "pergunta descartada: candidato falou depois de ela nascer";
+  if (jaFoiPerguntada(session, q)) return "pergunta descartada: pergunta parecida já feita";
+  return undefined;
 }
 
 /** Quantas palavras o candidato já disse na sessão (falas gravadas na linha do tempo). */

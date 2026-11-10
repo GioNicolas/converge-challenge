@@ -39,8 +39,12 @@ const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 const FALA_ESPERA_MAX_MS = 12_000;
 /** Depois de uma fala do Totti, ele espera isso antes de puxar outro assunto (o candidato precisa de vez). */
 const PAUSA_ENTRE_FALAS_MS = 8000;
-/** Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. */
-const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 12_000;
+/**
+ * Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. Com 12 s a pergunta chegava com o
+ * candidato ainda no meio do enunciado. Se ele começar a codar ou contar o plano antes, a abertura nem sai
+ * (lib/agents/policy.ts, perdeuAVez).
+ */
+const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 45_000;
 /** Teto da espera da apresentação por uma fala do candidato em andamento. */
 const APRESENTACAO_ESPERA_MAX_MS = 8000;
 /** Digitou há menos que isso: ele está no meio do código, então o Totti pede licença antes de perguntar. */
@@ -330,7 +334,13 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
 
   /** Pediu, falando, para encerrar: o Totti se despede e a sessão fecha, sem a última pergunta do botão. */
   async function encerrarPelaVoz() {
-    if (session.sessionId === null || finalizandoRef.current || session.ended) return;
+    if (session.sessionId === null || session.ended) return;
+    // Já na última conversa (os pontos pendentes do Finalizar): pedir para encerrar fecha ela, e o fechamento dela
+    // se despede e encerra. Antes o pedido era ignorado e ele ficava preso perguntando "como eu encerro?".
+    if (finalizandoRef.current) {
+      if (fioDoEncerramentoRef.current && conversa.fioRef.current?.blip.id === fioDoEncerramentoRef.current) conversa.fecharFio("agent");
+      return;
+    }
     finalizandoRef.current = true;
     setFinalizando(true);
     session.setIncomingBlip(null);

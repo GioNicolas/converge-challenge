@@ -20,7 +20,10 @@ export interface ChatJsonResult<T> {
 
 export interface ChatRequest<T> {
   model: string;
+  /** Prompt de sistema fixo (igual entre chamadas): no OpenRouter, vai para o cache do provedor. */
   system: string;
+  /** Parte do sistema que muda a cada chamada: vem depois do fixo, fora do cache. */
+  systemDinamico?: string;
   user: string;
   schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   maxTokens: number;
@@ -96,7 +99,30 @@ const TIMEOUT_MS = 90_000;
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [1_000, 3_000];
 
-type ParteDaMensagem = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ParteDaMensagem =
+  | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
+  | { type: "image_url"; image_url: { url: string } };
+
+/**
+ * Abaixo disto o prompt de sistema vai sem cache: o Gemini só guarda prompts de mais de ~1 mil tokens, e o filtro
+ * (curto) não ganha nada com a escrita do cache.
+ */
+const MIN_CHARS_CACHE = 4_000;
+
+/**
+ * Mensagem de sistema. No OpenRouter, o prompt fixo vai marcado para o cache do provedor (`cache_control`): no
+ * gemini-3.5-flash-lite o OpenRouter não usa cache implícito, e cada fala ao vivo pagava ~6 mil tokens de sistema
+ * cheios (US$ 0,0019); com o cache, US$ 0,0003. A parte que muda a cada chamada (`systemDinamico`) vai depois,
+ * fora do cache, para não invalidar o prefixo.
+ */
+export function mensagemDeSistema(provider: LlmProviderName, system: string, dinamico?: string): ChatMessage {
+  if (provider !== "openrouter" || system.length < MIN_CHARS_CACHE) {
+    return { role: "system", content: [system, dinamico].filter(Boolean).join("\n\n") };
+  }
+  const partes: ParteDaMensagem[] = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+  if (dinamico) partes.push({ type: "text", text: dinamico });
+  return { role: "system", content: partes };
+}
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -409,7 +435,7 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
   const started = Date.now();
   const totals: Totals = { cost: 0, prompt: 0, completion: 0 };
   const soTexto: ChatMessage[] = [
-    { role: "system", content: req.system },
+    mensagemDeSistema(provider.name, req.system, req.systemDinamico),
     { role: "user", content: req.user },
   ];
   const imagem = provider.name === "openrouter" && eImagemDataUrl(req.imageDataUrl) ? req.imageDataUrl : null;

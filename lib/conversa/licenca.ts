@@ -13,8 +13,19 @@ const ESPERA = /\b(espera|espere|pera|peraí|perai|agora n[ãa]o|n[ãa]o agora|a
 /** Liberou de forma explícita ("pode falar", "manda"): vale mesmo que a frase tenha um "depois" no meio. */
 const PODE = /\b(pode (falar|perguntar|mandar)|manda|claro|sim|fala a[íi]|pode sim)\b/i;
 
+/**
+ * Ele quer encerrar a entrevista ("pode encerrar", "vamos finalizar", "tenho que sair"). Respondendo a um pedido
+ * de licença, isso não é "pode perguntar": o "pode" fazia o Totti perguntar em vez de fechar.
+ */
+const ENCERRAR = /\b(encerr\w*|finaliz\w*|terminar a entrevista|acabar a entrevista|(vou|tenho que|preciso) (sair|ir embora)|por hoje [ée] isso)\b/i;
+
+export function pedeParaEncerrar(fala: string): boolean {
+  return ENCERRAR.test(fala);
+}
+
 /** A resposta ao pedido de licença: true pode perguntar, false é para esperar. */
 export function liberouAPergunta(fala: string): boolean {
+  if (pedeParaEncerrar(fala)) return false;
   if (PODE.test(fala)) return true;
   return !ESPERA.test(fala) && !/^\s*n[ãa]o\b/i.test(fala);
 }

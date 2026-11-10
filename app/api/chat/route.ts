@@ -48,15 +48,15 @@ export async function POST(request: Request) {
   }
 
   const response = await runInterviewerTurn(session, { blipId: conhecida ? blipId : undefined, messages, reconheceu: extra.reconheceu === true });
-  await guardarSessao(session);
+  // Gravar no Supabase (ler a cópia remota, juntar e gravar) são duas idas e voltas: ficam para depois da resposta,
+  // que é o que o candidato está esperando ouvir.
   // Concluiu uma etapa: o analista olha o código agora (momento-chave), e a próxima pergunta já vem sobre o que segue.
   const gatilho = session.events.at(-1);
-  if (response.concluded && gatilho) {
-    after(() =>
-      runAnalyst(session, gatilho)
-        .catch((err) => console.error("[chat] analista falhou:", err))
-        .then(() => guardarSessao(session)),
-    );
-  }
+  after(async () => {
+    await guardarSessao(session);
+    if (!response.concluded || !gatilho) return;
+    await runAnalyst(session, gatilho).catch((err) => console.error("[chat] analista falhou:", err));
+    await guardarSessao(session);
+  });
   return NextResponse.json(response);
 }

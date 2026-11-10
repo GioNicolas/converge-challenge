@@ -126,7 +126,8 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
       });
       const papel = PAPEL[args.nomeSchema] ?? PAPEL_PADRAO;
       const formato = PAPEIS_COM_SCHEMA_NO_PROMPT.has(papel) ? blocoDoFormato(args.schema) : undefined;
-      const sistema = [args.sistema.estatico, args.sistema.dinamico, formato].filter(Boolean).join("\n\n");
+      // O fixo (instruções e formato) primeiro, para o cache do provedor; o que muda a cada chamada, depois.
+      const sistema = [args.sistema.estatico, formato].filter(Boolean).join("\n\n");
       const prazoMs = args.timeoutMs ?? PRAZO_PADRAO_MS;
       const cancelar = new AbortController();
       try {
@@ -134,6 +135,7 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
           completar<T>({
             role: papel,
             system: sistema,
+            ...(args.sistema.dinamico ? { systemDinamico: args.sistema.dinamico } : {}),
             user: juntarMensagens(args.mensagens),
             schema: espiao,
             maxTokens: args.maxTokens !== undefined && args.maxTokens >= MIN_TOKENS_RESPEITADOS ? args.maxTokens : undefined,

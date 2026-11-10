@@ -23,3 +23,13 @@ test("pedido HTTP de conversa prioriza latência e relatório mantém throughput
   }
   assert.deepEqual(pedidos.map((p) => p.provider.sort), ["latency", "latency", "throughput"]);
 });
+
+test("prompt de sistema grande vai para o cache no OpenRouter; na Featherless e no curto, texto simples", async () => {
+  const { mensagemDeSistema } = await import("./openaiCompat");
+  const grande = "x".repeat(5000);
+  const or = mensagemDeSistema("openrouter", grande, "dinamico");
+  assert.ok(Array.isArray(or.content));
+  assert.deepEqual((or.content as { cache_control?: unknown }[]).map((p) => p.cache_control), [{ type: "ephemeral" }, undefined]);
+  assert.equal(mensagemDeSistema("featherless", grande, "dinamico").content, `${grande}\n\ndinamico`);
+  assert.equal(mensagemDeSistema("openrouter", "curto").content, "curto");
+});

@@ -41,7 +41,7 @@ export type EventoEntrevista =
   | { tipo: "COMECAR"; duracaoMin?: number }
   | { tipo: "APRESENTACAO_TERMINOU" }
   | { tipo: "CANDIDATO_DESENHOU" }
-  | { tipo: "CANDIDATO_CONTINUOU" }
+  | { tipo: "CANDIDATO_CONTINUOU"; texto?: string }
   /** O Totti acabou de responder ao candidato: a dúvida pendente fica para depois (não emenda uma na outra). */
   | { tipo: "AGENTE_RESPONDEU" }
   | { tipo: "TEMPO_DA_FASE_ACABOU" }
@@ -175,8 +175,9 @@ export function transicionar(estado: EstadoEntrevista, evento: EventoEntrevista,
     case "CANDIDATO_CONTINUOU":
       // A dúvida espera a próxima brecha na fala; só cai se já ficou para trás (a análise seguinte também pode
       // cancelá-la com "ok"). Sem isso, quem fala sem parar nunca recebia pergunta.
+      // Também cai se a fala já respondeu a ela: era o "você já me perguntou isso".
       return estado.plin === "PLIN_PENDENTE" && !estado.pendenteDeDemo
-        && agora - (estado.pendenteDesde ?? agora) >= RITMO.pendenteValidaMs
+        && (agora - (estado.pendenteDesde ?? agora) >= RITMO.pendenteValidaMs || falaJaCobre(estado, evento.texto))
         ? { ...estado, plin: "LIVRE", perguntaPendente: null, pendenteDesde: null }
         : estado;
 
@@ -247,4 +248,26 @@ export function transicionar(estado: EstadoEntrevista, evento: EventoEntrevista,
         perguntaAtiva: null,
       };
   }
+}
+
+/** Palavras de conteúdo (4+ letras) que não dizem nada do assunto. */
+const PALAVRAS_VAZIAS = new Set(["como", "você", "voce", "está", "esta", "isso", "esse", "essa", "aqui", "pensando", "para", "quando", "quer", "qual", "quais", "seria", "sobre", "mais", "tudo", "fazer", "vamos", "pode", "então", "agora"]);
+
+function palavrasDoAssunto(texto: string): Set<string> {
+  return new Set((texto.toLowerCase().match(/[a-zà-ú0-9]{4,}/g) ?? []).filter((p) => !PALAVRAS_VAZIAS.has(p)));
+}
+
+/**
+ * A fala nova do candidato já cobre a pergunta pendente: ela esperava uma brecha para ser dita e, nesse meio tempo,
+ * ele contou como está pensando (convite do começo, sem elementos do desenho) ou falou do mesmo assunto.
+ */
+export function falaJaCobre(estado: EstadoEntrevista, texto: string | undefined): boolean {
+  const pergunta = estado.perguntaPendente?.pergunta;
+  if (!texto || !pergunta) return false;
+  const palavras = texto.split(/\s+/).filter(Boolean).length;
+  if (estado.fase === "REQUISITOS" && (estado.perguntaPendente?.elementos.length ?? 0) === 0 && palavras >= 12) return true;
+  const assunto = palavrasDoAssunto(pergunta);
+  if (assunto.size < 2) return false;
+  const falou = palavrasDoAssunto(texto);
+  return [...assunto].filter((p) => falou.has(p)).length / assunto.size >= 0.5;
 }

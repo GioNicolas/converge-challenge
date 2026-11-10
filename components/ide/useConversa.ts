@@ -10,7 +10,7 @@
  * - Uma fala do Totti por vez: nenhuma corta a outra. O grifo de uma fala sai antes da próxima e quando o
  *   assunto fecha.
  */
-import { LICENCA_SEM_RESPOSTA_MS, liberouAPergunta } from "@/lib/conversa/licenca";
+import { LICENCA_SEM_RESPOSTA_MS, liberouAPergunta, pedeParaEncerrar } from "@/lib/conversa/licenca";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FilaFalas } from "@/lib/audio/filaFalas";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
@@ -264,9 +264,14 @@ export function useConversa(deps: ConversaDeps) {
     const licenca = licencaRef.current;
     if (licenca) {
       licencaRef.current = null;
-      if (liberouAPergunta(texto)) void abrirFioRef.current(licenca.blip);
-      else adiarRef.current(licenca.blip, true);
-      return;
+      // "Pode encerrar" não responde à licença: a pergunta fica para depois e a fala segue para o entrevistador,
+      // que entende o pedido de encerrar.
+      if (pedeParaEncerrar(texto)) adiarRef.current(licenca.blip, false);
+      else {
+        if (liberouAPergunta(texto)) void abrirFioRef.current(licenca.blip);
+        else adiarRef.current(licenca.blip, true);
+        return;
+      }
     }
     reconhecer(texto);
     filaRef.current?.adicionar(texto);
