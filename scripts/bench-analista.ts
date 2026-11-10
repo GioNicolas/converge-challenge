@@ -11,10 +11,10 @@ import { z } from "zod";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { SessionEvent } from "@/lib/contracts";
 import { getLlmStats, type LlmProviderName } from "@/lib/llm";
+import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 
 /** Gasto somado dos dois provedores neste processo, de todos os papéis (filtro incluso). */
 const gastoProcesso = () => Object.values(getLlmStats().providers).reduce((n, p) => n + p.costUsd, 0);
-import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 
 const PADRAO = ["featherless:zai-org/GLM-5.3-Flash@low", "featherless:google/gemma-4-26B-A4B-it"];
 
