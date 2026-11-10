@@ -7,12 +7,12 @@
  *   npm run pre:simular -- muda_foco                     # só uma
  *   npm run pre:simular -- questionadora muda_foco       # várias
  */
-import "../_gasto";
+import { pago } from "../_gasto";
 import type { FocusArea, InterviewConfig } from "@/lib/contracts";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
-import { chat, type Mensagem } from "@/lib/pre-entrevista/llm";
+import { chat, type Alvo, type Mensagem } from "@/lib/pre-entrevista/llm";
 import { descreverPasso } from "@/lib/pre-entrevista/planejador";
 import { normalizarTexto } from "@/lib/pre-entrevista/frases";
 import { DURACAO_PADRAO, paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
@@ -24,6 +24,14 @@ import { checarEstilo, descreverTempos } from "./checagens";
 const MAX_FALAS_RECRUTADORA = 14;
 /** Outro modelo que o do produto (gemini-flash-lite), para não disputar o limite de taxa do fallback. */
 const MODELO_RECRUTADORA = "meta-llama/llama-3.3-70b-instruct";
+/**
+ * Sem `--pago` a OpenRouter fica desligada e a recrutadora roda na Featherless: o mesmo Llama (a cópia da unsloth;
+ * a da meta-llama exige acesso no HuggingFace) e, quando ele está cheio, a Gemma 31B (outro modelo que o do produto).
+ */
+const ALVOS_RECRUTADORA_FEATHERLESS: Alvo[] = [
+  { provedor: "featherless", model: "unsloth/Llama-3.3-70B-Instruct" },
+  { provedor: "featherless", model: "google/gemma-4-31B-it" },
+];
 
 /**
  * O que a recrutadora de cada persona quer, escrito a partir do roteiro dela (não do que o sistema produziu).
@@ -237,7 +245,7 @@ async function falaDaRecrutadora(persona: Persona, descricaoVaga: string, sessao
   }
   const pedir = () =>
     chat({
-      alvos: [{ provedor: "openrouter", model: MODELO_RECRUTADORA }],
+      alvos: pago ? [{ provedor: "openrouter", model: MODELO_RECRUTADORA }] : ALVOS_RECRUTADORA_FEATHERLESS,
       messages: mensagens,
       temperature: 0.8,
       maxTokens: 200,

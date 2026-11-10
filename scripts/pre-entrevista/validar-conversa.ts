@@ -532,7 +532,9 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
     const { passo } = await conduzirTurno(sessao, caso.fala);
     const esperaMs = Math.round(performance.now() - inicio);
     // A extração também roda depois da fala testada: ela pode mudar foco e preferências, e `planoIgual` precisa ver isso.
-    await extrairAgora(sessao);
+    // Como na rota `mensagem`, não roda em turno de `repetir`/`esclarecer`.
+    const movimentoTestado = movimentoDaUltimaFala(sessao);
+    if (movimentoTestado !== "repetir" && movimentoTestado !== "esclarecer") await extrairAgora(sessao);
     const depois = fotografar(sessao);
     console.log(`  >> Recrutadora: ${caso.fala}`);
     console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoDaUltimaFala(sessao)} | ${esperaMs} ms]: ${depois.fala}`);

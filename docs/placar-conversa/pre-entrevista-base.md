@@ -3,56 +3,58 @@
 Parte da série da issue #22 (o modelo conduz a conversa na pré-entrevista). Este arquivo guarda como o Totti se
 comporta **antes** de qualquer mudança de prompt, trava ou planejador, para a última issue da série comparar.
 
-## Estado: PENDENTE
+## Estado: medida em 2026-11-10, só na Featherless
 
-A linha de base ainda não foi medida. Os casos e a persona foram escritos sem `.env.local`, e os dois comandos
-precisam do LLM e do Jev reais (`FEATHERLESS_API_KEY`, `TYPESAFE_API_KEY`; com `--pago`, também
-`OPENROUTER_API_KEY`). Sem `--pago` os dois rodam só na Featherless e os tempos não são os de produção. Como a
-latência é uma das medidas que a série não pode piorar, a linha de base e a medição final devem rodar **com `--pago`**,
-do mesmo jeito, para a comparação de tempo valer.
+Medida na branch `conversa/23-placar-casos` (commit `85bf936`), com o LLM e o Jev reais e **sem `--pago`**: a
+OpenRouter ficou desligada, de propósito, para não gastar crédito. Duas consequências:
 
-Para medir, na branch `conversa/23-placar-casos` (ou em qualquer commit anterior à issue #24):
+- **os tempos não são os de produção.** Em produção a fala do Totti vai à Featherless com 6 s de limite e cai na
+  OpenRouter se passar disso; aqui não há para onde cair, e a fala que passa de 6 s vira erro;
+- **o simulador quase não conversa.** Depois de um timeout, a Featherless fica 2 min fora (`DESCANSO_MS` em
+  `lib/pre-entrevista/llm.ts`), e as falas seguintes também falham. A maioria das personas parou depois de 0 a 3 falas
+  do Totti, e o placar de fidelidade mede quase só a configuração padrão. Por isso o número do simulador não entra
+  na comparação.
+
+A recrutadora simulada, que só existia na OpenRouter, roda sem `--pago` na Featherless (o mesmo Llama 3.3 70B, cópia
+da unsloth, com a Gemma 31B de reserva). A mudança foi aplicada só para medir; ela entra no código pela #28.
 
 ```bash
-npm run pre:conversa -- --pago
-npm run pre:simular -- distraida --pago
+npm run pre:conversa
+npm run pre:simular -- distraida
 ```
-
-e preencher as duas tabelas abaixo com o que sair.
 
 ## Casos fixos (`npm run pre:conversa`)
 
-| caso | situação | fala dela | resultado | espera (ms) | fala que saiu |
-|---|---|---|---|---|---|
-| `repetir-aprofundamento` | último passo: `aprofundar` | "desculpa, pode repetir a pergunta" | pendente | | |
-| `nao-entendeu` | último passo: `aprofundar` | "como assim, não entendi o que você quer saber" | pendente | | |
-| `pede-tempo` | último passo: `aprofundar` | "pera, deixa eu abrir a descrição da vaga aqui" | pendente | | |
-| `checagem-audio` | logo depois da abertura | "tá me ouvindo?" | pendente | | |
-| `repetir-nivel` | a abertura perguntou o nível | "oi? não ouvi" | pendente | | |
-| `repetir-oferta-troca` | a abertura ofereceu a troca | "não entendi, quais eram as opções mesmo" | pendente | | |
-| `repetir-resumo` | último passo: `resumo_final` | "pode repetir o resumo" | pendente | | |
-| `duvida-fora-da-entrevista` | último passo: `aprofundar` | "antes disso, o candidato vai ver essa conversa" | pendente | | |
+**1 de 8 passou, 6 falharam, 1 com erro.** Espera pela fala testada: p50 2518 ms, p95 4586 ms (7 falas, sem `--pago`).
 
-Resultado é `passou`, `falhou` (com as checagens que falharam) ou `não montado` (a conversa não chegou ao ponto).
-Espera é o tempo da fala testada (cobertura + resposta do modelo); o placar também imprime o p50 / p95 dos casos. Na
-linha de base o `movimento` sai sempre "(sem o campo)": o campo só entra com a issue #24.
+| caso | fala dela | resultado | espera (ms) | o que o Totti fez |
+|---|---|---|---|---|
+| `repetir-aprofundamento` | "desculpa, pode repetir a pergunta" | falhou | 4586 | repetiu a pergunta, mas o plano andou para `perguntar_contexto` e contou `contexto` |
+| `nao-entendeu` | "como assim, não entendi o que você quer saber" | passou | 2442 | `responder_duvida` explicou a pergunta e retomou o aprofundamento |
+| `pede-tempo` | "pera, deixa eu abrir a descrição da vaga aqui" | falhou | 2373 | "fique à vontade" e, na mesma fala, a pergunta de contexto: cobrou e avançou |
+| `checagem-audio` | "tá me ouvindo?" | falhou | 3000 | respondeu e devolveu a pergunta, mas contou `confirmou_inicio` de novo (1 → 2) |
+| `repetir-nivel` | "oi? não ouvi" | falhou | 2074 | repetiu, mas gastou uma das duas tentativas da pergunta de nível (0 → 1) |
+| `repetir-oferta-troca` | "não entendi, quais eram as opções mesmo" | falhou | 2518 | não disse os três caminhos de novo, e o modo mudou |
+| `repetir-resumo` | "pode repetir o resumo" | falhou | 4365 | caiu no resumo de revisão: contou outro resumo (1 → 2) e deixou a duração de fora |
+| `duvida-fora-da-entrevista` | "antes disso, o candidato vai ver essa conversa" | erro | | a Featherless passou de 6 s; numa segunda rodada, "vou considerar que o candidato terá acesso" e passou para a pergunta de contexto (falhou) |
 
-| medida | valor |
-|---|---|
-| espera pela fala testada (p50 / p95) | pendente |
+A leitura do código previa quase tudo isso (seção abaixo). O único caso que passou, `nao-entendeu`, passou porque
+o Jev marcou `fez_pergunta` e o planejador escolheu `responder_duvida`.
 
 ## Persona `distraida` (`npm run pre:simular -- distraida`)
 
 | medida | valor |
 |---|---|
-| fidelidade do plano | pendente |
-| checagens de estilo e repetição | pendente |
-| tempo por fala do Totti (p50 / p95) | pendente |
-| espera por fala, cobertura + Totti (p50 / p95) | pendente |
+| fidelidade do plano | 7/8 (falha: o eliminatório "rede" não aparece nas notas) |
+| checagens de estilo e repetição | nada a apontar |
+| tempo por fala do Totti (p50 / p95) | sem medida: a conversa parou com erro antes da primeira fala do Totti |
+| espera por fala, cobertura + Totti (p50 / p95) | sem medida, pelo mesmo motivo |
+
+Como a conversa não aconteceu, o 7/8 é o placar da configuração padrão, não da conversa com a persona.
 
 ## O que a leitura do código prevê
 
-Isto não é medição: é o que o código de hoje faz, pela leitura. Serve para conferir a linha de base quando ela sair.
+Isto não é medição: é o que o código de hoje faz, pela leitura. A linha de base acima confirma estes pontos.
 
 - **Repetir no aprofundamento e "não entendi"**: o prompt proíbe repetir pergunta, e `aprofundarPasso` só escolhe área
   com zero perguntas. O passo seguinte deve ser outra área, a pergunta de contexto ou o resumo, e a contagem anda.
