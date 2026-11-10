@@ -16,7 +16,6 @@ import { montarGuia } from "@/lib/pre-entrevista/guia";
 import { lerDuracao, perguntouSobreTempo } from "@/lib/pre-entrevista/duracao";
 import {
   aplicarPasso,
-  decidirNivel,
   decidirResumo,
   decidirTradeoff,
   decisaoDaOferta,
@@ -512,13 +511,6 @@ describe("decisões: escolha, recusa ou incerto", () => {
     assert.equal(decidirResumo({ pediu_mudanca: 1 }), "mudanca");
     assert.equal(decidirResumo({ aprovou_resumo: 1, pediu_mudanca: 1 }), "mudanca");
     assert.equal(decidirResumo({ aprovou_resumo: 0.2 }), "incerto");
-  });
-
-  it("nível: o que ela disse, incerto com o nível em aberto, e nada a decidir com o nível definido", () => {
-    assert.equal(decidirNivel("pleno", true), "pleno");
-    assert.equal(decidirNivel("senior", false), "senior");
-    assert.equal(decidirNivel("nao_disse", true), "incerto");
-    assert.equal(decidirNivel("nao_disse", false), undefined);
   });
 
   it("oferta em curso sem decisão fica pendente; com decisão ou com dúvida dela, não", () => {

@@ -23,6 +23,7 @@ import {
   falaDeEncerramento,
   falaDeReserva,
   fraseNivelPorEstimativa,
+  pedeONivel,
   perguntaEmAberto,
   responder,
   respostaFixa,
@@ -36,17 +37,18 @@ import {
   aplicarPasso,
   decisaoDaOferta,
   decisaoPendente,
-  MAX_RESUMOS,
-  VALORES_DE_DECISAO,
-  type DecisaoPendente,
-  type OferecerTradeoffPasso,
   decisoesAposTroca,
   descreverPasso,
+  MAX_ADIAMENTOS,
+  MAX_RESUMOS,
   nivelEmAberto,
   ofertaEmCurso,
   proximoPasso,
   trocaPedida,
+  VALORES_DE_DECISAO,
+  type DecisaoPendente,
   type EstadoPlanejamento,
+  type OferecerTradeoffPasso,
   type Passo,
 } from "./planejador";
 import { lerDuracao, perguntouSobreTempo } from "./duracao";
@@ -55,7 +57,7 @@ import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
 import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
-import { fraseComPalavra, limitarPalavras, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
+import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
 /**
@@ -303,9 +305,6 @@ function copiarEstadoLido(sessao: Sessao): EstadoLido {
   });
 }
 
-/** A pergunta em aberto pede o nível ("é júnior, pleno ou sênior?"): o passo `perguntar_nivel` ou a abertura. */
-const RE_PERGUNTA_DE_NIVEL = /j[úu]nior.*pleno.*s[êe]nior/i;
-
 /** O passo em curso de cada decisão pendente: é ele que o modelo recebe, com a decisão no lugar da instrução. */
 function passoDaDecisao(pendente: DecisaoPendente): Passo {
   if (pendente.tipo === "troca") return pendente.oferta;
@@ -382,19 +381,48 @@ type Desfecho =
   | { tipo: "revisao" };
 
 /**
+ * O modelo adiou: nada foi decidido. Depois de `MAX_ADIAMENTOS` adiamentos seguidos, troca de formato e nível seguem
+ * pelo caminho conservador, dito em voz alta (o que antes era o efeito de uma resposta ambígua), para a conversa não
+ * repetir a pergunta para sempre. A aprovação do resumo nunca é decidida por contagem.
+ */
+function adiar(sessao: Sessao, pendente: DecisaoPendente): Desfecho {
+  const adiados = (sessao.plano.adiamentos?.[pendente.tipo] ?? 0) + 1;
+  if (pendente.tipo === "resumo" || adiados < MAX_ADIAMENTOS) {
+    sessao.plano = { ...sessao.plano, adiamentos: { ...sessao.plano.adiamentos, [pendente.tipo]: adiados } };
+    return { tipo: "adiar" };
+  }
+  sessao.plano = { ...sessao.plano, adiamentos: { ...sessao.plano.adiamentos, [pendente.tipo]: 0 } };
+  registrarEvento(sessao, {
+    tipo: "plano",
+    resumo: `decisão pendente (${pendente.tipo}) adiada ${adiados} vezes: segue pelo caminho conservador`,
+    dados: { pendente, adiados },
+  });
+  if (pendente.tipo === "troca") {
+    registrarDecisaoDaTroca(sessao, pendente.oferta, "proxima_etapa", "sinais");
+    return { tipo: "seguir_adiante", prefixo: "Como não fechamos isso, deixo pra próxima etapa do processo." };
+  }
+  sessao.plano = { ...sessao.plano, nivelPorEstimativa: true };
+  return { tipo: "seguir_adiante", prefixo: fraseNivelPorEstimativa(sessao.rascunho.seniority) };
+}
+
+/**
  * Aplica a decisão que o modelo devolveu para a decisão pendente, pelas mesmas funções que aplicam a escolha lida
  * pelos sinais. Valor ausente ou que não existe conta como "adiar".
  */
 function aplicarDecisaoDoModelo(sessao: Sessao, pendente: DecisaoPendente, devolvida: string | undefined): Desfecho {
-  const valida = (VALORES_DE_DECISAO[pendente.tipo] as readonly string[]).includes(devolvida ?? "");
-  const decisao = valida ? devolvida : "adiar";
+  // "Trocar", " próxima etapa " e "seguir sem" valem como "trocar", "proxima_etapa" e "seguir_sem".
+  const normalizada = devolvida === undefined ? undefined : normalizarTexto(devolvida).trim().replace(/[\s-]+/g, "_");
+  const valida = (VALORES_DE_DECISAO[pendente.tipo] as readonly string[]).includes(normalizada ?? "");
+  const decisao = valida ? normalizada : "adiar";
   registrarEvento(sessao, {
     tipo: "plano",
     resumo: `decisão pendente (${pendente.tipo}): o modelo devolveu ${devolvida ?? "(nada)"}${valida ? "" : ", vale adiar"}`,
     dados: { pendente, devolvida, decisao },
   });
-  if (decisao === "adiar") return { tipo: "adiar" };
+  if (decisao === "adiar") return adiar(sessao, pendente);
 
+  // Decidiu: a contagem de adiamentos recomeça.
+  if (sessao.plano.adiamentos?.[pendente.tipo]) sessao.plano = { ...sessao.plano, adiamentos: { ...sessao.plano.adiamentos, [pendente.tipo]: 0 } };
   if (pendente.tipo === "troca") {
     registrarDecisaoDaTroca(sessao, pendente.oferta, decisao === "trocar" ? "trocou" : (decisao as DecisaoTradeoff), "modelo");
     return { tipo: "seguir_adiante" };
@@ -431,7 +459,7 @@ export async function conduzirTurno(
 ): Promise<{ passo: Passo; fala: string; movimento: Movimento }> {
   // Guardado antes de ler a fala dela: se o Totti repetir ou esclarecer, a fala não era resposta e nada disto muda.
   const antesDaFala = copiarEstadoLido(sessao);
-  const nivelPerguntado = RE_PERGUNTA_DE_NIVEL.test(perguntaEmAberto(sessao.transcricao) ?? "");
+  const nivelPerguntado = pedeONivel(perguntaEmAberto(sessao.transcricao));
   await lerFalaDela(sessao, texto, deps);
   const { passo, pendente } = planejar(sessao, "turno", nivelPerguntado);
 
