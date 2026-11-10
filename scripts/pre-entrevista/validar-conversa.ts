@@ -16,6 +16,8 @@
  * entra com `--pago`, e aí precisa também de OPENROUTER_API_KEY (ver `scripts/_gasto.ts`).
  */
 import { pago } from "../_gasto";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { normalizar, sobreposicao } from "@/lib/agente/guardas";
@@ -34,7 +36,7 @@ const LIMIAR_MESMA_PERGUNTA = 0.5;
 const MAX_PALAVRAS_FALA_CURTA = 30;
 
 /** O estado que um pedido de repetição não pode mudar. */
-interface Foto {
+export interface Foto {
   ultimoPasso?: Passo;
   /** O passo em curso: o último, ou o que a dúvida respondida retomou (ver `emCurso`). */
   emCurso?: Passo;
@@ -66,13 +68,13 @@ function fotografar(sessao: Sessao): Foto {
   });
 }
 
-interface Checagem {
+export interface Checagem {
   nome: string;
   ok: boolean;
   detalhe?: string;
 }
 
-interface Resultado {
+export interface Resultado {
   antes: Foto;
   depois: Foto;
   /** Passo que `conduzirTurno` devolveu para a fala testada. */
@@ -80,7 +82,7 @@ interface Resultado {
   sessao: Sessao;
 }
 
-interface Caso {
+export interface Caso {
   id: string;
   /** Id de uma vaga de `fixtures/pre-entrevista/vagas.ts`, ou a vaga inteira quando nenhuma das fixas serve. */
   vaga: string | Vaga;
@@ -97,11 +99,21 @@ interface Caso {
 // ---------------------------------------------------------------------------
 
 /**
- * A parte da fala que é a pergunta: a última frase terminada em "?". Frase só termina em pontuação seguida de espaço
- * ou do fim, para "R$ 1.000" ou "3.5" não cortarem a pergunta no meio.
+ * As frases da fala. Frase só termina em pontuação seguida de espaço ou do fim, para "R$ 1.000" ou "3.5" não
+ * cortarem a frase no meio.
  */
-function perguntaDe(fala: string): string {
-  return fala.split(/(?<=[.!?])\s+/).filter((f) => f.trim().endsWith("?")).at(-1)?.trim() ?? "";
+export function frasesDe(fala: string): string[] {
+  return fala.split(/(?<=[.!?])\s+/).map((f) => f.trim()).filter(Boolean);
+}
+
+/** Todas as perguntas da fala: as frases terminadas em "?", na ordem. */
+export function perguntasDe(fala: string): string[] {
+  return frasesDe(fala).filter((f) => f.endsWith("?"));
+}
+
+/** A parte da fala que é a pergunta em aberto: a última frase terminada em "?". */
+export function perguntaDe(fala: string): string {
+  return perguntasDe(fala).at(-1) ?? "";
 }
 
 /** Palavras curtas e conectivos que não dizem de que a pergunta trata. */
@@ -168,11 +180,39 @@ function falaCurta(r: Resultado): Checagem {
   return { nome: "fala curta", ok: frases <= 2 && n <= MAX_PALAVRAS_FALA_CURTA, detalhe: `${frases} frase(s), ${n} palavra(s)` };
 }
 
-/** Sem pergunta nova: ou não pergunta nada, ou a pergunta é a que já estava em aberto. */
-function semPerguntaNova(r: Resultado): Checagem {
-  const pergunta = perguntaDe(r.depois.fala);
-  const s = pergunta ? semelhanca(pergunta, perguntaDe(r.antes.fala)) : 1;
-  return { nome: "sem pergunta nova", ok: !pergunta || s >= LIMIAR_MESMA_PERGUNTA, detalhe: pergunta ? `pergunta: "${pergunta}" (sobreposição ${s.toFixed(2)})` : undefined };
+/**
+ * Sem pergunta nova: ou não pergunta nada, ou toda pergunta da fala é a que já estava em aberto. Confere cada
+ * pergunta, não só a última: "Qual a duração? E o pagamento duplicado?" traz uma pergunta nova antes da retomada.
+ */
+export function semPerguntaNova(r: Resultado): Checagem {
+  const aberta = perguntaDe(r.antes.fala);
+  const novas = perguntasDe(r.depois.fala)
+    .map((p) => ({ p, s: semelhanca(p, aberta) }))
+    .filter(({ s }) => s < LIMIAR_MESMA_PERGUNTA);
+  return {
+    nome: "sem pergunta nova",
+    ok: novas.length === 0,
+    detalhe: novas.length ? novas.map(({ p, s }) => `pergunta nova: "${p}" (sobreposição ${s.toFixed(2)})`).join("; ") : undefined,
+  };
+}
+
+/**
+ * A fala responde a dúvida antes de voltar à pergunta em aberto: a primeira frase não é a pergunta retomada e trata
+ * do que ela perguntou, com pelo menos um dos termos esperados (comparados pelo começo da palavra, sem acento).
+ * "Vamos continuar. E o pagamento duplicado?" tem duas frases e não responde nada.
+ */
+export function respondeAntes(r: Resultado, termos: string[]): Checagem {
+  const nome = "responde antes de voltar à pergunta";
+  const primeira = frasesDe(r.depois.fala)[0] ?? "";
+  const retomada = primeira.endsWith("?") && semelhanca(primeira, perguntaDe(r.antes.fala)) >= LIMIAR_MESMA_PERGUNTA;
+  if (!primeira || retomada) return { nome, ok: false, detalhe: `a primeira frase já é a pergunta retomada: "${primeira}"` };
+  const palavrasDaFrase = normalizarTexto(primeira).split(" ");
+  const achados = termos.filter((t) => palavrasDaFrase.some((p) => p.startsWith(normalizarTexto(t))));
+  return {
+    nome,
+    ok: achados.length > 0,
+    detalhe: achados.length ? `primeira frase trata da dúvida (${achados.join(", ")})` : `primeira frase não trata da dúvida: "${primeira}" (esperado um de: ${termos.join(", ")})`,
+  };
 }
 
 function semJargaoNemRotulo(r: Resultado): Checagem {
@@ -257,7 +297,10 @@ const VAGA_SEM_NIVEL: Vaga = {
     "Buscamos alguém que goste de resolver problemas de lógica e de escrever código limpo.",
 };
 
-const CASOS: Caso[] = [
+/** Termos de uma resposta a "o candidato vai ver essa conversa": de quem ela fala ou do que é visto. */
+export const TERMOS_DUVIDA_CONVERSA = ["candidat", "conversa", "acess", "compartilh", "visivel", "enxerg", "mostr", "privad"];
+
+export const CASOS: Caso[] = [
   {
     id: "repetir-aprofundamento",
     vaga: "backend-senior-pagamentos",
@@ -378,11 +421,7 @@ const CASOS: Caso[] = [
     conferir: (r) => [
       terminaEmPergunta(r),
       mesmaPergunta(r, "responde e volta à pergunta que estava em aberto"),
-      {
-        nome: "responde antes de voltar à pergunta",
-        ok: contarFrases(r.depois.fala) >= 2,
-        detalhe: `${contarFrases(r.depois.fala)} frase(s)`,
-      },
+      respondeAntes(r, TERMOS_DUVIDA_CONVERSA),
       {
         nome: "a contagem de perguntas não muda",
         ok: isDeepStrictEqual(r.antes.perguntasPorTopico, r.depois.perguntasPorTopico),
@@ -449,7 +488,25 @@ const CASOS: Caso[] = [
 // Execução
 // ---------------------------------------------------------------------------
 
-type Desfecho = "passou" | "falhou" | "nao_montado" | "erro";
+export type Desfecho = "passou" | "falhou" | "nao_montado" | "erro";
+
+/**
+ * Os eventos de erro do log da sessão (extrator, cobertura ou modelo que falharam), em toda a conversa: uma extração
+ * que falhou no histórico também deixa o estado errado para a fala testada.
+ */
+export function errosDaSessao(logs: Sessao["logs"]): string[] {
+  return logs.filter((e) => e.tipo === "erro").map((e) => e.resumo);
+}
+
+/**
+ * Erro na sessão vence até um cenário não montado: uma falha no histórico pode ser justamente o motivo de não chegar
+ * ao ponto esperado. "O plano não mudou" também não vale nada se a extração nem rodou.
+ */
+export function desfechoDoCaso(checagens: Checagem[], erros: string[], montado = true): Desfecho {
+  if (erros.length > 0) return "erro";
+  if (!montado) return "nao_montado";
+  return checagens.every((c) => c.ok) ? "passou" : "falhou";
+}
 
 const CHAVES = ["FEATHERLESS_API_KEY", "TYPESAFE_API_KEY", ...(pago ? ["OPENROUTER_API_KEY"] : [])];
 /** Logs do servidor que poluem a saída. As falas e os passos são impressos aqui. */
@@ -524,7 +581,9 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
     }
     if (!caso.situacao.chegou(sessao)) {
       console.log(`  NÃO MONTADO: a conversa não chegou ao ponto (passo em curso: ${descrever(emCurso(sessao))})`);
-      return { desfecho: "nao_montado" };
+      const erros = errosDaSessao(sessao.logs);
+      for (const e of erros) console.log(`  ERRO na sessão: ${e}`);
+      return { desfecho: desfechoDoCaso([], erros, false) };
     }
 
     const antes = fotografar(sessao);
@@ -543,7 +602,9 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
 
     const checagens = caso.conferir({ antes, depois, passo, sessao });
     for (const c of checagens) console.log(`  ${c.ok ? "PASS" : "FAIL"} ${c.nome}${c.detalhe ? ` | ${c.detalhe}` : ""}`);
-    return { desfecho: checagens.every((c) => c.ok) ? "passou" : "falhou", esperaMs };
+    const erros = errosDaSessao(sessao.logs);
+    for (const e of erros) console.log(`  ERRO na sessão: ${e}`);
+    return { desfecho: desfechoDoCaso(checagens, erros), esperaMs };
   } catch (err) {
     console.log(`  ERRO: ${err instanceof Error ? err.message : String(err)}`);
     return { desfecho: "erro" };
@@ -584,7 +645,17 @@ async function main(): Promise<void> {
   if (falhou) process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+/** O arquivo foi chamado direto (`npm run pre:conversa`), não importado pelo teste. */
+function executadoDireto(): boolean {
+  const script = process.argv[1];
+  if (!script) return false;
+  const igual = (a: string, b: string) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  return igual(resolve(fileURLToPath(import.meta.url)), resolve(script));
+}
+
+if (executadoDireto()) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

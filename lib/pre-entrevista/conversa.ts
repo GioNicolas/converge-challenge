@@ -1100,6 +1100,10 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   if (texto && segue && passo.tipo === "perguntar_contexto" && (!texto.includes("?") || perguntaObvia(texto))) {
     aplicar("pergunta_de_contexto", trocarPergunta(texto, PERGUNTA_CONTEXTO));
   }
+  // A leitura da resposta dela confere a pergunta em aberto, que precisa trazer as três opções.
+  if (texto && segue && passo.tipo === "perguntar_nivel" && !pedeONivel(ultimaPergunta(texto))) {
+    aplicar("pergunta_de_nivel", trocarPergunta(texto, PERGUNTA_DE_NIVEL));
+  }
   // Confirmação do início e resposta a dúvida devolvem a decisão para ela: sem pergunta, o código acrescenta uma.
   // Fora do `seguir` não acrescenta: um "Claro, sem pressa." viraria cobrança.
   if (texto && segue && !texto.includes("?") && (passo.tipo === "confirmar_inicio" || passo.tipo === "responder_duvida")) {
