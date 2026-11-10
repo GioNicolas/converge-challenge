@@ -42,7 +42,12 @@ export interface Sessao {
   /** Tom e dicas que a recrutadora pediu, atualizados a cada fala (ver `preferencias.ts`). */
   preferencias: Preferencias;
   /** Como estava o resumo da última vez que o Totti o falou. Serve para confirmar só o que mudou na revisão. */
-  resumo?: { preferencias: Preferencias; duracaoMin: number };
+  resumo?: {
+    preferencias: Preferencias;
+    duracaoMin: number;
+    /** O último resumo inteiro, como foi falado, para repetir se ela pedir. Some depois de uma revisão (já não vale). */
+    texto?: string;
+  };
   /** Competências-chave da vaga e se o formato verifica cada uma (ver `competencias.ts`). Não viram pergunta. */
   competencias: Competencia[];
   /** O que a vaga pede, em até 12 palavras, para a abertura da Totti (ver `competencias.ts`). Pode não existir. */

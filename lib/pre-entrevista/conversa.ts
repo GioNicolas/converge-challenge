@@ -428,7 +428,7 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
 const SEM_LOGISTICA = "Não pergunte duração, tom nem dicas: isso fica para o resumo, que usa o padrão do formato.";
 
 /** Instrução específica para o passo escolhido pelo planejador. */
-function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
+function instrucaoDoPasso(passo: Passo, sessao: Sessao, semDecisao = false): string {
   const r = sessao.rascunho;
   switch (passo.tipo) {
     case "confirmar_inicio":
@@ -497,6 +497,14 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       return texto;
     }
     case "resumo_final":
+      if (passo.revisao && semDecisao) {
+        return (
+          "Você fez o resumo e perguntou se pode finalizar. A última fala dela não aprovou nem pediu uma mudança clara. " +
+          "Leia o que ela disse e responda a isso: se pediu para repetir, diga o resumo de novo; se perguntou algo, responda com o que " +
+          "está em 'O QUE JÁ SE SABE' e pergunte de novo se pode finalizar; se pediu um tempo, aceite em poucas palavras e espere. " +
+          "Não invente mudança que ela não pediu e não dê a conversa por encerrada."
+        );
+      }
       if (passo.revisao) {
         return (
           "Ela pediu uma mudança depois do resumo. Confirme só o que mudou, numa frase curta com as palavras dela, sem repetir o resumo. " +
@@ -773,7 +781,7 @@ function primeiraLinha(texto: string | undefined): string {
 }
 
 /** Mensagens da próxima fala: persona e regras no sistema; contexto, passo e transcrição no usuário. */
-export function montarMensagensConversa(sessao: Sessao, passo: Passo): Mensagem[] {
+export function montarMensagensConversa(sessao: Sessao, passo: Passo, opcoes: { semDecisao?: boolean } = {}): Mensagem[] {
   const r = sessao.rascunho;
   const ultimas = sessao.transcricao
     .filter((t) => t.role === "agente")
@@ -785,7 +793,7 @@ export function montarMensagensConversa(sessao: Sessao, passo: Passo): Mensagem[
     `O QUE JÁ SE SABE:\n${saberEmLinguagemNatural(sessao)}`,
     `SUAS ÚLTIMAS FALAS (não repita essas perguntas por conta própria; só se ela pedir):\n${ultimas.join("\n") || "(nenhuma)"}`,
     `PERGUNTA SUA EM ABERTO: ${perguntaEmAberto(sessao.transcricao) ?? "(nenhuma)"}`,
-    `PASSO DESTA FALA:\n${instrucaoDoPasso(passo, sessao)}`,
+    `PASSO DESTA FALA:\n${instrucaoDoPasso(passo, sessao, opcoes.semDecisao)}`,
     `ÚLTIMAS 6 FALAS DA TRANSCRIÇÃO:\n${formatarTranscricao(sessao.transcricao.slice(-6))}`,
     "Escreva a próxima fala do Totti, no formato JSON pedido.",
   ].join("\n\n");
@@ -893,6 +901,11 @@ export function movimentoDaFala(declarado: Movimento, fala: string, sessao: Sess
 export interface OpcoesResponder {
   /** Cliente de LLM. Os testes passam um falso; sem ele, vale o `chat` de verdade. */
   chat?: typeof chat;
+  /**
+   * Depois do resumo, a fala dela não aprovou nem pediu mudança clara (ver `conduzirTurno`): nenhuma fala fixa é usada,
+   * e o modelo recebe o resumo como passo em curso, para responder ao que ela disse.
+   */
+  semDecisao?: boolean;
 }
 
 /**
@@ -908,13 +921,13 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
   if (passo.tipo === "informar_formato_indisponivel") return respostaFixa(falaFormatoIndisponivel(sessao.rascunho.mode));
   // Revisão de tom, dicas ou duração: a confirmação sai pronta. Mudança de foco ou de critério segue com o modelo.
-  if (passo.tipo === "resumo_final" && passo.revisao) {
+  if (passo.tipo === "resumo_final" && passo.revisao && !opcoes.semDecisao) {
     const confirmacao = confirmacaoDeterministica(sessao);
     if (confirmacao) return respostaFixa(confirmacao);
   }
   const conversar = opcoes.chat ?? chat;
   const resumoCompleto = passo.tipo === "resumo_final" && !passo.revisao;
-  const mensagens = montarMensagensConversa(sessao, passo);
+  const mensagens = montarMensagensConversa(sessao, passo, { semDecisao: opcoes.semDecisao });
   let resposta = await conversar({
     alvos: alvosDaConversa(),
     messages: mensagens,
@@ -993,8 +1006,13 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   // No resumo, o código acrescenta o que fica de fora, duração, tom e dicas (do estado) e a pergunta final, em variações.
   // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
   // Com movimento diferente de `seguir`, a fala não é um resumo (é uma resposta ou uma repetição) e fica como veio.
-  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao) {
+  // Sem decisão clara dela, a fala pode ser a resposta a "quanto tempo ficou mesmo?": a logística fica.
+  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao && !opcoes.semDecisao) {
     aplicar("logistica_da_revisao", removerLogisticaDaRevisao(texto));
+  }
+  // Ela pediu para repetir o resumo: sai o último resumo como foi falado, sem montar outro.
+  if (texto && movimento === "repetir" && passoEmCurso(sessao)?.tipo === "resumo_final" && sessao.resumo?.texto) {
+    aplicar("resumo_repetido", sessao.resumo.texto);
   }
   if (texto && segue && resumoCompleto) {
     const variante = Math.floor(Math.random() * 3);

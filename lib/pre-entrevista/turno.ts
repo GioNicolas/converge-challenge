@@ -5,15 +5,18 @@
  *   2. mede a cobertura e os sinais no momento (Jev, ~0,3 s) e aplica no rascunho;
  *   3. se o Totti acabou de oferecer a troca de formato, aplica a escolha dela; se ela pediu system design, troca;
  *   4. o planejador escolhe o próximo passo;
- *   5. o Totti escreve a fala desse passo e ela é registrada.
+ *   5. o Totti escreve a fala e declara o `movimento` dela (ver `conversa.ts`), e ela é registrada;
+ *   6. o turno obedece ao movimento: com `seguir`, o passo conta como feito; com `repetir`, `esclarecer` ou `responder`,
+ *      o passo em curso continua em curso; e com `repetir` ou `esclarecer`, o que foi lido da fala dela em 2 e 3 é desfeito
+ *      (a fala não era uma resposta).
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
 import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
 import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
-import { aberturaDoAgente, responder, tradeoffDaAbertura } from "./conversa";
-import { ErroChat } from "./llm";
+import { aberturaDoAgente, responder, tradeoffDaAbertura, type Movimento } from "./conversa";
+import { chat, ErroChat } from "./llm";
 import { registrarEvento } from "./log";
 import {
   aplicarPasso,
@@ -78,14 +81,14 @@ function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
  * o erro e segue com o estado anterior: o planejador ainda tem o que decidir, e a conversa não trava.
  * O foco e as notas são refeitos depois, em `conduzirTurno` (ver `aplicarPesosNaSessao`).
  */
-async function atualizarCobertura(sessao: Sessao): Promise<void> {
+async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno): Promise<void> {
   try {
-    const cob = await avaliarCobertura(sessao.rascunho, sessao.transcricao.slice(), {
+    const cob = await (deps.avaliarCobertura ?? avaliarCobertura)(sessao.rascunho, sessao.transcricao.slice(), {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
     });
     // A ênfase é por fala: classifica só a última fala dela, e o acumulado é feito no código (ver `enfase.ts`).
     const ultimaDela = ultimaFalaDaRecrutadora(sessao.transcricao);
-    const porFala = await avaliarEnfaseDaFala(sessao.transcricao);
+    const porFala = await (deps.avaliarEnfaseDaFala ?? avaliarEnfaseDaFala)(sessao.transcricao);
     if (ultimaDela) sessao.enfaseEstado = acumularEnfase(sessao.enfaseEstado, porFala.niveis, ultimaDela);
     sessao.plano = { ...sessao.plano, sinais: semDispensaContrariada(cob.sinais, sessao.enfaseEstado) };
 
@@ -248,11 +251,50 @@ export function abrirConversa(sessao: Sessao): void {
   atualizarNaoAvaliado(sessao);
 }
 
+/** O LLM e o Jev do turno. Os testes passam falsos; sem eles, valem os de verdade. */
+export interface DepsDoTurno {
+  chat?: typeof chat;
+  avaliarCobertura?: typeof avaliarCobertura;
+  avaliarEnfaseDaFala?: typeof avaliarEnfaseDaFala;
+}
+
+/** O que a leitura de uma fala dela altera na sessão (passos 2 e 3 do turno). */
+type EstadoLido = Pick<
+  Sessao,
+  "plano" | "rascunho" | "preferencias" | "enfaseEstado" | "origemPreferencias" | "eliminatorioFalas" | "naoAvaliado" | "pesosDetalhe"
+>;
+
+function copiarEstadoLido(sessao: Sessao): EstadoLido {
+  return structuredClone({
+    plano: sessao.plano,
+    rascunho: sessao.rascunho,
+    preferencias: sessao.preferencias,
+    enfaseEstado: sessao.enfaseEstado,
+    origemPreferencias: sessao.origemPreferencias,
+    eliminatorioFalas: sessao.eliminatorioFalas,
+    naoAvaliado: sessao.naoAvaliado,
+    pesosDetalhe: sessao.pesosDetalhe,
+  });
+}
+
+/** O passo em curso: o último executado (a dúvida respondida não conta, vale o passo que ela retomou). */
+function passoEmCurso(plano: Sessao["plano"]): Passo | undefined {
+  return plano.ultimoPasso?.tipo === "responder_duvida" ? plano.ultimoPasso.retomar : plano.ultimoPasso;
+}
+
 /**
- * Processa uma fala da recrutadora e devolve o passo escolhido e a fala do Totti.
+ * Processa uma fala da recrutadora e devolve o passo escolhido, a fala do Totti e o movimento que ela foi.
+ * Com movimento diferente de `seguir`, o passo devolvido não foi executado: o passo em curso continua sendo
+ * `sessao.plano.ultimoPasso`.
  * Se o Totti falhar, a fala da recrutadora sai da transcrição e o erro sobe (a rota responde 502).
  */
-export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ passo: Passo; fala: string }> {
+export async function conduzirTurno(
+  sessao: Sessao,
+  texto: string,
+  deps: DepsDoTurno = {},
+): Promise<{ passo: Passo; fala: string; movimento: Movimento }> {
+  // Guardado antes de ler a fala dela: se o Totti repetir ou esclarecer, a fala não era resposta e nada disto muda.
+  const antesDaFala = copiarEstadoLido(sessao);
   registrarFala(sessao, { role: "recrutadora", text: texto });
   // Duração lida direto da fala, antes do planejador: o resumo não depende do extrator (lento) para saber o tempo.
   const duracao = lerDuracao(texto, { perguntouTempo: perguntouSobreTempo(ultimaFalaDoAgente(sessao.transcricao)) });
@@ -260,7 +302,7 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
   // Linguagem também: "só Python" vira restrição na config (no padrão o candidato escolhe entre todas).
   const linguagens = lerLinguagens(texto);
   if (linguagens) sessao.preferencias = { ...sessao.preferencias, linguagens };
-  await atualizarCobertura(sessao);
+  await atualizarCobertura(sessao, deps);
   // Formato pedido com as palavras da tela ("vamos de quadro", "no Excalidraw", "código ao vivo") vale como pedido,
   // mesmo quando o classificador não reconhece: sem isso o plano ficava no formato errado depois de ela confirmar.
   const formato = lerFormato(texto);
@@ -296,9 +338,19 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
     },
   });
 
+  // Depois do resumo, o encerramento e a confirmação de tom, dicas e duração saem fixos, sem modelo, e por isso sem
+  // movimento. Só valem quando a fala dela é uma aprovação ou um pedido claro; senão ela vai ao modelo, com o resumo
+  // como passo em curso, para ele responder ao que ela disse (repetir, tirar uma dúvida, esperar).
+  const sinal = (id: string) => sessao.plano.sinais[id] ?? 0;
+  // Troca de formato pedida depois do resumo também é pedido claro: o resumo de revisão mostra o formato novo.
+  const decisaoClara = sinal("aprovou_resumo") >= LIMIAR || sinal("pediu_mudanca") >= LIMIAR || sessao.plano.trocaPendente !== undefined;
+  const passoDeFalaFixa = passo.tipo === "encerrar" || (passo.tipo === "resumo_final" && passo.revisao === true);
+  const semDecisao = passoEmCurso(antesDaFala.plano)?.tipo === "resumo_final" && passoDeFalaFixa && !decisaoClara;
+  const passoDaFala: Passo = semDecisao ? { tipo: "resumo_final", revisao: true } : passo;
+
   let resposta: Awaited<ReturnType<typeof responder>>;
   try {
-    resposta = await responder(sessao, passo);
+    resposta = await responder(sessao, passoDaFala, { chat: deps.chat, semDecisao });
   } catch (err) {
     desfazerUltimaFala(sessao);
     const mensagem = err instanceof Error ? err.message : String(err);
@@ -309,13 +361,18 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
       dados: {
         etapa: "conversa",
         textoNaoRespondido: texto,
-        passo,
+        passo: passoDaFala,
         mensagem,
         ...(err instanceof ErroChat ? { tentativas: err.tentativas } : {}),
       },
     });
     throw err;
   }
+
+  const movimento = resposta.movimento;
+  // Repetir e esclarecer: a fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos
+  // dela são desfeitos, e o plano volta a ser o de antes.
+  if (movimento === "repetir" || movimento === "esclarecer") Object.assign(sessao, antesDaFala);
 
   registrarFala(
     sessao,
@@ -326,8 +383,8 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
       model: resposta.model,
       fallback: resposta.fallback,
       dados: {
-        passo,
-        movimento: resposta.movimento,
+        passo: passoDaFala,
+        movimento,
         travas: resposta.travas,
         mensagens: resposta.mensagens,
         respostaCrua: resposta.respostaCrua,
@@ -335,10 +392,35 @@ export async function conduzirTurno(sessao: Sessao, texto: string): Promise<{ pa
       },
     },
   );
-  sessao.plano = aplicarPasso(sessao.plano, passo);
-  // Guarda como ficou o resumo, para a próxima revisão confirmar só o que mudou.
-  if (passo.tipo === "resumo_final") {
-    sessao.resumo = { preferencias: { ...sessao.preferencias }, duracaoMin: duracaoDoRascunho(sessao.rascunho, sessao.preferencias) };
+  // Só uma fala que executa o passo o fecha. Repetição, esclarecimento e resposta deixam o passo em curso como estava:
+  // a pergunta continua em aberto, nenhuma contagem anda, e o planejador escolhe de novo no turno seguinte.
+  if (movimento !== "seguir") {
+    const emCurso = sessao.plano.ultimoPasso;
+    registrarEvento(sessao, {
+      tipo: "plano",
+      resumo:
+        `passo mantido (movimento ${movimento}): ${emCurso ? descreverPasso(emCurso) : "nenhum"} continua em curso; ` +
+        `${descreverPasso(passoDaFala)} não foi executado`,
+      dados: {
+        movimento,
+        passoMantido: emCurso,
+        passoNaoExecutado: passoDaFala,
+        estadoRestaurado: movimento !== "responder",
+        perguntasPorTopico: sessao.plano.perguntasPorTopico,
+        resumos: sessao.plano.resumos,
+      },
+    });
+    return { passo: passoDaFala, fala: resposta.texto, movimento };
   }
-  return { passo, fala: resposta.texto };
+  sessao.plano = aplicarPasso(sessao.plano, passoDaFala);
+  // Guarda como ficou o resumo, para a próxima revisão confirmar só o que mudou. O texto do resumo inteiro fica para
+  // repetir se ela pedir; depois de uma revisão ele já não vale.
+  if (passoDaFala.tipo === "resumo_final") {
+    sessao.resumo = {
+      preferencias: { ...sessao.preferencias },
+      duracaoMin: duracaoDoRascunho(sessao.rascunho, sessao.preferencias),
+      ...(passoDaFala.revisao ? {} : { texto: resposta.texto }),
+    };
+  }
+  return { passo: passoDaFala, fala: resposta.texto, movimento };
 }
