@@ -123,19 +123,23 @@ test("fila: sozinho, fundo ocupa uma vaga por vez", async (t) => {
   assert.deepEqual(filaDoProvedor("featherless"), { ativas: 0, fundo: 0, esperando: 0 });
 });
 
-/** `fetch` falso: cada pedido fica pendente até ser liberado ou abortado; guarda o sinal de cada um. */
+/**
+ * `fetch` falso: a Featherless fica pendente até ser liberada ou abortada; a OpenRouter responde na hora.
+ * Guarda cada pedido, com o sinal, para o teste ver quando saiu.
+ */
 function fetchFalso(t: { mock: { method: typeof import("node:test").mock.method } }) {
-  const pedidos: Array<{ id: string; sinal: AbortSignal; liberar: () => void }> = [];
-  t.mock.method(globalThis, "fetch", (_url: unknown, opcoes?: RequestInit) => {
+  const pedidos: Array<{ id: string; url: "featherless" | "openrouter"; sinal: AbortSignal; liberar: () => void }> = [];
+  const resposta = () => Response.json({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }] });
+  t.mock.method(globalThis, "fetch", (url: unknown, opcoes?: RequestInit) => {
     const sinal = opcoes?.signal as AbortSignal;
     const id = (JSON.parse(String(opcoes?.body)) as { messages: { content: string }[] }).messages[1].content;
+    if (String(url).includes("openrouter")) {
+      pedidos.push({ id, url: "openrouter", sinal, liberar: () => {} });
+      return Promise.resolve(resposta());
+    }
     return new Promise<Response>((resolve, reject) => {
       sinal.addEventListener("abort", () => reject(Object.assign(new Error("abortado"), { name: "AbortError" })), { once: true });
-      pedidos.push({
-        id,
-        sinal,
-        liberar: () => resolve(Response.json({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }] })),
-      });
+      pedidos.push({ id, url: "featherless", sinal, liberar: () => resolve(resposta()) });
     });
   });
   return pedidos;
@@ -146,40 +150,97 @@ const mensagens = (id: string) => [
   { role: "system" as const, content: "sistema" },
   { role: "user" as const, content: id },
 ];
+const fila = () => filaDoProvedor("featherless");
 
-test("chat: fundo não ocupa a última vaga e a fala passa na frente; espera na fila não gasta o timeout", async (t) => {
+test("chat, fundo: espera na fila mais que o prazo e ainda sai com o sinal não abortado", async (t) => {
   fixarEnv(t, { FEATHERLESS_API_KEY: "chave-ficticia", FEATHERLESS_CONCURRENCY: "2" });
   const pedidos = fetchFalso(t);
-
+  const falaX = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fala-x") });
   const fundoA = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fundo-a"), prioridade: "fundo" });
-  const fundoB = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fundo-b"), prioridade: "fundo" });
   await esperar();
-  assert.deepEqual(pedidos.map((p) => p.id), ["fundo-a"], "o segundo fundo espera: não pega a última vaga");
 
-  // Fala pega a vaga livre na hora.
-  const fala = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fala") });
-  await esperar();
-  assert.deepEqual(pedidos.map((p) => p.id), ["fundo-a", "fala"]);
-  assert.equal(filaDoProvedor("featherless").ativas, 2);
-  assert.equal(filaDoProvedor("featherless").esperando, 1);
-
-  // Uma terceira fala espera mais que o timeout do alvo (60 ms) na fila. Quando a vaga abre, o fetch sai com o
-  // sinal ainda não abortado: o tempo na fila não conta contra o alvo.
-  const tardia = chat({ alvos: [alvoFeatherless], messages: mensagens("fala-tardia") });
+  // Duas vagas ocupadas: fala-x e fundo-a. O fundo-b tem prazo de 60 ms, que não vale na fila de fundo.
+  const fundoB = chat({ alvos: [alvoFeatherless], messages: mensagens("fundo-b"), prioridade: "fundo" });
   await esperar(120);
-  assert.equal(pedidos.some((p) => p.id === "fala-tardia"), false, "ainda na fila");
-  pedidos.find((p) => p.id === "fala")?.liberar();
-  await fala;
-  await esperar();
-  const pedidoTardio = pedidos.find((p) => p.id === "fala-tardia");
-  assert.ok(pedidoTardio, "a fala tardia saiu quando a vaga abriu");
-  assert.equal(pedidoTardio.sinal.aborted, false, "o timeout começa no envio, não na entrada na fila");
-  pedidoTardio.liberar();
-  assert.equal((await tardia).provedor, "featherless");
+  assert.equal(pedidos.some((p) => p.id === "fundo-b"), false, "ainda na fila");
+
+  pedidos.find((p) => p.id === "fala-x")?.liberar();
+  await falaX;
+  await esperar(); // fundo-a segue ocupando uma vaga: o fundo-b não pega a última
+  assert.equal(pedidos.some((p) => p.id === "fundo-b"), false, "o fundo não pega a última vaga");
 
   pedidos.find((p) => p.id === "fundo-a")?.liberar();
+  await fundoA;
   await esperar();
-  pedidos.find((p) => p.id === "fundo-b")?.liberar();
-  await Promise.all([fundoA, fundoB]);
-  assert.deepEqual(filaDoProvedor("featherless"), { ativas: 0, fundo: 0, esperando: 0 });
+  const pedidoB = pedidos.find((p) => p.id === "fundo-b");
+  assert.ok(pedidoB, "o fundo-b saiu quando a vaga abriu");
+  assert.equal(pedidoB.sinal.aborted, false, "o prazo do fundo nasce no envio, não na fila");
+  pedidoB.liberar();
+  assert.equal((await fundoB).provedor, "featherless");
+  assert.deepEqual(fila(), { ativas: 0, fundo: 0, esperando: 0 });
+});
+
+test("chat, fala: espera na fila menos que o prazo e ainda é atendida pela Featherless", async (t) => {
+  fixarEnv(t, { FEATHERLESS_API_KEY: "chave-ficticia", FEATHERLESS_CONCURRENCY: "2" });
+  const pedidos = fetchFalso(t);
+  const falaX = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fala-x") });
+  const fundoA = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fundo-a"), prioridade: "fundo" });
+  await esperar();
+
+  const falaY = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 2_000 }], messages: mensagens("fala-y") });
+  await esperar(60);
+  pedidos.find((p) => p.id === "fala-x")?.liberar();
+  await falaX;
+  await esperar();
+  pedidos.find((p) => p.id === "fala-y")?.liberar();
+  const r = await falaY;
+  assert.equal(r.provedor, "featherless");
+  assert.equal(r.tentativas.length, 1);
+  assert.equal(r.tentativas[0].erro, undefined);
+
+  pedidos.find((p) => p.id === "fundo-a")?.liberar();
+  await fundoA;
+  assert.deepEqual(fila(), { ativas: 0, fundo: 0, esperando: 0 });
+});
+
+test("chat, fala: estoura o prazo na fila, passa para a reserva e a Featherless não entra em descanso", async (t) => {
+  fixarEnv(t, { FEATHERLESS_API_KEY: "chave-ficticia", OPENROUTER_API_KEY: "chave-ficticia", FEATHERLESS_CONCURRENCY: "2" });
+  const pedidos = fetchFalso(t);
+  const modelo = "modelo-fila-cheia";
+  const falaX = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fala-x") });
+  const fundoA = chat({ alvos: [{ ...alvoFeatherless, timeoutMs: 5_000 }], messages: mensagens("fundo-a"), prioridade: "fundo" });
+  await esperar();
+
+  // Vagas cheias: a fala-y espera 60 ms na fila, estoura e cai na OpenRouter.
+  const falaY = await chat({
+    alvos: [
+      { provedor: "featherless", model: modelo, timeoutMs: 60 },
+      { provedor: "openrouter", model: "reserva", timeoutMs: 5_000 },
+    ],
+    messages: mensagens("fala-y"),
+  });
+  assert.equal(falaY.provedor, "openrouter");
+  assert.equal(falaY.tentativas[0].provedor, "featherless");
+  assert.match(falaY.tentativas[0].erro ?? "", /fila da Featherless cheia por \d+ ms/);
+  assert.equal(pedidos.some((p) => p.id === "fala-y" && p.url === "featherless"), false, "a Featherless nunca recebeu a fala-y");
+  assert.ok(pedidos.some((p) => p.id === "fala-y" && p.url === "openrouter"), "a fala caiu na reserva");
+
+  // Libera as vagas: o mesmo alvo volta a ser tentado primeiro, sem ter ficado de descanso.
+  pedidos.find((p) => p.id === "fala-x")?.liberar();
+  await falaX;
+  pedidos.find((p) => p.id === "fundo-a")?.liberar();
+  await fundoA;
+  await esperar();
+  const seguinte = chat({
+    alvos: [
+      { provedor: "featherless", model: modelo, timeoutMs: 5_000 },
+      { provedor: "openrouter", model: "reserva", timeoutMs: 5_000 },
+    ],
+    messages: mensagens("fala-z"),
+  });
+  await esperar();
+  pedidos.find((p) => p.id === "fala-z")?.liberar();
+  const z = await seguinte;
+  assert.equal(z.provedor, "featherless", "o alvo não ficou de descanso");
+  assert.deepEqual(fila(), { ativas: 0, fundo: 0, esperando: 0 });
 });

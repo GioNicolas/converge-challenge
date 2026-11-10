@@ -115,6 +115,12 @@ interface RespostaChat {
 /** Falha que justifica tentar o próximo alvo: 503 persistente, 429, 5xx, timeout, rede ou chave ausente. */
 class FalhaRecuperavel extends Error {}
 
+/**
+ * O prazo da fala estourou ainda na fila da Featherless (o envio nem saiu). A Featherless não falhou, só estava cheia:
+ * o `chat` passa para o próximo alvo sem pôr este em descanso.
+ */
+class FilaCheia extends FalhaRecuperavel {}
+
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -127,37 +133,45 @@ async function tentarAlvo(
   if (!chave) throw new FalhaRecuperavel(`${CHAVES[alvo.provedor]} não definida`);
 
   const limite = alvo.timeoutMs ?? o.timeoutMs;
-  // Um envio à HTTP: resposta e corpo juntos, porque o provedor gera tudo antes de responder.
-  const enviar = async () => {
-    const res = await fetch(URLS[alvo.provedor], {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
-      body: JSON.stringify({
-        model: alvo.model,
-        messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
-        max_tokens: o.maxTokens,
-        temperature: o.temperature,
-        ...alvo.extraBody,
-      }),
-      // O timeout nasce com o envio: a espera na fila da Featherless não gasta o tempo do alvo.
-      signal: AbortSignal.timeout(limite),
-    });
-    return { res, corpo: await res.text() };
-  };
   for (let tentativa = 0; ; tentativa++) {
     let res: Response;
     let corpo: string;
+    // Uma tentativa. Fala: o prazo (`limite`) nasce antes da fila e cobre fila + envio, então a fala não espera sem
+    // limite. Fundo: o prazo nasce no envio, a espera na fila não conta.
+    const chegada = Date.now();
+    const prazoFala = o.prioridade === "fala" ? AbortSignal.timeout(limite) : undefined;
+    let enviado = false;
+    // Um envio à HTTP: resposta e corpo juntos, porque o provedor gera tudo antes de responder.
+    const enviar = async () => {
+      enviado = true;
+      const resposta = await fetch(URLS[alvo.provedor], {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
+        body: JSON.stringify({
+          model: alvo.model,
+          messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
+          max_tokens: o.maxTokens,
+          temperature: o.temperature,
+          ...alvo.extraBody,
+        }),
+        signal: prazoFala ?? AbortSignal.timeout(limite),
+      });
+      return { res: resposta, corpo: await resposta.text() };
+    };
     try {
       // Featherless: cada envio ocupa uma vaga da fila do provedor, a mesma da entrevista. A espera do 503 fica
       // fora da vaga, para não segurar a fila dormindo. OpenRouter não passa pela fila: a entrevista tem a dela.
       ({ res, corpo } =
-        alvo.provedor === "featherless" ? await comVagaNoProvedor("featherless", o.prioridade, enviar) : await enviar());
+        alvo.provedor === "featherless"
+          ? await comVagaNoProvedor("featherless", o.prioridade, enviar, prazoFala)
+          : await enviar());
       if (res.status === 503 && tentativa < ESPERAS_503_MS.length) {
         await esperar(ESPERAS_503_MS[tentativa]);
         continue;
       }
     } catch (err) {
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        if (!enviado) throw new FilaCheia(`fila da Featherless cheia por ${Date.now() - chegada} ms`);
         throw new FalhaRecuperavel(`sem resposta completa em ${limite} ms`);
       }
       // Erro de rede ou corpo interrompido (fetch e o stream lançam TypeError).
@@ -215,7 +229,8 @@ export async function chat({
       tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms: Date.now() - inicioAlvo, erro: mensagem });
       // Erro não recuperável (ex.: 4xx que não é 429): não adianta tentar o próximo alvo.
       if (!(err instanceof FalhaRecuperavel)) throw new ErroChat(mensagem, tentativas);
-      descansoAte.set(chaveAlvo(alvo), Date.now() + DESCANSO_MS);
+      // Fila cheia não é falha do alvo: a Featherless só estava ocupada, então ele segue disponível.
+      if (!(err instanceof FilaCheia)) descansoAte.set(chaveAlvo(alvo), Date.now() + DESCANSO_MS);
       falhas.push(`${alvo.provedor}/${alvo.model}: ${mensagem}`);
     }
   }

@@ -266,9 +266,15 @@ const PROVEDORES: Record<LlmProviderName, ProviderConfig> = { featherless, openr
 /**
  * Roda `fn` numa vaga do provedor, pela mesma fila das chamadas de `chatJsonVia`. Quem não usa `chatJsonVia`
  * (a pré-entrevista) passa por aqui para dividir as vagas com a entrevista e respeitar a prioridade.
+ * Com `signal`, abortar enquanto espera na fila tira a espera da fila e rejeita com AbortError.
  */
-export function comVagaNoProvedor<R>(nome: LlmProviderName, prioridade: Prioridade, fn: () => Promise<R>): Promise<R> {
-  return withSlot(PROVEDORES[nome], prioridade, undefined, fn);
+export function comVagaNoProvedor<R>(
+  nome: LlmProviderName,
+  prioridade: Prioridade,
+  fn: () => Promise<R>,
+  signal?: AbortSignal,
+): Promise<R> {
+  return withSlot(PROVEDORES[nome], prioridade, signal, fn);
 }
 
 function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {

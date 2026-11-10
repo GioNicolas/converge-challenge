@@ -33,7 +33,10 @@ const MAX_TOKENS_CONVERSA = 400;
 const TIMEOUT_FEATHERLESS_MS = 6_000;
 const TIMEOUT_OPENROUTER_MS = 8_000;
 
-/** Featherless (principal) e OpenRouter (plano B). Cada alvo tem 12 s antes de passar adiante. */
+/**
+ * Featherless (principal) e OpenRouter (plano B). A Featherless tem 6 s (fila incluída) e a OpenRouter 8 s; quando
+ * estouram, a fala passa para o próximo alvo.
+ */
 export function alvosDaConversa(): Alvo[] {
   return [
     {
