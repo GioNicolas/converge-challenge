@@ -177,6 +177,14 @@ async function turno(
         question, req.messages, opening,
       );
     }
+    // Encerramento com todos os pontos já perguntados: a resposta dele ao último é o fim. Ficar ouvindo deixava o
+    // candidato esperando ~30 s até perguntar "tem mais alguma pergunta?".
+    if (!opening && question?.kind === "encerramento" && (output.respond === false || output.reply.trim() === "")
+      && perguntasSeguidas(req.messages) >= limiteDePerguntas(question)) {
+      registrarEvidencia(session, output);
+      session.lastConversationEndedAt = elapsedMs(session);
+      return { reply: falaNaoRepetida(FECHAR_O_ENCERRAMENTO, falasDoAgente(session, req.messages)), commands: [{ type: "clear_highlights" }], end: true };
+    }
     if (!opening && (output.respond === false || output.reply.trim() === "")) {
       registrarEvidencia(session, output);
       return { reply: "", commands: [], end: false, listening: true };

@@ -210,13 +210,10 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   const kickoff = session.queue.find((q) => q.kickoff && q.status === "queued");
   if (kickoff) {
     // Abertura: espera ele ler o enunciado, não interrompe digitação e some se ele já foi direto pro código.
-    if (linesWrittenBeyondStarter(session) >= KICKOFF_SKIP_IF_LINES_WRITTEN) {
+    const descartada = perdeuAVez(session, kickoff, t);
+    if (descartada) {
       kickoff.status = "stale";
-      return { reason: "abertura descartada: candidato já começou a codar" };
-    }
-    if (palavrasFaladas(session) >= KICKOFF_SKIP_IF_WORDS_SPOKEN) {
-      kickoff.status = "stale";
-      return { reason: "abertura descartada: candidato já contou o plano falando" };
+      return { reason: descartada };
     }
     if (t < KICKOFF_READING_MS) {
       return { reason: `esperando: tempo de leitura (faltam ${Math.ceil((KICKOFF_READING_MS - t) / 1000)} s)` };
@@ -616,6 +613,7 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
   };
   const empecilho = q.kind === "empecilho" ? empecilhoDaQuestao(session) : undefined;
   if (empecilho) blip.empecilho = empecilhoPublico(session, empecilho);
+  if (q.kind !== "retorno" && q.kind !== "encerramento" && q.kind !== "empecilho") blip.perdeAVez = true;
   session.blips.push(blip);
   session.pendingBlipId = blip.id;
   return blip;
@@ -639,6 +637,9 @@ function previewFor(q: QueuedQuestion): string {
 export function perdeuAVez(session: SessionState, q: QueuedQuestion, blipCreatedAt: number): string | undefined {
   if (q.kind === "retorno" || q.kind === "empecilho" || q.kind === "encerramento") return undefined;
   if (q.kickoff) {
+    // O entrevistador já fez uma pergunta (numa fala livre, ex.: "como você pretende começar?"): a abertura sobra.
+    const perguntou = session.events.some((e) => e.type === "speech" && e.role === "agent" && e.text.trim().endsWith("?") && !/posso (te )?(perguntar|interromper)/i.test(e.text));
+    if (perguntou) return "abertura descartada: o entrevistador já perguntou";
     if (palavrasFaladas(session) >= KICKOFF_SKIP_IF_WORDS_SPOKEN) return "abertura descartada: candidato já contou o plano falando";
     if (linesWrittenBeyondStarter(session) >= KICKOFF_SKIP_IF_LINES_WRITTEN) return "abertura descartada: candidato já começou a codar";
     if (jaFoiPerguntada(session, q)) return "abertura descartada: pergunta parecida já feita";

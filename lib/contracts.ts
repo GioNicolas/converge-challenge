@@ -216,6 +216,11 @@ export const Blip = z.object({
   highlight: LineRange.optional(),
   /** Balão de empecilho: a IDE abre a conversa sozinha, sem "agora não", e aplica a mudança na tela. */
   empecilho: EmpecilhoPublico.optional(),
+  /**
+   * A pergunta perde a vez se o candidato falar bastante antes de ela ser feita (ele pode ter explicado aquilo):
+   * a IDE a descarta em vez de pedir licença. Retorno, encerramento e mudança no problema não perdem.
+   */
+  perdeAVez: z.boolean().optional(),
 });
 export type Blip = z.infer<typeof Blip>;
 

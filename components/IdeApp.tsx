@@ -47,6 +47,8 @@ const PAUSA_ENTRE_FALAS_MS = 8000;
 const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 45_000;
 /** Teto da espera da apresentação por uma fala do candidato em andamento. */
 const APRESENTACAO_ESPERA_MAX_MS = 8000;
+/** Fala com pelo menos isso de palavras é uma explicação: a pergunta que chegou antes dela perde a vez. */
+const PALAVRAS_FALA_LONGA = 12;
 /** Digitou há menos que isso: ele está no meio do código, então o Totti pede licença antes de perguntar. */
 const LICENCA_SE_DIGITOU_MS = 12_000;
 
@@ -187,9 +189,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   // Fala do candidato (Scribe, ou o navegador como reserva): vai para a conversa, que decide pela intenção se o
   // Totti responde (dúvida, feedback, etapa concluída, resposta à pergunta dele) ou só ouve (pensando em voz alta).
   const falaRef = useRef<(texto: string) => void>(() => {});
+  /** Quando ele terminou a última fala longa (explicando algo): uma pergunta que chegou antes disso perde a vez. */
+  const ultimaFalaLongaEmRef = useRef(0);
   falaRef.current = (texto) => {
     const limpo = texto.trim();
     if (!limpo || session.ended) return;
+    if (limpo.split(/\s+/).length >= PALAVRAS_FALA_LONGA) ultimaFalaLongaEmRef.current = Date.now();
     conversa.ouvir(limpo);
   };
   // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de ~3 s sem voz
@@ -297,10 +302,21 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const ocupada = conversa.ocupada;
   const fioRef = conversa.fioRef;
   const ultimaFalaDoAgenteEmRef = conversa.ultimaFalaDoAgenteEmRef;
+  const enviarEvento = session.sendEvent;
   useEffect(() => {
     if (!balao || finalizando || session.ended) return;
+    const chegouEm = Date.now();
     const id = setInterval(() => {
       const agora = Date.now();
+      // Ele explicou bastante coisa depois que a pergunta chegou (ex.: contou o plano): ela pode já ter sido
+      // respondida. Sai sem ser dita e sem pedir licença; a próxima análise, que ouviu a fala, decide de novo.
+      // Era o "Ei, posso te perguntar?" logo depois de ele contar o plano, e a mesma pergunta em seguida.
+      if (balao.perdeAVez && ultimaFalaLongaEmRef.current > chegouEm) {
+        clearInterval(id);
+        tirarBalao(null);
+        void enviarEvento({ type: "blip_closed", blipId: balao.id, reason: "agent" });
+        return;
+      }
       if (!saudacaoTerminadaEmRef.current || fioRef.current || ocupada() || vozEstadoRef.current !== "inativa" || bufferFalaRef.current) return;
       if (agora - saudacaoTerminadaEmRef.current < LEITURA_DEPOIS_DA_APRESENTACAO_MS) return;
       if (agora - ultimaFalaDoAgenteEmRef.current < PAUSA_ENTRE_FALAS_MS) return;
@@ -318,7 +334,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       else void abrirFio(balao);
     }, 150);
     return () => clearInterval(id);
-  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, pedirLicenca, ocupada, fioRef, ultimaFalaDoAgenteEmRef]);
+  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, pedirLicenca, ocupada, fioRef, ultimaFalaDoAgenteEmRef, enviarEvento]);
 
   /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
   async function forcarEmpecilho() {
