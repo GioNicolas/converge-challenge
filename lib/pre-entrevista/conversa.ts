@@ -1,14 +1,16 @@
 /**
  * Agente de conversa (Totti): conduz a configuração da entrevista falando com a recrutadora.
  *
- * O planejador (`planejador.ts`) escolhe o passo; aqui o modelo só escreve a fala desse passo.
+ * O planejador (`planejador.ts`) escolhe o passo; aqui o modelo escreve a fala e diz que movimento de conversa ela é
+ * (`movimento`: seguir o passo, repetir, esclarecer ou responder a algo que a recrutadora disse).
  * A abertura sai sem LLM, a partir da classificação, para aparecer na hora. As falas seguintes
  * vêm do modelo: Featherless primeiro, OpenRouter depois, com 12 s por alvo.
  */
+import { z } from "zod";
 import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
 import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
-import { chat, ErroChat, type Alvo, type Mensagem, type Tentativa } from "./llm";
+import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
@@ -47,14 +49,17 @@ Você soa como um colega de RH experiente que conhece tecnologia: direto, simpá
 A fala vai ser ouvida em voz alta.
 
 Como falar:
-- Cada fala tem no máximo 2 frases curtas e uma pergunta só. No resumo final, você escreve só as duas primeiras frases; o resto é acrescentado pelo sistema.
+- Cada fala tem no máximo 2 frases curtas e uma pergunta só (3 frases quando você responde a algo que ela perguntou e volta
+  à sua pergunta). No resumo final, você escreve só as duas primeiras frases; o resto é acrescentado pelo sistema.
 - Nunca comece com palavra de concordância ou reconhecimento: "Boa", "Fechado", "Certo", "Perfeito", "Ótimo", "Show", "Beleza",
   "Legal", "Combinado", "Entendi", "Entendido" ou "Faz sentido". Comece direto pelo conteúdo ou pela pergunta.
+  A exceção é uma fala curta de movimento "responder" (ela pediu um tempo ou fez um comentário): ali um "Claro" ou "Certo" é a resposta natural.
 - Não repita a resposta dela palavra por palavra.
 - Nunca ofereça como opção algo que ela já disse. Se ela falou de escalabilidade, não a ofereça de novo como escolha.
 - Fale com as palavras dela e da vaga. Nunca use nomes internos (tecnico, pressao, escala_produto, uso_ia, criterio, passo)
   nem as expressões "domínio técnico", "escala e produto" e "pressão e adaptação". Para a área de IA, diga "IA aplicada".
-- Não repita uma pergunta que aparece em "SUAS ÚLTIMAS FALAS", e não pergunte de novo o que ela já respondeu na transcrição.
+- Não repita por conta própria uma pergunta que aparece em "SUAS ÚLTIMAS FALAS", e não pergunte de novo o que ela já
+  respondeu na transcrição. Se ela pedir para repetir, repita.
 - Só cite o que está na transcrição ou em "O QUE JÁ SE SABE". Nunca invente.
 - Sem listas, markdown, asteriscos, aspas nem emojis. Português do Brasil, tratando a recrutadora por "você".
 - Você se apresenta só na abertura. Depois dela, nunca diga "sou Totti", "eu sou o Totti" nem repita seu nome.
@@ -74,8 +79,124 @@ O formato de uma boa pergunta: parte do que ela acabou de dizer ou de um detalhe
 posturas que times diferentes escolheriam diferente, em palavras de RH. Uma mudança que ela pediu é confirmada numa frase
 curta antes da pergunta. Nunca reaproveite um cenário que não apareceu nesta conversa nem nesta vaga.
 
-A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, o PASSO desta fala e a transcrição.
-Siga o PASSO. Responda somente com a fala do Totti, sem prefixo, sem aspas e sem explicações.`;
+QUANDO A CONVERSA SAI DO ROTEIRO
+Você conduz uma conversa, não um formulário. Antes de seguir o PASSO, leia a última fala dela: às vezes ela não respondeu
+à sua pergunta, e seguir em frente deixaria uma escolha da entrevista sem dono. Nos casos abaixo, o movimento vem NO LUGAR
+do PASSO desta fala; o PASSO fica para a fala seguinte.
+- Ela pediu para repetir, não ouviu ou se perdeu ("pode repetir?", "oi? não ouvi", "quais eram as opções mesmo?"): diga de
+  novo a PERGUNTA SUA EM ABERTO, igual ou mais simples (se o que estava em aberto era o resumo, diga o resumo de novo).
+  Sem a pergunta ela não tem como decidir, e o plano sairia com um padrão que ninguém escolheu. Movimento "repetir".
+- Ela não entendeu o que você quer saber ("como assim?", "não entendi a pergunta"): reformule em palavras de RH, ou diga em
+  uma frase o que essa escolha muda na entrevista, sem jargão, e pergunte de novo. Dizer as mesmas palavras outra vez não
+  ajuda quem não entendeu. Movimento "esclarecer".
+- Ela pediu um tempo ("pera", "deixa eu abrir a vaga aqui"): aceite em poucas palavras e espere. A pergunta continua em
+  aberto e você não cobra: quem pede um minuto e é cobrada na mesma hora sente que não foi ouvida. Movimento "responder".
+- Ela perguntou outra coisa no meio: responda primeiro, com o que está em "O QUE JÁ SE SABE", ou diga com franqueza que não
+  sabe. Pergunta ignorada quebra a confiança dela no resto da conversa. Depois volte à pergunta em aberto, na mesma fala.
+  Movimento "responder".
+- Ela fez um comentário de conversa ("tá me ouvindo?", "desculpa, me distraí"): responda como gente, curto. Movimento "responder".
+Se a última fala dela responde à sua pergunta, mesmo curta ou vaga, ou se o PASSO já manda responder a uma dúvida dela,
+nada disso vale: siga o PASSO. Movimento "seguir".
+
+A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, a sua pergunta em aberto, o PASSO desta
+fala e a transcrição.
+
+FORMATO DA RESPOSTA
+Responda com um objeto JSON e nada mais: {"fala": "...", "movimento": "seguir"}
+- "fala": o que o Totti diz, em texto puro, sem prefixo e sem explicações.
+- "movimento": "seguir" (a fala executa o PASSO), "repetir" (ela pediu e a fala traz de novo a pergunta ou o resumo em aberto),
+  "esclarecer" (ela não entendeu e a fala reformula ou explica o que você quer saber) ou "responder" (a fala responde a algo
+  que ELA perguntou ou comentou). Na dúvida, "seguir".`;
+
+/**
+ * Que movimento de conversa é a fala do Totti (contrato comum da issue #22). Quem decide é o modelo.
+ *  - `repetir`: ela pediu para repetir, e a fala traz a mesma pergunta (ou o mesmo resumo) que estava em aberto;
+ *  - `esclarecer`: ela não entendeu a pergunta, e a fala a reformula ou explica o que se quer saber, em palavras de RH;
+ *  - `responder`: a fala responde a algo que ELA perguntou ou comentou (dúvida, "tá me ouvindo?", pedido de tempo);
+ *  - `seguir`: todo o resto, ou seja, executar o passo do planejador. Campo ausente vale `seguir`.
+ */
+export const Movimento = z.enum(["repetir", "esclarecer", "responder", "seguir"]);
+export type Movimento = z.infer<typeof Movimento>;
+
+/** Saída do modelo. `movimento` é opcional, e um valor que não existe conta como ausente. */
+const SaidaDoModelo = z.object({
+  fala: z.string(),
+  movimento: Movimento.optional().catch(undefined),
+});
+
+/** JSON cortado no meio (limite de tokens): ainda dá para aproveitar o que veio do campo "fala". */
+const RE_FALA_EM_JSON_CORTADO = /"fala"\s*:\s*"((?:[^"\\]|\\.)*)/;
+
+/** Resposta que começa como objeto JSON (com ou sem cerca de código). */
+const RE_COMECA_COMO_JSON = /^\s*(```(json)?\s*)?\{/i;
+
+/** Chaves que o modelo às vezes usa no lugar de "fala". */
+const CHAVES_DA_FALA = ["fala", "texto", "text", "resposta"] as const;
+
+/** Desfaz os escapes de uma string JSON cortada no meio (inclusive \uXXXX); um escape incompleto no fim é descartado. */
+function desescaparStringJson(trecho: string): string {
+  const semEscapeIncompleto = trecho.replace(/\\u[0-9a-fA-F]{0,3}$/, "");
+  try {
+    return JSON.parse(`"${semEscapeIncompleto}"`) as string;
+  } catch {
+    return semEscapeIncompleto.replace(/\\(["\\/])/g, "$1");
+  }
+}
+
+/**
+ * Lê a resposta do modelo: o JSON `{ fala, movimento }`, com ou sem cerca de código. Texto puro continua válido
+ * (a resposta inteira é a fala), e sem o campo `movimento` vale `seguir`. Um JSON de onde não sai fala nenhuma
+ * devolve fala vazia (quem chama trata como erro), para o JSON cru nunca ir para a voz. Função pura.
+ */
+export function lerSaidaDoModelo(conteudo: string): { fala: string; movimento: Movimento } {
+  let objeto: unknown;
+  try {
+    objeto = extrairJson(conteudo);
+  } catch {
+    // Não é JSON inteiro: segue como JSON cortado ou como texto puro.
+  }
+  if (objeto !== undefined) {
+    const lida = SaidaDoModelo.safeParse(objeto);
+    if (lida.success) return { fala: lida.data.fala, movimento: lida.data.movimento ?? "seguir" };
+    // JSON válido com a fala noutra chave ou de outro tipo: aproveita a chave que der, ou fala vazia.
+    const registro = typeof objeto === "object" && objeto !== null ? (objeto as Record<string, unknown>) : {};
+    const fala = CHAVES_DA_FALA.map((chave) => registro[chave]).find((v): v is string => typeof v === "string") ?? "";
+    const movimento = Movimento.safeParse(registro.movimento);
+    return { fala, movimento: movimento.success ? movimento.data : "seguir" };
+  }
+  const cortado = conteudo.match(RE_FALA_EM_JSON_CORTADO);
+  if (cortado) return { fala: desescaparStringJson(cortado[1]).replace(/\s*\n\s*/g, " ").trim(), movimento: "seguir" };
+  if (RE_COMECA_COMO_JSON.test(conteudo)) return { fala: "", movimento: "seguir" };
+  return { fala: conteudo, movimento: "seguir" };
+}
+
+/**
+ * Última pergunta de uma fala: a última frase terminada em "?". Frase acaba em ".", "!" ou "?" seguido de espaço,
+ * para não cortar em "Node.js" nem em "R$ 1.000". Função pura.
+ */
+export function ultimaPergunta(texto: string): string | undefined {
+  return texto
+    .split(/(?<=[.!?])\s+/)
+    .map((frase) => frase.trim())
+    .filter((frase) => frase.endsWith("?"))
+    .at(-1);
+}
+
+/**
+ * A pergunta do Totti que ficou sem resposta: a última pergunta da última fala dele que tem pergunta
+ * (depois de um resumo, a pergunta de fechamento). Uma fala sem pergunta ("Claro, sem pressa.") não fecha a
+ * pergunta de antes; a fala de encerramento fecha, porque só vem depois que ela aprovou o resumo. Função pura.
+ */
+export function perguntaEmAberto(transcricao: Turno[]): string | undefined {
+  for (let i = transcricao.length - 1; i >= 0; i--) {
+    const turno = transcricao[i];
+    if (turno.role !== "agente") continue;
+    if (FALAS_DE_ENCERRAMENTO.includes(turno.text)) return undefined;
+    const pergunta = ultimaPergunta(turno.text);
+    if (pergunta) return pergunta;
+  }
+  return undefined;
+}
 
 const FORMATO_FALA: Record<Rascunho["mode"], string> = {
   live_coding: "live coding, com código na IDE",
@@ -406,7 +527,7 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
           .map((c) => `- ${c.name}: ${c.description}`)
           .join("\n")}`,
         `Depois, em uma pergunta curta, retome o que ficou sem resposta: ${perguntaParaRetomar(passo.retomar, sessao)} ` +
-          "É a mesma pergunta de antes: reformule, sem repetir as palavras dela, e termine perguntando o que ela prefere.",
+          "É a mesma pergunta de antes: pode dizê-la com as mesmas palavras ou com outras mais simples, e termine perguntando o que ela prefere.",
       ].join("\n\n");
     case "encerrar":
       // Não passa pelo modelo: a fala de encerramento é fixa (ver `falaDeEncerramento`).
@@ -632,7 +753,7 @@ function confirmacaoDeterministica(sessao: Sessao): string | undefined {
 
 /** Resposta sem modelo: mesma forma de `RespostaAgente`, com o provedor "fixa". */
 function respostaFixa(texto: string): RespostaAgente {
-  return { texto, provedor: "fixa", model: "-", ms: 0, fallback: false, tentativas: [], mensagens: [], respostaCrua: "" };
+  return { texto, movimento: "seguir", provedor: "fixa", model: "-", ms: 0, fallback: false, tentativas: [], mensagens: [], respostaCrua: "" };
 }
 
 function formatarTranscricao(turnos: Turno[]): string {
@@ -660,10 +781,11 @@ export function montarMensagensConversa(sessao: Sessao, passo: Passo): Mensagem[
   const entrada = [
     `CONTEXTO DA VAGA: ${r.roleTitle}. ${primeiraLinha(r.jobDescription)}`.trimEnd(),
     `O QUE JÁ SE SABE:\n${saberEmLinguagemNatural(sessao)}`,
-    `SUAS ÚLTIMAS FALAS (não repita essas perguntas):\n${ultimas.join("\n") || "(nenhuma)"}`,
+    `SUAS ÚLTIMAS FALAS (não repita essas perguntas por conta própria; só se ela pedir):\n${ultimas.join("\n") || "(nenhuma)"}`,
+    `PERGUNTA SUA EM ABERTO: ${perguntaEmAberto(sessao.transcricao) ?? "(nenhuma)"}`,
     `PASSO DESTA FALA:\n${instrucaoDoPasso(passo, sessao)}`,
     `ÚLTIMAS 6 FALAS DA TRANSCRIÇÃO:\n${formatarTranscricao(sessao.transcricao.slice(-6))}`,
-    "Escreva a próxima fala do Totti.",
+    "Escreva a próxima fala do Totti, no formato JSON pedido.",
   ].join("\n\n");
 
   return [
@@ -699,6 +821,8 @@ export function limparFala(texto: string): string {
 
 export interface RespostaAgente {
   texto: string;
+  /** O movimento de conversa que o modelo declarou (`seguir` quando não declarou, e nas falas fixas). */
+  movimento: Movimento;
   provedor: string;
   model: string;
   /** Tempo somado das tentativas. */
@@ -738,7 +862,10 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
     temperature: TEMPERATURA_CONVERSA,
     maxTokens: MAX_TOKENS_CONVERSA,
   });
-  let texto = limparFala(resposta.content);
+  // A reescrita do resumo, abaixo, não muda o movimento: vale o que o modelo declarou na primeira resposta.
+  const saida = lerSaidaDoModelo(resposta.content);
+  const movimento = saida.movimento;
+  let texto = limparFala(saida.fala);
   let ms = resposta.ms;
   let tentativas = resposta.tentativas;
   let respostaCrua = resposta.content;
@@ -749,16 +876,19 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
       alvos: alvosDaConversa(),
       messages: [
         ...mensagens,
-        { role: "assistant", content: texto },
+        // A resposta anterior volta no mesmo formato JSON que o sistema pede, para o modelo não aprender o contrário.
+        { role: "assistant", content: JSON.stringify({ fala: texto, movimento }) },
         {
           role: "user",
-          content: `Reescreva em no máximo ${teto} frases curtas, mantendo o conteúdo. Não fale de tom, duração nem dicas, e não faça pergunta.`,
+          content:
+            `Reescreva em no máximo ${teto} frases curtas, mantendo o conteúdo. Não fale de tom, duração nem dicas, e não faça pergunta. ` +
+            "Responda no mesmo formato JSON.",
         },
       ],
       temperature: TEMPERATURA_CONVERSA,
       maxTokens: MAX_TOKENS_CONVERSA,
     });
-    texto = limparFala(reescrita.content) || texto;
+    texto = limparFala(lerSaidaDoModelo(reescrita.content).fala) || texto;
     ms += reescrita.ms;
     tentativas = [...tentativas, ...reescrita.tentativas];
     respostaCrua = `${respostaCrua}\n[reescrita]\n${reescrita.content}`;
@@ -800,6 +930,7 @@ export async function responder(sessao: Sessao, passo: Passo): Promise<RespostaA
 
   return {
     texto,
+    movimento,
     provedor: resposta.provedor,
     model: resposta.model,
     ms,
