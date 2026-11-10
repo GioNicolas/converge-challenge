@@ -33,3 +33,12 @@ test("prompt de sistema grande vai para o cache no OpenRouter; na Featherless e 
   assert.equal(mensagemDeSistema("featherless", grande, "dinamico").content, `${grande}\n\ndinamico`);
   assert.equal(mensagemDeSistema("openrouter", "curto").content, "curto");
 });
+
+test("Gemini vai primeiro ao Google AI Studio (com reserva); outros modelos, sem ordem fixa", async () => {
+  const { openrouter } = await import("./openrouter");
+  const gemini = openrouter.buildExtraBody({ model: "google/gemini-3.5-flash-lite", priorizarLatencia: true }) as { provider: Record<string, unknown> };
+  assert.deepEqual(gemini.provider.order, ["google-ai-studio"]);
+  assert.equal(gemini.provider.allow_fallbacks, true);
+  const glm = openrouter.buildExtraBody({ model: "z-ai/glm-5.2" }) as { provider: Record<string, unknown> };
+  assert.equal(glm.provider.order, undefined);
+});

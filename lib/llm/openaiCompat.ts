@@ -58,6 +58,8 @@ export function eImagemDataUrl(v: unknown): v is string {
 export type Prioridade = "fala" | "fundo";
 
 export interface ExtraBodyOpts {
+  /** Modelo pedido (o provedor pode escolher a rota por ele). */
+  model?: string;
   reasoningEffort?: ReasoningEffort;
   priorizarLatencia?: boolean;
 }
@@ -423,7 +425,7 @@ function parseContent<T>(c: Completion, schema: z.ZodType<T, z.ZodTypeDef, unkno
 export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<T>): Promise<ChatJsonResult<T>> {
   const apiKey = process.env[provider.apiKeyEnv];
   if (!apiKey) throw new Error(`${provider.apiKeyEnv} não definida (confira .env.local)`);
-  const extra = provider.buildExtraBody({ reasoningEffort: req.reasoningEffort, priorizarLatencia: req.priorizarLatencia });
+  const extra = provider.buildExtraBody({ model: req.model, reasoningEffort: req.reasoningEffort, priorizarLatencia: req.priorizarLatencia });
   const prioridade: Prioridade = req.prioridade ?? "fundo";
   const baseBody = {
     model: req.model,
