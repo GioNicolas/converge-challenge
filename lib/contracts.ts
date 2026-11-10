@@ -444,6 +444,11 @@ export const SILENCIO_S = 8;
  * você está pensando?" com o candidato ainda lendo o enunciado (o mesmo problema do live coding).
  */
 export const SILENCIO_INICIAL_S = 45;
+/**
+ * Em REQUISITOS, depois de o Totti responder uma dúvida dele: o silêncio que devolve a vez ao Totti. Mais curto que o
+ * inicial (ali ele já leu o enunciado e está conversando).
+ */
+export const SILENCIO_REQUISITOS_S = 15;
 /** Se o silêncio continua depois de uma análise, o quadro volta a perguntar ao modelo a cada tanto. */
 export const SILENCIO_REPETIR_S = 30;
 
