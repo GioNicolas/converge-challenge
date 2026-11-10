@@ -216,6 +216,38 @@ const NO_APROFUNDAMENTO = { descricao: "último passo do Totti: aprofundar", che
 /** Leva a vaga de pagamentos até a primeira pergunta de aprofundamento. */
 const ATE_APROFUNDAR = ["isso, pode seguir assim", "é isso mesmo, system design e nível sênior"];
 
+/** Leva a vaga de pagamentos até o resumo. */
+const ATE_O_RESUMO = [
+  "isso, pode seguir assim",
+  "o pior é não pensar no que acontece quando a rede cai no meio do pagamento",
+  "reprova direto quem trata o pagamento como se a rede nunca falhasse",
+  "não tenho mais nada, pode resumir",
+  "é só isso",
+  "pode resumir",
+];
+const NO_RESUMO = { descricao: "último passo do Totti: resumo_final", chegou: (s: Sessao) => emCurso(s)?.tipo === "resumo_final" };
+const NA_OFERTA_DE_TROCA = { descricao: "a abertura ofereceu a troca de formato", chegou: (s: Sessao) => s.plano.tradeoffNaAbertura === true };
+const NA_PERGUNTA_DE_NIVEL = {
+  descricao: "a abertura perguntou o nível (vaga sem nível)",
+  chegou: (s: Sessao) => nivelEmAberto(s.plano, s.classificacao.confirmar, s.rascunho.confirmado.seniority),
+};
+
+const semDecisaoDeTroca = (r: Resultado): Checagem => ({
+  nome: "nenhuma decisão de troca registrada",
+  ok: Object.keys(r.depois.decisoesTradeoff).length === 0,
+  detalhe: JSON.stringify(r.depois.decisoesTradeoff),
+});
+const naoEncerra = (r: Resultado): Checagem => ({
+  nome: "não encerra",
+  ok: r.passo.tipo !== "encerrar" && r.depois.ultimoPasso?.tipo !== "encerrar",
+  detalhe: `passo: ${descrever(r.passo)}`,
+});
+const semOutroResumo = (r: Resultado): Checagem => ({
+  nome: "não conta outro resumo",
+  ok: r.depois.resumos === r.antes.resumos,
+  detalhe: `resumos: ${r.antes.resumos} -> ${r.depois.resumos}`,
+});
+
 /** Vaga que não diz o nível: nenhuma das fixas de `vagas.ts` serve, todas dizem. */
 const VAGA_SEM_NIVEL: Vaga = {
   roleTitle: "Desenvolvedor(a) Backend",
@@ -291,10 +323,7 @@ const CASOS: Caso[] = [
     id: "repetir-nivel",
     vaga: VAGA_SEM_NIVEL,
     historico: [],
-    situacao: {
-      descricao: "a abertura perguntou o nível (vaga sem nível)",
-      chegou: (s) => nivelEmAberto(s.plano, s.classificacao.confirmar, s.rascunho.confirmado.seniority),
-    },
+    situacao: NA_PERGUNTA_DE_NIVEL,
     fala: "oi? não ouvi",
     conferir: (r) => [
       contem(r, "repete a pergunta de nível", ["júnior", "pleno", "sênior"]),
@@ -311,14 +340,10 @@ const CASOS: Caso[] = [
     id: "repetir-oferta-troca",
     vaga: "ia-pleno",
     historico: [],
-    situacao: { descricao: "a abertura ofereceu a troca de formato", chegou: (s) => s.plano.tradeoffNaAbertura === true },
+    situacao: NA_OFERTA_DE_TROCA,
     fala: "não entendi, quais eram as opções mesmo",
     conferir: (r) => [
-      {
-        nome: "nenhuma decisão de troca registrada",
-        ok: Object.keys(r.depois.decisoesTradeoff).length === 0,
-        detalhe: JSON.stringify(r.depois.decisoesTradeoff),
-      },
+      semDecisaoDeTroca(r),
       contem(r, "a fala traz os caminhos de novo", ["system design", "próxima etapa"]),
       planoIgual(r),
     ],
@@ -326,19 +351,12 @@ const CASOS: Caso[] = [
   {
     id: "repetir-resumo",
     vaga: "backend-senior-pagamentos",
-    historico: [
-      "isso, pode seguir assim",
-      "o pior é não pensar no que acontece quando a rede cai no meio do pagamento",
-      "reprova direto quem trata o pagamento como se a rede nunca falhasse",
-      "não tenho mais nada, pode resumir",
-      "é só isso",
-      "pode resumir",
-    ],
-    situacao: { descricao: "último passo do Totti: resumo_final", chegou: (s) => emCurso(s)?.tipo === "resumo_final" },
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
     fala: "pode repetir o resumo",
     conferir: (r) => [
-      { nome: "não encerra", ok: r.passo.tipo !== "encerrar" && r.depois.ultimoPasso?.tipo !== "encerrar", detalhe: `passo: ${descrever(r.passo)}` },
-      { nome: "não conta outro resumo", ok: r.depois.resumos === r.antes.resumos, detalhe: `resumos: ${r.antes.resumos} -> ${r.depois.resumos}` },
+      naoEncerra(r),
+      semOutroResumo(r),
       passoNaoAvanca(r),
       contem(r, "a fala traz o formato e a duração de novo", [
         r.antes.modo === "system_design" ? ["system design", "desenho", "quadro"] : ["live coding", "codigo ao vivo", "programando"],
@@ -371,6 +389,59 @@ const CASOS: Caso[] = [
         detalhe: `${JSON.stringify(r.antes.perguntasPorTopico)} -> ${JSON.stringify(r.depois.perguntasPorTopico)}`,
       },
     ],
+  },
+  // Resposta que não é escolha nem aprovação: o Totti pediu uma decisão e ela não decidiu (issue #27).
+  {
+    id: "troca-deixa-eu-pensar",
+    vaga: "ia-pleno",
+    historico: [],
+    situacao: NA_OFERTA_DE_TROCA,
+    fala: "hum, deixa eu pensar",
+    conferir: (r) => [semDecisaoDeTroca(r), falaCurta(r), passoNaoAvanca(r)],
+  },
+  {
+    id: "troca-pede-recomendacao",
+    vaga: "ia-pleno",
+    historico: [],
+    situacao: NA_OFERTA_DE_TROCA,
+    fala: "tanto faz, o que você recomenda?",
+    conferir: (r) => [semDecisaoDeTroca(r), terminaEmPergunta(r), passoNaoAvanca(r)],
+  },
+  {
+    id: "nivel-nao-sabe",
+    vaga: VAGA_SEM_NIVEL,
+    historico: [],
+    situacao: NA_PERGUNTA_DE_NIVEL,
+    fala: "não sei, o gestor não me falou",
+    conferir: (r) => [
+      contem(r, "diz que segue com a estimativa e que dá pra mudar na revisão", ["revisão"]),
+      {
+        nome: "não pergunta o nível de novo",
+        ok: !/j[úu]nior.*pleno.*s[êe]nior/i.test(r.depois.fala),
+        detalhe: undefined,
+      },
+      {
+        nome: "a contagem da pergunta de nível não aumenta",
+        ok: (r.depois.perguntasPorTopico.nivel ?? 0) === (r.antes.perguntasPorTopico.nivel ?? 0),
+        detalhe: `nivel: ${r.antes.perguntasPorTopico.nivel ?? 0} -> ${r.depois.perguntasPorTopico.nivel ?? 0}`,
+      },
+    ],
+  },
+  {
+    id: "resumo-pede-tempo",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "peraí, deixa eu ler aqui na tela",
+    conferir: (r) => [falaCurta(r), naoEncerra(r), semOutroResumo(r)],
+  },
+  {
+    id: "resumo-pergunta-duracao",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "acho que sim… a duração ficou quanto mesmo?",
+    conferir: (r) => [naoEncerra(r), contem(r, "responde a duração", ["minutos"]), terminaEmPergunta(r), semOutroResumo(r)],
   },
 ];
 

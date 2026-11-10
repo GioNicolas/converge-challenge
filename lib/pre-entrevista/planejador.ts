@@ -18,7 +18,10 @@
  *  - nível em aberto (a vaga não disse e ela não respondeu): a Totti pergunta só o nível, antes do resto;
  *  - dúvida dela sobre a entrevista (`fez_pergunta`): a Totti responde e retoma o passo em curso, sem contar como pergunta nova;
  *  - o resumo vem quando não há mais o que perguntar; depois dele, a Totti só resume de novo se ela pedir mudança;
- *  - encerra só depois do resumo aprovado e sem pedido de mudança.
+ *  - encerra só depois do resumo aprovado e sem pedido de mudança, ou no limite de resumos de verdade;
+ *  - quando o Totti pediu uma decisão (troca de formato, nível, aprovação do resumo) e a resposta dela não é escolha nem
+ *    recusa, o código não decide por ela: a decisão fica pendente (`decisaoPendente`) e a fala vai ao modelo, que lê a
+ *    resposta e devolve a escolha, ou adia (ver `conduzirTurno` em `turno.ts`).
  */
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
 import { mede, modoAlternativoQueMede, modoAtivo } from "./catalogo";
@@ -106,6 +109,8 @@ export interface PlanoEstado {
   trocaPendente?: InterviewMode;
   /** A primeira fala já foi a oferta de troca (ver `abrirConversa` em `turno.ts`). */
   tradeoffNaAbertura?: boolean;
+  /** Ela não soube dizer o nível e a conversa segue com a estimativa do classificador, dito em voz alta. */
+  nivelPorEstimativa?: boolean;
 }
 
 export function planoInicial(): PlanoEstado {
@@ -195,18 +200,70 @@ function tradeoffPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): OferecerTrad
   return undefined;
 }
 
+/** A resposta dela não é escolha nem recusa: nenhum sinal passa do limiar. O código não decide por ela. */
+export type Incerto = "incerto";
+
 /**
  * Escolha da recrutadora sobre a oferta de troca, pelos sinais do último turno. Se nenhum dos três sinais passa
- * do limiar, a resposta é ambígua e vale "próxima etapa". Função pura.
+ * do limiar, a resposta é "incerto": a oferta continua aberta e a fala vai ao modelo. Função pura.
  */
-export function decidirTradeoff(sinais: Record<string, number>): DecisaoTradeoff {
+export function decidirTradeoff(sinais: Record<string, number>): DecisaoTradeoff | Incerto {
   const opcoes: Array<[DecisaoTradeoff, number]> = [
     ["trocou", sinais.escolheu_trocar_formato ?? 0],
     ["proxima_etapa", sinais.escolheu_proxima_etapa ?? 0],
     ["seguir_sem", sinais.escolheu_seguir_sem ?? 0],
   ];
   const [melhor, probabilidade] = opcoes.reduce((a, b) => (b[1] > a[1] ? b : a));
-  return probabilidade >= LIMIAR ? melhor : "proxima_etapa";
+  return probabilidade >= LIMIAR ? melhor : "incerto";
+}
+
+/**
+ * O que a fala dela decide sobre o resumo, pelos sinais do último turno: aprovou, pediu mudança, ou "incerto"
+ * (nenhum dos dois passa do limiar). Aprovar e pedir mudança na mesma fala é pedir mudança. Função pura.
+ */
+export function decidirResumo(sinais: Record<string, number>): "aprovou" | "mudanca" | Incerto {
+  if ((sinais.pediu_mudanca ?? 0) >= LIMIAR) return "mudanca";
+  return (sinais.aprovou_resumo ?? 0) >= LIMIAR ? "aprovou" : "incerto";
+}
+
+/**
+ * O que a fala dela decide sobre o nível: o nível que ela disse, ou "incerto" quando não disse e o nível segue em
+ * aberto. Com o nível já definido, não há o que decidir. Função pura.
+ */
+export function decidirNivel(nivelDito: "nao_disse" | "junior" | "pleno" | "senior", emAberto: boolean): "junior" | "pleno" | "senior" | Incerto | undefined {
+  if (nivelDito !== "nao_disse") return nivelDito;
+  return emAberto ? "incerto" : undefined;
+}
+
+/** Uma decisão que o Totti pediu e que a resposta dela não fechou. */
+export type DecisaoPendente = { tipo: "troca"; oferta: OferecerTradeoffPasso } | { tipo: "nivel" } | { tipo: "resumo" };
+
+/** O que o modelo pode devolver no campo `decisao`, por tipo de decisão. `adiar` não decide nada. */
+export const VALORES_DE_DECISAO = {
+  troca: ["trocar", "proxima_etapa", "seguir_sem", "adiar"],
+  nivel: ["junior", "pleno", "senior", "estimativa", "adiar"],
+  resumo: ["finalizar", "mudar", "adiar"],
+} as const;
+
+/**
+ * A decisão que ficou pendente depois da fala dela, se houver. `passo` é o que `proximoPasso` escolheu para este
+ * estado, e `nivelPerguntado` diz se a última pergunta do Totti pediu o nível (o passo `perguntar_nivel` ou a abertura).
+ *  - troca: a oferta está em curso e sem decisão (os sinais não escolheram, ver `decidirTradeoff`);
+ *  - nível: o Totti perguntou o nível, ela não disse e o planejador ia perguntar de novo;
+ *  - resumo: depois do resumo, ela não aprovou nem pediu mudança, e o planejador ia fazer um resumo de revisão.
+ * Dúvida dela sobre a entrevista não é decisão pendente: o passo `responder_duvida` responde e retoma. Função pura.
+ */
+export function decisaoPendente(e: EstadoPlanejamento, passo: Passo, nivelPerguntado: boolean): DecisaoPendente | undefined {
+  if (passo.tipo === "responder_duvida") return undefined;
+  const oferta = ofertaEmCurso(e);
+  if (oferta && !e.decisoesTradeoff[oferta.area]) return { tipo: "troca", oferta };
+  if (passo.tipo === "perguntar_nivel" && nivelPerguntado && decidirNivel("nao_disse", e.nivelEmAberto === true) === "incerto") {
+    return { tipo: "nivel" };
+  }
+  const emCurso = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
+  const revisao = passo.tipo === "resumo_final" && passo.revisao === true;
+  if (emCurso?.tipo === "resumo_final" && revisao && !e.trocaPendente && decidirResumo(e.sinais) === "incerto") return { tipo: "resumo" };
+  return undefined;
 }
 
 /**
@@ -227,7 +284,11 @@ export function trocaPedida(sinais: Record<string, number>, modoAtual: Interview
  * Decisão sobre a oferta de troca em curso. Pedir o formato oferecido ("quero system design") é aceitar a troca,
  * mesmo sem o sinal de escolha; senão, vale `decidirTradeoff`. Função pura.
  */
-export function decisaoDaOferta(sinais: Record<string, number>, oferta: OferecerTradeoffPasso, modoAtual: InterviewMode): DecisaoTradeoff {
+export function decisaoDaOferta(
+  sinais: Record<string, number>,
+  oferta: OferecerTradeoffPasso,
+  modoAtual: InterviewMode,
+): DecisaoTradeoff | Incerto {
   if (trocaPedida(sinais, modoAtual) === oferta.modoAlternativo) return "trocou";
   return decidirTradeoff(sinais);
 }
@@ -252,9 +313,11 @@ export function ofertaEmCurso(plano: PlanoEstado): OferecerTradeoffPasso | undef
 
 /**
  * Nível em aberto: o classificador não tinha certeza do nível (a senioridade está em `confirmar`), ela ainda não disse
- * o nível e a Totti ainda não perguntou duas vezes. Depois disso, a conversa segue com a estimativa. Função pura.
+ * o nível, a conversa ainda não seguiu com a estimativa (`nivelPorEstimativa`) e a Totti ainda não perguntou duas vezes.
+ * Função pura.
  */
 export function nivelEmAberto(plano: PlanoEstado, confirmar: string[], nivelConfirmado: boolean): boolean {
+  if (plano.nivelPorEstimativa) return false;
   return confirmar.includes("seniority") && !nivelConfirmado && (plano.perguntasPorTopico.nivel ?? 0) < MAX_PERGUNTAS_POR_TOPICO;
 }
 
@@ -331,10 +394,12 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   // 4b. Contexto: o que reprova direto e o que não deu certo antes. Só se ela ainda não disse um eliminatório.
   if (e.resumos === 0 && !coberto("eliminatorios") && perguntas("contexto") === 0) return { tipo: "perguntar_contexto" };
 
-  // 5. Resumo: o primeiro, e depois revisões enquanto ela pedir mudança (com limite).
+  // 5. Resumo: o primeiro. Depois dele, com troca de formato ainda não mostrada, o resumo de revisão (com limite).
   if (e.resumos === 0) return { tipo: "resumo_final" };
-  if (e.resumos < MAX_RESUMOS) return { tipo: "resumo_final", revisao: true };
-  return { tipo: "encerrar" };
+  if (e.trocaPendente) return e.resumos < MAX_RESUMOS ? { tipo: "resumo_final", revisao: true } : { tipo: "encerrar" };
+  // Depois do resumo, sem aprovação e sem pedido de mudança: a decisão segue em aberto (ver `decisaoPendente`).
+  // O planejador nunca encerra por aqui: só a aprovação (passo 1) e o limite de resumos de verdade (passo 2c) encerram.
+  return { tipo: "resumo_final", revisao: true };
 }
 
 /** Registra no plano o passo que o Totti acabou de executar. Função pura. */

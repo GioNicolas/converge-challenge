@@ -6,6 +6,9 @@
  *   3. se o Totti acabou de oferecer a troca de formato, aplica a escolha dela; se ela pediu system design, troca;
  *   4. o planejador escolhe o próximo passo;
  *   5. o Totti escreve a fala e declara o `movimento` dela (ver `conversa.ts`), e ela é registrada;
+ *      Se o Totti tinha pedido uma decisão (troca de formato, nível, aprovação do resumo) e a resposta dela não é escolha
+ *      nem recusa, o código não decide por ela: a fala vai ao modelo com a decisão pendente, e ele devolve a escolha no
+ *      campo `decisao`, ou adia. Com a escolha feita, o planejador escolhe o passo seguinte e o Totti o escreve;
  *   6. o turno obedece ao movimento: com `seguir`, o passo conta como feito; com `repetir`, `esclarecer` ou `responder`,
  *      o passo em curso continua em curso; e com `repetir` ou `esclarecer`, o que foi lido da fala dela em 2 e 3 é desfeito
  *      (a fala não era uma resposta).
@@ -15,12 +18,28 @@
 import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
 import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
-import { aberturaDoAgente, responder, tradeoffDaAbertura, type Movimento } from "./conversa";
-import { chat, ErroChat } from "./llm";
+import {
+  aberturaDoAgente,
+  falaDeEncerramento,
+  falaDeReserva,
+  fraseNivelPorEstimativa,
+  perguntaEmAberto,
+  responder,
+  respostaFixa,
+  tradeoffDaAbertura,
+  type Movimento,
+  type RespostaAgente,
+} from "./conversa";
+import { ErroChat, type chat } from "./llm";
 import { registrarEvento } from "./log";
 import {
   aplicarPasso,
   decisaoDaOferta,
+  decisaoPendente,
+  MAX_RESUMOS,
+  VALORES_DE_DECISAO,
+  type DecisaoPendente,
+  type OferecerTradeoffPasso,
   decisoesAposTroca,
   descreverPasso,
   nivelEmAberto,
@@ -35,7 +54,7 @@ import { lerFormato } from "./formato";
 import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
-import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisoesTradeoff, type Turno } from "./rascunho";
+import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
@@ -186,8 +205,8 @@ function resolverPedidoDeFormato(sessao: Sessao): void {
 
 /**
  * Aplica a escolha da recrutadora sobre a última oferta de troca de formato. Só age quando a fala dela é uma escolha
- * (não uma dúvida) e a área ainda não tem decisão. Pedir o formato oferecido é aceitar; ambígua vira "próxima etapa"
- * (ver `decisaoDaOferta`).
+ * (não uma dúvida) e a área ainda não tem decisão. Pedir o formato oferecido é aceitar. Resposta que não é escolha
+ * ("incerto") não decide nada: a oferta segue aberta e a fala vai ao modelo (ver `decisaoPendente`).
  */
 function resolverTradeoff(sessao: Sessao): void {
   const oferta = ofertaEmCurso(sessao.plano);
@@ -196,6 +215,12 @@ function resolverTradeoff(sessao: Sessao): void {
   if ((sessao.plano.sinais.fez_pergunta ?? 0) >= LIMIAR) return;
 
   const decisao = decisaoDaOferta(sessao.plano.sinais, oferta, sessao.rascunho.mode);
+  if (decisao === "incerto") return;
+  registrarDecisaoDaTroca(sessao, oferta, decisao, "sinais");
+}
+
+/** Grava a decisão sobre a oferta de troca, venha ela dos sinais ou do modelo, e troca o formato se for o caso. */
+function registrarDecisaoDaTroca(sessao: Sessao, oferta: OferecerTradeoffPasso, decisao: DecisaoTradeoff, origem: "sinais" | "modelo"): void {
   const decisoes = { ...sessao.plano.decisoesTradeoff, [oferta.area]: decisao };
   if (decisao === "trocou") {
     aplicarTroca(sessao, oferta.modoAlternativo, decisoes, oferta.area);
@@ -206,10 +231,11 @@ function resolverTradeoff(sessao: Sessao): void {
   const plano = sessao.plano;
   registrarEvento(sessao, {
     tipo: "plano",
-    resumo: `troca de formato sobre ${oferta.area}: ${decisao}${decisao === "trocou" ? ` para ${oferta.modoAlternativo}` : ""}`,
+    resumo: `troca de formato sobre ${oferta.area}: ${decisao}${decisao === "trocou" ? ` para ${oferta.modoAlternativo}` : ""} (pelos ${origem === "sinais" ? "sinais" : "olhos do modelo"})`,
     dados: {
       oferta,
       decisao,
+      origem,
       decisoesTradeoff: plano.decisoesTradeoff,
       modoEscolhido: plano.modoEscolhido,
       sinais: {
@@ -277,24 +303,17 @@ function copiarEstadoLido(sessao: Sessao): EstadoLido {
   });
 }
 
-/** O passo em curso: o último executado (a dúvida respondida não conta, vale o passo que ela retomou). */
-function passoEmCurso(plano: Sessao["plano"]): Passo | undefined {
-  return plano.ultimoPasso?.tipo === "responder_duvida" ? plano.ultimoPasso.retomar : plano.ultimoPasso;
+/** A pergunta em aberto pede o nível ("é júnior, pleno ou sênior?"): o passo `perguntar_nivel` ou a abertura. */
+const RE_PERGUNTA_DE_NIVEL = /j[úu]nior.*pleno.*s[êe]nior/i;
+
+/** O passo em curso de cada decisão pendente: é ele que o modelo recebe, com a decisão no lugar da instrução. */
+function passoDaDecisao(pendente: DecisaoPendente): Passo {
+  if (pendente.tipo === "troca") return pendente.oferta;
+  return pendente.tipo === "nivel" ? { tipo: "perguntar_nivel" } : { tipo: "resumo_final", revisao: true };
 }
 
-/**
- * Processa uma fala da recrutadora e devolve o passo escolhido, a fala do Totti e o movimento que ela foi.
- * Com movimento diferente de `seguir`, o passo devolvido não foi executado: o passo em curso continua sendo
- * `sessao.plano.ultimoPasso`.
- * Se o Totti falhar, a fala da recrutadora sai da transcrição e o erro sobe (a rota responde 502).
- */
-export async function conduzirTurno(
-  sessao: Sessao,
-  texto: string,
-  deps: DepsDoTurno = {},
-): Promise<{ passo: Passo; fala: string; movimento: Movimento }> {
-  // Guardado antes de ler a fala dela: se o Totti repetir ou esclarecer, a fala não era resposta e nada disto muda.
-  const antesDaFala = copiarEstadoLido(sessao);
+/** Passos 1 a 3 do turno: registra a fala dela e lê o que ela diz (duração, linguagem, cobertura, formato, troca). */
+async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Promise<void> {
   registrarFala(sessao, { role: "recrutadora", text: texto });
   // Duração lida direto da fala, antes do planejador: o resumo não depende do extrator (lento) para saber o tempo.
   const duracao = lerDuracao(texto, { perguntouTempo: perguntouSobreTempo(ultimaFalaDoAgente(sessao.transcricao)) });
@@ -312,18 +331,29 @@ export async function conduzirTurno(
   }
   resolverTradeoff(sessao);
   resolverPedidoDeFormato(sessao);
+}
+
+/**
+ * Passo 4 do turno: refaz o que deriva do estado (o que fica de fora, pesos e notas), o planejador escolhe o próximo
+ * passo e diz se ficou uma decisão pendente. `nivelPerguntado`: a última pergunta do Totti pediu o nível.
+ */
+function planejar(sessao: Sessao, origem: string, nivelPerguntado: boolean): { passo: Passo; pendente?: DecisaoPendente } {
   atualizarNaoAvaliado(sessao);
   // O foco e as notas saem da ênfase, das falas e das decisões de agora, antes de o planejador escolher o passo.
-  aplicarPesosNaSessao(sessao, "turno");
+  aplicarPesosNaSessao(sessao, origem);
 
   const estado = estadoDoPlanejamento(sessao);
   const passo = proximoPasso(estado);
+  const pendente = decisaoPendente(estado, passo, nivelPerguntado);
   const emJogo = areasEmJogo(estado.focus, estado.sinais, estado.decisoesTradeoff);
   registrarEvento(sessao, {
     tipo: "plano",
-    resumo: `${descreverPasso(passo)} | em jogo: ${emJogo.join(", ") || "nenhuma"}`,
+    resumo:
+      (pendente ? `decisão pendente (${pendente.tipo}): a fala vai ao modelo` : descreverPasso(passo)) +
+      ` | em jogo: ${emJogo.join(", ") || "nenhuma"}`,
     dados: {
       passo,
+      pendente,
       emJogo,
       cobertura: estado.cobertura,
       sinais: estado.sinais,
@@ -337,42 +367,151 @@ export async function conduzirTurno(
       preferencias: sessao.preferencias,
     },
   });
+  return { passo, ...(pendente ? { pendente } : {}) };
+}
 
-  // Depois do resumo, o encerramento e a confirmação de tom, dicas e duração saem fixos, sem modelo, e por isso sem
-  // movimento. Só valem quando a fala dela é uma aprovação ou um pedido claro; senão ela vai ao modelo, com o resumo
-  // como passo em curso, para ele responder ao que ela disse (repetir, tirar uma dúvida, esperar).
-  const sinal = (id: string) => sessao.plano.sinais[id] ?? 0;
-  // Troca de formato pedida depois do resumo também é pedido claro: o resumo de revisão mostra o formato novo.
-  const decisaoClara = sinal("aprovou_resumo") >= LIMIAR || sinal("pediu_mudanca") >= LIMIAR || sessao.plano.trocaPendente !== undefined;
-  const passoDeFalaFixa = passo.tipo === "encerrar" || (passo.tipo === "resumo_final" && passo.revisao === true);
-  const semDecisao = passoEmCurso(antesDaFala.plano)?.tipo === "resumo_final" && passoDeFalaFixa && !decisaoClara;
-  const passoDaFala: Passo = semDecisao ? { tipo: "resumo_final", revisao: true } : passo;
+/** O que a decisão devolvida pelo modelo faz com o turno. */
+type Desfecho =
+  /** Nada foi decidido: a pergunta continua em aberto e as contagens não andam. */
+  | { tipo: "adiar" }
+  /** A escolha foi aplicada: o planejador escolhe o passo seguinte. `prefixo` é dito antes da fala desse passo. */
+  | { tipo: "seguir_adiante"; prefixo?: string }
+  /** O resumo foi aprovado, ou a mudança veio no limite de resumos: encerra com a fala fixa. */
+  | { tipo: "encerrar" }
+  /** Ela pediu uma mudança depois do resumo: a fala do modelo é o resumo de revisão. */
+  | { tipo: "revisao" };
 
-  let resposta: Awaited<ReturnType<typeof responder>>;
+/**
+ * Aplica a decisão que o modelo devolveu para a decisão pendente, pelas mesmas funções que aplicam a escolha lida
+ * pelos sinais. Valor ausente ou que não existe conta como "adiar".
+ */
+function aplicarDecisaoDoModelo(sessao: Sessao, pendente: DecisaoPendente, devolvida: string | undefined): Desfecho {
+  const valida = (VALORES_DE_DECISAO[pendente.tipo] as readonly string[]).includes(devolvida ?? "");
+  const decisao = valida ? devolvida : "adiar";
+  registrarEvento(sessao, {
+    tipo: "plano",
+    resumo: `decisão pendente (${pendente.tipo}): o modelo devolveu ${devolvida ?? "(nada)"}${valida ? "" : ", vale adiar"}`,
+    dados: { pendente, devolvida, decisao },
+  });
+  if (decisao === "adiar") return { tipo: "adiar" };
+
+  if (pendente.tipo === "troca") {
+    registrarDecisaoDaTroca(sessao, pendente.oferta, decisao === "trocar" ? "trocou" : (decisao as DecisaoTradeoff), "modelo");
+    return { tipo: "seguir_adiante" };
+  }
+  if (pendente.tipo === "nivel") {
+    if (decisao === "estimativa") {
+      // Ela não soube dizer: segue com a estimativa do classificador, e o Totti diz isso em voz alta.
+      sessao.plano = { ...sessao.plano, nivelPorEstimativa: true };
+      return { tipo: "seguir_adiante", prefixo: fraseNivelPorEstimativa(sessao.rascunho.seniority) };
+    }
+    sessao.rascunho = {
+      ...sessao.rascunho,
+      seniority: decisao as Sessao["rascunho"]["seniority"],
+      confirmado: { ...sessao.rascunho.confirmado, seniority: true },
+    };
+    return { tipo: "seguir_adiante" };
+  }
+  if (decisao === "finalizar") return { tipo: "encerrar" };
+  // Mudança depois do resumo: conta como resumo de verdade, e no limite deles a conversa encerra.
+  return sessao.plano.resumos < MAX_RESUMOS ? { tipo: "revisao" } : { tipo: "encerrar" };
+}
+
+/**
+ * Processa uma fala da recrutadora e devolve o passo da fala do Totti, a fala e o movimento que ela foi.
+ * Com movimento diferente de `seguir`, o passo devolvido não foi executado: o passo em curso continua sendo
+ * `sessao.plano.ultimoPasso`.
+ * Se o Totti falhar, a fala da recrutadora sai da transcrição e o erro sobe (a rota responde 502). Com uma decisão
+ * pendente, a falha não sobe: nada é decidido e sai uma fala de reserva que refaz a pergunta.
+ */
+export async function conduzirTurno(
+  sessao: Sessao,
+  texto: string,
+  deps: DepsDoTurno = {},
+): Promise<{ passo: Passo; fala: string; movimento: Movimento }> {
+  // Guardado antes de ler a fala dela: se o Totti repetir ou esclarecer, a fala não era resposta e nada disto muda.
+  const antesDaFala = copiarEstadoLido(sessao);
+  const nivelPerguntado = RE_PERGUNTA_DE_NIVEL.test(perguntaEmAberto(sessao.transcricao) ?? "");
+  await lerFalaDela(sessao, texto, deps);
+  const { passo, pendente } = planejar(sessao, "turno", nivelPerguntado);
+
+  // Com decisão pendente, o modelo recebe o passo em curso e a decisão no lugar da instrução. Nenhuma fala fixa
+  // (encerramento, confirmação de tom, dicas e duração) sai sem aprovação ou pedido claro dela.
+  let passoDaFala: Passo = pendente ? passoDaDecisao(pendente) : passo;
+  let resposta: RespostaAgente;
   try {
-    resposta = await responder(sessao, passoDaFala, { chat: deps.chat, semDecisao });
+    resposta = await responder(sessao, passoDaFala, { chat: deps.chat, pendente });
   } catch (err) {
-    desfazerUltimaFala(sessao);
     const mensagem = err instanceof Error ? err.message : String(err);
+    const dadosDoErro = { mensagem, ...(err instanceof ErroChat ? { tentativas: err.tentativas } : {}) };
+    if (!pendente) {
+      desfazerUltimaFala(sessao);
+      registrarEvento(sessao, {
+        tipo: "erro",
+        nivel: "erro",
+        resumo: `resposta do Totti falhou; fala desfeita: ${mensagem}`,
+        dados: { etapa: "conversa", textoNaoRespondido: texto, passo: passoDaFala, ...dadosDoErro },
+      });
+      throw err;
+    }
+    // Decisão pendente e o modelo não respondeu: o comportamento conservador. Nada é decidido e a pergunta é refeita.
     registrarEvento(sessao, {
-      tipo: "erro",
-      nivel: "erro",
-      resumo: `resposta do Totti falhou; fala desfeita: ${mensagem}`,
-      dados: {
-        etapa: "conversa",
-        textoNaoRespondido: texto,
-        passo: passoDaFala,
-        mensagem,
-        ...(err instanceof ErroChat ? { tentativas: err.tentativas } : {}),
-      },
+      tipo: "aviso",
+      nivel: "aviso",
+      resumo: `decisão pendente (${pendente.tipo}) e o Totti falhou: nada decidido, fala de reserva: ${mensagem}`,
+      dados: { etapa: "decisao_pendente", pendente, ...dadosDoErro },
     });
-    throw err;
+    resposta = { ...respostaFixa(falaDeReserva(pendente)), movimento: "responder" };
   }
 
-  const movimento = resposta.movimento;
-  // Repetir e esclarecer: a fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos
-  // dela são desfeitos, e o plano volta a ser o de antes.
-  if (movimento === "repetir" || movimento === "esclarecer") Object.assign(sessao, antesDaFala);
+  let movimento = resposta.movimento;
+  if (movimento === "repetir" || movimento === "esclarecer") {
+    // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
+    // e o plano volta a ser o de antes.
+    Object.assign(sessao, antesDaFala);
+  } else if (pendente) {
+    const desfecho = aplicarDecisaoDoModelo(sessao, pendente, resposta.decisao);
+    if (desfecho.tipo === "adiar") {
+      // Nada decidido: a oferta, o nível ou o resumo continuam em aberto, e o passo não conta, seja qual for o movimento.
+      if (movimento === "seguir") movimento = "responder";
+    } else if (desfecho.tipo === "encerrar") {
+      passoDaFala = { tipo: "encerrar" };
+      resposta = respostaFixa(falaDeEncerramento());
+      movimento = "seguir";
+    } else if (desfecho.tipo === "revisao") {
+      movimento = "seguir";
+    } else {
+      // A escolha está feita: daqui em diante é o caminho de sempre, com o passo seguinte do planejador.
+      const seguinte = planejar(sessao, "decisão", false);
+      try {
+        const segunda = await responder(sessao, seguinte.pendente ? passoDaDecisao(seguinte.pendente) : seguinte.passo, {
+          chat: deps.chat,
+          pendente: seguinte.pendente,
+        });
+        passoDaFala = seguinte.pendente ? passoDaDecisao(seguinte.pendente) : seguinte.passo;
+        // Outra decisão pendente logo em seguida não é decidida no mesmo turno: fica para a próxima fala dela.
+        movimento = seguinte.pendente && segunda.movimento === "seguir" ? "responder" : segunda.movimento;
+        resposta = {
+          ...segunda,
+          texto: [desfecho.prefixo, segunda.texto].filter(Boolean).join(" "),
+          ms: resposta.ms + segunda.ms,
+          tentativas: [...resposta.tentativas, ...segunda.tentativas],
+          respostaCrua: `${resposta.respostaCrua}\n[depois da decisão]\n${segunda.respostaCrua}`,
+        };
+      } catch (err) {
+        // A escolha já foi aplicada. Sem a fala do passo seguinte, vale a confirmação curta que o modelo já escreveu.
+        const mensagem = err instanceof Error ? err.message : String(err);
+        registrarEvento(sessao, {
+          tipo: "aviso",
+          nivel: "aviso",
+          resumo: `decisão aplicada, mas a fala do passo seguinte falhou; vale a confirmação: ${mensagem}`,
+          dados: { etapa: "depois_da_decisao", passo: seguinte.passo, mensagem },
+        });
+        if (desfecho.prefixo) resposta = { ...resposta, texto: desfecho.prefixo };
+        movimento = "responder";
+      }
+    }
+  }
 
   registrarFala(
     sessao,
@@ -385,6 +524,7 @@ export async function conduzirTurno(
       dados: {
         passo: passoDaFala,
         movimento,
+        ...(pendente ? { pendente, decisao: resposta.decisao } : {}),
         travas: resposta.travas,
         mensagens: resposta.mensagens,
         respostaCrua: resposta.respostaCrua,

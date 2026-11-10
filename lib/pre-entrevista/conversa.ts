@@ -12,7 +12,7 @@ import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
 import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { registrarEvento } from "./log";
-import { descreverPasso, nivelEmAberto, type OferecerTradeoffPasso, type Passo } from "./planejador";
+import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
 import { LIMIAR_DUPLICADA, sobreposicao } from "@/lib/agente/guardas";
@@ -100,15 +100,24 @@ do PASSO desta fala; o PASSO fica para a fala seguinte.
 Se a última fala dela responde à sua pergunta, mesmo curta ou vaga, ou se o PASSO já manda responder a uma dúvida dela,
 nada disso vale: siga o PASSO. Movimento "seguir".
 
+QUANDO VOCÊ PEDIU UMA DECISÃO E A RESPOSTA NÃO DECIDIU
+Às vezes você pediu uma decisão (troca de formato, nível da vaga, aprovação do resumo) e o sistema não conseguiu ler a
+resposta dela como escolha. A entrada traz então "DECISÃO PENDENTE" no lugar do PASSO, e quem lê a fala dela é você:
+se ela escolheu com outras palavras, registre a escolha no campo "decisao"; se pediu um tempo, aceite em poucas palavras;
+se perguntou algo ou pediu recomendação, responda com o que está na entrada e pergunte de novo. Nunca escolha por ela sem
+dizer: decisão que ela não tomou e ninguém avisou vira surpresa na entrevista. Sem certeza, "decisao" é "adiar", e a
+pergunta continua em aberto.
+
 A cada fala você recebe o contexto da vaga, o que já se sabe, suas últimas falas, a sua pergunta em aberto, o PASSO desta
-fala e a transcrição.
+fala (ou a DECISÃO PENDENTE) e a transcrição.
 
 FORMATO DA RESPOSTA
 Responda com um objeto JSON e nada mais: {"fala": "...", "movimento": "seguir"}
 - "fala": o que o Totti diz, em texto puro, sem prefixo e sem explicações.
 - "movimento": "seguir" (a fala executa o PASSO), "repetir" (ela pediu e a fala traz de novo a pergunta ou o resumo em aberto),
   "esclarecer" (ela não entendeu e a fala reformula ou explica o que você quer saber) ou "responder" (a fala responde a algo
-  que ELA perguntou ou comentou). Na dúvida, "seguir".`;
+  que ELA perguntou ou comentou). Na dúvida, "seguir".
+- "decisao": só quando a entrada traz DECISÃO PENDENTE; os valores possíveis vêm nela.`;
 
 /**
  * Que movimento de conversa é a fala do Totti (contrato comum da issue #22). Quem decide é o modelo.
@@ -124,6 +133,8 @@ export type Movimento = z.infer<typeof Movimento>;
 const SaidaDoModelo = z.object({
   fala: z.string(),
   movimento: Movimento.optional().catch(undefined),
+  /** Só quando havia uma decisão pendente. Quem confere o valor é o turno (ver `VALORES_DE_DECISAO`). */
+  decisao: z.string().optional().catch(undefined),
 });
 
 /** JSON cortado no meio (limite de tokens): ainda dá para aproveitar o que veio do campo "fala". */
@@ -150,7 +161,7 @@ function desescaparStringJson(trecho: string): string {
  * (a resposta inteira é a fala), e sem o campo `movimento` vale `seguir`. Um JSON de onde não sai fala nenhuma
  * devolve fala vazia (quem chama trata como erro), para o JSON cru nunca ir para a voz. Função pura.
  */
-export function lerSaidaDoModelo(conteudo: string): { fala: string; movimento: Movimento } {
+export function lerSaidaDoModelo(conteudo: string): { fala: string; movimento: Movimento; decisao?: string } {
   let objeto: unknown;
   try {
     objeto = extrairJson(conteudo);
@@ -159,12 +170,16 @@ export function lerSaidaDoModelo(conteudo: string): { fala: string; movimento: M
   }
   if (objeto !== undefined) {
     const lida = SaidaDoModelo.safeParse(objeto);
-    if (lida.success) return { fala: lida.data.fala, movimento: lida.data.movimento ?? "seguir" };
+    if (lida.success) {
+      const { fala, movimento, decisao } = lida.data;
+      return { fala, movimento: movimento ?? "seguir", ...(decisao ? { decisao } : {}) };
+    }
     // JSON válido com a fala noutra chave ou de outro tipo: aproveita a chave que der, ou fala vazia.
     const registro = typeof objeto === "object" && objeto !== null ? (objeto as Record<string, unknown>) : {};
     const fala = CHAVES_DA_FALA.map((chave) => registro[chave]).find((v): v is string => typeof v === "string") ?? "";
     const movimento = Movimento.safeParse(registro.movimento);
-    return { fala, movimento: movimento.success ? movimento.data : "seguir" };
+    const decisao = typeof registro.decisao === "string" && registro.decisao ? registro.decisao : undefined;
+    return { fala, movimento: movimento.success ? movimento.data : "seguir", ...(decisao ? { decisao } : {}) };
   }
   const cortado = conteudo.match(RE_FALA_EM_JSON_CORTADO);
   if (cortado) return { fala: desescaparStringJson(cortado[1]).replace(/\s*\n\s*/g, " ").trim(), movimento: "seguir" };
@@ -428,7 +443,7 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
 const SEM_LOGISTICA = "Não pergunte duração, tom nem dicas: isso fica para o resumo, que usa o padrão do formato.";
 
 /** Instrução específica para o passo escolhido pelo planejador. */
-function instrucaoDoPasso(passo: Passo, sessao: Sessao, semDecisao = false): string {
+function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
   const r = sessao.rascunho;
   switch (passo.tipo) {
     case "confirmar_inicio":
@@ -497,14 +512,6 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao, semDecisao = false): str
       return texto;
     }
     case "resumo_final":
-      if (passo.revisao && semDecisao) {
-        return (
-          "Você fez o resumo e perguntou se pode finalizar. A última fala dela não aprovou nem pediu uma mudança clara. " +
-          "Leia o que ela disse e responda a isso: se pediu para repetir, diga o resumo de novo; se perguntou algo, responda com o que " +
-          "está em 'O QUE JÁ SE SABE' e pergunte de novo se pode finalizar; se pediu um tempo, aceite em poucas palavras e espere. " +
-          "Não invente mudança que ela não pediu e não dê a conversa por encerrada."
-        );
-      }
       if (passo.revisao) {
         return (
           "Ela pediu uma mudança depois do resumo. Confirme só o que mudou, numa frase curta com as palavras dela, sem repetir o resumo. " +
@@ -543,6 +550,82 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao, semDecisao = false): str
       // Não passa pelo modelo: a fala de encerramento é fixa (ver `falaDeEncerramento`).
       return "Fala fixa, sem modelo.";
   }
+}
+
+/**
+ * Instrução quando o Totti pediu uma decisão e a resposta dela não decidiu (ver `decisaoPendente` no planejador).
+ * Vai no lugar do passo: o modelo lê a fala dela e devolve a escolha no campo `decisao`, ou adia.
+ */
+function instrucaoDaDecisao(pendente: DecisaoPendente, sessao: Sessao): string {
+  const r = sessao.rascunho;
+  const valores = VALORES_DE_DECISAO[pendente.tipo].map((v) => `"${v}"`).join(", ");
+  const comum =
+    "- Ela pediu um tempo: aceite em poucas palavras e espere (\"decisao\": \"adiar\").\n" +
+    "- Ela pediu para repetir ou não entendeu: repita ou explique, como em QUANDO A CONVERSA SAI DO ROTEIRO (\"decisao\": \"adiar\").";
+  switch (pendente.tipo) {
+    case "troca": {
+      const { area, modoAlternativo } = pendente.oferta;
+      const nome = NAO_MEDE_FALA[area];
+      return (
+        `DECISÃO PENDENTE: troca de formato. Você disse que ${FORMATO_CURTO[r.mode]} não mede ${nome} e ofereceu três caminhos: ` +
+        `trocar pra ${FORMATO_CURTO[modoAlternativo]}, deixar isso pra próxima etapa do processo, ou seguir sem. ` +
+        `A última fala dela não foi lida como escolha. Leia você e responda com "decisao" (${valores}):\n` +
+        `- Ela escolheu um caminho, mesmo com outras palavras: "trocar", "proxima_etapa" ou "seguir_sem". Se ela quis ficar em ` +
+        `${FORMATO_CURTO[r.mode]} sem dizer o que fazer com isso, vale "proxima_etapa". A fala é só uma confirmação curta do que ficou; ` +
+        "o sistema faz a próxima pergunta.\n" +
+        `- Ela perguntou algo ou pediu sua recomendação: responda com o que está abaixo, recomende um caminho se ela pediu, e pergunte ` +
+        'de novo qual ela prefere ("decisao": "adiar").\n' +
+        '- A fala dela não tratou disso: diga os três caminhos de novo, curto, e pergunte qual ela prefere ("decisao": "adiar").\n' +
+        `${comum}\n` +
+        `O QUE CADA FORMATO MOSTRA: em ${FORMATO_CURTO[modoAlternativo]}, ${COMO_AVALIAMOS[modoAlternativo][area]} Em ${FORMATO_CURTO[r.mode]}, isso não é medido.`
+      );
+    }
+    case "nivel": {
+      const estimativa = SENIORIDADE_FALA[r.seniority];
+      return (
+        `DECISÃO PENDENTE: nível da vaga. Você perguntou se é júnior, pleno ou sênior; a vaga não diz, e a estimativa é ${estimativa}. ` +
+        `A última fala dela não disse o nível de forma clara. Leia você e responda com "decisao" (${valores}):\n` +
+        '- Ela disse o nível com outras palavras ("mais experiente", "começando agora"): "junior", "pleno" ou "senior". ' +
+        "A fala é só uma confirmação curta; o sistema faz a próxima pergunta.\n" +
+        `- Ela não sabe, tanto faz, ou pediu que você decida: "estimativa". O sistema avisa que segue com ${estimativa} e que dá pra mudar na revisão.\n` +
+        '- Ela perguntou algo: responda e pergunte o nível de novo ("decisao": "adiar").\n' +
+        '- A fala dela não tratou disso: pergunte só o nível de novo, em uma frase ("decisao": "adiar").\n' +
+        comum
+      );
+    }
+    case "resumo":
+      return (
+        "DECISÃO PENDENTE: aprovação do resumo. Você fez o resumo e perguntou se pode finalizar. A última fala dela não aprovou " +
+        `nem pediu uma mudança clara. Leia você e responda com "decisao" (${valores}):\n` +
+        '- Ela aprovou com outras palavras: "finalizar". O sistema encerra; a fala pode ser uma frase curta.\n' +
+        '- Ela pediu uma mudança: confirme só o que mudou, numa frase, e pergunte se pode finalizar ("mudar").\n' +
+        "- Ela perguntou algo (por exemplo, quanto ficou a duração): responda com o que está abaixo e em 'O QUE JÁ SE SABE', " +
+        'e pergunte de novo se pode finalizar ("decisao": "adiar").\n' +
+        `${comum}\n` +
+        "Não invente mudança que ela não pediu e não dê a conversa por encerrada sem ela aprovar.\n" +
+        `O RESUMO EM VIGOR: ${FORMATO_CURTO[r.mode]} pra nível ${SENIORIDADE_FALA[r.seniority]}. ${fraseLogistica(r, sessao.preferencias)}`
+      );
+  }
+}
+
+/**
+ * Fala de reserva quando o modelo falha ou demora com uma decisão pendente: nada é decidido, e a pergunta é refeita,
+ * curta. Função pura.
+ */
+export function falaDeReserva(pendente: DecisaoPendente): string {
+  switch (pendente.tipo) {
+    case "troca":
+      return `Não peguei qual caminho você prefere: trocar pra ${FORMATO_CURTO[pendente.oferta.modoAlternativo]}, deixar pra próxima etapa ou seguir sem?`;
+    case "nivel":
+      return "Não peguei o nível: é júnior, pleno ou sênior?";
+    case "resumo":
+      return fechamentoDoResumo(0);
+  }
+}
+
+/** Frase que avisa que a conversa segue com a estimativa do nível. Vem antes da próxima pergunta. Função pura. */
+export function fraseNivelPorEstimativa(nivel: Rascunho["seniority"]): string {
+  return `Sigo com nível ${SENIORIDADE_FALA[nivel]} então; dá pra mudar na revisão.`;
 }
 
 /** Perguntas decisivas da área para esta vaga: as que a vaga e as falas dela puxam vêm primeiro. */
@@ -762,7 +845,7 @@ function confirmacaoDeterministica(sessao: Sessao): string | undefined {
 }
 
 /** Resposta sem modelo: mesma forma de `RespostaAgente`, com o provedor "fixa". */
-function respostaFixa(texto: string): RespostaAgente {
+export function respostaFixa(texto: string): RespostaAgente {
   return { texto, movimento: "seguir", travas: [], provedor: "fixa", model: "-", ms: 0, fallback: false, tentativas: [], mensagens: [], respostaCrua: "" };
 }
 
@@ -781,7 +864,7 @@ function primeiraLinha(texto: string | undefined): string {
 }
 
 /** Mensagens da próxima fala: persona e regras no sistema; contexto, passo e transcrição no usuário. */
-export function montarMensagensConversa(sessao: Sessao, passo: Passo, opcoes: { semDecisao?: boolean } = {}): Mensagem[] {
+export function montarMensagensConversa(sessao: Sessao, passo: Passo, opcoes: { pendente?: DecisaoPendente } = {}): Mensagem[] {
   const r = sessao.rascunho;
   const ultimas = sessao.transcricao
     .filter((t) => t.role === "agente")
@@ -793,7 +876,7 @@ export function montarMensagensConversa(sessao: Sessao, passo: Passo, opcoes: { 
     `O QUE JÁ SE SABE:\n${saberEmLinguagemNatural(sessao)}`,
     `SUAS ÚLTIMAS FALAS (não repita essas perguntas por conta própria; só se ela pedir):\n${ultimas.join("\n") || "(nenhuma)"}`,
     `PERGUNTA SUA EM ABERTO: ${perguntaEmAberto(sessao.transcricao) ?? "(nenhuma)"}`,
-    `PASSO DESTA FALA:\n${instrucaoDoPasso(passo, sessao, opcoes.semDecisao)}`,
+    opcoes.pendente ? instrucaoDaDecisao(opcoes.pendente, sessao) : `PASSO DESTA FALA:\n${instrucaoDoPasso(passo, sessao)}`,
     `ÚLTIMAS 6 FALAS DA TRANSCRIÇÃO:\n${formatarTranscricao(sessao.transcricao.slice(-6))}`,
     "Escreva a próxima fala do Totti, no formato JSON pedido.",
   ].join("\n\n");
@@ -842,6 +925,8 @@ export interface RespostaAgente {
   texto: string;
   /** O movimento de conversa que o modelo declarou (`seguir` quando não declarou, e nas falas fixas). */
   movimento: Movimento;
+  /** O que o modelo devolveu no campo `decisao`, quando havia uma decisão pendente. O turno confere e aplica. */
+  decisao?: string;
   /** Travas que reescreveram a fala, na ordem (cada uma também vira um evento `trava` no log da sessão). */
   travas: TravaAplicada[];
   provedor: string;
@@ -902,10 +987,10 @@ export interface OpcoesResponder {
   /** Cliente de LLM. Os testes passam um falso; sem ele, vale o `chat` de verdade. */
   chat?: typeof chat;
   /**
-   * Depois do resumo, a fala dela não aprovou nem pediu mudança clara (ver `conduzirTurno`): nenhuma fala fixa é usada,
-   * e o modelo recebe o resumo como passo em curso, para responder ao que ela disse.
+   * O Totti pediu uma decisão e a resposta dela não decidiu (ver `decisaoPendente`): nenhuma fala fixa é usada, e o
+   * modelo recebe a decisão pendente no lugar do passo. `passo` é o passo em curso.
    */
-  semDecisao?: boolean;
+  pendente?: DecisaoPendente;
 }
 
 /**
@@ -921,13 +1006,13 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
   if (passo.tipo === "informar_formato_indisponivel") return respostaFixa(falaFormatoIndisponivel(sessao.rascunho.mode));
   // Revisão de tom, dicas ou duração: a confirmação sai pronta. Mudança de foco ou de critério segue com o modelo.
-  if (passo.tipo === "resumo_final" && passo.revisao && !opcoes.semDecisao) {
+  if (passo.tipo === "resumo_final" && passo.revisao && !opcoes.pendente) {
     const confirmacao = confirmacaoDeterministica(sessao);
     if (confirmacao) return respostaFixa(confirmacao);
   }
   const conversar = opcoes.chat ?? chat;
   const resumoCompleto = passo.tipo === "resumo_final" && !passo.revisao;
-  const mensagens = montarMensagensConversa(sessao, passo, { semDecisao: opcoes.semDecisao });
+  const mensagens = montarMensagensConversa(sessao, passo, { pendente: opcoes.pendente });
   let resposta = await conversar({
     alvos: alvosDaConversa(),
     messages: mensagens,
@@ -1006,8 +1091,8 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   // No resumo, o código acrescenta o que fica de fora, duração, tom e dicas (do estado) e a pergunta final, em variações.
   // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
   // Com movimento diferente de `seguir`, a fala não é um resumo (é uma resposta ou uma repetição) e fica como veio.
-  // Sem decisão clara dela, a fala pode ser a resposta a "quanto tempo ficou mesmo?": a logística fica.
-  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao && !opcoes.semDecisao) {
+  // Com a aprovação pendente, a fala pode ser a resposta a "quanto tempo ficou mesmo?": a logística fica.
+  if (texto && segue && passo.tipo === "resumo_final" && passo.revisao && !opcoes.pendente) {
     aplicar("logistica_da_revisao", removerLogisticaDaRevisao(texto));
   }
   // Ela pediu para repetir o resumo: sai o último resumo como foi falado, sem montar outro.
@@ -1031,6 +1116,7 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   return {
     texto,
     movimento,
+    ...(opcoes.pendente && saida.decisao ? { decisao: saida.decisao } : {}),
     travas,
     provedor: resposta.provedor,
     model: resposta.model,
