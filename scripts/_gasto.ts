@@ -16,5 +16,5 @@ if (pago) {
   console.warn("[gasto] --pago: este script chama a OpenRouter e gasta crédito.");
 } else if (process.env.OPENROUTER_API_KEY) {
   delete process.env.OPENROUTER_API_KEY;
-  console.warn("[gasto] OpenRouter desligada neste script: roda só o que tem na Featherless. Os tempos NÃO são os de produção (a conversa ao vivo usa a OpenRouter). Para medir com os modelos pagos: --pago");
+  console.warn("[gasto] OpenRouter desligada neste script: roda só o que tem na Featherless. A produção pode usar a OpenRouter como reserva; tempos e contagens do script não representam esse fallback. Para medir com os modelos pagos: --pago");
 }

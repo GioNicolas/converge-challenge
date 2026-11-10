@@ -29,12 +29,15 @@ import { afirmacaoDaMemoria, pedidoDaRegra, perguntaDaMemoria, regrasDoFormato, 
 
 const TEMPERATURA_CONVERSA = 0.5;
 const MAX_TOKENS_CONVERSA = 400;
-/** Conversa vai para a voz: Featherless tem 6 s antes de cair para a OpenRouter, que tem 8 s. */
-const TIMEOUT_FEATHERLESS_MS = 6_000;
+/** A fala vai para a voz: a Featherless tem 8 s (fila incluída), depois a OpenRouter tem 8 s. */
+const TIMEOUT_FEATHERLESS_MS = 8_000;
 const TIMEOUT_OPENROUTER_MS = 8_000;
 
-/** Featherless (principal) e OpenRouter (plano B). Cada alvo tem 12 s antes de passar adiante. */
-function alvosDaConversa(): Alvo[] {
+/**
+ * Featherless primeiro (plano fixo), com uma única reserva na OpenRouter quando a fila, o envio ou o modelo falhar.
+ * A fila reserva uma vaga para a fala e o prazo da Featherless cobre tanto a espera quanto o envio.
+ */
+export function alvosDaConversa(): Alvo[] {
   return [
     {
       provedor: "featherless",
@@ -46,8 +49,6 @@ function alvosDaConversa(): Alvo[] {
       model: process.env.CONVERSA_FALLBACK_MODEL || "google/gemini-2.5-flash-lite",
       timeoutMs: TIMEOUT_OPENROUTER_MS,
     },
-    // Terceiro alvo: outro modelo da OpenRouter, diferente do flash-lite, para não cair junto com ele.
-    { provedor: "openrouter", model: "openai/gpt-4o-mini", timeoutMs: TIMEOUT_OPENROUTER_MS },
   ];
 }
 

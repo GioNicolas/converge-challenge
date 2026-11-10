@@ -4,6 +4,7 @@
  *  - OpenRouter (plano B): chave em `OPENROUTER_API_KEY`.
  * Só roda no servidor.
  */
+import { comVagaNoProvedor, type Prioridade } from "@/lib/llm/openaiCompat";
 
 const URLS = {
   featherless: "https://api.featherless.ai/v1/chat/completions",
@@ -69,6 +70,11 @@ export interface ChatOpcoes {
   temperature?: number;
   /** Timeout por tentativa HTTP, em ms. */
   timeoutMs?: number;
+  /**
+   * Fila da Featherless: "fala" (resposta ao vivo) passa na frente; "fundo" (extração em segundo plano, competências)
+   * nunca ocupa a última vaga. Padrão: "fala".
+   */
+  prioridade?: Prioridade;
 }
 
 /** Uma tentativa contra um provedor/modelo. Quem não respondeu traz `erro`. */
@@ -109,24 +115,49 @@ interface RespostaChat {
 /** Falha que justifica tentar o próximo alvo: 503 persistente, 429, 5xx, timeout, rede ou chave ausente. */
 class FalhaRecuperavel extends Error {}
 
-function esperar(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * O prazo da fala estourou ainda na fila da Featherless (o envio nem saiu). A Featherless não falhou, só estava cheia:
+ * o `chat` passa para o próximo alvo sem pôr este em descanso.
+ */
+class FilaCheia extends FalhaRecuperavel {}
+
+function esperar(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const concluir = () => {
+      signal?.removeEventListener("abort", abortar);
+      resolve();
+    };
+    const abortar = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abortar);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(concluir, ms);
+    signal?.addEventListener("abort", abortar, { once: true });
+  });
 }
 
 async function tentarAlvo(
   alvo: Alvo,
-  o: Required<Pick<ChatOpcoes, "messages" | "maxTokens" | "timeoutMs">> & Pick<ChatOpcoes, "temperature">,
+  o: Required<Pick<ChatOpcoes, "messages" | "maxTokens" | "timeoutMs">> & Pick<ChatOpcoes, "temperature"> & { prioridade: Prioridade },
 ): Promise<string> {
   const chave = process.env[CHAVES[alvo.provedor]];
   if (!chave) throw new FalhaRecuperavel(`${CHAVES[alvo.provedor]} não definida`);
 
   const limite = alvo.timeoutMs ?? o.timeoutMs;
+  // Uma fala tem um único prazo para fila, envio e esperas de 503 deste alvo.
+  const prazoFala = o.prioridade === "fala" ? AbortSignal.timeout(limite) : undefined;
   for (let tentativa = 0; ; tentativa++) {
     let res: Response;
     let corpo: string;
-    // Cabeçalhos e corpo entram no mesmo try: o timeout pode disparar durante a leitura do corpo.
-    try {
-      res = await fetch(URLS[alvo.provedor], {
+    // Fala: o prazo inclui fila e envio. Fundo: o prazo começa no envio, sem contar a fila.
+    const chegada = Date.now();
+    let enviado = false;
+    // Um envio à HTTP: resposta e corpo juntos, porque o provedor gera tudo antes de responder.
+    const enviar = async () => {
+      enviado = true;
+      const resposta = await fetch(URLS[alvo.provedor], {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
         body: JSON.stringify({
@@ -134,17 +165,31 @@ async function tentarAlvo(
           messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
           max_tokens: o.maxTokens,
           temperature: o.temperature,
+          // Gemini no OpenRouter: fixa o Google AI Studio, senão o cache do prompt leva o pedido para a Vertex (mais
+          // lenta). Mesmo ajuste de `buildExtraBody` em `lib/llm/openrouter.ts`, usado pela entrevista.
+          ...(alvo.provedor === "openrouter" && alvo.model.startsWith("google/gemini")
+            ? { provider: { order: ["google-ai-studio"], allow_fallbacks: true } }
+            : {}),
           ...alvo.extraBody,
         }),
-        signal: AbortSignal.timeout(limite),
+        signal: prazoFala ?? AbortSignal.timeout(limite),
       });
+      return { res: resposta, corpo: await resposta.text() };
+    };
+    try {
+      // Featherless: cada envio ocupa uma vaga da fila do provedor, a mesma da entrevista. A espera do 503 fica
+      // fora da vaga, para não segurar a fila dormindo. OpenRouter não passa pela fila: a entrevista tem a dela.
+      ({ res, corpo } =
+        alvo.provedor === "featherless"
+          ? await comVagaNoProvedor("featherless", o.prioridade, enviar, prazoFala)
+          : await enviar());
       if (res.status === 503 && tentativa < ESPERAS_503_MS.length) {
-        await esperar(ESPERAS_503_MS[tentativa]);
+        await esperar(ESPERAS_503_MS[tentativa], prazoFala);
         continue;
       }
-      corpo = await res.text();
     } catch (err) {
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        if (!enviado) throw new FilaCheia(`fila da Featherless cheia por ${Date.now() - chegada} ms`);
         throw new FalhaRecuperavel(`sem resposta completa em ${limite} ms`);
       }
       // Erro de rede ou corpo interrompido (fetch e o stream lançam TypeError).
@@ -179,6 +224,7 @@ export async function chat({
   maxTokens = 4000,
   temperature,
   timeoutMs = TIMEOUT_PADRAO_MS,
+  prioridade = "fala",
 }: ChatOpcoes): Promise<ChatResposta> {
   if (alvos.length === 0) throw new ErroChat("chat: nenhum alvo configurado", []);
   const inicio = Date.now();
@@ -191,7 +237,7 @@ export async function chat({
   for (const alvo of disponiveis.length > 0 ? disponiveis : alvos) {
     const inicioAlvo = Date.now();
     try {
-      const content = await tentarAlvo(alvo, { messages, maxTokens, timeoutMs, temperature });
+      const content = await tentarAlvo(alvo, { messages, maxTokens, timeoutMs, temperature, prioridade });
       const ms = Date.now() - inicioAlvo;
       descansoAte.delete(chaveAlvo(alvo));
       tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms });
@@ -201,7 +247,8 @@ export async function chat({
       tentativas.push({ provedor: alvo.provedor, model: alvo.model, ms: Date.now() - inicioAlvo, erro: mensagem });
       // Erro não recuperável (ex.: 4xx que não é 429): não adianta tentar o próximo alvo.
       if (!(err instanceof FalhaRecuperavel)) throw new ErroChat(mensagem, tentativas);
-      descansoAte.set(chaveAlvo(alvo), Date.now() + DESCANSO_MS);
+      // Fila cheia não é falha do alvo: a Featherless só estava ocupada, então ele segue disponível.
+      if (!(err instanceof FilaCheia)) descansoAte.set(chaveAlvo(alvo), Date.now() + DESCANSO_MS);
       falhas.push(`${alvo.provedor}/${alvo.model}: ${mensagem}`);
     }
   }
