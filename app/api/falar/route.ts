@@ -6,12 +6,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Voz do agente: ElevenLabs com tempos por caractere (a legenda e a mão do agente seguem a fala).
-// Sem ELEVENLABS_API_KEY responde 501 e o quadro usa a voz do navegador.
-// Voz do agente: Fernando - Casual (pt-BR, voz da biblioteca: a API exige plano pago).
-// ELEVENLABS_VOICE_ID só é preciso para trocar de voz (copie o ID em Voices, no painel do ElevenLabs).
-const VOZ_PADRAO = "jyRzzBWbHll8EUfOjmhe";
-// Flash v2.5: ~0,45 s para uma fala curta (o multilingual_v2 levava ~1,1 s). Troque com ELEVENLABS_MODEL_ID.
-const MODELO_PADRAO = "eleven_flash_v2_5";
+// Sem ELEVENLABS_API_KEY responde 501. Com servidor, a fala fica na legenda (nunca troca para a voz do navegador).
+// A voz do Totti é uma só, em todo o site (quadro, live coding, pré-entrevista): Fernando - Casual (pt-BR), no
+// eleven_flash_v2_5, com os ajustes abaixo. Escolhida ouvindo amostras em 2026-11-09. Fixa de propósito, sem variável
+// de ambiente: com os ajustes do painel (estilo 0,15, velocidade 1) o tom mudava de uma fala para outra e soava lenta.
+const VOZ = "jyRzzBWbHll8EUfOjmhe";
+// ~0,4 s numa fala curta (o turbo_v2_5 dá o mesmo tempo; o multilingual_v2, 0,65-0,8 s).
+const MODELO = "eleven_flash_v2_5";
+/** Estabilidade alta e estilo 0: a voz soa igual em toda fala. Velocidade 1,1 tira a lentidão. */
+const AJUSTES_DA_VOZ = { stability: 0.75, similarity_boost: 0.85, style: 0, use_speaker_boost: true, speed: 1.1 } as const;
 const MAXIMO_CARACTERES = 2000;
 const porIp = criarLimitador(60, 60_000);
 const global = criarLimitador(300, 600_000);
@@ -36,12 +39,12 @@ export async function POST(req: Request) {
   if (!texto || texto.length > MAXIMO_CARACTERES) return erro(400, `texto obrigatório (até ${MAXIMO_CARACTERES} caracteres).`);
   if (porIp.estourou(ipDe(req)) || global.estourou("global")) return erro(429, "Limite de voz atingido. Tente em instantes.");
 
-  const voz = encodeURIComponent(process.env.ELEVENLABS_VOICE_ID?.trim() || VOZ_PADRAO);
+  const voz = encodeURIComponent(VOZ);
   try {
     const resposta = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voz}/with-timestamps?output_format=mp3_44100_128`, {
       method: "POST",
       headers: { "xi-api-key": chave, "Content-Type": "application/json" },
-      body: JSON.stringify({ text: texto, model_id: process.env.ELEVENLABS_MODEL_ID?.trim() || MODELO_PADRAO, language_code: "pt" }),
+      body: JSON.stringify({ text: texto, model_id: MODELO, language_code: "pt", voice_settings: AJUSTES_DA_VOZ }),
       cache: "no-store",
       signal: AbortSignal.any([req.signal, AbortSignal.timeout(20000)]),
     });

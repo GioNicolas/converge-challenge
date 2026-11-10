@@ -13,8 +13,12 @@ import { getProblem } from "@/problems";
 
 // Afinação do ritmo dos blips. Tempos em ms de sessão.
 
-/** Pergunta fixa de abertura. É leve: uma pergunta, sem aprofundar (o Interviewer sabe que é abertura). */
-const KICKOFF_QUESTION = "Quando quiser, me conta rapidinho como você está pensando em resolver?";
+/**
+ * Reserva da abertura. A fala de verdade é escrita na hora pelo entrevistador, olhando o que ele começou a escrever
+ * (lib/agents/interviewer.ts); esta só sai se o modelo falhar. O "Quando quiser, me conta rapidinho como você está
+ * pensando em resolver?" fixo soava como robô.
+ */
+const KICKOFF_QUESTION = "E aí, qual é a ideia que você está seguindo?";
 /** Tema da abertura (o Interviewer não aprofunda a abertura, mas o campo é obrigatório). */
 const KICKOFF_FOLLOW_UP = "a ideia geral dele";
 /** Rótulo do balão da abertura. */
@@ -26,9 +30,16 @@ const KICKOFF_PRIORITY = 0.95;
  * depois dela (LEITURA_DEPOIS_DA_APRESENTACAO_MS em components/IdeApp.tsx). Com 14 s o balão nascia no meio da
  * apresentação e a pergunta saía uns 15 s depois de ela acabar: o candidato ainda estava lendo o enunciado.
  */
-const KICKOFF_READING_MS = 45_000;
-/** Se o candidato já escreveu esse tanto de linhas além do código inicial, ele escolheu codar primeiro: a abertura é descartada. */
-const KICKOFF_SKIP_IF_LINES_WRITTEN = 12;
+const KICKOFF_READING_MS = 30_000;
+/**
+ * A abertura sai depois que ele começa a escrever (esse tanto de linhas além do código inicial) e para: aí ele já
+ * pensou em alguma coisa e a pergunta é sobre algo concreto. Num tempo fixo, ele podia ainda não ter ideia nenhuma.
+ */
+const KICKOFF_MIN_LINES = 3;
+/** Sem escrever nada até aqui (pode estar travado na leitura): a abertura sai mesmo assim, leve. */
+const KICKOFF_FALLBACK_MS = 150_000;
+/** Escreveu muito sem parar: ele já está no meio da solução, e as perguntas da análise assumem. */
+const KICKOFF_SKIP_IF_LINES_WRITTEN = 20;
 /** Se o candidato já falou esse tanto (contou o plano sozinho, depois da apresentação), a abertura é descartada. */
 const KICKOFF_SKIP_IF_WORDS_SPOKEN = 15;
 /** Prioridade mínima, já com o boost de momento, pra uma pergunta virar blip. */
@@ -217,6 +228,10 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
     }
     if (t < KICKOFF_READING_MS) {
       return { reason: `esperando: tempo de leitura (faltam ${Math.ceil((KICKOFF_READING_MS - t) / 1000)} s)` };
+    }
+    const linhas = linesWrittenBeyondStarter(session);
+    if (linhas < KICKOFF_MIN_LINES && t < KICKOFF_FALLBACK_MS) {
+      return { reason: `esperando: abertura depois de ele começar a escrever (${linhas}/${KICKOFF_MIN_LINES} linhas)` };
     }
     if (!isCandidateIdle(session, t)) return { reason: "esperando: candidato digitando" };
     return { blip: raise(session, kickoff, t), reason: `blip ${kickoff.id} (abertura)` };
@@ -621,7 +636,7 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
 
 /** Texto curto do balão. Nunca a pergunta inteira. */
 function previewFor(q: QueuedQuestion): string {
-  if (q.kickoff) return "Quando quiser, uma pergunta rápida";
+  if (q.kickoff) return "Uma pergunta sobre a sua ideia";
   if (q.kind === "empecilho") return "Mudou uma coisa no problema";
   if (q.kind === "retorno") return q.topicLabel === "como ficou a mudança" ? "E aí, como ficou a mudança?" : "E aí, como foi o desafio?";
   if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";

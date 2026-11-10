@@ -160,7 +160,7 @@ test("fim da entrevista: 'já terminei' encerra; travado ou perguntando, a pergu
 });
 
 test("abertura: espera a leitura e não sai se ele já contou o plano enquanto ela esperava a pausa", async () => {
-  const { decideBlip, perdeuAVez, enqueueKickoff } = await import("@/lib/agents/policy");
+  const { decideBlip, perdeuAVez, enqueueKickoff, lastBlipDecision } = await import("@/lib/agents/policy");
   const { getOrCreateSession, appendEvent } = await import("@/lib/session/store");
   const { DEFAULT_CONFIG } = await import("@/lib/config/default");
   const s = getOrCreateSession(`abertura-${Date.now()}`, DEFAULT_CONFIG);
@@ -171,7 +171,14 @@ test("abertura: espera a leitura e não sai se ele já contou o plano enquanto e
   // Ainda na apresentação (~30 s): nada de pergunta.
   agora = 20_000;
   assert.equal(decideBlip(s, agora).blip, undefined);
+  // Passou da leitura, mas ele ainda não escreveu nada: a abertura espera ele começar.
   agora = 46_000;
+  assert.equal(decideBlip(s, agora).blip, undefined);
+  assert.match(lastBlipDecision(s) ?? "", /começar a escrever/);
+  // Escreveu umas linhas e parou: agora sim.
+  appendEvent(s, { type: "snapshot", sessionId: s.sessionId, t: 50_000, code: "def f(nums, target):\n    vistos = {}\n    for i, n in enumerate(nums):\n        falta = target - n\n", version: 1, language: "python" });
+  appendEvent(s, { type: "pause", sessionId: s.sessionId, t: 58_000, idleMs: 8_000 });
+  agora = 58_500;
   const blip = decideBlip(s, agora).blip;
   assert.ok(blip?.id);
   const q = s.queue.find((x) => x.id === blip.id)!;
@@ -191,10 +198,11 @@ test("a abertura que perdeu a vez não é falada: a conversa fecha sem fala", as
   s.clock = () => agora;
   appendEvent(s, { type: "session_started", sessionId: s.sessionId, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
   enqueueKickoff(s, 0);
-  agora = 46_000;
+  // Sem código nenhum até a reserva (2,5 min): a abertura sai mesmo assim.
+  agora = 151_000;
   const blip = decideBlip(s, agora).blip!;
-  appendEvent(s, { type: "speech", sessionId: s.sessionId, t: 50_000, role: "candidate", text: "minha ideia é usar um dicionário para guardar o que eu já vi e achar o complemento numa passada só" });
-  agora = 70_000;
+  appendEvent(s, { type: "speech", sessionId: s.sessionId, t: 155_000, role: "candidate", text: "minha ideia é usar um dicionário para guardar o que eu já vi e achar o complemento numa passada só" });
+  agora = 170_000;
   const res = await runInterviewerTurn(s, { blipId: blip.id, messages: [] });
   assert.equal(res.reply, "");
   assert.equal(res.end, true);
@@ -229,4 +237,15 @@ test("licença: 'pode encerrar' não libera a pergunta (é pedido para fechar a 
   }
   assert.equal(liberouAPergunta("pode falar"), true);
   assert.equal(pedeParaEncerrar("pode falar"), false);
+});
+
+test("filtro de fala: só roda quando a fala pode entregar algo (código, número, técnica, erro)", async () => {
+  const { podeEntregarAlgo } = await import("@/lib/agents/interviewer");
+  const code = "def busca(nums, alvo):\n    esquerda = 0\n    direita = len(nums) - 1\n";
+  for (const fala of ["Por que começar por aí?", "Me fala mais do que você pensou.", "Beleza, e qual o próximo passo?"]) {
+    assert.equal(podeEntregarAlgo(fala, code), false, fala);
+  }
+  for (const fala of ["E esse esquerda aqui, quando muda?", "Você notou algo estranho?", "Testa com [1, 2].", "Dá pra usar um dicionário?", "Isso está certo."]) {
+    assert.equal(podeEntregarAlgo(fala, code), true, fala);
+  }
 });

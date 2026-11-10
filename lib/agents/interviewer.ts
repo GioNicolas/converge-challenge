@@ -6,7 +6,7 @@ import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, candidatoPerguntou, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
-import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
+import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import { findBlipQuestion, nextHint, perdeuAVez } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
@@ -83,7 +83,7 @@ async function turno(
   // A primeira fala de uma pergunta é a pergunta preparada, dita como está: a análise já a escreveu para este
   // momento e o filtro já a aprovou. Reescrever com outra chamada de LLM era um segundo cérebro (mais um a
   // dois segundos e às vezes um "oi, tudo bem?" no meio da entrevista). Só o encerramento, que junta vários
-  // pontos pendentes numa fala, passa pelo modelo.
+  // pontos pendentes numa fala, e a abertura, que é sobre o que ele começou a escrever, passam pelo modelo.
   if (found && req.messages.length === 0 && found.question.kind !== "encerramento") {
     // Entre a pergunta nascer e a pausa para falar, ele pode já ter contado o plano ou ouvido o mesmo: fica quieto.
     const motivo = perdeuAVez(session, found.question, found.blip.createdAt);
@@ -92,10 +92,15 @@ async function turno(
       found.question.status = "stale";
       return { reply: "", commands: [{ type: "clear_highlights" }], end: true };
     }
+  }
+  // A abertura é escrita na hora, sobre o que ele começou a escrever (o modelo vê o código); as outras perguntas
+  // preparadas já foram escritas pela análise para este momento e saem como estão.
+  if (found && req.messages.length === 0 && found.question.kind !== "encerramento" && !found.question.kickoff) {
     const grifo = found.question.highlight;
     const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
     return { reply: found.question.question, commands: highlightCommands(util ? grifo : undefined), end: false };
   }
+  if (found?.question.kickoff && req.messages.length === 0) found.question.question = aberturaDeReserva(session);
   const checkInDoEmpecilho = question?.checkInId
     ? session.checkIns.find((c) => c.id === question.checkInId)?.empecilhoId !== undefined
     : false;
@@ -194,7 +199,8 @@ async function turno(
     // A pergunta preparada já passou pelo filtro de perguntas: só confere se o modelo acrescentou algo.
     // Fala curta que só reconhece e devolve a vez (sem pergunta) não tem o que entregar: vai sem o filtro, que
     // custava mais de um segundo em cada resposta.
-    if (!(opening && isAboutTheSame(output.reply, found.question.question)) && !falaSoDeReconhecer(output.reply)) {
+    if (!(opening && isAboutTheSame(output.reply, found.question.question)) && !falaSoDeReconhecer(output.reply)
+      && podeEntregarAlgo(output.reply, code)) {
       const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
       session.analyst.costUsd += verdict.costUsd;
       if (!verdict.safe && sobra() < MIN_PARA_REGERAR_MS) {
@@ -448,6 +454,20 @@ export function semReconhecimentoRepetido(reply: string, messages: ChatMessage[]
   return texto[0].toUpperCase() + texto.slice(1);
 }
 
+/** O que o filtro de fala barra: erro, caso que quebra, técnica, validação, comparação com algo melhor. */
+const TEMA_DE_SPOILER = /\b(not[oa]u|percebeu|reparou|problema|erro|bug|falh|errad|cert[oa]|corret|exat|isso mesmo|funciona|falt|sobr|devia|deveria|precis|tent[ae]|test|entrada|caso|melhor|r[áa]pid|otimiz|alternativ|em vez|dicion|hash|mapa|map|set|conjunt|pilha|fila|heap|[áa]rvore|grafo|orden|bin[áa]ri|ponteir|loop|la[çc]o|recurs|mem[óo]ria|complexidade|[íi]ndice|array|lista|vetor|string|vazi|negativ|repetid|duplicad|limite|borda)/i;
+
+/**
+ * A fala pode entregar algo (e vale o filtro, ~1 s em cada resposta): cita o código dele, um número ou símbolo, ou um
+ * tema que o filtro barra. "Por que começar por aí?" não tem o que entregar e sai sem esperar o filtro.
+ */
+export function podeEntregarAlgo(reply: string, code: string): boolean {
+  if (/[0-9\[\]{}()=<>+*/%]/.test(reply) || TEMA_DE_SPOILER.test(reply)) return true;
+  const fala = reply.toLowerCase();
+  const nomes = new Set(code.toLowerCase().match(/[a-zà-ú_][a-zà-ú0-9_]{2,}/g) ?? []);
+  return [...nomes].some((n) => !PALAVRAS_DA_LINGUAGEM.has(n) && new RegExp(`(^|[^a-zà-ú0-9_])${n}([^a-zà-ú0-9_]|$)`).test(fala));
+}
+
 /** Uma fala curta e sem pergunta: só reconhece e devolve a vez. */
 function falaSoDeReconhecer(reply: string): boolean {
   const texto = reply.trim();
@@ -483,6 +503,13 @@ function liberarParaCodar(reply: string): string {
   const frases = reply.trim().split(/(?<=[.!?])\s+/);
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
   return [...frases, "Pode começar a codar quando quiser."].join(" ");
+}
+
+/** A abertura de reserva (o modelo falhou): sobre a ideia que ele está seguindo, ou, sem código ainda, sobre o plano. */
+function aberturaDeReserva(session: SessionState): string {
+  return linesWrittenBeyondStarter(session) >= 3
+    ? "E aí, qual é a ideia que você está seguindo?"
+    : "Como você está pensando em atacar esse problema?";
 }
 
 /** Mais linhas que isso já é o arquivo, não um trecho. */
