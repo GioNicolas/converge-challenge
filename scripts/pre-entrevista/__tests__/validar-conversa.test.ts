@@ -116,6 +116,11 @@ describe("erro na sessão", () => {
     assert.equal(desfechoDoCaso(ok, errosDaSessao(logs(["sessao_criada", "rascunho_atualizado"]))), "passou");
   });
 
+  it("erro no histórico vence cenário que não chegou ao ponto esperado", () => {
+    assert.equal(desfechoDoCaso([], errosDaSessao(logs(["sessao_criada", "erro"])), false), "erro");
+    assert.equal(desfechoDoCaso([], errosDaSessao(logs(["sessao_criada"])), false), "nao_montado");
+  });
+
   it("checagem que falha sem erro na sessão sai como falhou", () => {
     assert.equal(desfechoDoCaso([...ok, { nome: "x", ok: false }], []), "falhou");
   });

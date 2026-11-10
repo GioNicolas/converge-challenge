@@ -499,11 +499,12 @@ export function errosDaSessao(logs: Sessao["logs"]): string[] {
 }
 
 /**
- * O desfecho de um caso que chegou ao ponto. Erro na sessão vence as checagens: "o plano não mudou" não vale nada se
- * a extração nem rodou.
+ * Erro na sessão vence até um cenário não montado: uma falha no histórico pode ser justamente o motivo de não chegar
+ * ao ponto esperado. "O plano não mudou" também não vale nada se a extração nem rodou.
  */
-export function desfechoDoCaso(checagens: Checagem[], erros: string[]): Desfecho {
+export function desfechoDoCaso(checagens: Checagem[], erros: string[], montado = true): Desfecho {
   if (erros.length > 0) return "erro";
+  if (!montado) return "nao_montado";
   return checagens.every((c) => c.ok) ? "passou" : "falhou";
 }
 
@@ -580,7 +581,9 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
     }
     if (!caso.situacao.chegou(sessao)) {
       console.log(`  NÃO MONTADO: a conversa não chegou ao ponto (passo em curso: ${descrever(emCurso(sessao))})`);
-      return { desfecho: "nao_montado" };
+      const erros = errosDaSessao(sessao.logs);
+      for (const e of erros) console.log(`  ERRO na sessão: ${e}`);
+      return { desfecho: desfechoDoCaso([], erros, false) };
     }
 
     const antes = fotografar(sessao);
