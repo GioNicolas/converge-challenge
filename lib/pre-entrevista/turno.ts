@@ -103,7 +103,7 @@ function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
  * o erro e segue com o estado anterior: o planejador ainda tem o que decidir, e a conversa não trava.
  * O foco e as notas são refeitos depois, em `conduzirTurno` (ver `aplicarPesosNaSessao`).
  */
-async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno): Promise<void> {
+async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno, aoReceberJev?: () => void): Promise<void> {
   try {
     const cob = await (deps.avaliarCobertura ?? avaliarCobertura)(sessao.rascunho, sessao.transcricao.slice(), {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
@@ -111,6 +111,8 @@ async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno): Promise<vo
     // A ênfase é por fala: classifica só a última fala dela, e o acumulado é feito no código (ver `enfase.ts`).
     const ultimaDela = ultimaFalaDaRecrutadora(sessao.transcricao);
     const porFala = await (deps.avaliarEnfaseDaFala ?? avaliarEnfaseDaFala)(sessao.transcricao);
+    // Até aqui a sessão pode ter sido gravada pela extração; daqui em diante, as escritas são síncronas.
+    aoReceberJev?.();
     if (ultimaDela) sessao.enfaseEstado = acumularEnfase(sessao.enfaseEstado, porFala.niveis, ultimaDela);
     sessao.plano = { ...sessao.plano, sinais: semDispensaContrariada(cob.sinais, sessao.enfaseEstado) };
 
@@ -353,16 +355,29 @@ function passoDaDecisao(pendente: DecisaoPendente): Passo {
   return pendente.tipo === "nivel" ? { tipo: "perguntar_nivel" } : { tipo: "resumo_final", revisao: true };
 }
 
-/** Passos 1 a 3 do turno: registra a fala dela e lê o que ela diz (duração, linguagem, cobertura, formato, troca). */
-async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Promise<void> {
+/**
+ * Passos 1 a 3 do turno: registra a fala dela e lê o que ela diz (duração, linguagem, cobertura, formato, troca).
+ * Devolve o estado de antes da leitura, para `desfazerLeitura`. Essa captura é feita antes de duração e linguagens
+ * serem aplicadas, e logo antes de a cobertura gravar, depois da espera pelo Jev: o que a extração gravou nessa
+ * espera fica no estado de antes e não é desfeito junto com a leitura.
+ */
+async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Promise<EstadoLido> {
   registrarFala(sessao, { role: "recrutadora", text: texto });
   // Duração lida direto da fala, antes do planejador: o resumo não depende do extrator (lento) para saber o tempo.
   const duracao = lerDuracao(texto, { perguntouTempo: perguntouSobreTempo(ultimaFalaDoAgente(sessao.transcricao)) });
-  if (duracao !== undefined) sessao.preferencias = { ...sessao.preferencias, duracaoMin: duracao };
   // Linguagem também: "só Python" vira restrição na config (no padrão o candidato escolhe entre todas).
   const linguagens = lerLinguagens(texto);
-  if (linguagens) sessao.preferencias = { ...sessao.preferencias, linguagens };
-  await atualizarCobertura(sessao, deps);
+  const capturar = (): EstadoLido => {
+    const antes = copiarEstadoLido(sessao);
+    if (duracao !== undefined) sessao.preferencias = { ...sessao.preferencias, duracaoMin: duracao };
+    if (linguagens) sessao.preferencias = { ...sessao.preferencias, linguagens };
+    return antes;
+  };
+  let antes: EstadoLido | undefined;
+  // Se o Jev falhar, `atualizarCobertura` não chama o callback: a captura cai no `??` logo depois.
+  await atualizarCobertura(sessao, deps, () => {
+    antes = capturar();
+  });
   // Formato pedido com as palavras da tela ("vamos de quadro", "no Excalidraw", "código ao vivo") vale como pedido,
   // mesmo quando o classificador não reconhece: sem isso o plano ficava no formato errado depois de ela confirmar.
   const formato = lerFormato(texto);
@@ -372,6 +387,7 @@ async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Pr
   }
   resolverTradeoff(sessao);
   resolverPedidoDeFormato(sessao);
+  return antes ?? capturar();
 }
 
 /**
@@ -499,10 +515,9 @@ export async function conduzirTurno(
   texto: string,
   deps: DepsDoTurno = {},
 ): Promise<{ passo: Passo; fala: string; movimento: Movimento }> {
-  // Guardado antes de ler a fala dela: se o Totti repetir ou esclarecer, a fala não era resposta e nada disto muda.
-  const antesDaFala = copiarEstadoLido(sessao);
+  // Guardado antes de ler a fala dela (ver `lerFalaDela`): se o Totti repetir ou esclarecer, a fala não era resposta.
   const nivelPerguntado = pedeONivel(perguntaEmAberto(sessao.transcricao));
-  await lerFalaDela(sessao, texto, deps);
+  const antesDaFala = await lerFalaDela(sessao, texto, deps);
   const { passo, pendente } = planejar(sessao, "turno", nivelPerguntado);
   // Como a sessão ficou depois de ler a fala dela e planejar (os dois gravam nela), antes de esperar o modelo:
   // `desfazerLeitura` compara com isto para não pisar no que outra escrita mudar durante a espera.
@@ -542,6 +557,10 @@ export async function conduzirTurno(
     // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
     // e o plano volta a ser o de antes.
     desfazerLeitura(sessao, antesDaFala, depoisDaLeitura);
+    // Notas, foco e pesos foram refeitos com a leitura dentro (e com o que a extração gravou): saem de novo,
+    // a partir das fontes já restauradas, como o planejador faz (ver `planejar`).
+    atualizarNaoAvaliado(sessao);
+    aplicarPesosNaSessao(sessao, "leitura desfeita");
   } else if (pendente) {
     const desfecho = aplicarDecisaoDoModelo(sessao, pendente, resposta.decisao);
     if (desfecho.tipo === "adiar") {
