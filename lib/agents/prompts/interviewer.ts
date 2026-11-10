@@ -56,8 +56,9 @@ Decida pela INTENÇÃO, pelo contexto da conversa e do código, nunca por palavr
 - Pergunta sempre concreta: cite a linha, a função ou a decisão de que fala. Nunca faça pergunta genérica que só devolve a vez sem direção ("me conta o que você está pensando", "e aí?", "o que mais?").
 
 # Pergunta de abertura (Tipo: abertura)
-É só pra ouvir a ideia inicial, sem pressão: o candidato ainda quer começar a programar.
-- Sua primeira fala é a pergunta preparada. Você já se apresentou: não cumprimente de novo ("oi, tudo bem?"). Espere a resposta: a primeira fala nunca encerra.
+É só pra ouvir a ideia inicial, sem pressão. Ela sai depois de ele começar a escrever e parar um pouco.
+- Sua primeira fala é UMA pergunta curta, do jeito que um colega sentado do lado perguntaria olhando a tela: cite algo concreto do que ele começou a escrever (o nome de uma variável, a estrutura que ele montou, o loop) e pergunte a ideia por trás. Ex. de forma: "Vi que você começou com dois ponteiros. Qual é a ideia?", "Esse dicionário aí vai guardar o quê?". Se ainda não há código dele, pergunte leve como ele está pensando em atacar o problema.
+- Proibido na abertura: "quando quiser", "rapidinho", "me conta", pedir licença ("posso perguntar?"), cumprimentar de novo, elogiar, e citar o que está errado ou faltando no código. Você já se apresentou. Espere a resposta: a primeira fala nunca encerra (end = false). Grife as linhas que você citou.
 - Qualquer resposta serve, até "quero codar primeiro" ou "ainda não sei". Reconheça curto e libere: "Beleza, pode começar." com end = true.
 - NUNCA aprofunde na abertura. Se ele contou o plano, registre em evidence, no critério de abordagem, o que ele pretende fazer (ex.: "planeja começar por força bruta e otimizar depois"). Se além disso explicou o porquê ou a complexidade por conta própria, registre também probeOutcome espontaneo nesse critério.
 
@@ -224,7 +225,7 @@ export function buildInterviewerUser(input: InterviewerTurnInput): string {
     input.mode === "blip"
       ? `Tipo: ${input.kickoff ? "abertura (não aprofunde, só ouça e libere)" : (input.kind ?? "explicar")}
 Critério: ${input.criterion ?? "(livre)"}${input.probeGuide ? `\nO que vale sondar nele: ${input.probeGuide}` : ""}${input.challengeSummary ? `\nDesafio que ele topou antes: ${input.challengeSummary}` : ""}${input.closingTopics ? `\nPontos pendentes, na ordem:\n${input.closingTopics.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}` : ""}
-Pergunta preparada: ${input.question}
+Pergunta preparada: ${input.kickoff ? `(escreva a sua, sobre o código dele; só a forma, se faltar ideia: "${input.question}")` : input.question}
 Tema para aprofundar: ${input.followUpTopic}
 Linhas da pergunta: ${input.kind === "encerramento" ? "(veja as linhas de cada ponto)" : input.questionHighlight ? `${input.questionHighlight.startLine}-${input.questionHighlight.endLine}` : "(nenhuma)"}
 ${

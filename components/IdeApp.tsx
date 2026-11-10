@@ -19,7 +19,8 @@ import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
-import { deveAguardarParaFalar, PAUSA_FIM_DA_FALA_MS, podeTomarTurno } from "@/lib/conversa/turnos";
+import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
+import { esperaDoFimDaFala } from "@/lib/audio/fimDaFala";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
 import Legenda from "./Legenda";
 import { postEncerramento, postForcarEmpecilho } from "./ide/api";
@@ -33,24 +34,19 @@ const MARGEM_PROBLEMA = 392;
 const MARGEM_RECOLHIDO = 12;
 /** Espaço em cima do editor com o painel recolhido: pílula e botões numa fileira só. */
 const TOPO_RECOLHIDO = 104;
-/** Silêncio real depois da última frase final antes de a fala ir para o Totti (evita cortar no meio da frase). */
-const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 /** Teto da espera acima: ruído constante no microfone não segura a fala para sempre. */
 const FALA_ESPERA_MAX_MS = 12_000;
 /** Depois de uma fala do Totti, ele espera isso antes de puxar outro assunto (o candidato precisa de vez). */
 const PAUSA_ENTRE_FALAS_MS = 8000;
 /**
- * Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. Com 12 s a pergunta chegava com o
- * candidato ainda no meio do enunciado. Se ele começar a codar ou contar o plano antes, a abertura nem sai
- * (lib/agents/policy.ts, perdeuAVez).
+ * Depois da apresentação, o mínimo de leitura antes de qualquer pergunta (com 12 s ela chegava no meio do
+ * enunciado). A abertura em si espera ele começar a escrever e parar (lib/agents/policy.ts).
  */
-const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 45_000;
+const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 30_000;
 /** Teto da espera da apresentação por uma fala do candidato em andamento. */
 const APRESENTACAO_ESPERA_MAX_MS = 8000;
 /** Fala com pelo menos isso de palavras é uma explicação: a pergunta que chegou antes dela perde a vez. */
 const PALAVRAS_FALA_LONGA = 12;
-/** Digitou há menos que isso: ele está no meio do código, então o Totti pede licença antes de perguntar. */
-const LICENCA_SE_DIGITOU_MS = 12_000;
 
 /**
  * A IDE não tem inteligência: mostra, captura e obedece (docs/contexto-pessoa-a-ide.md).
@@ -63,8 +59,11 @@ export type VagaIDE = Pick<InterviewConfig, "id" | "durationMin" | "languages" |
 /** Logo no começo o agente se apresenta, diz quanto tempo dura e como funciona (lib/conversa/instrucoes.ts). */
 /** Espera depois de a sessão começar, para a saudação não atropelar o carregamento da tela. */
 const ATRASO_SAUDACAO_MS = 1500;
-/** Digitou há menos que isso: o agente não abre uma pergunta no meio da digitação. */
-const PAUSA_DIGITACAO_MS = 2000;
+/**
+ * Digitou há menos que isso: o agente não abre uma pergunta no meio da digitação. É a pausa de quem parou para
+ * pensar; com ela o Totti pergunta direto, sem o "posso te perguntar uma coisa?" fixo (soava como robô).
+ */
+const PAUSA_DIGITACAO_MS = 4000;
 /** Volume do microfone acima disso conta como alguém falando (segura a vez do agente). */
 const VOLUME_DE_FALA = 0.08;
 /** Sem voz (desligada ou bloqueada pelo navegador), a fala do agente fica na legenda por esse tempo. */
@@ -197,8 +196,9 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     if (limpo.split(/\s+/).length >= PALAVRAS_FALA_LONGA) ultimaFalaLongaEmRef.current = Date.now();
     conversa.ouvir(limpo);
   };
-  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de ~3 s sem voz
-  // (PAUSA_FIM_DA_FALA_MS mais o 1 s do Scribe). Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
+  // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de um silêncio que
+  // depende de como a frase terminou (lib/audio/fimDaFala.ts, o mesmo do quadro): fechada ou pergunta, 1,5 s;
+  // pendurada num "e", "tipo", vírgula, 2,6 s. Mais o ~1 s do Scribe. Uma parcial nova ou voz no microfone nesse intervalo adia o envio (a frase não é cortada).
   const bufferFalaRef = useRef("");
   const bufferDesdeRef = useRef(0);
   const bufferTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -212,7 +212,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     clearTimeout(bufferTimerRef.current);
     const checar = () => {
       const agora = Date.now();
-      const falando = falaParcialRef.current || agora - ultimaFalaEmRef.current < FALA_SILENCIO_MS;
+      const falando = falaParcialRef.current || agora - ultimaFalaEmRef.current < esperaDoFimDaFala(bufferFalaRef.current);
       if (falando && agora - bufferDesdeRef.current < FALA_ESPERA_MAX_MS) {
         bufferTimerRef.current = setTimeout(checar, 150);
         return;
@@ -221,7 +221,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       bufferFalaRef.current = "";
       if (pronto) falaRef.current(pronto);
     };
-    bufferTimerRef.current = setTimeout(checar, FALA_SILENCIO_MS);
+    bufferTimerRef.current = setTimeout(checar, esperaDoFimDaFala(bufferFalaRef.current));
   }, []);
   useEffect(() => () => clearTimeout(bufferTimerRef.current), []);
 
@@ -298,7 +298,6 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const balao = session.incomingBlip;
   const tirarBalao = session.setIncomingBlip;
   const abrirFio = conversa.abrirFio;
-  const pedirLicenca = conversa.pedirLicenca;
   const ocupada = conversa.ocupada;
   const fioRef = conversa.fioRef;
   const ultimaFalaDoAgenteEmRef = conversa.ultimaFalaDoAgenteEmRef;
@@ -328,13 +327,10 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
         setMudanca(balao.empecilho);
         setProblemaAberto(true);
       }
-      // No meio do código, o Totti pede licença antes; parado (pensando, depois de rodar), pergunta direto.
-      // A mudança no problema não pede licença: é parte da entrevista, não uma dúvida dele.
-      if (!balao.empecilho && agora - ultimaDigitacaoEmRef.current < LICENCA_SE_DIGITOU_MS) void pedirLicenca(balao);
-      else void abrirFio(balao);
+      void abrirFio(balao);
     }, 150);
     return () => clearInterval(id);
-  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, pedirLicenca, ocupada, fioRef, ultimaFalaDoAgenteEmRef, enviarEvento]);
+  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, ocupada, fioRef, ultimaFalaDoAgenteEmRef, enviarEvento]);
 
   /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
   async function forcarEmpecilho() {

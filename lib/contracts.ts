@@ -440,10 +440,11 @@ export type Gravacao = z.infer<typeof Gravacao>;
 /** Silêncio total (sem desenhar, digitar nem falar) a partir do qual o agente pode quebrá-lo. */
 export const SILENCIO_S = 8;
 /**
- * Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. Com 15 s o Totti perguntava "como
- * você está pensando?" com o candidato ainda lendo o enunciado (o mesmo problema do live coding).
+ * Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. É só a reserva: a primeira pergunta
+ * normal vem da análise do desenho, depois que ele começa a desenhar. Com 15 s o Totti perguntava "como você está
+ * pensando?" com o candidato ainda lendo o enunciado; num tempo fixo curto, ele podia não ter ideia nenhuma ainda.
  */
-export const SILENCIO_INICIAL_S = 45;
+export const SILENCIO_INICIAL_S = 120;
 /**
  * Em REQUISITOS, depois de o Totti responder uma dúvida dele: o silêncio que devolve a vez ao Totti. Mais curto que o
  * inicial (ali ele já leu o enunciado e está conversando).

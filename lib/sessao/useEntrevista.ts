@@ -49,14 +49,11 @@ import { criarConversor, type Instantaneo } from "@/lib/excalidraw/conversor";
 import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff";
 
 /** Como uma fala do Totti entra na fila única (ver lib/audio/filaDoAgente.ts). */
-/** Desenhou há menos que isso: ele está no meio do desenho, então o Totti pede licença antes de perguntar. */
-const LICENCA_SE_DESENHOU_MS = 12_000;
-/** Pedidos de licença, variados para não soar como gravação. */
-const PEDIDOS_DE_LICENCA = [
-  "Ei, posso te perguntar uma coisa sobre o desenho?",
-  "Tenho uma dúvida sobre o que você desenhou. Posso perguntar agora?",
-  "Posso te interromper rapidinho com uma pergunta?",
-];
+/**
+ * Parou de desenhar há pelo menos isso: uma pausa de quem parou para pensar. Ali o Totti pergunta direto, como no
+ * live coding, sem o "posso te perguntar uma coisa sobre o desenho?" fixo (soava como robô).
+ */
+const PAUSA_NO_DESENHO_MS = 4_000;
 
 interface OpcoesDeFala {
   /** Quem pediu a fala; define quando ela ainda vale depois de esperar. Padrão: "sempre" (abertura, desafio, despedida). */
@@ -328,7 +325,6 @@ export function useEntrevista(
   const licencaPedidaEm = useRef<number | null>(null);
   /** Ele pediu para esperar (ou não respondeu): não pede licença de novo antes disso. */
   const licencaDeNovoEm = useRef(0);
-  const pedidosDeLicenca = useRef(0);
   /** Quando o Totti anunciou a mudança no problema (a próxima pergunta espera um respiro depois dela). */
   const empecilhoAnunciadoEm = useRef(-Infinity);
   /** Requisitos já combinados (vão ao /analisar para a análise não inventar contexto). */
@@ -621,19 +617,10 @@ export function useEntrevista(
       if (!respiroDaMudanca || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) return;
-      const desenhando = agora - ultimoDesenhoEm.current < LICENCA_SE_DESENHOU_MS;
-      if (momento === null && !desenhando) {
-        enviar({ tipo: "PLIN_CLICADO" });
-        return;
-      }
-      // No meio do desenho (como no live coding com o código): numa pausa curta, o Totti pede licença antes de
-      // perguntar, em vez de esperar uma pausa longa que pode nunca vir. A resposta dele decide (ver enviarTexto).
+      // Pausa real, ou, para quem desenha sem parar, uma pausa curta de alguns segundos: pergunta direto.
+      if (agora - ultimoDesenhoEm.current < PAUSA_NO_DESENHO_MS) return;
       const pausaCurta = motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current, marco: true }) === null;
-      if ((momento === null || pausaCurta) && agora >= licencaDeNovoEm.current) {
-        licencaPedidaEm.current = Number.POSITIVE_INFINITY;
-        void dizer(PEDIDOS_DE_LICENCA[pedidosDeLicenca.current++ % PEDIDOS_DE_LICENCA.length])
-          .finally(() => { if (licencaPedidaEm.current !== null) licencaPedidaEm.current = Date.now(); });
-      }
+      if (momento === null || pausaCurta) enviar({ tipo: "PLIN_CLICADO" });
     }, 150);
     return () => clearInterval(id);
   }, [estado.plin, estado.perguntaPendente, enviar, dizer]);
