@@ -38,8 +38,16 @@ const KICKOFF_READING_MS = 30_000;
 const KICKOFF_MIN_LINES = 3;
 /** Sem escrever nada até aqui (pode estar travado na leitura): a abertura sai mesmo assim, leve. */
 const KICKOFF_FALLBACK_MS = 150_000;
-/** Escreveu muito sem parar: ele já está no meio da solução, e as perguntas da análise assumem. */
-const KICKOFF_SKIP_IF_LINES_WRITTEN = 20;
+/**
+ * Escreveu muito antes de a abertura sair: a solução já está quase pronta, e as perguntas da análise assumem. Alto de
+ * propósito: com a pausa curta abaixo, quem digita sem parar ainda recebe a abertura bem antes disso.
+ */
+const KICKOFF_SKIP_IF_LINES_WRITTEN = 40;
+/**
+ * Depois de começar a escrever, a abertura sai numa pausa curta da digitação: quem digita direto, sem nunca parar
+ * 8 s, nunca recebia a abertura e ela era descartada ao passar de 20 linhas.
+ */
+const KICKOFF_PAUSA_CURTA_MS = 3_000;
 /** Se o candidato já falou esse tanto (contou o plano sozinho, depois da apresentação), a abertura é descartada. */
 const KICKOFF_SKIP_IF_WORDS_SPOKEN = 15;
 /** Prioridade mínima, já com o boost de momento, pra uma pergunta virar blip. */
@@ -233,7 +241,9 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
     if (linhas < KICKOFF_MIN_LINES && t < KICKOFF_FALLBACK_MS) {
       return { reason: `esperando: abertura depois de ele começar a escrever (${linhas}/${KICKOFF_MIN_LINES} linhas)` };
     }
-    if (!isCandidateIdle(session, t)) return { reason: "esperando: candidato digitando" };
+    const { maosParadasHaMs, falaHaMs } = momentoDaSessao(session, t);
+    const pausaCurta = maosParadasHaMs >= KICKOFF_PAUSA_CURTA_MS && falaHaMs >= KICKOFF_PAUSA_CURTA_MS;
+    if (!isCandidateIdle(session, t) && !pausaCurta) return { reason: "esperando: candidato digitando" };
     return { blip: raise(session, kickoff, t), reason: `blip ${kickoff.id} (abertura)` };
   }
 
