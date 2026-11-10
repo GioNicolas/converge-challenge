@@ -15,6 +15,7 @@
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
+import { isDeepStrictEqual } from "node:util";
 import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
 import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
@@ -291,7 +292,11 @@ type EstadoLido = Pick<
 >;
 
 function copiarEstadoLido(sessao: Sessao): EstadoLido {
-  return structuredClone({
+  return structuredClone(estadoLido(sessao));
+}
+
+function estadoLido(sessao: Sessao): EstadoLido {
+  return ({
     plano: sessao.plano,
     rascunho: sessao.rascunho,
     preferencias: sessao.preferencias,
@@ -301,6 +306,39 @@ function copiarEstadoLido(sessao: Sessao): EstadoLido {
     naoAvaliado: sessao.naoAvaliado,
     pesosDetalhe: sessao.pesosDetalhe,
   });
+}
+
+const CAMPOS_LIDOS: (keyof EstadoLido)[] = [
+  "plano", "rascunho", "preferencias", "enfaseEstado", "origemPreferencias", "eliminatorioFalas", "naoAvaliado", "pesosDetalhe",
+];
+
+const ehObjetoSimples = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Desfaz o que a leitura da fala dela mudou (`antes` -> `depois`), sem pisar no que mudou por outro caminho desde então.
+ * A extração em segundo plano do turno anterior pode gravar no rascunho enquanto o turno espera o modelo: voltar a cópia
+ * inteira de `antes` perderia o que ela extraiu. Por isso, cada campo (e cada chave de primeiro nível dele) só volta
+ * ao valor de `antes` se ainda estiver igual ao de `depois`.
+ */
+function desfazerLeitura(sessao: Sessao, antes: EstadoLido, depois: EstadoLido): void {
+  const alvo = sessao as unknown as Record<string, unknown>;
+  for (const campo of CAMPOS_LIDOS) {
+    const atual = alvo[campo];
+    if (isDeepStrictEqual(atual, depois[campo])) {
+      alvo[campo] = antes[campo];
+    } else if (ehObjetoSimples(atual) && ehObjetoSimples(antes[campo]) && ehObjetoSimples(depois[campo])) {
+      const a = antes[campo] as Record<string, unknown>;
+      const d = depois[campo] as Record<string, unknown>;
+      const novo: Record<string, unknown> = { ...atual };
+      for (const chave of new Set([...Object.keys(atual), ...Object.keys(a), ...Object.keys(d)])) {
+        if (!isDeepStrictEqual(atual[chave], d[chave])) continue; // mudou depois da leitura: fica
+        if (chave in a) novo[chave] = a[chave];
+        else delete novo[chave];
+      }
+      alvo[campo] = novo;
+    }
+  }
 }
 
 /** A pergunta em aberto pede o nível ("é júnior, pleno ou sênior?"): o passo `perguntar_nivel` ou a abertura. */
@@ -434,6 +472,8 @@ export async function conduzirTurno(
   const nivelPerguntado = RE_PERGUNTA_DE_NIVEL.test(perguntaEmAberto(sessao.transcricao) ?? "");
   await lerFalaDela(sessao, texto, deps);
   const { passo, pendente } = planejar(sessao, "turno", nivelPerguntado);
+  // Como a sessão ficou depois de ler a fala dela: é o que `desfazerLeitura` compara para não pisar em outras escritas.
+  const depoisDaLeitura = copiarEstadoLido(sessao);
 
   // Com decisão pendente, o modelo recebe o passo em curso e a decisão no lugar da instrução. Nenhuma fala fixa
   // (encerramento, confirmação de tom, dicas e duração) sai sem aprovação ou pedido claro dela.
@@ -468,7 +508,7 @@ export async function conduzirTurno(
   if (movimento === "repetir" || movimento === "esclarecer") {
     // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
     // e o plano volta a ser o de antes.
-    Object.assign(sessao, antesDaFala);
+    desfazerLeitura(sessao, antesDaFala, depoisDaLeitura);
   } else if (pendente) {
     const desfecho = aplicarDecisaoDoModelo(sessao, pendente, resposta.decisao);
     if (desfecho.tipo === "adiar") {

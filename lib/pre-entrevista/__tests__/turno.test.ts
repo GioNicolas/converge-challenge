@@ -78,6 +78,23 @@ describe("conduzirTurno: repetir e esclarecer não mudam o plano", () => {
     assert.deepEqual(sessao.plano.perguntasPorTopico, { confirmou_inicio: 1, criterio_tecnico: 1, contexto: 1 });
   });
 
+  it("o que a extração gravou enquanto o Totti respondia sobrevive ao desfazer do repetir", async () => {
+    const { sessao } = await conversar(ATE_APROFUNDAR);
+    const falso = chatFalso(saida(PERGUNTA, "repetir"));
+    // A extração do turno anterior grava no rascunho durante a espera do modelo.
+    const chat: typeof falso.chat = async (op) => {
+      sessao.rascunho = { ...sessao.rascunho, eliminatorios: ["copiar sem entender"] } as typeof sessao.rascunho;
+      return falso.chat(op);
+    };
+    const antesPlano = structuredClone(sessao.plano);
+    await conduzirTurno(sessao, "desculpa, pode repetir a pergunta", {
+      chat,
+      ...jevFalso({ sinais: { dispensa_tecnico: 1 } }),
+    });
+    assert.deepEqual((sessao.rascunho as { eliminatorios?: unknown }).eliminatorios, ["copiar sem entender"]);
+    assert.deepEqual(sessao.plano, antesPlano);
+  });
+
   it("'quarenta e cinco minutos' dito dentro de um pedido de repetição não vira duração", async () => {
     const { sessao } = await conversar([
       ...ATE_APROFUNDAR,
