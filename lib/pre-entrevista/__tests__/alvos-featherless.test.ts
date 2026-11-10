@@ -59,12 +59,46 @@ test("competências: Featherless primeiro, OpenRouter por último", () => {
   assert.equal(ALVOS_COMPETENCIAS.at(-1)?.provedor, "openrouter");
 });
 
-test("conversa: Featherless primeiro e no máximo uma OpenRouter de reserva", (t) => {
-  fixarEnv(t, { CONVERSA_MODEL: undefined, CONVERSA_FALLBACK_MODEL: undefined });
+test("conversa: OpenRouter primeiro (gemini-3.5-flash-lite), Featherless de reserva, uma OpenRouter só", (t) => {
+  fixarEnv(t, { PRE_CONVERSA_MODEL: undefined, CONVERSA_MODEL: undefined });
   const alvos = alvosDaConversa();
-  assert.ok(featherlessAntesDaOpenrouter(alvos));
-  assert.equal(alvos[0].provedor, "featherless");
-  assert.ok(alvos.filter((a) => a.provedor === "openrouter").length <= 1, "uma reserva só");
+  assert.deepEqual(
+    alvos.map((a) => [a.provedor, a.model]),
+    [
+      ["openrouter", "google/gemini-3.5-flash-lite"],
+      ["featherless", "google/gemma-4-26B-A4B-it"],
+    ],
+  );
+  assert.equal(alvos.filter((a) => a.provedor === "openrouter").length, 1, "uma reserva só");
+
+  fixarEnv(t, { PRE_CONVERSA_MODEL: "google/gemini-2.5-flash-lite", CONVERSA_MODEL: "outro/modelo" });
+  const trocados = alvosDaConversa();
+  assert.equal(trocados[0].model, "google/gemini-2.5-flash-lite", "PRE_CONVERSA_MODEL troca o modelo da OpenRouter");
+  assert.equal(trocados[1].model, "outro/modelo", "CONVERSA_MODEL troca o da Featherless");
+});
+
+test("corpo do pedido: OpenRouter com gemini fixa o Google AI Studio; outros modelos e a Featherless não", async (t) => {
+  fixarEnv(t, { OPENROUTER_API_KEY: "chave-ficticia", FEATHERLESS_API_KEY: "chave-ficticia" });
+  const enviados: Array<{ url: string; corpo: { provider?: unknown; messages: Array<{ content: unknown }> } }> = [];
+  t.mock.method(globalThis, "fetch", (url: unknown, opcoes?: RequestInit) => {
+    enviados.push({ url: String(url), corpo: JSON.parse(String(opcoes?.body)) });
+    return Promise.resolve(Response.json({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }] }));
+  });
+  // Prompt de sistema longo (como o da conversa, ~6,9 mil caracteres): no OpenRouter vai marcado para o cache.
+  const messages = [
+    { role: "system" as const, content: "s".repeat(5_000) },
+    { role: "user" as const, content: "oi" },
+  ];
+  await chat({ alvos: [{ provedor: "openrouter", model: "google/gemini-3.5-flash-lite", timeoutMs: 5_000 }], messages });
+  await chat({ alvos: [{ provedor: "openrouter", model: "openai/gpt-4o-mini", timeoutMs: 5_000 }], messages });
+  await chat({ alvos: [{ provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 5_000 }], messages });
+
+  const [gemini, outro, featherless] = enviados;
+  assert.deepEqual(gemini.corpo.provider, { order: ["google-ai-studio"], allow_fallbacks: true });
+  assert.ok(Array.isArray(gemini.corpo.messages[0].content), "cache_control no prompt de sistema do OpenRouter");
+  assert.equal(outro.corpo.provider, undefined, "só o gemini é fixado");
+  assert.equal(featherless.corpo.provider, undefined, "a Featherless não recebe o campo do OpenRouter");
+  assert.equal(typeof featherless.corpo.messages[0].content, "string", "Featherless: sistema em texto simples");
 });
 
 test("fila: fundo nunca ocupa as duas vagas, e a fala passa na frente de fundo que já esperava", async (t) => {

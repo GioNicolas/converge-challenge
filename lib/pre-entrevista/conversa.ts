@@ -29,26 +29,26 @@ import { afirmacaoDaMemoria, pedidoDaRegra, perguntaDaMemoria, regrasDoFormato, 
 
 const TEMPERATURA_CONVERSA = 0.5;
 const MAX_TOKENS_CONVERSA = 400;
-/** Conversa vai para a voz: Featherless tem 6 s antes de cair para a OpenRouter, que tem 8 s. */
+/** A fala vai para a voz: a OpenRouter tem 4 s antes de cair para a Featherless, que tem 6 s (fila incluída). */
+const TIMEOUT_OPENROUTER_MS = 4_000;
 const TIMEOUT_FEATHERLESS_MS = 6_000;
-const TIMEOUT_OPENROUTER_MS = 8_000;
 
 /**
- * Featherless (principal) e OpenRouter (plano B). A Featherless tem 6 s (fila incluída) e a OpenRouter 8 s; quando
- * estouram, a fala passa para o próximo alvo.
+ * OpenRouter primeiro (gemini-3.5-flash-lite, p50 ~1,6 s no bench), Featherless de reserva (gemma, p50 ~2,6 s e cauda
+ * de 4 a 8 s). É a mesma escolha da entrevista (`lib/llm/index.ts`), pela latência da voz: a Featherless primeiro
+ * deixava a fala esperar a cauda. A OpenRouter vai com o provedor fixado no Google AI Studio (ver `pre-entrevista/llm.ts`).
  */
 export function alvosDaConversa(): Alvo[] {
   return [
     {
+      provedor: "openrouter",
+      model: process.env.PRE_CONVERSA_MODEL || "google/gemini-3.5-flash-lite",
+      timeoutMs: TIMEOUT_OPENROUTER_MS,
+    },
+    {
       provedor: "featherless",
       model: process.env.CONVERSA_MODEL || "google/gemma-4-26B-A4B-it",
       timeoutMs: TIMEOUT_FEATHERLESS_MS,
-    },
-    // Uma só reserva paga: a fala vai para a voz, então ela não pode faltar. Mais um alvo só custaria a espera.
-    {
-      provedor: "openrouter",
-      model: process.env.CONVERSA_FALLBACK_MODEL || "google/gemini-2.5-flash-lite",
-      timeoutMs: TIMEOUT_OPENROUTER_MS,
     },
   ];
 }

@@ -152,6 +152,11 @@ async function tentarAlvo(
           messages: alvo.provedor === "openrouter" ? comCacheDoSistema(o.messages) : o.messages,
           max_tokens: o.maxTokens,
           temperature: o.temperature,
+          // Gemini no OpenRouter: fixa o Google AI Studio, senão o cache do prompt leva o pedido para a Vertex (mais
+          // lenta). Mesmo ajuste de `buildExtraBody` em `lib/llm/openrouter.ts`, usado pela entrevista.
+          ...(alvo.provedor === "openrouter" && alvo.model.startsWith("google/gemini")
+            ? { provider: { order: ["google-ai-studio"], allow_fallbacks: true } }
+            : {}),
           ...alvo.extraBody,
         }),
         signal: prazoFala ?? AbortSignal.timeout(limite),
