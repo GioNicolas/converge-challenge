@@ -60,6 +60,10 @@ export const EsquemaSaidaScorecardLlm = z.object({
   pontos_fortes: z.array(z.string()),
   pontos_a_aprofundar: z.array(z.string()),
   briefing_para_proxima_etapa: z.string(),
+  /** O que o candidato propôs (componentes, fluxo de dados, escolhas principais). "" em scorecards antigos. */
+  resumo_da_solucao: z.string().default(""),
+  /** Como a entrevista foi: o que foi bem, o que faltou e a reação à mudança. "" em scorecards antigos. */
+  resumo_da_entrevista: z.string().default(""),
   /** Como o candidato reagiu à mudança no problema. null quando não houve mudança. Fora da nota geral. */
   adaptacao: z.object({
     nota: z.number().nullable(),
@@ -112,6 +116,9 @@ export type Scorecard = {
   pontos_fortes: string[];
   pontos_a_aprofundar: string[];
   briefing_para_proxima_etapa: string;
+  /** Ausentes em scorecards guardados antes deste campo: trate "" (ou ausente) como sem resumo. */
+  resumo_da_solucao?: string;
+  resumo_da_entrevista?: string;
   gerado_em: string;
   origem: "llm" | "fake";
   /** O que as guardas corrigiram (para o recrutador/dev; vazio = nada). */
@@ -307,7 +314,10 @@ function validarDesenho(e: SaidaScorecardLlm["criterios"][number]["evidencias"][
   };
 }
 
-export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): Scorecard {
+/** A saída do modelo com os resumos opcionais: a entrada do zod (com default) pode não trazê-los tipados. */
+type SaidaParaGuardas = Omit<SaidaScorecardLlm, "resumo_da_solucao" | "resumo_da_entrevista"> & Partial<Pick<SaidaScorecardLlm, "resumo_da_solucao" | "resumo_da_entrevista">>;
+
+export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): Scorecard {
   const ajustes: string[] = [];
   const { fontes } = p;
   const vistos = new Set<string>();
@@ -398,6 +408,9 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
   const pontosAAprofundar = (reverResumo ? criterios.filter(c => c.nota === null || c.nota < 3)
     .map(c => `Aprofundar ${nomes.get(c.criterio)}.`) : saida.pontos_a_aprofundar).map(legivel);
   const briefing = legivel(reverResumo ? "Revisar as evidências por critério e aprofundar os pontos sem cobertura antes de decidir." : saida.briefing_para_proxima_etapa);
+  // Resumo da entrevista feito antes de uma correção das guardas pode contradizer as notas finais: sai, e o cartão usa as justificativas.
+  const resumoDaSolucao = legivel((saida.resumo_da_solucao ?? "").trim());
+  const resumoDaEntrevista = reverResumo ? "" : legivel((saida.resumo_da_entrevista ?? "").trim());
   const ajustesLegiveis = ajustes.map(legivel);
   if (corrigiuTexto) ajustesLegiveis.push("Referências técnicas substituídas por nomes nos textos explicativos.");
 
@@ -410,6 +423,8 @@ export function aplicarGuardas(saida: SaidaScorecardLlm, p: ParametrosGuardas): 
     pontos_fortes: pontosFortes,
     pontos_a_aprofundar: pontosAAprofundar,
     briefing_para_proxima_etapa: briefing,
+    resumo_da_solucao: resumoDaSolucao,
+    resumo_da_entrevista: resumoDaEntrevista,
     gerado_em: (p.agora?.() ?? new Date()).toISOString(),
     origem: p.origem,
     ajustes: ajustesLegiveis,
@@ -601,6 +616,8 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     pontos_fortes: criterios.filter(c => c.nota !== null && c.nota >= 3).map(c => c.justificativa).slice(0, 3),
     pontos_a_aprofundar: criterios.filter(c => c.nota !== null && c.nota < 3).map(c => c.justificativa).slice(0, 3),
     briefing_para_proxima_etapa: "[fake] Scorecard determinístico construído do livro de observações.",
+    resumo_da_solucao: "[fake] Resumo da solução não foi escrito: scorecard determinístico.",
+    resumo_da_entrevista: "[fake] Resumo da entrevista não foi escrito: scorecard determinístico.",
   };
   // Sem modelo não há julgamento da adaptação: só os números medidos pela linha do tempo.
   return comAlertaDeInjecao(comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(saida, {

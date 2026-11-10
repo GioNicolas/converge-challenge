@@ -55,6 +55,9 @@ export type RelatorioVisto = {
   pontosFortes: string[];
   pontosAAprofundar: string[];
   briefing: string;
+  /** "" quando o scorecard é antigo (sem o campo): a tela não mostra o bloco. */
+  resumoDaSolucao: string;
+  resumoDaEntrevista: string;
   desenhoFinal: string | null;
   provasConferidas: number;
   ajustes: string[];
@@ -173,6 +176,8 @@ export function montarRelatorio(p: {
     pontosFortes: scorecard.pontos_fortes,
     pontosAAprofundar: scorecard.pontos_a_aprofundar,
     briefing: scorecard.briefing_para_proxima_etapa,
+    resumoDaSolucao: scorecard.resumo_da_solucao?.trim() ?? "",
+    resumoDaEntrevista: scorecard.resumo_da_entrevista?.trim() ?? "",
     desenhoFinal: imagens.length ? urlDaImagem(imagens[imagens.length - 1].numero) : null,
     provasConferidas: criterios.reduce((n, c) => n + c.provas.length, 0),
     ajustes: scorecard.ajustes,

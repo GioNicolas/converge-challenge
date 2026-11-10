@@ -287,6 +287,7 @@ describe("finalizar", () => {
     pontos_fortes: [],
     pontos_a_aprofundar: [],
     briefing_para_proxima_etapa: "b",
+    resumo_da_solucao: "", resumo_da_entrevista: "",
   });
 
   it("é idempotente (inclusive em paralelo): uma única chamada ao modelo final, com as opções certas", async () => {
