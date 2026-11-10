@@ -66,10 +66,39 @@ test("etapa concluída: responde, avisa a IDE e marca o momento-chave para a pr�
 test("resposta comum não marca etapa concluída", async () => {
   const session = getOrCreateSession(`comum-${Date.now()}`);
   saidas.push({ ...base, respond: true, concluded: false, reply: "Então você procura o complemento a cada passo." });
-  const r = await runInterviewerTurn(session, { messages: [{ role: "candidate", text: "eu procuro o complemento" }] });
+  const r = await runInterviewerTurn(session, { messages: [
+    { role: "agent", text: "O que esse laço de fora faz?" },
+    { role: "candidate", text: "eu procuro o complemento" },
+  ] });
   assert.equal(r.concluded, undefined);
   assert.equal(r.listening, undefined);
   assert.equal(session.etapaConcluidaEm, undefined);
+});
+
+// Entrevista real de 2026-11-10 (sessão 972b2a10): o candidato resmungava sozinho e o Totti respondia "entendi".
+test("fala solta sem pergunta: uma resposta que só reconhece não é falada, mas o que ele mostrou fica registrado", async () => {
+  const session = getOrCreateSession(`resmungo-${Date.now()}`);
+  saidas.push({ ...base, respond: true, concluded: false, end: true, reply: "Entendi, você está separando as contagens por passo.", evidence: { criterionId: "abordagem", note: "separa as contagens por passo" } });
+  const r = await runInterviewerTurn(session, { messages: [{ role: "candidate", text: "em dois por dois dá sete, ok, acho que separo as contagens" }] });
+  assert.deepEqual(r, { reply: "", commands: [], end: false, listening: true });
+  assert.equal(session.evidence.at(-1)?.note, "separa as contagens por passo");
+});
+
+test("fala solta: ele perguntou, chamou o Totti, travou ou avisou que terminou → o Totti responde", async () => {
+  const { reacaoDesnecessaria, respondendoAoTotti } = await import("../interviewer");
+  const saida = { ...base, respond: true, concluded: false, finish: false, reply: "Pode usar, sim." };
+  const fala = (text: string) => [{ role: "candidate" as const, text }];
+  assert.equal(reacaoDesnecessaria(saida, fala("agora eu somo os dois de trás"), false), true);
+  assert.equal(reacaoDesnecessaria(saida, fala("posso usar a biblioteca padrão"), true), false, "perguntou");
+  assert.equal(reacaoDesnecessaria(saida, fala("totti eu vou começar pelo caso simples"), false), false, "chamou pelo nome");
+  assert.equal(reacaoDesnecessaria(saida, fala("travei aqui nesse laço"), false), false, "travado");
+  assert.equal(reacaoDesnecessaria({ ...saida, concluded: true }, fala("pronto terminei essa parte"), false), false, "etapa concluída");
+  assert.equal(reacaoDesnecessaria({ ...saida, reply: "Saquei. Por que começar por aí?" }, fala("vou pelo mais direto"), false), false, "a fala pergunta algo");
+  // Respondendo a uma pergunta que o Totti fez (o assunto fechou por silêncio e a resposta veio como fala livre).
+  const respondendo = [{ role: "agent" as const, text: "Qual é a ideia aqui?" }, { role: "candidate" as const, text: "divido n por dois e arredondo" }];
+  assert.equal(respondendoAoTotti(respondendo), true);
+  assert.equal(reacaoDesnecessaria(saida, respondendo, false), false);
+  assert.equal(respondendoAoTotti([{ role: "agent", text: "Pode seguir." }, { role: "candidate", text: "beleza vou seguir" }]), false);
 });
 
 test("falha do LLM: a fala de reserva não se repete na mesma sessão", async () => {
@@ -129,4 +158,47 @@ test("abertura: se o entrevistador já perguntou do plano numa fala livre, ela n
   assert.equal(decideBlip(session, agora).blip, undefined);
   assert.equal(session.queue.find((q) => q.kickoff)?.status, "stale");
   assert.match(perdeuAVez(session, session.queue.find((q) => q.kickoff)!, 0) ?? "", /já perguntou/);
+});
+
+// Sessão 972b2a10: ele colou da web uma solução diferente da que vinha escrevendo e o Totti não comentou.
+test("colagem: a pergunta é escrita pelo modelo vendo o que havia antes; se o modelo falha, sai a de reserva com o grifo", async () => {
+  const { enqueueCola, decideBlip } = await import("../policy");
+  const { appendEvent } = await import("@/lib/session/store");
+  const config = { ...DEFAULT_CONFIG, problemId: "climbing-stairs", durationMin: 15 };
+  const session = getOrCreateSession(`cola-fala-${Date.now()}`, config);
+  const id = session.sessionId;
+  let agora = 0;
+  session.clock = () => agora;
+  appendEvent(session, { type: "session_started", sessionId: id, t: 0, configId: config.id, problemId: config.problemId, language: "python" });
+  const antes = "def climb_stairs(n):\n    um_por_um = n/2\n    if um_por_um%10 != 0:\n        um_por_um = int(um_por_um) + 1\n    pass\n";
+  const colado = "def climb_stairs(n):\n    if n <= 2:\n        return n\n    anterior, atual = 1, 2\n    for _ in range(3, n + 1):\n        anterior, atual = atual, anterior + atual\n    return atual\n";
+  appendEvent(session, { type: "snapshot", sessionId: id, t: 199_000, code: antes, version: 1, language: "python" });
+  appendEvent(session, { type: "snapshot", sessionId: id, t: 260_000, code: colado, version: 2, language: "python" });
+  const colou = { type: "paste" as const, sessionId: id, t: 260_000, chars: 180, lines: 6, startLine: 2 };
+  appendEvent(session, colou);
+  assert.equal(enqueueCola(session, colou), true);
+  agora = 263_000;
+  const blip = decideBlip(session, agora).blip!;
+  assert.equal(blip.passaNaFrente, true);
+
+  saidas.push({ ...base, respond: true, concluded: false, reply: "Você vinha montando a conta com um_por_um e agora entrou esse laço com anterior e atual. De onde veio essa mudança, e como ela funciona?", highlight: { startLine: 4, endLine: 6 } });
+  const r = await runInterviewerTurn(session, { blipId: blip.id, messages: [] });
+  assert.equal(chamadasAoEntrevistador, 1, "a abertura da colagem passa pelo modelo");
+  assert.match(r.reply, /um_por_um/);
+  assert.equal(r.end, false);
+  assert.deepEqual(r.commands, [{ type: "highlight_range", startLine: 4, endLine: 6 }]);
+
+  // Modelo fora do ar: a pergunta de reserva, sobre a troca, com o grifo do trecho colado.
+  const reserva = await runInterviewerTurn(session, { blipId: blip.id, messages: [] });
+  assert.match(reserva.reply, /entrou de uma vez/);
+  assert.match(reserva.reply, /diferente do que você vinha escrevendo/);
+  assert.equal(reserva.end, false);
+});
+
+test("prompt: colagem vira conversa, encerramento não pergunta do plano do começo e fala que não é com ele fica sem resposta", () => {
+  const sistema = buildInterviewerSystem(DEFAULT_CONFIG, getProblem(DEFAULT_CONFIG.problemId));
+  assert.match(sistema, /## Tipo: cola/);
+  assert.match(sistema, /de onde veio e se ele entende o que colou/);
+  assert.match(sistema, /Nunca pergunte como ele planejou ou pensou "antes de começar"/);
+  assert.match(sistema, /Fala que não é com você → respond = false/);
 });

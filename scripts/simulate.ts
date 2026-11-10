@@ -16,7 +16,7 @@ import { runInterviewerTurn } from "@/lib/agents/interviewer";
 import { faseDaEntrevista } from "@/lib/agents/fase";
 import { resumoDoCusto } from "./custo";
 import { disparaAnalise } from "@/lib/agents/gatilhos";
-import { allPassed, decideBlip, enqueueKickoff, lastBlipDecision } from "@/lib/agents/policy";
+import { allPassed, decideBlip, enqueueCola, enqueueKickoff, lastBlipDecision } from "@/lib/agents/policy";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { normalizarConfig } from "@/lib/config/store";
 import { type Blip, type ChatMessage, InterviewConfig, type Report, type SessionEvent } from "@/lib/contracts";
@@ -374,6 +374,8 @@ async function simulate(persona: Persona): Promise<SimResult> {
     appendEvent(session, event);
     if (event.type === "session_started") enqueueKickoff(session, event.t);
     if (event.type === "session_ended" && (!LINHA_DO_TEMPO || COM_RELATORIO)) startEvaluation(session);
+    // Como em /api/events: a colagem grande já entra na fila com a pergunta dela.
+    if (event.type === "paste") enqueueCola(session, event);
     if (disparaAnalise(event, session)) await runAnalyst(session, event);
     handleBlip(decideBlip(session, simT));
   }

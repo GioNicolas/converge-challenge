@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { disparaAnalise } from "@/lib/agents/gatilhos";
 import { startEvaluation, waitForEvaluation } from "@/lib/agents/evaluator";
-import { decideBlip, enqueueKickoff } from "@/lib/agents/policy";
+import { decideBlip, enqueueCola, enqueueKickoff } from "@/lib/agents/policy";
 import { resolveConfig } from "@/lib/config/store";
 import { prewarmPyodide } from "@/lib/execution/pyodide-node";
 import { EventsResponse, SessionEvent, type InterviewConfig } from "@/lib/contracts";
@@ -55,7 +55,12 @@ export async function POST(request: Request) {
     // Na Vercel, o que roda depois da resposta é interrompido a menos que a plataforma saiba que ainda há trabalho.
     after(() => waitForEvaluation(session).then(() => guardarSessao(session)));
   }
-  if (disparaAnalise(event, session)) {
+  // Colou um bloco: a pergunta sobre ele entra na fila na hora, sem LLM. A análise do código novo roda depois da
+  // resposta: esperar por ela (6 a 15 s) atrasava a pergunta que já está pronta.
+  const colou = event.type === "paste" && enqueueCola(session, event);
+  if (colou) {
+    after(() => runAnalyst(session, event).then(() => guardarSessao(session)).catch((err) => console.error("[events] analista falhou:", err)));
+  } else if (disparaAnalise(event, session)) {
     try {
       await runAnalyst(session, event);
     } catch (err) {
