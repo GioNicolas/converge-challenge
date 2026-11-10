@@ -34,20 +34,19 @@ const TIMEOUT_FEATHERLESS_MS = 6_000;
 const TIMEOUT_OPENROUTER_MS = 8_000;
 
 /** Featherless (principal) e OpenRouter (plano B). Cada alvo tem 12 s antes de passar adiante. */
-function alvosDaConversa(): Alvo[] {
+export function alvosDaConversa(): Alvo[] {
   return [
     {
       provedor: "featherless",
       model: process.env.CONVERSA_MODEL || "google/gemma-4-26B-A4B-it",
       timeoutMs: TIMEOUT_FEATHERLESS_MS,
     },
+    // Uma só reserva paga: a fala vai para a voz, então ela não pode faltar. Mais um alvo só custaria a espera.
     {
       provedor: "openrouter",
       model: process.env.CONVERSA_FALLBACK_MODEL || "google/gemini-2.5-flash-lite",
       timeoutMs: TIMEOUT_OPENROUTER_MS,
     },
-    // Terceiro alvo: outro modelo da OpenRouter, diferente do flash-lite, para não cair junto com ele.
-    { provedor: "openrouter", model: "openai/gpt-4o-mini", timeoutMs: TIMEOUT_OPENROUTER_MS },
   ];
 }
 

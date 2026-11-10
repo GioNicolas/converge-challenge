@@ -34,10 +34,14 @@ export interface ResultadoCompetencias {
   tentativas: Tentativa[];
 }
 
-/** OpenRouter primeiro (8 s), depois Featherless (10 s). Qualquer falha segue sem competências. */
-const ALVOS: Alvo[] = [
+/**
+ * Featherless primeiro (gemma, plano fixo), OpenRouter só de reserva. A chamada é feita ao criar a sessão, em
+ * segundo plano (fila "fundo"). O timeout da Featherless é 15 s, porque ela pode passar dos 8 s do alvo antigo.
+ * Qualquer falha segue sem competências.
+ */
+export const ALVOS: Alvo[] = [
+  { provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 15_000 },
   { provedor: "openrouter", model: "google/gemini-2.5-flash-lite", timeoutMs: 8_000 },
-  { provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 10_000 },
 ];
 
 const Competencias = z.array(
@@ -118,7 +122,7 @@ export async function extrairCompetencias(vaga: Vaga): Promise<ResultadoCompeten
 
   let resposta: Awaited<ReturnType<typeof chat>>;
   try {
-    resposta = await chat({ alvos: ALVOS, messages: mensagens, temperature: 0, maxTokens: 800 });
+    resposta = await chat({ alvos: ALVOS, messages: mensagens, temperature: 0, maxTokens: 800, prioridade: "fundo" });
   } catch (err) {
     return {
       competencias: [],

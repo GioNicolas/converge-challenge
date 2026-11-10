@@ -19,24 +19,37 @@ import { alinharPesos, mudarModo, Origem, Rascunho, type Turno } from "./rascunh
 const TEMPERATURA = 0.2;
 const MAX_TOKENS_EXTRATOR = 12000;
 
+const GLM = "zai-org/GLM-5.2";
+const GEMMA = "google/gemma-4-26B-A4B-it";
+
 /**
- * Alvos do extrator, em ordem: OpenRouter (rápido, ~3 s) primeiro e o GLM na Featherless de reserva. Com o GLM na
- * frente, cada extração podia levar até 15 s (mais as esperas de 503) antes de cair para a OpenRouter, e o
- * "Montando o plano…" esperava por ela. O GLM vai com o raciocínio desligado: sem isso uma chamada levava ~170 s.
+ * Alvos do extrator, em ordem: as duas Featherless primeiro (plano fixo, sem cobrança por chamada) e a OpenRouter só
+ * como última reserva. A extração roda a cada fala dela, em segundo plano, então a OpenRouter aqui era o custo
+ * que mais pesava. `EXTRACTOR_MODEL` escolhe a primária (padrão: GLM, que deu a melhor configuração na medição);
+ * a outra Featherless vem em seguida. O GLM vai com o raciocínio desligado: sem isso uma chamada levava ~170 s.
  */
 export function alvosDoExtrator(): Alvo[] {
-  const rapido = process.env.EXTRACTOR_FALLBACK_MODEL || "google/gemini-2.5-flash-lite";
+  const primario = process.env.EXTRACTOR_MODEL || GLM;
+  const segundo = primario === GEMMA ? GLM : GEMMA;
   return [
-    { provedor: "openrouter", model: rapido, timeoutMs: 15000 },
+    alvoFeatherless(primario, 20000),
+    alvoFeatherless(segundo, 20000),
+    // Reserva paga: só entra quando as duas Featherless falham.
     {
-      provedor: "featherless",
-      model: process.env.EXTRACTOR_MODEL || "zai-org/GLM-5.2",
-      extraBody: { chat_template_kwargs: { enable_thinking: false } },
+      provedor: "openrouter",
+      model: process.env.EXTRACTOR_FALLBACK_MODEL || "google/gemini-2.5-flash-lite",
       timeoutMs: 15000,
     },
-    // Terceiro alvo: outro modelo na Featherless, para quando a OpenRouter e o GLM falham.
-    { provedor: "featherless", model: "google/gemma-4-26B-A4B-it", timeoutMs: 20000 },
   ];
+}
+
+function alvoFeatherless(model: string, timeoutMs: number): Alvo {
+  return {
+    provedor: "featherless",
+    model,
+    ...(model.startsWith("zai-org/GLM") ? { extraBody: { chat_template_kwargs: { enable_thinking: false } } } : {}),
+    timeoutMs,
+  };
 }
 
 const ConfirmadoParcial = Rascunho.shape.confirmado.partial();
@@ -389,6 +402,8 @@ export async function extrair(r: Rascunho, transcricao: Turno[], contexto: Conte
         temperature: TEMPERATURA,
         // Raciocínio consome tokens e segundos antes do JSON. Com ele desligado a chamada cai para poucos segundos.
         maxTokens: MAX_TOKENS_EXTRATOR,
+        // Segundo plano: a fila da Featherless deixa a vaga livre para a fala da recrutadora.
+        prioridade: "fundo",
       });
     } catch (err) {
       if (err instanceof ErroChat) tentativas.push(...err.tentativas);
