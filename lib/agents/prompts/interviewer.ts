@@ -99,9 +99,10 @@ Você acabou de trazer uma MUDANÇA no problema (sua primeira fala, já feita, f
 
 ## Tipo: encerramento
 O candidato clicou para finalizar a entrevista. É a última conversa: você tem uma lista de PONTOS PENDENTES (perguntas preparadas e critérios da vaga que ainda não apareceram) e precisa passar por eles antes de ele sair.
-1. Primeira fala: avise em poucas palavras e já faça a pergunta do primeiro ponto ("Antes de você encerrar, queria fechar uns pontos rápidos. <pergunta>"). Se o ponto é uma pergunta preparada, use ela quase com as mesmas palavras e o highlight dela; se é um critério, faça uma pergunta sobre ele ligada ao código dele, com highlight.
-2. Um ponto por vez, na ordem, e UMA pergunta por fala: mesmo no fim, não junte dois pontos nem duas perguntas na mesma fala. No máximo 1 aprofundamento por ponto. Ao passar para o próximo, registre o probeOutcome do ponto que terminou (critério da pergunta preparada, ou o critério do ponto).
-3. Passou por todos, ou ele pediu para encerrar logo: feche agradecendo, sem avaliar ("Valeu, era isso. Pode finalizar.") com end = true e o probeOutcome do último ponto.
+1. Primeira fala: avise em poucas palavras e já faça a pergunta do primeiro ponto ("Antes de você encerrar, queria fechar uns pontos rápidos. <pergunta>"). Se o ponto é uma pergunta preparada, use ela quase com as mesmas palavras.
+2. Grifo: cada ponto diz as próprias linhas ("[linhas a-b]" ou "[sem linhas]"). Em cada fala, highlight são as linhas do ponto de que ESTA fala trata; ponto sem linhas → highlight null. Nunca use as linhas de outro ponto, e nunca diga "grifado", "esse trecho" ou "aqui" sem mandar o highlight nessa mesma fala.
+3. Um ponto por vez, na ordem, e UMA pergunta por fala, sem aprofundar: ouviu a resposta, passe para o próximo ponto. Ao passar, registre o probeOutcome do ponto que terminou (critério da pergunta preparada, ou o critério do ponto).
+4. Ele respondeu ao último ponto, ou pediu para encerrar logo: feche agradecendo, sem avaliar e sem pergunta ("Valeu, era isso.") com end = true e o probeOutcome do último ponto. Ele já quer sair: não traga assunto novo.
 As mesmas regras de nunca entregar a solução, nunca apontar erro e nunca elogiar continuam valendo.
 
 ## Fechar
@@ -225,10 +226,10 @@ export function buildInterviewerUser(input: InterviewerTurnInput): string {
 Critério: ${input.criterion ?? "(livre)"}${input.probeGuide ? `\nO que vale sondar nele: ${input.probeGuide}` : ""}${input.challengeSummary ? `\nDesafio que ele topou antes: ${input.challengeSummary}` : ""}${input.closingTopics ? `\nPontos pendentes, na ordem:\n${input.closingTopics.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}` : ""}
 Pergunta preparada: ${input.question}
 Tema para aprofundar: ${input.followUpTopic}
-Linhas da pergunta: ${input.questionHighlight ? `${input.questionHighlight.startLine}-${input.questionHighlight.endLine}` : "(nenhuma)"}
+Linhas da pergunta: ${input.kind === "encerramento" ? "(veja as linhas de cada ponto)" : input.questionHighlight ? `${input.questionHighlight.startLine}-${input.questionHighlight.endLine}` : "(nenhuma)"}
 ${
         input.kind === "encerramento"
-          ? `Suas falas até agora nesta conversa: ${input.messages.filter((m) => m.role === "agent").length} (um ponto por vez, no máximo 1 aprofundamento por ponto)`
+          ? `Suas falas até agora nesta conversa: ${input.messages.filter((m) => m.role === "agent").length} (um ponto por vez, sem aprofundar; o servidor fecha depois do último ponto)`
           : `Aprofundamentos já feitos nesta conversa: ${Math.max(0, input.messages.filter((m) => m.role === "agent").length - 1)} (máximo 1; o servidor corta o que passar disso)`
       }
 Critérios ainda não explorados: ${input.uncovered.length ? input.uncovered.join(" | ") : "(todos já explorados)"}`

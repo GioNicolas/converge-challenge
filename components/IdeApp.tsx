@@ -39,10 +39,16 @@ const FALA_SILENCIO_MS = PAUSA_FIM_DA_FALA_MS;
 const FALA_ESPERA_MAX_MS = 12_000;
 /** Depois de uma fala do Totti, ele espera isso antes de puxar outro assunto (o candidato precisa de vez). */
 const PAUSA_ENTRE_FALAS_MS = 8000;
-/** Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. */
-const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 12_000;
+/**
+ * Depois da apresentação, o tempo de ler o enunciado antes da primeira pergunta. Com 12 s a pergunta chegava com o
+ * candidato ainda no meio do enunciado. Se ele começar a codar ou contar o plano antes, a abertura nem sai
+ * (lib/agents/policy.ts, perdeuAVez).
+ */
+const LEITURA_DEPOIS_DA_APRESENTACAO_MS = 45_000;
 /** Teto da espera da apresentação por uma fala do candidato em andamento. */
 const APRESENTACAO_ESPERA_MAX_MS = 8000;
+/** Fala com pelo menos isso de palavras é uma explicação: a pergunta que chegou antes dela perde a vez. */
+const PALAVRAS_FALA_LONGA = 12;
 /** Digitou há menos que isso: ele está no meio do código, então o Totti pede licença antes de perguntar. */
 const LICENCA_SE_DIGITOU_MS = 12_000;
 
@@ -183,9 +189,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   // Fala do candidato (Scribe, ou o navegador como reserva): vai para a conversa, que decide pela intenção se o
   // Totti responde (dúvida, feedback, etapa concluída, resposta à pergunta dele) ou só ouve (pensando em voz alta).
   const falaRef = useRef<(texto: string) => void>(() => {});
+  /** Quando ele terminou a última fala longa (explicando algo): uma pergunta que chegou antes disso perde a vez. */
+  const ultimaFalaLongaEmRef = useRef(0);
   falaRef.current = (texto) => {
     const limpo = texto.trim();
     if (!limpo || session.ended) return;
+    if (limpo.split(/\s+/).length >= PALAVRAS_FALA_LONGA) ultimaFalaLongaEmRef.current = Date.now();
     conversa.ouvir(limpo);
   };
   // Turn-taking: os trechos finais da transcrição se acumulam e só seguem para o Totti depois de ~3 s sem voz
@@ -293,10 +302,21 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const ocupada = conversa.ocupada;
   const fioRef = conversa.fioRef;
   const ultimaFalaDoAgenteEmRef = conversa.ultimaFalaDoAgenteEmRef;
+  const enviarEvento = session.sendEvent;
   useEffect(() => {
     if (!balao || finalizando || session.ended) return;
+    const chegouEm = Date.now();
     const id = setInterval(() => {
       const agora = Date.now();
+      // Ele explicou bastante coisa depois que a pergunta chegou (ex.: contou o plano): ela pode já ter sido
+      // respondida. Sai sem ser dita e sem pedir licença; a próxima análise, que ouviu a fala, decide de novo.
+      // Era o "Ei, posso te perguntar?" logo depois de ele contar o plano, e a mesma pergunta em seguida.
+      if (balao.perdeAVez && ultimaFalaLongaEmRef.current > chegouEm) {
+        clearInterval(id);
+        tirarBalao(null);
+        void enviarEvento({ type: "blip_closed", blipId: balao.id, reason: "agent" });
+        return;
+      }
       if (!saudacaoTerminadaEmRef.current || fioRef.current || ocupada() || vozEstadoRef.current !== "inativa" || bufferFalaRef.current) return;
       if (agora - saudacaoTerminadaEmRef.current < LEITURA_DEPOIS_DA_APRESENTACAO_MS) return;
       if (agora - ultimaFalaDoAgenteEmRef.current < PAUSA_ENTRE_FALAS_MS) return;
@@ -314,7 +334,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       else void abrirFio(balao);
     }, 150);
     return () => clearInterval(id);
-  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, pedirLicenca, ocupada, fioRef, ultimaFalaDoAgenteEmRef]);
+  }, [balao, finalizando, session.ended, tirarBalao, abrirFio, pedirLicenca, ocupada, fioRef, ultimaFalaDoAgenteEmRef, enviarEvento]);
 
   /** Dev: solta o empecilho agora, sem esperar as regras de tempo. */
   async function forcarEmpecilho() {
@@ -330,7 +350,13 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
 
   /** Pediu, falando, para encerrar: o Totti se despede e a sessão fecha, sem a última pergunta do botão. */
   async function encerrarPelaVoz() {
-    if (session.sessionId === null || finalizandoRef.current || session.ended) return;
+    if (session.sessionId === null || session.ended) return;
+    // Já na última conversa (os pontos pendentes do Finalizar): pedir para encerrar fecha ela, e o fechamento dela
+    // se despede e encerra. Antes o pedido era ignorado e ele ficava preso perguntando "como eu encerro?".
+    if (finalizandoRef.current) {
+      if (fioDoEncerramentoRef.current && conversa.fioRef.current?.blip.id === fioDoEncerramentoRef.current) conversa.fecharFio("agent");
+      return;
+    }
     finalizandoRef.current = true;
     setFinalizando(true);
     session.setIncomingBlip(null);

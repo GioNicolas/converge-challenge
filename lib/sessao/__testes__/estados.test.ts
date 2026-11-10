@@ -277,3 +277,9 @@ test("pergunta de continuação mantém o fio ativo, com a fala nova", () => {
   const livre = transicionar({ ...estadoInicial(), fase: "APROFUNDAMENTO" }, { tipo: "SEGUIMENTO", pergunta: "x?" }, 0);
   assert.equal(livre.perguntaAtiva, null);
 });
+
+test("a pergunta pendente cai se a fala do candidato já respondeu a ela (sem repetir a pergunta)", () => {
+  const pendente = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: { ...duvida, pergunta: "Onde fica o gargalo de escrita no banco?" } }, 0);
+  assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU", texto: "acho que o gargalo vai ser a escrita no banco principal" }, 1).plin, "LIVRE");
+  assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU", texto: "vou colocar um cache na frente da API" }, 1).plin, "PLIN_PENDENTE");
+});

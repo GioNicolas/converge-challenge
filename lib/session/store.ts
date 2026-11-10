@@ -88,10 +88,14 @@ export function appendEvent(session: SessionState, event: SessionEvent): void {
       // pendingBlipId continua até o blip_closed: nada de blip novo com a conversa aberta.
       break;
     }
-    case "blip_closed":
+    case "blip_closed": {
       if (session.pendingBlipId === event.blipId) session.pendingBlipId = undefined;
+      // Fechada sem nunca ter sido aberta (a IDE a descartou: perdeu a vez): não volta para a fila.
+      const fechada = session.queue.find((q) => q.id === event.blipId);
+      if (fechada?.status === "blipped") fechada.status = "stale";
       session.lastConversationEndedAt = event.t;
       break;
+    }
     case "blip_snoozed": {
       // Só o balão que está na tela pode ser adiado: um já aberto ou antigo é ignorado.
       if (session.pendingBlipId !== event.blipId) break;

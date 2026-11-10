@@ -34,7 +34,7 @@ import { FilaDoAgente, type Descartado, type MotivoDoDescarte, type OrigemDaFala
 import { apontarEAnotar } from "@/lib/presenca/coreografia";
 import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
 import { interrupcaoAtrasada, motivoDoMomento, RITMO } from "@/lib/interrupcao/politica";
-import { LICENCA_DE_NOVO_MS, LICENCA_SEM_RESPOSTA_MS, liberouAPergunta } from "@/lib/conversa/licenca";
+import { LICENCA_DE_NOVO_MS, LICENCA_SEM_RESPOSTA_MS, liberouAPergunta, pedeParaEncerrar } from "@/lib/conversa/licenca";
 import {
   estadoInicial,
   marcoDeFase,
@@ -553,6 +553,8 @@ export function useEntrevista(
     const p = estadoAtual.current.perguntaAtiva;
     if (numeroPergunta === null || !p || !quadro) return;
     const grupo = `pergunta:${numeroPergunta}`;
+    // O gesto de uma resposta anterior (grupo conversa:N) não fica na tela durante a pergunta nova.
+    limparVisualDaConversa();
     const alvos = p.elementos
       .map((curto) => conversor.current.idReal(curto))
       .filter((id): id is string => !!id);
@@ -592,7 +594,7 @@ export function useEntrevista(
       controle.abort();
       void (coreografia ?? Promise.resolve()).then(() => quadro.agente.apagarGrupo(grupo));
     };
-  }, [numeroPergunta, quadro, cursor, dizer, silenciarSeAtual, registrar, descarregarJa]);
+  }, [numeroPergunta, quadro, cursor, dizer, silenciarSeAtual, registrar, descarregarJa, limparVisualDaConversa]);
 
   // A entrevista é só por voz: uma pergunta do Totti não espera clique. Ela fica pendente até a vez dele
   // (candidato em pausa, nada tocando, nenhum pedido em andamento) e então é dita sozinha.
@@ -860,6 +862,11 @@ export function useEntrevista(
       const atual = estadoAtual.current;
       if (!texto || !sessao || atual.fase === "AGUARDANDO" || atual.fase === "ENCERRADA") return { requisito: null };
       // Resposta ao pedido de licença: "pode" faz a pergunta; "espera" (ou "agora não") deixa para depois.
+      // "Pode encerrar" não responde à licença: segue para o /perguntar, que fecha a entrevista.
+      if (licencaPedidaEm.current !== null && pedeParaEncerrar(texto)) {
+        licencaPedidaEm.current = null;
+        licencaDeNovoEm.current = Date.now() + LICENCA_DE_NOVO_MS;
+      }
       if (licencaPedidaEm.current !== null) {
         licencaPedidaEm.current = null;
         registrar("fala", { quem: "candidato", texto });
@@ -877,7 +884,7 @@ export function useEntrevista(
       ultimaAtividade.current = Date.now();
       revisaoDaConversa.current++;
       limparVisualDaConversa();
-      enviar({ tipo: "CANDIDATO_CONTINUOU" });
+      enviar({ tipo: "CANDIDATO_CONTINUOU", texto });
       // A fala junta as partes da anterior, que ele continuou antes de ouvir a resposta: a anterior (e a resposta
       // que não tocou) saem do histórico. Ver lib/audio/filaFalas.ts.
       const marcarRespostaComoAtual = () => { versaoRespostaConversa.current = versaoDaFala.current; };

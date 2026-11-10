@@ -7,7 +7,7 @@ import { buildInterviewerSystem, buildInterviewerUser, candidatoPerguntou, type 
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
 import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas } from "@/lib/agents/fase";
-import { findBlipQuestion, nextHint } from "@/lib/agents/policy";
+import { findBlipQuestion, nextHint, perdeuAVez } from "@/lib/agents/policy";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
@@ -85,6 +85,13 @@ async function turno(
   // dois segundos e às vezes um "oi, tudo bem?" no meio da entrevista). Só o encerramento, que junta vários
   // pontos pendentes numa fala, passa pelo modelo.
   if (found && req.messages.length === 0 && found.question.kind !== "encerramento") {
+    // Entre a pergunta nascer e a pausa para falar, ele pode já ter contado o plano ou ouvido o mesmo: fica quieto.
+    const motivo = perdeuAVez(session, found.question, found.blip.createdAt);
+    if (motivo) {
+      console.info(`[interviewer] ${found.question.id}: ${motivo}`);
+      found.question.status = "stale";
+      return { reply: "", commands: [{ type: "clear_highlights" }], end: true };
+    }
     const grifo = found.question.highlight;
     const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
     return { reply: found.question.question, commands: highlightCommands(util ? grifo : undefined), end: false };
@@ -170,6 +177,14 @@ async function turno(
         question, req.messages, opening,
       );
     }
+    // Encerramento com todos os pontos já perguntados: a resposta dele ao último é o fim. Ficar ouvindo deixava o
+    // candidato esperando ~30 s até perguntar "tem mais alguma pergunta?".
+    if (!opening && question?.kind === "encerramento" && (output.respond === false || output.reply.trim() === "")
+      && perguntasSeguidas(req.messages) >= limiteDePerguntas(question)) {
+      registrarEvidencia(session, output);
+      session.lastConversationEndedAt = elapsedMs(session);
+      return { reply: falaNaoRepetida(FECHAR_O_ENCERRAMENTO, falasDoAgente(session, req.messages)), commands: [{ type: "clear_highlights" }], end: true };
+    }
     if (!opening && (output.respond === false || output.reply.trim() === "")) {
       registrarEvidencia(session, output);
       return { reply: "", commands: [], end: false, listening: true };
@@ -236,7 +251,7 @@ async function turno(
   else if (!output.end && !output.reply.trim().endsWith("?")) output = { ...output, end: true };
   // Antes de ele escrever código, uma pergunta sobre o plano basta: depois disso ele é liberado para codar.
   // Sem isso a conversa virava um interrogatório (por que, custo, bordas...) antes da primeira linha.
-  if (!found && input.fase === "entendendo" && jaPerguntouDoPlano(req.messages) && output.reply.trim().endsWith("?")) {
+  if (!found && input.fase === "entendendo" && (jaPerguntouDoPlano(req.messages) || jaPerguntouNaSessao(session)) && output.reply.trim().endsWith("?")) {
     output = { ...output, reply: liberarParaCodar(output.reply), end: true, highlight: null };
   }
   // Grifo só com propósito: a fala tem que citar algo que está nas linhas grifadas.
@@ -361,30 +376,38 @@ export function perguntasSeguidas(messages: ChatMessage[]): number {
  * candidato voltar para o código. Fora de uma pergunta sua, uma pergunta só. O encerramento e a mudança no
  * problema têm o próprio ritmo.
  */
-export function limiteDePerguntas(question: { kind?: string; kickoff?: boolean } | undefined): number {
+export function limiteDePerguntas(question: PerguntaDoLimite | undefined): number {
   if (!question) return 1;
   if (question.kind === "empecilho") return Number.POSITIVE_INFINITY;
-  // Dois pontos, com um aprofundamento cada, no máximo.
-  if (question.kind === "encerramento") return 4;
+  // Uma pergunta por ponto pendente, sem aprofundar: ele já clicou para sair. Com aprofundamento eram quatro
+  // perguntas e o Totti não encerrava depois dos pontos.
+  if (question.kind === "encerramento") return Math.max(1, question.closingTopics?.length ?? 2);
   if (question.kickoff) return 1;
   if (question.kind === "retorno") return 3;
   return 2;
 }
 
 /** Passou do limite de perguntas seguidas: reconhece, tira a pergunta e devolve a vez para o código. */
+type PerguntaDoLimite = { kind?: string; kickoff?: boolean; closingTopics?: string[] };
+
+/** No encerramento, o corte despede (a IDE diz o tchau depois); nas outras conversas, devolve para o código. */
+const FECHAR_O_ENCERRAMENTO = ["Era isso que eu queria fechar.", "Era isso, obrigado pelas respostas."];
+
 export function limitarPerguntas(
   output: InterviewerOutput,
-  question: { kind?: string; kickoff?: boolean } | undefined,
+  question: PerguntaDoLimite | undefined,
   messages: ChatMessage[],
   opening: boolean,
 ): InterviewerOutput {
   if (opening || output.respond === false || output.finish === true || !output.reply.trim().endsWith("?")) return output;
   // Perguntou algo ou está travado: a pergunta do Totti ali é ajuda (o que ele está vendo, onde travou), não
   // interrogatório. Cortar deixava um "Pode seguir." seco para quem acabou de dizer que não sabe seguir.
-  if (candidatoPerguntou(messages) || travado(messages)) return output;
+  const encerramento = question?.kind === "encerramento";
+  if (!encerramento && (candidatoPerguntou(messages) || travado(messages))) return output;
   if (perguntasSeguidas(messages) + 1 <= limiteDePerguntas(question)) return output;
   const jaDitas = messages.filter((m) => m.role === "agent").map((m) => m.text);
-  return { ...output, reply: semPerguntaNoFim(output.reply, falaNaoRepetida(DEVOLVER_PARA_O_CODIGO, jaDitas)), end: true, highlight: null };
+  const fechamento = falaNaoRepetida(encerramento ? FECHAR_O_ENCERRAMENTO : DEVOLVER_PARA_O_CODIGO, jaDitas);
+  return { ...output, reply: semPerguntaNoFim(output.reply, fechamento, encerramento), end: true, highlight: null };
 }
 
 /** Ele diz que não sabe seguir, não entendeu ou travou. */
@@ -432,9 +455,10 @@ function falaSoDeReconhecer(reply: string): boolean {
 }
 
 /** Tira as perguntas do fim da fala e põe o fechamento no lugar (mantém a reação curta do começo, se houver). */
-function semPerguntaNoFim(reply: string, fechamento: string): string {
+function semPerguntaNoFim(reply: string, fechamento: string, sempreFechar = false): string {
   const frases = reply.trim().split(/(?<=[.!?])\s+/);
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  if (sempreFechar) return [...frases.slice(0, 1), fechamento].join(" ");
   // Sobrou a reação ou a resposta ao que ele perguntou: ela basta (o "Pode seguir." em toda fala cansava).
   // O fechamento só entra quando não sobrou nada.
   return frases.length ? frases.slice(0, 2).join(" ") : fechamento;
@@ -443,6 +467,15 @@ function semPerguntaNoFim(reply: string, fechamento: string): string {
 /** O entrevistador já fez alguma pergunta nesta conversa livre (as falas que vieram no pedido). */
 function jaPerguntouDoPlano(messages: ChatMessage[]): boolean {
   return messages.some((m) => m.role === "agent" && m.text.trim().endsWith("?"));
+}
+
+/**
+ * Ele já ouviu uma pergunta do Totti nesta sessão (a abertura ou outra). Antes de haver código, qualquer pergunta é
+ * sobre o plano: a abertura numa conversa e outra pergunta do plano na fala livre seguinte era o "você já me
+ * perguntou isso".
+ */
+function jaPerguntouNaSessao(session: SessionState): boolean {
+  return session.events.some((e) => e.type === "speech" && e.role === "agent" && e.text.trim().endsWith("?") && !/posso (te )?(perguntar|interromper)/i.test(e.text));
 }
 
 /** Tira a pergunta do fim e libera para codar (mantém a reação curta do começo, se houver). */

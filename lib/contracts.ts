@@ -216,6 +216,11 @@ export const Blip = z.object({
   highlight: LineRange.optional(),
   /** Balão de empecilho: a IDE abre a conversa sozinha, sem "agora não", e aplica a mudança na tela. */
   empecilho: EmpecilhoPublico.optional(),
+  /**
+   * A pergunta perde a vez se o candidato falar bastante antes de ela ser feita (ele pode ter explicado aquilo):
+   * a IDE a descarta em vez de pedir licença. Retorno, encerramento e mudança no problema não perdem.
+   */
+  perdeAVez: z.boolean().optional(),
 });
 export type Blip = z.infer<typeof Blip>;
 
@@ -434,8 +439,16 @@ export type Gravacao = z.infer<typeof Gravacao>;
 
 /** Silêncio total (sem desenhar, digitar nem falar) a partir do qual o agente pode quebrá-lo. */
 export const SILENCIO_S = 8;
-/** Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. */
-export const SILENCIO_INICIAL_S = 15;
+/**
+ * Idem no começo (fase REQUISITOS), contado a partir do fim da apresentação. Com 15 s o Totti perguntava "como
+ * você está pensando?" com o candidato ainda lendo o enunciado (o mesmo problema do live coding).
+ */
+export const SILENCIO_INICIAL_S = 45;
+/**
+ * Em REQUISITOS, depois de o Totti responder uma dúvida dele: o silêncio que devolve a vez ao Totti. Mais curto que o
+ * inicial (ali ele já leu o enunciado e está conversando).
+ */
+export const SILENCIO_REQUISITOS_S = 15;
 /** Se o silêncio continua depois de uma análise, o quadro volta a perguntar ao modelo a cada tanto. */
 export const SILENCIO_REPETIR_S = 30;
 

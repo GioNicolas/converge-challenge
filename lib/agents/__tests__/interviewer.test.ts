@@ -96,3 +96,37 @@ test("prompt da IDE traz intenção, feedback sem validar, recusa variada e grif
   assert.match(sistema, /Sempre que a fala comentar, parafrasear ou perguntar sobre um trecho do código/);
   assert.doesNotMatch(sistema, /Isso eu não posso te dar, a graça é ver como você pensa/);
 });
+
+// Entrevista real de 2026-11-09 (sessão 3ec438c1): depois da resposta ao último ponto do encerramento o Totti ficou
+// ouvindo, e o candidato esperou ~30 s até perguntar "tem mais alguma pergunta?".
+test("encerramento: respondeu o último ponto e o modelo ficou quieto → fecha agradecendo, sem 'pode finalizar'", async () => {
+  const session = getOrCreateSession(`encerra-${Date.now()}`);
+  session.queue.push({ id: "q-9", question: "Consegue me explicar esse bloco?", followUpTopic: "x", priority: 1, createdAt: 0, status: "asked", kind: "encerramento", closingTopics: ["ponto 1", "ponto 2"] });
+  session.blips.push({ id: "q-9", preview: "Antes de encerrar, uns pontos rápidos", priority: 1, createdAt: 0 });
+  saidas.push({ ...base, respond: false, concluded: false, reply: "" });
+  const r = await runInterviewerTurn(session, { blipId: "q-9", messages: [
+    { role: "agent", text: "Antes de você encerrar, queria fechar uns pontos rápidos. Consegue me explicar esse bloco?" },
+    { role: "candidate", text: "ele vai cortando a lista ao meio" },
+    { role: "agent", text: "E numa lista vazia, como esse código se comporta?" },
+    { role: "candidate", text: "numa lista vazia ele já retornaria menos um porque nunca entra no while" },
+  ] });
+  assert.equal(r.end, true);
+  assert.ok(r.reply.length > 0);
+  assert.ok(!/finalizar|seguir|\?/i.test(r.reply), r.reply);
+});
+
+test("abertura: se o entrevistador já perguntou do plano numa fala livre, ela não sai de novo", async () => {
+  const { enqueueKickoff, decideBlip, perdeuAVez } = await import("../policy");
+  const { appendEvent } = await import("@/lib/session/store");
+  const session = getOrCreateSession(`abertura-repetida-${Date.now()}`);
+  let agora = 0;
+  session.clock = () => agora;
+  appendEvent(session, { type: "session_started", sessionId: session.sessionId, t: 0, configId: session.config.id, problemId: session.config.problemId, language: "python" });
+  enqueueKickoff(session, 0);
+  appendEvent(session, { type: "speech", sessionId: session.sessionId, t: 45_000, role: "candidate", text: "fecho obrigado" });
+  appendEvent(session, { type: "speech", sessionId: session.sessionId, t: 49_000, role: "agent", text: "Me conta, como você pretende começar a resolver?" });
+  agora = 50_000;
+  assert.equal(decideBlip(session, agora).blip, undefined);
+  assert.equal(session.queue.find((q) => q.kickoff)?.status, "stale");
+  assert.match(perdeuAVez(session, session.queue.find((q) => q.kickoff)!, 0) ?? "", /já perguntou/);
+});

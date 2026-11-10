@@ -1,7 +1,7 @@
 // Política do "portão de entrada": funções puras que decidem SE a análise pode rodar e SE uma
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
-import { SILENCIO_INICIAL_S, SILENCIO_S } from "../../contracts";
+import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_S } from "../../contracts";
 import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
 import { mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
@@ -170,7 +170,7 @@ export function motivoBloqueioPlin(
   const fala = estado.ultimaFalaDoAgenteEm;
   if (fala != null && candidato.paradoHaS !== undefined) {
     const agiuDepois = agora - candidato.paradoHaS * 1000 > fala;
-    const silencioS = estado.fase === "REQUISITOS" ? SILENCIO_INICIAL_S : SILENCIO_S;
+    const silencioS = estado.fase === "REQUISITOS" ? SILENCIO_REQUISITOS_S : SILENCIO_S;
     if (!agiuDepois && agora - fala < silencioS * 1000) return "BOLA_COM_O_CANDIDATO";
   }
   return null;

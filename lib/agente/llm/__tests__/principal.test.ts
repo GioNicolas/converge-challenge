@@ -54,10 +54,11 @@ describe("criarClientePrincipal (cérebro do quadro sobre o lib/llm)", () => {
     }
   });
 
-  it("junta o prompt estático e o dinâmico e devolve dados, modelo e uso", async () => {
+  it("manda o prompt estático (vai para o cache) separado do dinâmico e devolve dados, modelo e uso", async () => {
     const { chamadas, cliente } = falso({ n: 7 });
     const r = await cliente.completarJson(base(NOME_SCHEMA_ANALISE));
-    assert.equal(chamadas[0].system, "ESTATICO\n\nDINAMICO");
+    assert.equal(chamadas[0].system, "ESTATICO");
+    assert.equal(chamadas[0].systemDinamico, "DINAMICO");
     assert.equal(chamadas[0].user, "oi");
     assert.deepEqual(r.dados, { n: 7 });
     assert.equal(r.modelo, "zai-org/GLM-5.3-Flash");

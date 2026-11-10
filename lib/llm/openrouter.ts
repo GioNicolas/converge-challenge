@@ -10,7 +10,12 @@ export const openrouter: ProviderConfig = {
   },
   buildExtraBody: (opts) => ({
     // Falas curtas priorizam o início da resposta; relatórios priorizam tokens por segundo.
-    provider: { sort: opts.priorizarLatencia ? "latency" : "throughput" },
+    // Gemini: Google AI Studio primeiro. Com o prompt em cache (cache_control), o OpenRouter mandava para o Vertex,
+    // ~0,4 s mais lento por fala; no AI Studio o cache vale igual (medido em 2026-11-09: p50 1,5 s, -80% no custo).
+    provider: {
+      sort: opts.priorizarLatencia ? "latency" : "throughput",
+      ...(opts.model?.startsWith("google/gemini") ? { order: ["google-ai-studio"], allow_fallbacks: true } : {}),
+    },
     usage: { include: true },
     ...(opts.reasoningEffort ? { reasoning: { effort: opts.reasoningEffort } } : {}),
   }),

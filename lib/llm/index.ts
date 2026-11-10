@@ -506,7 +506,10 @@ async function callOnly<T>(call: RoleCall<T>, name: LlmProviderName, signal?: Ab
 
 export async function completeJson<T>(opts: {
   role: LlmRole;
+  /** Sistema fixo entre chamadas (vai para o cache do provedor no OpenRouter). */
   system: string;
+  /** Parte do sistema que muda a cada chamada (fora do cache). */
+  systemDinamico?: string;
   user: string;
   schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   maxTokens?: number;
@@ -526,6 +529,7 @@ export async function completeJson<T>(opts: {
     role: opts.role,
     base: {
       system: opts.system,
+      ...(opts.systemDinamico ? { systemDinamico: opts.systemDinamico } : {}),
       user: opts.user,
       schema: opts.schema,
       maxTokens: opts.maxTokens ?? cfg.maxTokens,
