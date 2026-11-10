@@ -11,6 +11,9 @@ import { z } from "zod";
 import { runAnalyst } from "@/lib/agents/analyst";
 import { SessionEvent } from "@/lib/contracts";
 import { getLlmStats, type LlmProviderName } from "@/lib/llm";
+
+/** Gasto somado dos dois provedores neste processo, de todos os papéis (filtro incluso). */
+const gastoProcesso = () => Object.values(getLlmStats().providers).reduce((n, p) => n + p.costUsd, 0);
 import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 
 const PADRAO = ["featherless:zai-org/GLM-5.3-Flash@low", "featherless:google/gemma-4-26B-A4B-it"];
@@ -107,7 +110,9 @@ async function rodarCenario(c: Cenario, n: number) {
 
 async function medir(alvo: string, rodadas: number) {
   apontar(alvo);
-  const antes = structuredClone(getLlmStats().providers);
+  // Chamadas por provedor do papel "codigo" (não de outros papéis, como o filtro, que a análise também usa).
+  const antes = structuredClone(getLlmStats().roles.codigo.uso);
+  const gastoAntes = gastoProcesso();
   const tempos: number[] = [];
   let custo = 0;
   let erros = 0;
@@ -151,9 +156,10 @@ async function medir(alvo: string, rodadas: number) {
       }
     }
   }
-  const depois = getLlmStats().providers;
+  const depois = getLlmStats().roles.codigo.uso;
+  const primario = process.env.LLM_PRIMARIO_CODIGO ?? "featherless";
   const reservas = (["featherless", "openrouter"] as const)
-    .filter((p) => p !== process.env.LLM_PRIMARIO_ANALYST)
+    .filter((p) => p !== primario)
     .reduce((n, p) => n + depois[p].calls - antes[p].calls, 0);
   return {
     alvo,
@@ -165,6 +171,8 @@ async function medir(alvo: string, rodadas: number) {
     p50: percentil(tempos, 50),
     p95: percentil(tempos, 95),
     custoPorAnaliseUsd: Number((custo / total).toFixed(5)),
+    /** Tudo que o processo gastou neste alvo (análise, filtro e reservas perdedoras que terminaram). */
+    custoTotalUsd: Number((gastoProcesso() - gastoAntes).toFixed(5)),
     falhas,
   };
 }

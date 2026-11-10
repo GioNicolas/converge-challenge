@@ -5,7 +5,7 @@
 //   (RODADAS=3 repete a simulação; sem argumentos, a lista padrão abaixo)
 import "./_gasto";
 import { featherless } from "../lib/llm/featherless";
-import { completeJson } from "../lib/llm";
+import { completeJson, getLlmStats } from "../lib/llm";
 import { chatJsonVia, type LlmProviderName, type ReasoningEffort } from "../lib/llm/openaiCompat";
 import { openrouter } from "../lib/llm/openrouter";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
@@ -26,7 +26,11 @@ function percentil(xs: number[], p: number): number {
   return ordenado[Math.min(ordenado.length - 1, Math.floor((p / 100) * ordenado.length))] ?? 0;
 }
 
+/** Gasto somado dos dois provedores neste processo (a conversa da simulação também passa por aqui). */
+const gastoProcesso = () => Object.values(getLlmStats().providers).reduce((n, p) => n + p.costUsd, 0);
+
 async function medir(alvo: string, rodadas: number) {
+  const gastoAntes = gastoProcesso();
   const i = alvo.indexOf(":");
   const provedor = PROVEDORES[alvo.slice(0, i) as LlmProviderName];
   const [modelo, esforco] = alvo.slice(i + 1).split("@") as [string, ReasoningEffort | undefined];
@@ -72,11 +76,18 @@ async function medir(alvo: string, rodadas: number) {
     aprovadas: `${aprovadas}/${rodadas}`,
     erros,
     p50: percentil(tempos, 50),
+    p90: percentil(tempos, 90),
     p95: percentil(tempos, 95),
+    /** Disparos da reserva por prazo do hedge: quantas chamadas passariam de 6 s, 7 s e 8 s. */
+    acimaDe6s: tempos.filter((t) => t > 6000).length,
+    acimaDe7s: tempos.filter((t) => t > 7000).length,
+    acimaDe8s: tempos.filter((t) => t > 8000).length,
     chamadas: tempos.length,
     tokensEntradaMedia: tempos.length ? Math.round(entrada / tempos.length) : 0,
     tokensSaidaMedia: tempos.length ? Math.round(saida / tempos.length) : 0,
     custoUsd: Number(custo.toFixed(4)),
+    /** Análise do quadro mais o que o resto da simulação (conversa) gastou no processo. */
+    custoTotalUsd: Number((custo + gastoProcesso() - gastoAntes).toFixed(4)),
     falhas: [...new Set(falhas)].join(" | "),
   };
 }
