@@ -14,11 +14,11 @@ import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
 import { chat, type Mensagem } from "@/lib/pre-entrevista/llm";
 import { descreverPasso } from "@/lib/pre-entrevista/planejador";
-import { perguntaObvia } from "@/lib/pre-entrevista/perguntas";
 import { normalizarTexto } from "@/lib/pre-entrevista/pesos";
 import { DURACAO_PADRAO, paraInterviewConfig } from "@/lib/pre-entrevista/rascunho";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
 import { abrirConversa, atualizarNaoAvaliado, conduzirTurno } from "@/lib/pre-entrevista/turno";
+import { checarEstilo } from "./checagens";
 
 /** Teto de falas da recrutadora por conversa (segurança). */
 const MAX_FALAS_RECRUTADORA = 14;
@@ -173,6 +173,27 @@ const PERSONAS: Persona[] = [
       "Você responde de forma curta e um pouco genérica. Para estágio, quer ver raciocínio lógico e se a pessoa sabe explicar o que está fazendo; " +
       "não espera solução perfeita. Pode dar dicas sempre que ele pedir. Não liga para pressão nem para escala nesse nível.",
     verdade: { ordemFoco: ["tecnico"], dispensa: ["pressao", "escala_produto"], tom: "amigavel", dicas: "leves" },
+  },
+  {
+    id: "distraida",
+    vagaId: "backend-senior-pagamentos",
+    descricao:
+      "Você está fazendo outra coisa ao mesmo tempo e se distrai. Ao longo da conversa, faça cada uma destas três coisas uma única vez, " +
+      "em falas diferentes, e nessas falas não responda à pergunta: (1) na primeira pergunta do Totti depois da abertura, peça para repetir: " +
+      "'desculpa, pode repetir a pergunta?'; (2) mais adiante, em outra pergunta, diga que não entendeu: 'como assim? não entendi o que você quer saber'; " +
+      "(3) em outra, peça um tempo: 'pera, deixa eu abrir a descrição da vaga aqui'. Quando o Totti repetir, explicar ou esperar, responda de verdade na fala seguinte. " +
+      "Fora esses três momentos, responde direto, em uma ou duas frases. O que você quer: concorda com system design; o mais importante é como o sistema " +
+      "lida com falhas no meio do pagamento e com picos de volume; consistência dos dados vem depois. Eliminatório: tratar o pagamento como se a rede nunca falhasse. " +
+      "Duração: quarenta e cinco minutos. Tom tranquilo, com dica leve se ele travar.",
+    // O gabarito é o que ela quer de fato: pedir para repetir, não entender e pedir um tempo não mudam nada disto.
+    verdade: {
+      ordemFoco: ["escala_produto", "tecnico"],
+      dispensa: [],
+      eliminatorio: "rede",
+      tom: "amigavel",
+      dicas: "leves",
+      duracaoMin: 45,
+    },
   },
 ];
 
@@ -345,28 +366,6 @@ function checarRepeticao(sessao: Sessao): string[] {
   }
   for (const [id, n] of Object.entries(sessao.plano.perguntasPorTopico)) {
     if (n > 2) avisos.push(`tópico "${id}" perguntado ${n} vezes (limite 2)`);
-  }
-  return avisos;
-}
-
-/** Identificadores internos, sem acento (`pressao` é rótulo; `pressão` é palavra natural). Vale no texto original. */
-const IDENTIFICADOR_INTERNO = /\b(tecnico|pressao|escala_produto|uso_ia|criterio_\w+|nara)\b/;
-/** Expressões internas, comparadas sem acento. */
-const EXPRESSAO_INTERNA = /dominio tecnico|escala e produto|pressao e adaptacao/;
-
-function checarEstilo(sessao: Sessao): string[] {
-  const avisos: string[] = [];
-  for (const [i, t] of sessao.transcricao.entries()) {
-    if (t.role !== "agente") continue;
-    const sem = t.text.normalize("NFD").replace(/[̀-ͯ]/g, "");
-    if (IDENTIFICADOR_INTERNO.test(t.text) || EXPRESSAO_INTERNA.test(sem.toLowerCase()))
-      avisos.push(`fala ${i + 1} usa rótulo interno: "${t.text}"`);
-    if (perguntaObvia(t.text)) avisos.push(`fala ${i + 1} faz pergunta óbvia (ótimo x fraco): "${t.text}"`);
-    if (/^\s*entendi/i.test(t.text)) avisos.push(`fala ${i + 1} começa com "Entendi": "${t.text}"`);
-    // A apresentação é só a abertura (índice 0): depois dela, o Totti não se apresenta de novo.
-    if (i > 0 && /\bsou (a )?totti\b/i.test(sem)) avisos.push(`fala ${i + 1} se apresenta de novo: "${t.text}"`);
-    const frases = t.text.split(/[.!?]+/).filter((s) => s.trim()).length;
-    if (i > 0 && frases > 4) avisos.push(`fala ${i + 1} tem ${frases} frases`);
   }
   return avisos;
 }
@@ -625,7 +624,7 @@ function imprimirFidelidade(persona: Persona, itens: ItemFidelidade[]): { passou
 function imprimirChecagens(sessao: Sessao): void {
   console.log("\n--- checagens automáticas ---");
   const repeticao = checarRepeticao(sessao);
-  const estilo = checarEstilo(sessao);
+  const estilo = checarEstilo(sessao.transcricao);
   const eventosRuins = sessao.logs.filter((e) => e.tipo === "erro" || e.tipo === "aviso");
   if (repeticao.length === 0) console.log("  repetição: nenhuma");
   for (const a of repeticao) console.log(`  repetição: ${a}`);
