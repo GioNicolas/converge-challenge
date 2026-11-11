@@ -1,5 +1,5 @@
 /** Registro dos kits. Só no servidor: nada daqui, além de dadosPublicosDoProblema, vai ao navegador. */
-import type { Kit, Problema } from "./tipos";
+import { kitSemTermosInternos, type Kit, type Problema } from "./tipos";
 import { KIT_SYSTEM_DESIGN } from "./system-design";
 import { KIT_SYSTEM_DESIGN_IA } from "./system-design-ia";
 import { KIT_DESIGN_PRODUTO } from "./design-produto";
@@ -49,7 +49,7 @@ export function resolverAvaliacaoEstatica(avaliacaoId: string): { kit: Kit; prob
 /** Procura primeiro as avaliações geradas (dinâmicas) e depois as demos estáticas. */
 export async function resolverAvaliacao(avaliacaoId: string): Promise<AvaliacaoResolvida | undefined> {
   const dinamica = await repositorioAvaliacoesPadrao().obter(avaliacaoId);
-  if (dinamica) return { kit: dinamica.kit, problema: dinamica.problema, dinamica: true, aprovado: dinamica.aprovado };
+  if (dinamica) return { kit: kitSemTermosInternos(dinamica.kit), problema: dinamica.problema, dinamica: true, aprovado: dinamica.aprovado };
   const estatica = resolverAvaliacaoEstatica(avaliacaoId);
   return estatica ? { ...estatica, dinamica: false, aprovado: true } : undefined;
 }

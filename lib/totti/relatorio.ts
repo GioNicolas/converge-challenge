@@ -87,6 +87,25 @@ export function ehPedidoDeRepeticao(texto: string): boolean {
   return trechos.every(ehTrechoDePedido);
 }
 
+const PADROES_DE_CULPA: RegExp[] = [
+  /\b(?:pediu|pedindo|pedidos?|solicitou)\b.{0,50}\b(?:repeti|esclarec)/,
+  /\brepeticoes\b/,
+  /\bdificuldade\b.{0,40}\b(?:acompanhar|entender|compreender)\b/,
+  /\bnao (?:entendeu|compreendeu|conseguiu (?:entender|acompanhar)) (?:a |as |o |os )?(?:perguntas?|questionamentos?)/,
+  /\babrupt/,
+  /\bdesistiu\b/,
+];
+
+/**
+ * O texto (escrito pelo modelo) culpa o candidato por pedir repetição ou por não acompanhar as perguntas, ou
+ * descreve o encerramento com adjetivo? É o que a análise do quadro registrava como "pediu repetições sucessivas"
+ * e o relatório repetia. Serve para descartar observações e frases assim.
+ */
+export function textoCulpaOCandidatoPorPedido(texto: string): boolean {
+  const t = normalizar(texto);
+  return PADROES_DE_CULPA.some((p) => p.test(t));
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fato de cobertura e termos internos
 // ---------------------------------------------------------------------------------------------

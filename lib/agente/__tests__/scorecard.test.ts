@@ -242,7 +242,9 @@ describe("scorecard: regressões de proveniência", () => {
     const sc = guardas(s);
     assert.equal(sc.criterios[0].nota, null); assert.equal(sc.criterios[1].nota, null);
     assert.equal(sc.recomendacao, "avancar_com_ressalvas");
-    assert.deepEqual(sc.pontos_fortes, []);
+    assert.deepEqual(sc.pontos_fortes, ["a"], "o ponto forte que não cita critério sem prova fica");
+    const citando = guardas({ ...s, pontos_fortes: ["Foi bem em Requisitos e escopo.", "Explicou o cache."] });
+    assert.deepEqual(citando.pontos_fortes, ["Explicou o cache."], "o que se apoiava em prova removida sai");
   });
 
   it("sem desenho nem fala: nenhuma nota, mesmo com observação sem vínculo", () => {
@@ -304,7 +306,10 @@ describe("scorecard: regressões de proveniência", () => {
     // Nota de critério sem prova: as guardas mexem nos critérios, então o resumo escrito antes não vale.
     const corrigido = aplicarGuardas({ ...s, criterios: s.criterios.map((c, i) => i === 0 ? { ...c, evidencias: [] } : c) },
       { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
-    assert.equal(corrigido.resumo_da_entrevista, "");
+    assert.equal(corrigido.resumo_da_entrevista, "Boa base em Dados e consistência.", "resumo que não cita a nota removida fica");
+    const citando = aplicarGuardas({ ...s, resumo_da_entrevista: "Foi bem em dados_consistencia e em requisitos.", criterios: s.criterios.map((c, i) => i === 0 ? { ...c, evidencias: [] } : c) },
+      { sessaoId: "s1", candidatoId: "c", problemaId: "p", rubrica: RUBRICA, fontes: f, origem: "llm" });
+    assert.equal(citando.resumo_da_entrevista, "Houve prova em 5 de 6 critérios: Componentes e fluxo (3 de 4), Escalabilidade (3 de 4), Dados e consistência (3 de 4), Trade-offs (3 de 4), Comunicação (3 de 4). 1 de 6 critérios ficou sem prova.");
     assert.equal(corrigido.resumo_da_solucao, "Um cache com Postgres na frente do Postgres.");
   });
 
@@ -312,9 +317,11 @@ describe("scorecard: regressões de proveniência", () => {
     const estado = estadoInicial();
     const sc = gerarScorecardFalso({ kit: KIT_SYSTEM_DESIGN, problema: KIT_SYSTEM_DESIGN.problemas[0] },
       { sessaoId: "s", candidatoId: "c", estado, eventos: [], imagens: [] });
-    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Componentes e fluxo."));
-    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Dados e consistência."));
-    assert.ok(sc.pontos_a_aprofundar.includes("Aprofundar Requisitos e escopo."), "não expande duas vezes um nome já legível");
+    const itens = sc.pontos_a_aprofundar.join(" | ");
+    assert.ok(itens.includes("Componentes e fluxo: sem prova"));
+    assert.ok(itens.includes("Dados e consistência: sem prova"));
+    assert.ok(itens.includes("Requisitos e escopo: sem prova"), "não expande duas vezes um nome já legível");
+    assert.ok(sc.pontos_a_aprofundar.every(t => !/^Aprofundar/.test(t)), "nunca 'Aprofundar X.'");
     assert.ok(!sc.pontos_a_aprofundar.join(" ").includes("componentes_fluxo"));
   });
 

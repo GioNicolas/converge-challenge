@@ -90,3 +90,21 @@ export function criterioSoPorFala(c: Pick<Criterio, "id"> & Partial<Pick<Criteri
 export function criterioIndireto(c: Pick<Criterio, "id"> & Partial<Pick<Criterio, "nome" | "provaSoPorFala">>): boolean {
   return c.provaSoPorFala ?? (c.id === "comunicacao" || criterioSoPorFala(c));
 }
+
+/**
+ * Kit salvo antes da renomeação (vagas já criadas): o critério de comunicação guarda o nome antigo, com o termo
+ * interno. Devolve o mesmo kit com o nome legível e o campo novo, sem mudar o id (o scorecard e as configs
+ * guardam só o id). Kit sem o nome antigo volta intacto (o mesmo objeto).
+ */
+export function kitSemTermosInternos<K extends Pick<Kit, "criterios">>(kit: K): K {
+  const antigo = (c: Criterio) => /\bplins?\b/i.test(c.nome);
+  if (!kit.criterios.some(antigo)) return kit;
+  return {
+    ...kit,
+    criterios: kit.criterios.map((c) => {
+      if (!antigo(c)) return c;
+      const nome = c.nome.replace(/\s*\([^()]*\bplins?\b[^()]*\)\s*$/i, "").trim() || "Comunicação";
+      return { ...c, nome, ...(criterioSoPorFala(c) ? { provaSoPorFala: true } : {}) };
+    }),
+  };
+}
