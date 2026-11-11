@@ -103,7 +103,9 @@ do PASSO desta fala; o PASSO fica para a fala seguinte.
   termina em "?", e não como relato ("eu perguntei sobre..."): por voz, é o "?" que diz a ela que a vez é dela. Movimento "repetir".
 - Ela não entendeu o que você quer saber ("como assim?", "não entendi a pergunta"): reformule em palavras de RH, ou diga em
   uma frase o que essa escolha muda na entrevista, sem jargão, e pergunte de novo. Dizer as mesmas palavras outra vez não
-  ajuda quem não entendeu. A fala termina na pergunta, com "?", e não na explicação. Movimento "esclarecer".
+  ajuda quem não entendeu. A fala termina na pergunta, com "?", e não na explicação. Pergunte de forma direta, não
+  indireta: não "Eu quero saber se ele pode ir direto pra solução ou explicar o plano antes.", e sim "Ele pode ir direto
+  pra solução, ou você quer que ele explique o plano antes?". Movimento "esclarecer".
 - Ela pediu um tempo ("pera", "deixa eu abrir a vaga aqui"): aceite em poucas palavras e espere. A pergunta continua em
   aberto e você não cobra: quem pede um minuto e é cobrada na mesma hora sente que não foi ouvida. Movimento "responder".
 - Ela perguntou outra coisa no meio ("e o resultado chega pra mim quando", "isso aparece pro candidato"): a fala
@@ -1194,6 +1196,35 @@ export function semRepeticaoDaFalaDela(texto: string, falaDela: string | undefin
   return resto.charAt(0).toUpperCase() + resto.slice(1);
 }
 
+/** Pergunta indireta no começo da frase: "Eu quero saber se", "O que eu queria saber é se", "A pergunta é se". */
+const RE_PERGUNTA_INDIRETA =
+  /^(?:(?:o que )?(?:eu )?(?:quero|queria|preciso|gostaria de) saber(?: [eé])?|a (?:minha )?pergunta [eé]|minha d[uú]vida [eé])\s+se\s+/i;
+
+/**
+ * Fala de esclarecimento que não termina em pergunta (issue #113). Por voz, sem o "?" ela não sabe que a vez é dela:
+ *  - frase com pergunta indireta ("Eu quero saber se X ou Y.") vira a pergunta direta ("X ou Y?"), e a explicação que
+ *    vinha depois sai;
+ *  - sem pergunta indireta, a explicação fica e a pergunta em aberto volta no fim (ou, sem ela, "O que você prefere?").
+ * Fala que já tem "?" fica como está. Função pura.
+ */
+export function perguntaNoEsclarecimento(texto: string, aberta: string | undefined): string {
+  if (texto.includes("?")) return texto;
+  const frases = texto.split(/(?<=[.!])\s+/).map((f) => f.trim()).filter(Boolean);
+  const i = frases.findIndex((f) => RE_PERGUNTA_INDIRETA.test(f));
+  if (i >= 0) {
+    // "saber se A ou se B": o segundo "se" é da forma indireta e sai junto ("A, ou B?").
+    const resto = frases[i]
+      .replace(RE_PERGUNTA_INDIRETA, "")
+      .replace(/,?\s+ou se\s+/i, ", ou ")
+      .replace(/[\s.!,;:…]+$/, "");
+    if (resto) {
+      const direta = `${resto.charAt(0).toUpperCase()}${resto.slice(1)}?`;
+      return [...frases.slice(0, i), direta].join(" ");
+    }
+  }
+  return `${texto.trim()} ${aberta ?? "O que você prefere?"}`;
+}
+
 /** Uma trava que reescreveu a fala do modelo: o nome dela e a fala antes e depois. */
 export interface TravaAplicada {
   trava: string;
@@ -1363,6 +1394,10 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   if (texto && movimento === "nao_entendi" && !texto.includes("?")) {
     const aberta = perguntaEmAberto(sessao.transcricao);
     if (aberta) aplicar("pergunta_no_nao_entendi", `${texto} ${aberta}`);
+  }
+  // Esclarecimento que termina na explicação, sem "?": vira pergunta direta, ou ganha a pergunta em aberto no fim.
+  if (texto && movimento === "esclarecer" && !texto.includes("?")) {
+    aplicar("pergunta_no_esclarecer", perguntaNoEsclarecimento(texto, perguntaEmAberto(sessao.transcricao)));
   }
   // Pergunta no molde óbvio ("o que separa um ótimo de um fraco?"): troca pela pergunta do banco, sem nova chamada.
   // Só quando a fala executa o passo: uma repetição, um esclarecimento ou uma resposta não viram outra pergunta.

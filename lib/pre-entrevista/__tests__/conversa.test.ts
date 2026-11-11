@@ -10,6 +10,7 @@ import {
   montarMensagensConversa,
   movimentoDaFala,
   perguntaEmAberto,
+  perguntaNoEsclarecimento,
   responder,
   semRepeticaoDaFalaDela,
 } from "../conversa";
@@ -537,5 +538,60 @@ describe("confirmacaoDeterministica (issue #76)", () => {
     assert.equal(confirmacaoDeterministica(sessao), undefined);
     sessao.preferencias = { ...sessao.preferencias, duracaoMin: 45 };
     assert.equal(confirmacaoDeterministica(sessao), "Ajustei quarenta e cinco minutos. Posso finalizar?");
+  });
+});
+
+describe("esclarecer termina em pergunta (issue #113)", () => {
+  const ABERTA = "Você quer que ele faça contas de volume antes de desenhar, ou basta ele raciocinar sobre o pico de uso?";
+  const APROFUNDAR: Passo = { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" };
+  const INDIRETA =
+    "Eu quero saber se você prefere que o candidato use números exatos para dimensionar o sistema, ou se apenas o raciocínio " +
+    "sobre o volume de transações já é o suficiente. Isso ajuda a definir o nível de detalhe que vamos cobrar na questão.";
+
+  it("pergunta indireta vira direta, e a explicação de depois sai", () => {
+    assert.equal(
+      perguntaNoEsclarecimento(INDIRETA, ABERTA),
+      "Você prefere que o candidato use números exatos para dimensionar o sistema, ou apenas o raciocínio sobre o volume de transações já é o suficiente?",
+    );
+  });
+
+  it("frase antes da pergunta indireta fica", () => {
+    assert.equal(
+      perguntaNoEsclarecimento("É sobre o nível de detalhe. O que eu queria saber é se ele precisa fazer contas.", ABERTA),
+      "É sobre o nível de detalhe. Ele precisa fazer contas?",
+    );
+  });
+
+  it("frases depois da pergunta indireta saem, mesmo as que não são só explicação", () => {
+    assert.equal(
+      perguntaNoEsclarecimento("Eu quero saber se ele precisa fazer contas. Isso muda o nível, e também a nota.", ABERTA),
+      "Ele precisa fazer contas?",
+    );
+  });
+
+  it("só explicação: a pergunta em aberto volta no fim; sem ela, uma pergunta curta", () => {
+    const explicacao = "Isso define se a questão cobra números ou só raciocínio.";
+    assert.equal(perguntaNoEsclarecimento(explicacao, ABERTA), `${explicacao} ${ABERTA}`);
+    assert.equal(perguntaNoEsclarecimento(explicacao, undefined), `${explicacao} O que você prefere?`);
+  });
+
+  it("fala que já pergunta fica como está", () => {
+    assert.equal(perguntaNoEsclarecimento(ABERTA, ABERTA), ABERTA);
+  });
+
+  it("responder: a fala `esclarecer` sem '?' sai com pergunta, e a trava vai para o log", async () => {
+    const sessao = sessaoAberta([totti(ABERTA), ela("como assim, não entendi o que você quer saber")]);
+    const r = await responder(sessao, APROFUNDAR, { chat: chatFalso(saida(INDIRETA, "esclarecer")).chat });
+    assert.equal(r.movimento, "esclarecer");
+    assert.ok(r.texto.endsWith("?"));
+    assert.deepEqual(
+      r.travas.map((t) => t.trava),
+      ["pergunta_no_esclarecer"],
+    );
+  });
+
+  it("o prompt traz o exemplo de pergunta direta no esclarecer", () => {
+    const [sistema] = montarMensagensConversa(sessaoAberta(), APROFUNDAR);
+    assert.match(sistema.content, /Pergunte de forma direta, não\s+indireta/);
   });
 });
