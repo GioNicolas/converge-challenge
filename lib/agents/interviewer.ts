@@ -12,6 +12,11 @@ import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import { completeJson } from "@/lib/llm";
+import { aplicarGuardas, eSoReacao, escolherConvite, falaNaoRepetida, reacaoNeutra, semReacaoRepetida } from "@/lib/totti/guardas";
+import {
+  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoLiveCoding, paraSaidaDoLiveCoding,
+  type SituacaoDoTurno,
+} from "@/lib/totti/turno";
 import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -41,13 +46,7 @@ const PRAZO_FILTRO_MS = 1_800;
 /** Só gera de novo (fala barrada) se ainda couber uma geração e um filtro no orçamento. */
 const MIN_PARA_REGERAR_MS = 3_000;
 
-/** A primeira das opções que o entrevistador ainda não disse nesta sessão (ou a menos recente, se já disse todas). */
-export function falaNaoRepetida(opcoes: string[], jaDitas: string[]): string {
-  const ditas = jaDitas.map((t) => t.trim());
-  const nova = opcoes.find((o) => !ditas.includes(o));
-  if (nova) return nova;
-  return [...opcoes].sort((a, b) => ditas.lastIndexOf(a) - ditas.lastIndexOf(b))[0];
-}
+export { falaNaoRepetida };
 
 /** O que o agente já falou: nesta conversa e nas falas gravadas da sessão. */
 function falasDoAgente(session: SessionState, messages: ChatMessage[]): string[] {
@@ -60,12 +59,19 @@ export async function runInterviewerTurn(
   req: { blipId?: string; messages: ChatMessage[]; reconheceu?: boolean },
 ): Promise<ChatResponse> {
   const resposta = await turno(session, req);
-  return resposta.reply ? { ...resposta, reply: semReconhecimentoRepetido(resposta.reply, req.messages, req.reconheceu === true) } : resposta;
+  // Toda fala que sai (a gerada, a pergunta preparada e as de reserva) passa pela trava comum da reação repetida:
+  // não abre com outro reconhecimento depois do "uhum" da IDE nem repete o da fala anterior.
+  return resposta.reply ? { ...resposta, reply: semReacaoRepetida(resposta.reply, falasDoTottiNaConversa(req.messages), req.reconheceu === true) || resposta.reply } : resposta;
+}
+
+/** As falas do Totti nesta conversa (as que vieram no pedido), mais antigas primeiro. */
+function falasDoTottiNaConversa(messages: ChatMessage[]): string[] {
+  return messages.filter((m) => m.role === "agent").map((m) => m.text);
 }
 
 async function turno(
   session: SessionState,
-  req: { blipId?: string; messages: ChatMessage[] },
+  req: { blipId?: string; messages: ChatMessage[]; reconheceu?: boolean },
 ): Promise<ChatResponse> {
   const found = req.blipId !== undefined ? findBlipQuestion(session, req.blipId) : undefined;
   if (req.blipId !== undefined && !found) throw new Error(`blip desconhecido: ${req.blipId}`);
@@ -99,7 +105,7 @@ async function turno(
   if (found && req.messages.length === 0 && found.question.kind !== "encerramento" && found.question.kind !== "cola" && !found.question.kickoff) {
     const grifo = found.question.highlight;
     const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
-    return { reply: found.question.question, commands: highlightCommands(util ? grifo : undefined), end: false };
+    return { reply: perguntaPreparada(found.question.question), commands: highlightCommands(util ? grifo : undefined), end: false };
   }
   if (found?.question.kickoff && req.messages.length === 0) found.question.question = aberturaDeReserva(session);
   const checkInDoEmpecilho = question?.checkInId
@@ -165,11 +171,58 @@ async function turno(
   const user = buildInterviewerUser(input);
   const candidateLines = req.messages.filter((m) => m.role === "candidate").slice(-3).map((m) => m.text);
   const opening = found !== undefined && req.messages.length === 0;
+  /**
+   * As travas da fala do Totti único (lib/totti/guardas.ts), as mesmas do quadro, em toda fala gerada e antes do
+   * filtro de spoiler: cumprimento fora da abertura, validação, eco, pergunta repetida ou de condução e reação
+   * vazia repetida. Na primeira fala de uma pergunta sua a pergunta é o motivo da fala, então ali ela não é
+   * barrada (se era a hora dela, a política já decidiu).
+   */
+  const comGuardas = (o: InterviewerOutput): InterviewerOutput => {
+    if (o.respond === false || !o.reply.trim()) return o;
+    const naConversa = falasDoTottiNaConversa(req.messages);
+    const guardada = aplicarGuardas(o.reply, {
+      falaDoCandidato: req.messages.findLast((m) => m.role === "candidate")?.text,
+      candidatoPerguntou: perguntou,
+      falasDoTotti: naConversa,
+      perguntasJaFeitas: opening ? undefined : falasDoAgente(session, req.messages).filter((t) => t.includes("?")),
+      // No encerramento, "quer acrescentar alguma coisa?" é a pergunta da vez; e com ele travado, oferecer um
+      // caminho ("prefere continuar sozinho?") é ajuda, não condução devolvida.
+      barrarConducao: !opening && question?.kind !== "encerramento" && !travado(req.messages),
+      reconheceu: req.reconheceu === true,
+    });
+    if (!guardada.travas.length) return o;
+    console.info("[interviewer] travas", { travas: guardada.travas, antes: o.reply });
+    // A trava tirou a fala inteira de quem espera uma resposta (ele respondia a uma pergunta do Totti ou avisou que
+    // terminou uma etapa): entra uma reação curta e neutra, para os outros campos da saída não se perderem.
+    const esperaResposta = !opening && !perguntou && (found !== undefined || o.concluded === true || respondendoAoTotti(req.messages));
+    return { ...o, reply: guardada.texto || (esperaResposta ? reacaoNeutra(naConversa) : "") };
+  };
+  // A leitura do turno é a do Totti único (lib/totti/turno.ts), a mesma do quadro: a saída do modelo vira a
+  // leitura comum, as decisões comuns agem sobre ela (sinal de conclusão, sem pergunta nova depois de "não sei",
+  // vez devolvida depois de uma resposta) e ela volta para a saída desta sala.
+  const situacao: SituacaoDoTurno = {
+    sala: "codigo",
+    falaDoCandidato: req.messages.findLast((m) => m.role === "candidate")?.text ?? "",
+    respondiaAoTotti: found !== undefined || respondendoAoTotti(req.messages),
+    falasDoTotti: falasDoAgente(session, req.messages),
+    // Há quanto tempo ele não digita: a última versão do código que a sessão recebeu.
+    paradoHaS: Math.max(0, elapsedMs(session) - (session.codeHistory.at(-1)?.t ?? 0)) / 1000,
+    ajudando: travado(req.messages),
+  };
+  const comTurno = (o: InterviewerOutput): InterviewerOutput => {
+    if (opening) return o;
+    const decidido = decidirTurno(deSaidaDoLiveCoding(o, situacao), situacao);
+    if (decidido.regras.length) console.info("[interviewer] turno", { regras: decidido.regras, antes: o.reply });
+    return paraSaidaDoLiveCoding(decidido.leitura, o);
+  };
+  /** A saída do modelo depois das travas da fala, das decisões do turno e do limite de perguntas desta sala. */
+  const lida = (o: InterviewerOutput): InterviewerOutput => limitarPerguntas(comTurno(comGuardas(o)), question, req.messages, opening);
+  const calou = (o: InterviewerOutput): boolean => o.respond === false || o.reply.trim() === "";
   let output: InterviewerOutput;
   const prazo = Date.now() + PRAZO_TURNO_MS;
   const sobra = () => prazo - Date.now();
   try {
-    output = limitarPerguntas(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra())), question, req.messages, opening);
+    output = lida(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra())));
     // Pediu para encerrar a entrevista: quem se despede e fecha é a IDE (como no botão Finalizar).
     if (!opening && output.finish === true) {
       registrarEvidencia(session, output);
@@ -177,12 +230,23 @@ async function turno(
     }
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
-    if (!opening && perguntou && (output.respond === false || output.reply.trim() === "") && sobra() >= MIN_PARA_REGERAR_MS) {
+    if (!opening && perguntou && calou(output) && output.finish !== true && sobra() >= MIN_PARA_REGERAR_MS) {
       // Ele perguntou e o modelo ficou quieto: era o "você pode me explicar?" sem resposta.
-      output = limitarPerguntas(
-        await generate(session, system, `${user}\n\nATENÇÃO: ele te fez uma pergunta e você não respondeu. respond = true: responda a ela agora.`, Math.min(PRAZO_GERACAO_MS, sobra())),
-        question, req.messages, opening,
-      );
+      output = lida(await generate(session, system, `${user}\n\n${avisoDePerguntaSemResposta("respond")}`, Math.min(PRAZO_GERACAO_MS, sobra())));
+    }
+    if (!opening) {
+      // Pergunta clara nunca fica sem resposta (regra comum às duas salas): se nem a segunda geração respondeu,
+      // o Totti pede para ele repetir, em vez de ignorar.
+      const reserva = comRespostaDeReserva(deSaidaDoLiveCoding(output, situacao), situacao);
+      if (reserva.regras.length) {
+        console.info("[interviewer] turno", { regras: reserva.regras });
+        output = { ...paraSaidaDoLiveCoding(reserva.leitura, output), end: false, highlight: null };
+      }
+      // Ele avisou que terminou (pelo modelo ou pelo sinal da fala com as mãos paradas) e não veio fala: o Totti
+      // avisa que vai olhar, e a pergunta seguinte vem da análise do código, como no quadro.
+      if (output.concluded === true && output.finish !== true && calou(output)) {
+        output = { ...output, respond: true, reply: falaNaoRepetida(avisosDeQueVaiOlhar("codigo"), falasDoAgente(session, req.messages)), end: true, highlight: null };
+      }
     }
     // Encerramento com todos os pontos já perguntados: a resposta dele ao último é o fim. Ficar ouvindo deixava o
     // candidato esperando ~30 s até perguntar "tem mais alguma pergunta?".
@@ -235,7 +299,7 @@ async function turno(
           system,
           `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
           Math.min(PRAZO_GERACAO_MS, sobra() - PRAZO_FILTRO_MS / 2),
-        ).then((o) => limitarPerguntas(o, question, req.messages, opening)).catch((err) => {
+        ).then(lida).catch((err) => {
           console.info("[interviewer] segunda geração falhou, indo de fala segura:", err instanceof Error ? err.message : err);
           return opening
             ? { ...barrada, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
@@ -259,7 +323,7 @@ async function turno(
       const grifo = found.question.highlight;
       const util = grifo && grifoComProposito(found.question.question, code, grifo, problem.public.starters[session.language] ?? "");
       return {
-        reply: found.question.question,
+        reply: perguntaPreparada(found.question.question),
         commands: highlightCommands(util ? grifo : undefined),
         end: false,
       };
@@ -393,9 +457,6 @@ export function reacaoDesnecessaria(output: InterviewerOutput, messages: ChatMes
   return !/\btotti\b/i.test(ultima);
 }
 
-/** Fechamentos que devolvem a vez para o código, variados. */
-const DEVOLVER_PARA_O_CODIGO = ["Pode seguir.", "Segue no seu ritmo.", "Fica à vontade para continuar.", "Pode continuar no código."];
-
 /**
  * Quantas perguntas o Totti já fez seguidas nesta conversa, sem devolver a vez (uma fala dele sem pergunta fecha
  * a sequência). Os pedidos de licença não contam.
@@ -447,7 +508,8 @@ export function limitarPerguntas(
   if (!encerramento && (candidatoPerguntou(messages) || travado(messages))) return output;
   if (perguntasSeguidas(messages) + 1 <= limiteDePerguntas(question)) return output;
   const jaDitas = messages.filter((m) => m.role === "agent").map((m) => m.text);
-  const fechamento = falaNaoRepetida(encerramento ? FECHAR_O_ENCERRAMENTO : DEVOLVER_PARA_O_CODIGO, jaDitas);
+  // Fora do encerramento, a vez volta para o código com o convite comum às duas salas (lib/totti/guardas.ts).
+  const fechamento = encerramento ? falaNaoRepetida(FECHAR_O_ENCERRAMENTO, jaDitas) : escolherConvite(output.reply, jaDitas, "codigo");
   return { ...output, reply: semPerguntaNoFim(output.reply, fechamento, encerramento), end: true, highlight: null };
 }
 
@@ -471,22 +533,16 @@ function falaSegura(perguntou: boolean, jaDitas: string[]): string {
   return falaNaoRepetida(perguntou ? SAFE_ANSWER_REPLIES : SAFE_CLOSE_REPLIES, jaDitas);
 }
 
-const RECONHECIMENTO_NO_COMECO = /^(uhum|hum|hm+|saquei|entendi|entendido|certo|beleza|ok|t[áa]|legal|show|ah|ent[ãa]o)\b[,.!]?\s*/i;
-
 /**
- * Tira o "Saquei."/"Entendi." do começo da resposta quando a IDE já disse um "uhum" agora, ou quando a fala
- * anterior do Totti abriu com a mesma palavra: era o "entendi, entendi, entendi".
+ * A pergunta que a análise preparou sai como está, mas também é fala do Totti: passa pelas travas comuns de
+ * cumprimento e de validação (um "Oi, tudo bem?" na frente da pergunta, no meio da entrevista). Se a trava não
+ * deixar sobrar pergunta, vale a original.
  */
-export function semReconhecimentoRepetido(reply: string, messages: ChatMessage[], reconheceu: boolean): string {
-  const primeira = (t: string) => t.trim().match(RECONHECIMENTO_NO_COMECO)?.[1]?.toLowerCase();
-  const anterior = messages.filter((m) => m.role === "agent").at(-1)?.text;
-  const abre = primeira(reply);
-  if (!abre || (!reconheceu && abre !== (anterior && primeira(anterior)))) return reply;
-  let texto = reply.trim();
-  for (let i = 0; i < 2 && RECONHECIMENTO_NO_COMECO.test(texto); i++) texto = texto.replace(RECONHECIMENTO_NO_COMECO, "");
-  // Só a reação ("Saquei."): sem ela não sobra fala; fica como está.
-  if (texto.length < 3) return reply;
-  return texto[0].toUpperCase() + texto.slice(1);
+function perguntaPreparada(pergunta: string): string {
+  const guardada = aplicarGuardas(pergunta, { barrarConducao: false });
+  if (guardada.travas.length) console.info("[interviewer] travas na pergunta preparada", { travas: guardada.travas, antes: pergunta });
+  const sobrou = guardada.texto && !eSoReacao(guardada.texto) && (!pergunta.includes("?") || guardada.texto.includes("?"));
+  return sobrou ? guardada.texto : pergunta;
 }
 
 /** O que o filtro de fala barra: erro, caso que quebra, técnica, validação, comparação com algo melhor. */

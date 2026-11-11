@@ -30,8 +30,8 @@ describe("semEcoNoComeco", () => {
     assert.equal(semEcoNoComeco("Então você quer evitar colisão. Pode seguir.", fala), "Pode seguir.");
     assert.equal(semEcoNoComeco("Ou seja, cada servidor tem a sua faixa. Continua daí.", fala), "Continua daí.");
   });
-  it("mantém a fala quando não sobra nada depois do eco", () => {
-    assert.equal(semEcoNoComeco("Entendi que você vai usar base 62.", fala), "Entendi que você vai usar base 62.");
+  it("a fala que era só o eco não sai (trava comum, lib/totti/guardas.ts)", () => {
+    assert.equal(semEcoNoComeco("Entendi que você vai usar base 62.", fala), "");
   });
   it("mantém reação curta e conteúdo que não é eco", () => {
     assert.equal(semEcoNoComeco("Entendi. E onde ele fica guardado?", fala), "Entendi. E onde ele fica guardado?");

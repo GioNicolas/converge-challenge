@@ -991,6 +991,9 @@ export function useEntrevista(
           pergunta_ativa: atual.perguntaAtiva?.pergunta ?? undefined,
           requisitos: requisitosCombinados.current.slice(-30),
           gestos_recentes: resumirGestosRecentes(memoriaVisual.current),
+          // Há quanto tempo ele não mexe no desenho: com "terminei" dito de mãos paradas, o servidor conta a
+          // conclusão mesmo que o modelo não marque (lib/totti/turno.ts). Antes do primeiro traço não há o que informar.
+          ...(ultimoDesenhoEm.current > 0 ? { desenho_parado_ha_s: Math.round((Date.now() - ultimoDesenhoEm.current) / 1000) } : {}),
           ...(substitui ? { substitui: true } : {}),
         }, sinal);
         if (sinal?.aborted) throw new DOMException("Substituída por uma fala nova.", "AbortError");
