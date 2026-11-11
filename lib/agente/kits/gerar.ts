@@ -145,7 +145,15 @@ export async function gerarKitDetalhado(args: ArgsGerarKit): Promise<ResultadoGe
     }
 
     const kit = imporIds(dados, vaga.id);
-    const v = validarKit(kit);
+    let v = validarKit(kit);
+    // Última tentativa e só a coerência do texto reclama: segue (a revisão pode corrigir) em vez de matar a geração.
+    if (!v.ok && tentativa === 2) {
+      const semCoerencia = validarKit(kit, { semCoerencia: true });
+      if (semCoerencia.ok) {
+        console.warn("[agente] kit aceito com erros de coerência do texto:", v.erros);
+        v = semCoerencia;
+      }
+    }
     if (v.ok) {
       let kitFinal = v.kit;
       let revisao: ResultadoRevisao | undefined;

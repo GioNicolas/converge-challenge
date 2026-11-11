@@ -12,7 +12,7 @@ import { runHiddenTests, runServerTests, type HiddenTestsResult } from "@/lib/ag
 import { allPassed } from "@/lib/agents/policy";
 import { buildEvaluatorSystem, buildEvaluatorUser } from "@/lib/agents/prompts/evaluator";
 import { dadoEmLinha, tentativasDeInjecao, type TentativaDeInjecao } from "@/lib/seguranca/injecao";
-import { ehPedidoDeRepeticao, fatoDeCobertura, semTermosInternos, textoCulpaOCandidatoPorPedido } from "@/lib/totti/relatorio";
+import { ehItemGenerico, ehPedidoDeRepeticao, FRACAO_DE_ENCERRAMENTO_ANTECIPADO, fatoDeCobertura, mencionaDuracao, semTermosInternos, textoCulpaOCandidatoPorPedido } from "@/lib/totti/relatorio";
 import { CONCEITOS_EMPECILHO, type Report, type SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
@@ -220,17 +220,14 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
   };
 }
 
-/** Antes desta fração do tempo previsto, a sessão conta como encerrada antes da hora. */
-const FRACAO_DE_ENCERRAMENTO_ANTECIPADO = 0.8;
-
-/** "A entrevista durou 8 de 30 minutos; 2 de 5 critérios ficaram sem prova." ou null se foi até o fim. */
+/**
+ * "A entrevista durou 8 de 30 minutos; 2 de 5 critérios ficaram sem prova." Só existe quando a sessão acabou antes da hora;
+ * passa os minutos crus para o fato de cobertura.
+ */
 export function fatoDeEncerramentoAntecipado(endMs: number, previstoMin: number, semNota: number, total: number): string | null {
-  if (previstoMin <= 0 || endMs >= previstoMin * 60_000 * FRACAO_DE_ENCERRAMENTO_ANTECIPADO) return null;
-  return fatoDeCobertura({ duracaoMin: Math.floor(endMs / 60_000), previstoMin, criteriosSemProva: semNota, totalCriterios: total });
+  if (previstoMin <= 0 || endMs >= FRACAO_DE_ENCERRAMENTO_ANTECIPADO * previstoMin * 60_000) return null;
+  return fatoDeCobertura({ duracaoMin: endMs / 60_000, previstoMin, criteriosSemProva: semNota, totalCriterios: total });
 }
-
-/** "Aprofundar Requisitos.": só o tema, sem fato. */
-const ITEM_GENERICO = /^aprofundar\b[^.;:,]{0,80}\.?$/i;
 
 /**
  * Textos do relatório com as regras de justiça do Totti: sai o que culpa o candidato por pedir repetição, o item
@@ -240,10 +237,10 @@ export function limparTextosDoRelatorio<T extends Pick<EvaluatorOutput, "summary
   output: T,
   fato: string | null,
 ): Pick<EvaluatorOutput, "summary" | "strengths" | "concerns" | "nextSteps"> {
-  const bom = (t: string) => t.trim() !== "" && !textoCulpaOCandidatoPorPedido(t) && !ITEM_GENERICO.test(t.trim());
+  const bom = (t: string) => t.trim() !== "" && !textoCulpaOCandidatoPorPedido(t) && !ehItemGenerico(t);
   const lista = (xs: string[]) => xs.filter(bom).map(semTermosInternos);
   const resumo = bom(output.summary) ? semTermosInternos(output.summary.trim()) : "";
-  const comFato = fato && !/\bdurou\b/i.test(resumo) ? [resumo, fato].filter(Boolean).join(" ") : resumo;
+  const comFato = fato && !mencionaDuracao(resumo) ? [resumo, fato].filter(Boolean).join(" ") : resumo;
   return { summary: comFato, strengths: lista(output.strengths), concerns: lista(output.concerns), nextSteps: lista(output.nextSteps) };
 }
 
@@ -260,8 +257,8 @@ function falasDoCandidatoPorMomento(session: SessionState): Map<string, string[]
 
 /**
  * Tira da nota a evidência que é só pedido de repetição ou esclarecimento (a fala do candidato naquele momento, ou o
- * próprio texto da evidência). Se a nota era baixa (1 ou 2) e nenhuma evidência sobrou, a nota vira nula
- * (`semProva`). Nota 3 ou 4 fica, só sem essa evidência. Pura: o teste a chama direto.
+ * próprio texto da evidência). Se nenhuma evidência sobrou, a nota vira nula (`semProva`), qualquer que seja o
+ * valor: sem prova, sem nota. Se sobrou alguma, a nota fica, só sem a evidência de pedido. Pura: o teste a chama direto.
  */
 export function descartarProvaDePedido<T extends { score: number | null; evidence: { at: string; text: string }[] }>(
   judged: T,
@@ -274,7 +271,7 @@ export function descartarProvaDePedido<T extends { score: number | null; evidenc
   };
   const evidence = judged.evidence.filter((e) => !ehPedido(e));
   if (evidence.length === judged.evidence.length) return judged;
-  if (evidence.length === 0 && judged.score !== null && judged.score <= 2) return { ...judged, score: null, evidence, semProva: true };
+  if (evidence.length === 0) return { ...judged, score: null, evidence, semProva: true };
   return { ...judged, evidence };
 }
 

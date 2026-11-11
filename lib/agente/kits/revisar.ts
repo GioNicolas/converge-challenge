@@ -43,7 +43,21 @@ export type ResultadoRevisao = {
 
 /** Todos os números (qualquer quantidade de dígitos, com separador) de um texto, ordenados. */
 export function numerosDoTexto(texto: string): string[] {
-  return [...texto.matchAll(/\d+(?:[.,]\d+)*/g)].map((m) => m[0]).sort();
+  const eDigito = (ch: string | undefined) => ch !== undefined && ch >= "0" && ch <= "9";
+  const numeros: string[] = [];
+  let i = 0;
+  while (i < texto.length) {
+    if (!eDigito(texto[i])) {
+      i++;
+      continue;
+    }
+    // Dígitos, com "." ou "," no meio quando há dígito dos dois lados ("10.000", "2,5").
+    let fim = i;
+    while (fim < texto.length && (eDigito(texto[fim]) || ((texto[fim] === "." || texto[fim] === ",") && eDigito(texto[fim + 1])))) fim++;
+    numeros.push(texto.slice(i, fim));
+    i = fim;
+  }
+  return numeros.sort();
 }
 
 /** Os campos de texto de um problema, cada um com uma etiqueta (para dizer onde um número mudou). */
@@ -109,7 +123,19 @@ export function aplicarRevisao(original: Problema, r: RevisaoDoProblema): { ok: 
 
 /** Frases de um texto falado (corta em . ! ? seguidos de espaço). */
 export function contarFrases(texto: string): number {
-  return texto.split(/(?<=[.!?])\s+/).filter((f) => f.trim()).length;
+  let frases = 0;
+  let atual = "";
+  for (let i = 0; i < texto.length; i++) {
+    const ch = texto[i];
+    if (ch.trim() === "" && ".!?".includes(texto[i - 1] ?? "x")) {
+      if (atual.trim()) frases++;
+      atual = "";
+      while (i + 1 < texto.length && texto[i + 1].trim() === "") i++;
+      continue;
+    }
+    atual += ch;
+  }
+  return atual.trim() ? frases + 1 : frases;
 }
 
 /** Por que a fala está acima do alvo (2 frases, ~220 caracteres), ou undefined se está dentro. Função pura. */

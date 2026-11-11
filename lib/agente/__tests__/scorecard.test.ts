@@ -321,7 +321,7 @@ describe("scorecard: regressões de proveniência", () => {
     assert.ok(itens.includes("Componentes e fluxo: sem prova"));
     assert.ok(itens.includes("Dados e consistência: sem prova"));
     assert.ok(itens.includes("Requisitos e escopo: sem prova"), "não expande duas vezes um nome já legível");
-    assert.ok(sc.pontos_a_aprofundar.every(t => !/^Aprofundar/.test(t)), "nunca 'Aprofundar X.'");
+    assert.ok(sc.pontos_a_aprofundar.every(t => !t.startsWith("Aprofundar")), "nunca 'Aprofundar X.'");
     assert.ok(!sc.pontos_a_aprofundar.join(" ").includes("componentes_fluxo"));
   });
 

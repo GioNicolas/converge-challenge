@@ -117,6 +117,11 @@ export async function gerarProblema(config: InterviewConfig, llm: LlmCliente): P
       const problema: Problema = { ...r.dados, id };
       erros = errosDoProblema(problema);
       if (!erros.length) return { problema, ms: Date.now() - inicio, modelo, tentativas: tentativa };
+      // Última tentativa e só a coerência do texto reclama (o título tem falsos positivos): segue, e a revisão pode corrigir.
+      if (tentativa === 2 && !errosDoProblema(problema, { semCoerencia: true }).length) {
+        console.warn("[agente] questão aceita com erros de coerência do texto:", erros);
+        return { problema, ms: Date.now() - inicio, modelo, tentativas: tentativa };
+      }
     } catch (e) {
       if (!(e instanceof ErroLlm && e.codigo === "invalido")) throw e;
       erros = [`schema: ${e.message}`];

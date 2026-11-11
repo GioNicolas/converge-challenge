@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { EventoArmazenado } from "./armazenamento/repositorio";
 import { ErroLlm, type LlmCliente } from "./llm/cliente";
 import { criterioSoPorFala, type Criterio, type Kit, type Problema } from "./kits/tipos";
-import { ehPedidoDeRepeticao, fatoDeCobertura, semTermosInternos, textoCulpaOCandidatoPorPedido } from "../totti/relatorio";
+import { ehItemGenerico, ehPedidoDeRepeticao, falaDeProximaConversa, fatoDeCobertura, semTermosInternos, textoCulpaOCandidatoPorPedido } from "../totti/relatorio";
 import {
   montarSistemaDinamicoScorecard,
   montarSistemaEstaticoScorecard,
@@ -16,7 +16,7 @@ import {
   NOME_SCHEMA_SCORECARD,
 } from "./prompts/scorecard";
 
-export { NIVEIS_ADAPTACAO };
+export { NIVEIS_ADAPTACAO, ehItemGenerico };
 import { tempoDaEntrevista, type EstadoSessao } from "./sessao/estado";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { SquadRule } from "../contracts";
@@ -288,11 +288,22 @@ export function duracaoDaSessao(estado: EstadoSessao, eventos: EventoArmazenado[
 
 const LIMITADA_AS_REFERENCIAS = "Avaliação limitada às referências verificadas abaixo.";
 
-const semParenteses = (nome: string) => nome.replace(/\s*\([^()]*\)\s*$/, "").trim();
+/** "Nome (xxx)" -> "Nome": tira UM parêntese final, se o nome terminar com um. */
+function semParenteses(nome: string): string {
+  const t = nome.trim();
+  if (!t.endsWith(")")) return t;
+  const abre = t.lastIndexOf("(");
+  if (abre < 0) return t;
+  const dentro = t.slice(abre + 1, -1);
+  if (dentro.includes("(") || dentro.includes(")")) return t;
+  return t.slice(0, abre).trim();
+}
 
-/** "Aprofundar Requisitos e escopo.": só o nome de um tema, sem nenhum fato. Nunca é um item útil. */
-export function ehItemGenerico(texto: string): boolean {
-  return /^aprofundar\b[^.;:,]{0,80}\.?$/i.test(texto.trim());
+/** Tira . ; : do fim do texto. */
+function semPontuacaoFinal(texto: string): string {
+  let fim = texto.length;
+  while (fim > 0 && ".;:".includes(texto[fim - 1])) fim--;
+  return texto.slice(0, fim);
 }
 
 /**
@@ -302,10 +313,10 @@ export function ehItemGenerico(texto: string): boolean {
 export function textoDoQueFaltou(nome: string, id: string, soPorFala: boolean, sinaisEsperados: string[]): string {
   if (soPorFala) return `${nome}: não houve fala do candidato explicando ou respondendo algo de conteúdo; vale ouvi-lo explicar a solução.`;
   const raizes = (s: string) => normalizar(s).split(" ").filter(w => w.length >= 5).map(w => w.slice(0, 5));
-  const chaves = new Set([...raizes(nome), ...raizes(id.replace(/_/g, " "))]);
+  const chaves = new Set([...raizes(nome), ...raizes(id.replaceAll("_", " "))]);
   const sinal = sinaisEsperados.find(s => raizes(s).some(r => chaves.has(r)));
   if (!sinal) return `${nome}: sem prova nesta entrevista; vale perguntar diretamente sobre isso.`;
-  const frase = sinal.trim().replace(/[.;:]+$/, "");
+  const frase = semPontuacaoFinal(sinal.trim());
   return `${nome}: sem prova nesta entrevista. Sinal esperado que não apareceu: ${frase[0].toLowerCase()}${frase.slice(1)}.`;
 }
 
@@ -478,7 +489,7 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
   // o resto fica: só some o que se apoiava em prova que não existe mais. Nunca vira frase fixa para todo critério.
   const nomeLegivel = (id: string) => semParenteses(semTermosInternos(nomes.get(id) ?? id));
   const semNota = criterios.filter(c => c.nota === null);
-  const chavesSemNota = semNota.flatMap(c => [nomeLegivel(c.criterio), c.criterio.replace(/_/g, " ")]).map(normalizar).filter(Boolean);
+  const chavesSemNota = semNota.flatMap(c => [nomeLegivel(c.criterio), c.criterio.replaceAll("_", " ")]).map(normalizar).filter(Boolean);
   const citaCriterioSemProva = (texto: string) => {
     const t = normalizar(texto);
     return chavesSemNota.some(k => t.includes(k));
@@ -495,7 +506,7 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
   const pontosAAprofundar = [...doModelo, ...faltas].map(legivel);
 
   const fato = fatoDeCobertura({
-    duracaoMin: duracao ? Math.floor(duracao.decorridoMin) : null,
+    duracaoMin: duracao ? duracao.decorridoMin : null,
     previstoMin: duracao?.previstoMin ?? null,
     criteriosSemProva: semNota.length,
     totalCriterios: criterios.length,
@@ -504,7 +515,7 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
   const briefingDoModelo = saida.briefing_para_proxima_etapa.trim();
   const modeloServe = !reverResumo && briefingDoModelo !== "" && !textoCulpaOCandidatoPorPedido(briefingDoModelo)
     // "Não avançar" não manda a conversa para a próxima etapa.
-    && !(recomendacao === "nao_avancar" && /proxim[ao] (conversa|etapa)/.test(normalizar(briefingDoModelo)));
+    && !(recomendacao === "nao_avancar" && falaDeProximaConversa(normalizar(briefingDoModelo)));
   const briefingComposto = [
     recomendacao === "evidencia_insuficiente" ? "Sem evidência suficiente para recomendar avançar ou não avançar." : "",
     fato ?? "",

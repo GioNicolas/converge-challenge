@@ -75,15 +75,43 @@ export const Kit = z.object({
 });
 export type Kit = Omit<z.infer<typeof Kit>, "problemas" | "criterios"> & { problemas: Problema[]; criterios: Criterio[] };
 
+/** Minúsculas e sem acento ("Comunicação" -> "comunicacao"). */
+export function semAcento(texto: string): string {
+  let out = "";
+  for (const ch of texto.normalize("NFD")) {
+    const cod = ch.codePointAt(0) ?? 0;
+    if (cod >= 0x300 && cod <= 0x36f) continue;
+    out += ch;
+  }
+  return out.toLowerCase();
+}
+
+/** Palavras de um texto (sequências de letras, em minúsculas e sem acento). */
+export function palavrasSemAcento(texto: string): string[] {
+  const palavras: string[] = [];
+  let atual = "";
+  for (const ch of semAcento(texto)) {
+    if (ch >= "a" && ch <= "z") atual += ch;
+    else if (atual) {
+      palavras.push(atual);
+      atual = "";
+    }
+  }
+  if (atual) palavras.push(atual);
+  return palavras;
+}
+
 /**
- * O critério só se prova por fala? Vale o campo do critério. Kits já salvos (vagas) não têm o campo e guardam o
- * nome antigo (com o termo interno entre parênteses): o texto do nome antigo continua sendo reconhecido para
- * eles não mudarem de comportamento. O id do critério não muda.
+ * O critério só se prova por fala? Vale o campo do critério. Sem o campo (kits já salvos), o nome antigo (com o termo interno entre
+ * parênteses) continua sendo reconhecido para esses kits não mudarem de comportamento. O id não muda.
  */
 export function criterioSoPorFala(c: Pick<Criterio, "id"> & Partial<Pick<Criterio, "nome" | "provaSoPorFala">>): boolean {
   if (c.provaSoPorFala !== undefined) return c.provaSoPorFala;
-  const nome = (c.nome ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-  return /\b(oral|verbal|plins)\b|comunicacao.*\brespostas\b/.test(nome);
+  const nome = semAcento(c.nome ?? "");
+  const palavras = palavrasSemAcento(nome);
+  if (palavras.some((p) => p === "plins" || p === "oral" || p === "verbal")) return true;
+  const ini = nome.indexOf("comunicacao");
+  return ini >= 0 && palavrasSemAcento(nome.slice(ini + "comunicacao".length)).includes("respostas");
 }
 
 /** Critério sem pergunta própria: fica fora da cobertura e nunca vira alvo (o id "comunicacao" sempre foi assim). */
@@ -97,14 +125,18 @@ export function criterioIndireto(c: Pick<Criterio, "id"> & Partial<Pick<Criterio
  * guardam só o id). Kit sem o nome antigo volta intacto (o mesmo objeto).
  */
 export function kitSemTermosInternos<K extends Pick<Kit, "criterios">>(kit: K): K {
-  const antigo = (c: Criterio) => /\bplins?\b/i.test(c.nome);
+  const temPlins = (texto: string) => palavrasSemAcento(texto).some((p) => p === "plin" || p === "plins");
+  const antigo = (c: Criterio) => temPlins(c.nome);
   if (!kit.criterios.some(antigo)) return kit;
   return {
     ...kit,
     criterios: kit.criterios.map((c) => {
       if (!antigo(c)) return c;
-      const nome = c.nome.replace(/\s*\([^()]*\bplins?\b[^()]*\)\s*$/i, "").trim() || "Comunicação";
-      return { ...c, nome, ...(criterioSoPorFala(c) ? { provaSoPorFala: true } : {}) };
+      // Tira o último parêntese do nome quando é ele que traz o termo interno.
+      let nome = c.nome.trim();
+      const abre = nome.lastIndexOf("(");
+      if (nome.endsWith(")") && abre >= 0 && temPlins(nome.slice(abre + 1, -1))) nome = nome.slice(0, abre).trim();
+      return { ...c, nome: nome || "Comunicação", ...(criterioSoPorFala(c) ? { provaSoPorFala: true } : {}) };
     }),
   };
 }

@@ -20,7 +20,7 @@ describe("live coding: pedido de repetição não é prova", () => {
     assert.deepEqual(r.evidence, []);
   });
 
-  it("nota 2 também cai; nota 3 fica, só sem a evidência de pedido", () => {
+  it("nota 2 também cai; nota 3 com outra prova fica, só sem a evidência de pedido", () => {
     const dois = descartarProvaDePedido({ score: 2, evidence: [{ at: "01:00", text: "x" }] }, falas({ "01:00": ["Não entendi."] }));
     assert.equal(dois.score, null);
     const tres = descartarProvaDePedido(
@@ -29,6 +29,13 @@ describe("live coding: pedido de repetição não é prova", () => {
     );
     assert.equal(tres.score, 3);
     assert.deepEqual(tres.evidence.map((e) => e.at), ["02:00"]);
+  });
+
+  it("nota 4 cuja única prova era pedido de repetição também vira nula, sem prova", () => {
+    const r = descartarProvaDePedido({ score: 4, evidence: [{ at: "01:00", text: "x" }] }, falas({ "01:00": ["Pode repetir a pergunta?"] }));
+    assert.equal(r.score, null);
+    assert.equal(r.semProva, true);
+    assert.deepEqual(r.evidence, []);
   });
 
   it("fala com conteúdo continua sendo prova, mesmo de nota baixa", () => {
@@ -75,6 +82,8 @@ describe("live coding: textos do relatório", () => {
 
   it("sessão que foi até perto do fim não ganha fato de encerramento", () => {
     assert.equal(fatoDeEncerramentoAntecipado(28 * 60_000, 30, 0, 5), null);
+    assert.equal(fatoDeEncerramentoAntecipado(27 * 60_000, 30, 2, 5), null);
+    assert.equal(fatoDeEncerramentoAntecipado(60_000, 0, 2, 5), null);
   });
 });
 
@@ -84,6 +93,6 @@ describe("live coding: prompt do avaliador", () => {
     const problem = getProblem(config.problemId);
     const system = buildEvaluatorSystem(config, problem, config.criteria.map((c) => c.id));
     assert.ok(system.includes(REGRAS_DE_JUSTICA_DO_RELATORIO));
-    assert.match(system, /pedir repetição ou esclarecimento, a nota de comunicação é null/);
+    assert.ok(system.includes("pedir repetição ou esclarecimento, a nota de comunicação é null"));
   });
 });

@@ -28,7 +28,7 @@ const configDe = (extra: Partial<InterviewConfig> = {}): InterviewConfig =>
 const problemaDoModelo = () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { id, empecilho, ...p } = kitFalso("Logística").problemas[0] as ReturnType<typeof kitFalso>["problemas"][0] & { empecilho?: unknown };
-  return { ...p, titulo: "Roteirização de entregas" };
+  return { ...p, titulo: "Roteirização de entregas", enunciado: "Desenhe a roteirização das entregas de última milha para os motoristas." };
 };
 
 /** O cliente falso com um atraso, para a geração ainda estar rodando quando o candidato chega. */

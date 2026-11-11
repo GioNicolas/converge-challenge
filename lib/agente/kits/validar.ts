@@ -2,7 +2,7 @@
  * Validação determinística de um kit gerado (ou editado por uma pessoa): Zod + regras de negócio.
  * Não chama LLM. Devolve TODAS as violações de uma vez (alimentam o retry da geração e o PUT).
  */
-import { Kit, type Problema } from "./tipos";
+import { Kit, palavrasSemAcento, type Problema, semAcento } from "./tipos";
 
 export const MIN_CRITERIOS = 6;
 export const MIN_FICHA = 8;
@@ -13,6 +13,19 @@ export const MIN_TIPOS_PERGUNTA = 4;
 export const MAX_ENUNCIADO = 500;
 /** Alvo do prompt: 2 frases e ~220 caracteres (12 s de voz); 300 é a folga. Os problemas FIXOS do catálogo têm falas maiores e não passam por este validador. */
 export const MAX_FALA_DO_DESAFIO = 300;
+/** Teto ao EDITAR uma avaliação já salva: questões gravadas antes do teto de 300 podem ter até 600 e não podem travar a edição. */
+export const MAX_FALA_DO_DESAFIO_EDICAO = 600;
+
+/**
+ * `edicao: true` = validação de uma avaliação que uma pessoa edita (rota PUT): teto da fala em 600 e sem as
+ * checagens de coerência do texto (título x enunciado, concordância), para não travar questões já salvas.
+ * Sem a opção = problema recém-gerado: teto de 300 e todas as checagens.
+ */
+export type OpcoesValidacao = {
+  edicao?: boolean;
+  /** Pula só as checagens de coerência do texto (título, concordância): serve para aceitar, na última tentativa da geração, o problema que só falha nelas. */
+  semCoerencia?: boolean;
+};
 
 /** Id seguro para URL, log e chave de mapa: minúsculas, dígitos e "_", começando por letra. */
 export const RE_SLUG = /^[a-z][a-z0-9_]{1,63}$/;
@@ -47,7 +60,7 @@ function numerosDe(texto: string): Set<string> {
 
 export type ResultadoValidacao = { ok: true; kit: Kit; avisos: string[] } | { ok: false; erros: string[] };
 
-export function validarKit(bruto: unknown): ResultadoValidacao {
+export function validarKit(bruto: unknown, opcoes: OpcoesValidacao = {}): ResultadoValidacao {
   const z = Kit.safeParse(bruto);
   if (!z.success) {
     return {
@@ -55,7 +68,19 @@ export function validarKit(bruto: unknown): ResultadoValidacao {
       erros: z.error.issues.slice(0, 20).map((i) => `schema: ${i.path.join(".") || "(raiz)"}: ${i.message}`),
     };
   }
-  const kit = z.data;
+  // `provaSoPorFala` está fora do schema (o Zod o descarta): devolve o booleano do critério de entrada.
+  const soPorFala = new Map<string, boolean>();
+  const criteriosBrutos = (bruto as { criterios?: unknown }).criterios;
+  if (Array.isArray(criteriosBrutos)) {
+    for (const c of criteriosBrutos) {
+      const { id, provaSoPorFala } = (c ?? {}) as { id?: unknown; provaSoPorFala?: unknown };
+      if (typeof id === "string" && typeof provaSoPorFala === "boolean") soPorFala.set(id, provaSoPorFala);
+    }
+  }
+  const kit: Kit = {
+    ...z.data,
+    criterios: z.data.criterios.map((c) => (soPorFala.has(c.id) ? { ...c, provaSoPorFala: soPorFala.get(c.id) } : c)),
+  };
   const erros: string[] = [];
   const avisos: string[] = [];
 
@@ -84,7 +109,7 @@ export function validarKit(bruto: unknown): ResultadoValidacao {
 
   // Problema
   if (kit.problemas.length !== 1) erros.push(`o kit deve ter exatamente 1 problema (veio ${kit.problemas.length})`);
-  if (kit.problemas[0]) erros.push(...errosDoProblema(kit.problemas[0]));
+  if (kit.problemas[0]) erros.push(...errosDoProblema(kit.problemas[0], opcoes));
 
   if (kit.tiposPergunta.length < MIN_TIPOS_PERGUNTA) {
     erros.push(`tiposPergunta com ${kit.tiposPergunta.length}; o mínimo é ${MIN_TIPOS_PERGUNTA}`);
@@ -99,7 +124,8 @@ export function validarKit(bruto: unknown): ResultadoValidacao {
 }
 
 /** Regras do problema (o que a questão gerada para a vaga precisa cumprir sozinha, sem o resto do kit). */
-export function errosDoProblema(p: Problema): string[] {
+export function errosDoProblema(p: Problema, opcoes: OpcoesValidacao = {}): string[] {
+  const maxFala = opcoes.edicao ? MAX_FALA_DO_DESAFIO_EDICAO : MAX_FALA_DO_DESAFIO;
   const erros: string[] = [];
   if (!eSlugSeguro(p.id)) erros.push(`problema.id "${p.id}" não é slug seguro`);
   if (vazio(p.titulo)) erros.push("problema.titulo vazio");
@@ -130,13 +156,139 @@ export function errosDoProblema(p: Problema): string[] {
   }
   // A fala do desafio também é pública (o agente a fala no início): mesmas regras do enunciado.
   if (p.falaDoDesafio !== undefined) {
-    if (p.falaDoDesafio.length > MAX_FALA_DO_DESAFIO) {
-      erros.push(`falaDoDesafio com ${p.falaDoDesafio.length} caracteres; o máximo é ${MAX_FALA_DO_DESAFIO}`);
+    if (p.falaDoDesafio.length > maxFala) {
+      erros.push(`falaDoDesafio com ${p.falaDoDesafio.length} caracteres; o máximo é ${maxFala}`);
     }
     const vazadosFala = [...numerosDe(p.falaDoDesafio)].filter((n) => numerosFicha.has(n));
     if (vazadosFala.length) {
       erros.push(`falaDoDesafio vaza números da ficha (${vazadosFala.join(", ")})`);
     }
   }
+  if (!opcoes.edicao && !opcoes.semCoerencia) erros.push(...errosDeCoerencia(p));
   return erros;
+}
+
+// Coerência do texto (sem modelo): título x enunciado e concordância de gênero. Sem regex.
+
+/** Palavras que não dizem de que o sistema trata (nem o título nem o enunciado se distinguem por elas). */
+const PALAVRAS_VAZIAS = new Set([
+  "para", "como", "com", "sem", "mais", "menos", "sobre", "entre", "cada", "todo", "toda", "todos", "todas",
+  "seus", "suas", "meus", "minhas", "esse", "essa", "esses", "essas", "este", "esta", "estes", "estas",
+  "isso", "aquele", "aquela", "aquilo", "pela", "pelo", "pelas", "pelos", "quando", "onde", "quem",
+  "qual", "quais", "muito", "muita", "muitos", "muitas", "pouco", "pouca", "poucos", "poucas", "tambem",
+  "desde", "apos", "ainda", "tudo", "nada", "outro", "outra", "outros", "outras", "mesmo", "mesma",
+  "sistema", "sistemas", "plataforma", "plataformas", "real", "tempo", "painel", "paineis", "app", "apps",
+  "aplicativo", "aplicativos", "servico", "servicos", "solucao", "desenhe", "desenho", "projete", "projeto",
+  "crie", "monte", "arquitetura", "dados", "ferramenta", "ferramentas", "modulo", "novo", "nova",
+  "grande", "grandes", "forma", "parte", "partes", "tipo", "tipos", "ponto", "pontos", "empresa", "equipe",
+]);
+
+/** Mesma palavra, comparando até 5 letras ("pedido" = "pedidos", "entrega" = "entregas"). */
+const mesmoRadical = (a: string, b: string): boolean => {
+  const k = Math.min(5, a.length, b.length);
+  return (k >= 4 || (k >= 2 && a.length === b.length)) && a.slice(0, k) === b.slice(0, k);
+};
+
+/** Siglas de 2 a 4 letras escritas em maiúsculas no texto original ("URL", "API", "SMS"), em minúsculas. */
+function siglasDe(texto: string): string[] {
+  const out: string[] = [];
+  let atual = "";
+  const fechar = () => {
+    if (atual.length >= 2 && atual.length <= 4) out.push(atual.toLowerCase());
+    atual = "";
+  };
+  for (const ch of texto) {
+    if (ch >= "A" && ch <= "Z") atual += ch;
+    else fechar();
+  }
+  fechar();
+  return out;
+}
+
+/** Palavras de conteúdo de um texto: sem acento, 4 letras ou mais (ou sigla em maiúsculas), fora da lista de palavras vazias; sem repetir. */
+function palavrasDeConteudo(texto: string): string[] {
+  return [...new Set([...palavrasSemAcento(texto).filter((w) => w.length >= 4 && !PALAVRAS_VAZIAS.has(w)), ...siglasDe(texto)])];
+}
+
+const citar = (ws: string[]) => ws.slice(0, 3).map((w) => `"${w}"`).join(", ");
+
+/** O título precisa compartilhar uma palavra de conteúdo com o enunciado ou com a primeira linha da ficha. */
+export function errosDoTitulo(p: Problema): string[] {
+  const doTitulo = palavrasDeConteudo(p.titulo);
+  if (!doTitulo.length) return [];
+  const primeira = p.ficha[0] ? `${p.ficha[0].pergunta} ${p.ficha[0].resposta}` : "";
+  const dele = palavrasDeConteudo(`${p.enunciado} ${primeira}`);
+  if (doTitulo.some((t) => dele.some((e) => mesmoRadical(t, e)))) return [];
+  return [
+    `o título fala de ${citar(doTitulo)}; o enunciado, de ${citar(palavrasDeConteudo(p.enunciado))}. ` +
+      "O título deve nomear o sistema que o enunciado descreve, com as mesmas palavras-chave",
+  ];
+}
+
+/** Determinantes e possessivos (minúsculos, com acento). "a" sozinho fica fora do feminino ("a pedido de"). */
+const FEMININO = new Set([
+  "as", "às", "à", "da", "das", "na", "nas", "pela", "pelas", "sua", "suas", "minha", "minhas", "própria", "próprias",
+  "essa", "essas", "esta", "estas", "aquela", "aquelas", "toda", "todas", "muita", "muitas", "pouca", "poucas",
+  "uma", "umas", "quantas", "outra", "outras", "algumas",
+]);
+const MASCULINO = new Set([
+  "o", "os", "do", "dos", "no", "nos", "pelo", "pelos", "ao", "aos", "seu", "seus", "meu", "meus", "próprio", "próprios",
+  "esse", "esses", "este", "estes", "aquele", "aqueles", "todo", "todos", "muito", "muitos", "pouco", "poucos",
+  "um", "uns", "quantos", "outro", "outros", "alguns",
+]);
+
+/** Palavras (só letras, minúsculas, COM acento) de um texto. */
+function palavrasComAcento(texto: string): string[] {
+  const out: string[] = [];
+  let atual = "";
+  for (const ch of texto.toLowerCase()) {
+    if (ch.toLowerCase() !== ch.toUpperCase()) atual += ch;
+    else if (atual) {
+      out.push(atual);
+      atual = "";
+    }
+  }
+  if (atual) out.push(atual);
+  return out;
+}
+
+/**
+ * Concordância de gênero barata: uma palavra que o MESMO problema usa depois de um determinante masculino
+ * ("os pedidos") e depois de um feminino ("suas pedidos") está errada em um dos dois (erro típico do gerador ao
+ * trocar uma palavra sem ajustar o artigo). Só olha palavras terminadas em a/o (com s), para não acusar
+ * substantivos de dois gêneros ("os clientes", "as clientes"). Um campo por vez: não pareia entre campos.
+ */
+export function errosDeConcordancia(p: Problema): string[] {
+  const campos = [p.titulo, p.enunciado, p.falaDoDesafio ?? "", ...p.ficha.flatMap((f) => [f.pergunta, f.resposta])];
+  const fem = new Map<string, string>(); // radical -> primeiro "determinante palavra" visto no feminino
+  const masc = new Map<string, string>();
+  for (const campo of campos) {
+    const ws = palavrasComAcento(campo);
+    for (let i = 0; i + 1 < ws.length; i++) {
+      const det = ws[i];
+      const prox = ws[i + 1];
+      const eFem = FEMININO.has(det);
+      if (!eFem && !MASCULINO.has(det)) continue;
+      if (FEMININO.has(prox) || MASCULINO.has(prox)) continue;
+      const n = semAcento(prox);
+      if (n.length < 4 || n.endsWith("ista") || n.endsWith("istas")) continue;
+      const radical = n.endsWith("s") ? n.slice(0, -1) : n;
+      if (!radical.endsWith("a") && !radical.endsWith("o")) continue;
+      const alvo = eFem ? fem : masc;
+      if (!alvo.has(radical)) alvo.set(radical, `${det} ${prox}`);
+    }
+  }
+  const erros: string[] = [];
+  for (const [radical, comFem] of fem) {
+    const comMasc = masc.get(radical);
+    if (comMasc) {
+      erros.push(`concordância de gênero: "${comFem}" (feminino) e "${comMasc}" (masculino) usam a mesma palavra; corrija o artigo ou o possessivo`);
+    }
+  }
+  return erros;
+}
+
+/** Checagens de coerência do texto de um problema GERADO (ver `OpcoesValidacao`). */
+export function errosDeCoerencia(p: Problema): string[] {
+  return [...errosDoTitulo(p), ...errosDeConcordancia(p)];
 }

@@ -67,6 +67,35 @@ export type RelatorioVisto = {
   adaptacao: AdaptacaoVista | null;
 };
 
+const MARCAS_FINAIS_DE_CONEXAO = [" (ponta perto, sem encostar)", " (tracejada)", " (seta solta)", " (linha solta)"];
+
+/** Tira UMA marca final de conexão (marca interna ou rótulo entre aspas), ou devolve o texto como veio. */
+function semMarcaFinal(t: string): string {
+  const sufixo = MARCAS_FINAIS_DE_CONEXAO.find(m => t.endsWith(m));
+  if (sufixo) return t.slice(0, -sufixo.length);
+  if (!t.endsWith('")')) return t;
+  // Rótulo: ("..."), que pode ter aspas escapadas (\"). Anda do fim até a aspa de abertura (sem barra antes).
+  for (let i = t.length - 3; i >= 1; i--) {
+    if (t[i] !== '"') continue;
+    let barras = 0;
+    while (i - 1 - barras >= 0 && t[i - 1 - barras] === "\\") barras++;
+    if (barras % 2 === 1) continue;
+    if (t[i - 1] !== "(") return t;
+    return t.slice(0, i - 1).trimEnd();
+  }
+  return t;
+}
+
+/** Primeira seta do texto (a que aparece antes na linha), com a posição e o sinal. */
+function primeiraSeta(t: string): { pos: number; seta: string } | null {
+  let melhor: { pos: number; seta: string } | null = null;
+  for (const seta of ["→", "↔", "—"]) {
+    const pos = t.indexOf(` ${seta} `);
+    if (pos >= 0 && (!melhor || pos < melhor.pos)) melhor = { pos, seta };
+  }
+  return melhor;
+}
+
 /**
  * Linha de conexão do grafo ("Entrada dos dados → Quadro (ponta perto, sem encostar)") -> nome legível para a
  * prova: "Entrada dos dados → Quadro", "seta de Entrada dos dados" (sem destino) ou "seta para Quadro" (sem origem).
@@ -77,15 +106,14 @@ function nomeDeConexao(id: string, linha: string): string | null {
   let t = linha.trim();
   for (;;) {
     const antes = t;
-    t = t
-      .replace(/\s*\((?:ponta perto, sem encostar|tracejada|seta solta|linha solta)\)$/, "")
-      .replace(/\s*\("(?:[^"\\]|\\.)*"\)$/, "")
-      .trim();
+    t = semMarcaFinal(t).trim();
     if (t === antes) break;
   }
-  const par = /^(.*?) (→|↔|—) (.*)$/.exec(t);
-  if (!par) return null;
-  const [, a, seta, b] = par;
+  const achada = primeiraSeta(t);
+  if (!achada) return null;
+  const { seta } = achada;
+  const a = t.slice(0, achada.pos);
+  const b = t.slice(achada.pos + seta.length + 2);
   const semOrigem = a === "(sem origem)" || a === "?";
   const semDestino = b === "(sem destino)" || b === "?";
   if (semOrigem && semDestino) return "seta solta";

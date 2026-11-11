@@ -34,4 +34,15 @@ describe("nomesDosElementos: conexões", () => {
     assert.equal(nomes.get("s1"), "seta de Entrada dos dados");
     assert.equal(nomes.get("s2"), "seta para API");
   });
+
+  it("rótulo com texto de seta dentro não confunde a divisão", () => {
+    const nomes = nomesDosElementos([desenho('- [s1] Cliente → API ("a → b") (tracejada)\n- [s2] Cliente ↔ API ("x — y")')]);
+    assert.equal(nomes.get("s1"), "Cliente → API");
+    assert.equal(nomes.get("s2"), "Cliente ↔ API");
+  });
+
+  it("rótulo com aspas escapadas é removido inteiro", () => {
+    const nomes = nomesDosElementos([desenho('- [s1] Cliente → API ("diz \\"oi → tchau\\"") (ponta perto, sem encostar)')]);
+    assert.equal(nomes.get("s1"), "Cliente → API");
+  });
 });

@@ -23,11 +23,25 @@ const revisaoBoa = (p: Problema): RevisaoDoProblema => ({
   ficha: p.ficha.map((f) => ({ ...f, resposta: f.resposta.replace("próprias pedidos", "próprios pedidos") })),
 });
 
+/** A questão real sem os erros que o validador agora pega (título, concordância, fala longa): a geração a aceita e a revisão a melhora. */
+const semErrosDeTexto = (): Problema => {
+  const real = casoReal();
+  return {
+    ...real,
+    titulo: "Painel de Pedidos em Tempo Real",
+    enunciado: real.enunciado.replace("das suas pedidos", "dos seus pedidos"),
+    falaDoDesafio: "Hoje o tema é o andamento dos pedidos. Pergunte o que precisar e pense em voz alta.",
+    ficha: real.ficha.map((f) => ({ ...f, resposta: f.resposta.replace("próprias pedidos", "próprios pedidos") })),
+  };
+};
+
 describe("o caso real da issue #90", () => {
-  it("o original é válido no validador de tamanhos, exceto pela fala longa", () => {
+  it("o original reprova no validador: fala longa, título que não bate e concordância", () => {
     const es = errosDoProblema(casoReal());
-    assert.equal(es.length, 1, JSON.stringify(es));
-    assert.match(es[0], /falaDoDesafio com \d+ caracteres/);
+    assert.equal(es.length, 3, JSON.stringify(es));
+    assert.ok(es.some((e) => e.includes("falaDoDesafio com")));
+    assert.ok(es.some((e) => e.includes('o título fala de "vendas"')), JSON.stringify(es));
+    assert.ok(es.some((e) => e.includes("concordância") && e.includes("suas pedidos")), JSON.stringify(es));
     assert.ok(casoReal().falaDoDesafio!.length > 350);
   });
 
@@ -73,7 +87,7 @@ describe("guardas da revisão (sem modelo)", () => {
     rev.ficha[1] = { ...rev.ficha[1], resposta: rev.ficha[1].resposta.replace("120 mil", "150 mil") };
     const r = await revisarProblema(o, criarClienteFalso([rev]));
     assert.equal(r.aceita, false);
-    assert.match(r.descartada!, /número alterado em ficha\[1\]\.resposta/);
+    assert.ok(r.descartada!.includes("número alterado em ficha[1].resposta"), r.descartada);
     assert.deepEqual(r.problema, o);
   });
 
@@ -95,13 +109,13 @@ describe("guardas da revisão (sem modelo)", () => {
     const o = casoReal();
     const longa = aplicarRevisao(o, { ...revisaoBoa(o), falaDoDesafio: "a".repeat(MAX_FALA_DO_DESAFIO + 1) });
     assert.equal(longa.ok, false);
-    assert.match((longa as { motivo: string }).motivo, /validador/);
+    assert.ok((longa as { motivo: string }).motivo.includes("validador"));
     const vazio = aplicarRevisao(o, { ...revisaoBoa(o), titulo: "  " });
     assert.equal(vazio.ok, false);
   });
 
   it("aceita revisão sem mudança, sem marcar como mudou", () => {
-    const o = { ...casoReal(), falaDoDesafio: "Hoje o tema é o andamento dos pedidos. Pode me perguntar o que precisar." };
+    const o = { ...semErrosDeTexto(), falaDoDesafio: "Hoje o tema é o andamento dos pedidos. Pode me perguntar o que precisar." };
     const a = aplicarRevisao(o, { problemas: [], titulo: o.titulo, enunciado: o.enunciado, falaDoDesafio: o.falaDoDesafio!, ficha: o.ficha });
     assert.ok(a.ok && !a.mudou);
   });
@@ -120,8 +134,8 @@ describe("fala acima do alvo: pede de novo uma vez", () => {
   it("contarFrases e foraDoAlvoDaFala", () => {
     assert.equal(contarFrases("Um. Dois! Três?"), 3);
     assert.equal(foraDoAlvoDaFala("Curta. Convite."), undefined);
-    assert.match(foraDoAlvoDaFala(longa)!, /3 frases/);
-    assert.match(foraDoAlvoDaFala("a".repeat(230))!, /230 caracteres/);
+    assert.ok(foraDoAlvoDaFala(longa)!.includes("3 frases"));
+    assert.ok(foraDoAlvoDaFala("a".repeat(230))!.includes("230 caracteres"));
   });
 
   it("a 2ª chamada encurta a fala; os números e o resto seguem guardados", async () => {
@@ -131,7 +145,7 @@ describe("fala acima do alvo: pede de novo uma vez", () => {
     assert.equal(llm.chamadas.length, 2);
     assert.ok(r.aceita);
     assert.equal(foraDoAlvoDaFala(r.problema.falaDoDesafio), undefined);
-    assert.match(llm.chamadas[1].mensagens.at(-1)!.content, /3 frases/);
+    assert.ok(llm.chamadas[1].mensagens.at(-1)!.content.includes("3 frases"));
   });
 
   it("se a 2ª chamada falha ou mexe em número, fica a 1ª (aceitável pelo validador)", async () => {
@@ -190,8 +204,8 @@ describe("revisão na questão da vaga e no papel do modelo", () => {
     const { id, ...resto } = p;
     return resto;
   };
-  // A questão real, mas com a fala curta o bastante para passar na geração (a revisão trata o resto).
-  const geradaComErro = (): Problema => ({ ...casoReal(), falaDoDesafio: "Hoje o tema é o andamento das pedidos deles. Pergunte o que precisar e pense em voz alta." });
+  // A questão real sem os erros que o validador pega: passa na geração, e a revisão ainda melhora o título.
+  const geradaComErro = semErrosDeTexto;
 
   it("salva o texto revisado", async () => {
     const repositorio = criarRepositorioAvaliacoesEmMemoria();
@@ -247,6 +261,6 @@ describe("revisão na questão da vaga e no papel do modelo", () => {
     const llm = criarClienteFalso([kit, new ErroLlm("timeout", "lento")]);
     const r = await gerarKitDetalhado({ llm, vaga });
     assert.equal(r.revisao?.aceita, false);
-    assert.equal(r.kit.problemas[0].titulo, "Painel de Vendas em Tempo Real");
+    assert.equal(r.kit.problemas[0].titulo, geradaComErro().titulo);
   });
 });

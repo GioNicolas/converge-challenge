@@ -273,7 +273,8 @@ export function criarConversor(): {
     });
     const conexoes = linhasVisiveis.map((e): Conexao => {
       let inferida = false;
-      function ponta(binding: typeof e.startBinding, indice: number): string | null {
+      // 1) vínculo explícito, 2) caixa a 40 px, 3) texto solto a 60 px. Sem direção: a direção só entra depois.
+      function pontaDireta(binding: typeof e.startBinding, indice: number): string | null {
         // Um vínculo explícito a um elemento ignorado nunca vira vínculo por proximidade.
         if (binding) return ids.get(absorvidos.get(binding.elementId) ?? binding.elementId) ?? null;
         const ponto = e.points[indice];
@@ -283,19 +284,26 @@ export function criarConversor(): {
         if (proximo) return id(proximo.id);
         // Diagramas só com texto ("Cliente -> API -> Banco"): vale o texto solto mais próximo.
         const textoProximo = maisProximo(alvo, soltos.filter((t) => !absorvidos.has(t.id) && textoDigitado(t)), 60);
-        if (textoProximo) return id(textoProximo.id);
-        // Parou antes da caixa mas aponta para ela: prolonga só o último trecho (no começo, o inverso).
+        return textoProximo ? id(textoProximo.id) : null;
+      }
+      // Parou antes da caixa mas aponta para ela: prolonga só o último trecho (no começo, o inverso).
+      // Nunca cai no mesmo elemento em que a outra ponta já ficou (vínculo, proximidade ou texto): seria A → A.
+      function pontaPorDirecao(indice: number, daOutraPonta: string | null): string | null {
+        const ponto = e.points[indice];
         const vizinho = e.points[indice === 0 ? 1 : indice - 1];
-        if (!vizinho) return null;
-        const outraPonta = indice === 0 ? e.endBinding : e.startBinding;
-        const candidatas = caixas.filter((c) => c.id !== outraPonta?.elementId);
+        if (!ponto || !vizinho) return null;
+        const alvo: Ponto = [e.x + ponto[0], e.y + ponto[1]];
+        const candidatas = caixas.filter((c) => id(c.id) !== daOutraPonta);
         const naDirecao = caixaNaDirecao(alvo, [e.x + vizinho[0], e.y + vizinho[1]], candidatas);
         if (!naDirecao) return null;
         inferida = true;
         return id(naDirecao.id);
       }
-      const comeco = ponta(e.startBinding, 0);
-      const fim = ponta(e.endBinding, e.points.length - 1);
+      const ultimo = e.points.length - 1;
+      const comecoDireto = pontaDireta(e.startBinding, 0);
+      const fimDireto = pontaDireta(e.endBinding, ultimo);
+      const comeco = comecoDireto ?? (e.startBinding ? null : pontaPorDirecao(0, fimDireto));
+      const fim = fimDireto ?? (e.endBinding ? null : pontaPorDirecao(ultimo, comeco));
       const cabecaNoComeco = !!e.startArrowhead;
       const cabecaNoFim = !!e.endArrowhead;
       // Em system design a direção importa (quem chama quem): ponta só no começo inverte a leitura.

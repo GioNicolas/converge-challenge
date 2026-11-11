@@ -57,14 +57,14 @@ test("usa pontas absolutas e distância até o retângulo para setas sem binding
   assert.deepEqual(resultado.instantaneo.conexoes[0], { id: "s1", tipo: "arrow", de: "r1", para: "l1", seta: "→", rotulo: "" });
   assert.match(resultado.texto, /\[s1\] \[r1\] → Decisão/);
   const longe = alterar(cenaVisual, "solta", { points: [[0, 0], [2000, 0]] } as unknown as Partial<ExcalidrawElement>);
-  assert.match(criarConversor().converter(longe).texto, /→ \(sem destino\)\n/);
+  assert.ok(criarConversor().converter(longe).texto.includes("→ (sem destino)\n"));
 });
 
 test("vínculo explícito ignorado não vaza nem é substituído por proximidade", () => {
   const elementos = alterar(cena, "cliente-api-longo", { startBinding: { elementId: "autor-ignorado", focus: 0, gap: 0 } });
   const resultado = criarConversor().converter(elementos);
   assert.equal(resultado.instantaneo.conexoes[0].de, null);
-  assert.match(resultado.texto, /\[s1\] \(sem origem\) → API\n/);
+  assert.ok(resultado.texto.includes("[s1] (sem origem) → API\n"), resultado.texto);
 });
 
 test("linhas usam traço sem ponta", () => {

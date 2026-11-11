@@ -7,13 +7,13 @@
 import "./_gasto";
 import { InterviewConfig } from "../lib/contracts";
 import { casoReal } from "../lib/agente/kits/caso-real-issue-90";
-import { camposComNumeroAlterado, revisarProblema } from "../lib/agente/kits/revisar";
+import { camposComNumeroAlterado, contarFrases, revisarProblema } from "../lib/agente/kits/revisar";
 import { gerarProblema } from "../lib/agente/kits/questao-da-vaga";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
 import { JOB_POSTINGS } from "../lib/hiring/mocks/job-postings";
 
 const LIMITE_FALA = 220;
-const frases = (t: string) => t.split(/(?<=[.!?])\s+/).filter(Boolean).length;
+const frases = contarFrases;
 
 async function main() {
   const i = process.argv.indexOf("--n");

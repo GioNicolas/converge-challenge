@@ -10,7 +10,21 @@ import { criterioIndireto, criterioSoPorFala, kitSemTermosInternos, type Criteri
 import { montarRelatorio } from "../relatorio";
 import { aplicarGuardas, duracaoDaSessao, extrairFontes, gerarScorecard, ehItemGenerico, type SaidaScorecardLlm } from "../scorecard";
 
-const TERMOS_INTERNOS = /\bplins?\b|componentes_fluxo|dados_consistencia|\be1\b/i;
+/** Termos internos que nunca aparecem nos textos que a recrutadora lê (comparados como palavra inteira). */
+const TERMOS_INTERNOS = ["plin", "plins", "componentes_fluxo", "dados_consistencia", "e1"];
+
+function temTermoInterno(texto: string): boolean {
+  const palavras = new Set<string>();
+  let palavra = "";
+  for (const ch of `${texto.toLowerCase()} `) {
+    if ((ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9") || ch === "_") palavra += ch;
+    else {
+      if (palavra) palavras.add(palavra);
+      palavra = "";
+    }
+  }
+  return TERMOS_INTERNOS.some(t => palavras.has(t));
+}
 
 async function gerarDoCaso(alterar?: (s: SaidaScorecardLlm) => void) {
   const caso = montarCasoEncerradoPeloCandidato();
@@ -36,7 +50,7 @@ describe("caso real da issue #89 (encerrada aos 8:43 de 15 min)", () => {
     assert.equal(com.nota, null);
     assert.deepEqual(com.evidencias, []);
     assert.ok(sc.ajustes.some(a => a.includes("pedido de repetição")));
-    assert.doesNotMatch(texto(sc), /repeti[çc][õo]es|dificuldade constante|abruptamente/i);
+    for (const termo of ["repetições", "repeticoes", "dificuldade constante", "abruptamente"]) assert.ok(!texto(sc).toLowerCase().includes(termo), termo);
   });
 
   it("o que o candidato explicou de verdade continua valendo", async () => {
@@ -67,10 +81,10 @@ describe("caso real da issue #89 (encerrada aos 8:43 de 15 min)", () => {
 
   it("o briefing diz o que faltou e por quê, sem 'próxima conversa' junto de 'Não avançar'", async () => {
     const { sc } = await gerarDoCaso();
-    assert.match(sc.briefing_para_proxima_etapa, /durou 8 de 15 minutos/);
-    assert.match(sc.briefing_para_proxima_etapa, /4 de 6 critérios ficaram sem prova/);
-    assert.match(sc.briefing_para_proxima_etapa, /Sem prova: .*Comunicação/);
-    assert.doesNotMatch(sc.briefing_para_proxima_etapa, /Revisar as evidências por critério/);
+    assert.ok(sc.briefing_para_proxima_etapa.includes("durou 8 de 15 minutos"), sc.briefing_para_proxima_etapa);
+    assert.ok(sc.briefing_para_proxima_etapa.includes("4 de 6 critérios ficaram sem prova"), sc.briefing_para_proxima_etapa);
+    assert.ok(sc.briefing_para_proxima_etapa.includes("Sem prova: ") && sc.briefing_para_proxima_etapa.split("Sem prova: ")[1].includes("Comunicação"), sc.briefing_para_proxima_etapa);
+    assert.ok(!sc.briefing_para_proxima_etapa.includes("Revisar as evidências por critério"));
   });
 
   it("nenhum item de 'onde aprofundar' é só 'Aprofundar <critério>.' e todos dizem o que faltou", async () => {
@@ -78,7 +92,7 @@ describe("caso real da issue #89 (encerrada aos 8:43 de 15 min)", () => {
     assert.equal(sc.pontos_a_aprofundar.length, 4);
     for (const item of sc.pontos_a_aprofundar) {
       assert.ok(!ehItemGenerico(item), item);
-      assert.doesNotMatch(item, /^Aprofundar\b/);
+      assert.ok(!item.startsWith("Aprofundar"), item);
       assert.ok(item.length > 40, item);
     }
     assert.ok(sc.pontos_a_aprofundar.some(i => i.startsWith("Escalabilidade: sem prova")));
@@ -87,19 +101,19 @@ describe("caso real da issue #89 (encerrada aos 8:43 de 15 min)", () => {
 
   it("o resumo da entrevista é factual, sem adjetivo, e nada tem termo interno", async () => {
     const { sc } = await gerarDoCaso();
-    assert.match(sc.resumo_da_entrevista!, /Houve prova em 2 de 6 critérios: Requisitos e escopo \(2 de 4\), Componentes e fluxo \(2 de 4\)/);
-    assert.match(sc.resumo_da_entrevista!, /A entrevista durou 8 de 15 minutos/);
+    assert.ok(sc.resumo_da_entrevista!.includes("Houve prova em 2 de 6 critérios: Requisitos e escopo (2 de 4), Componentes e fluxo (2 de 4)"), sc.resumo_da_entrevista);
+    assert.ok(sc.resumo_da_entrevista!.includes("A entrevista durou 8 de 15 minutos"), sc.resumo_da_entrevista);
     // Os ids ficam nos campos estruturados; nos textos que a recrutadora lê não aparece nenhum.
     const lidos = [sc.briefing_para_proxima_etapa, sc.resumo_da_entrevista, sc.resumo_da_solucao, ...sc.pontos_fortes, ...sc.pontos_a_aprofundar,
       ...sc.criterios.map(c => c.justificativa), ...sc.ajustes].join("\n");
-    assert.doesNotMatch(lidos, TERMOS_INTERNOS);
+    assert.ok(!temTermoInterno(lidos), lidos);
   });
 
   it("o relatório mostra os critérios sem o termo interno", async () => {
     const { sc, kit, problema, entrada } = await gerarDoCaso();
     const r = montarRelatorio({ sessao: { candidatoId: "c", estado: entrada.estado, criadaEm: 0 } as never, scorecard: sc, kit, problema, eventos: entrada.eventos, imagens: [] });
     assert.ok(r.criterios.some(c => c.nome === "Comunicação"));
-    assert.doesNotMatch(JSON.stringify(r), /plin/i);
+    assert.ok(!JSON.stringify(r).toLowerCase().includes("plin"));
   });
 });
 
@@ -142,8 +156,8 @@ describe("recomendação 'Não avançar' com cobertura e duração", () => {
   it("o texto de 'não avançar' não manda para a próxima conversa", () => {
     const sc = saidaComNotas([1, 1, 2, 1])({ decorridoMin: 15, previstoMin: 15 });
     assert.equal(sc.recomendacao, "nao_avancar");
-    assert.doesNotMatch(sc.briefing_para_proxima_etapa, /próxima conversa/i);
-    assert.match(sc.briefing_para_proxima_etapa, /Sem prova: /);
+    assert.ok(!sc.briefing_para_proxima_etapa.toLowerCase().includes("próxima conversa"));
+    assert.ok(sc.briefing_para_proxima_etapa.includes("Sem prova: "), sc.briefing_para_proxima_etapa);
   });
 });
 
