@@ -18,7 +18,7 @@ import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVAL
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { registrarEvento } from "./log";
 import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type OferecerTradeoffPasso, type Passo } from "./planejador";
-import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
+import { PERGUNTA_CONTEXTO, PERGUNTA_O_QUE_REPROVA, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
 import { LIMIAR_DUPLICADA, sobreposicao } from "@/lib/agente/guardas";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
@@ -490,9 +490,32 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     }
     case "perguntar_contexto":
       return (
-        "Pergunte o que a descrição da vaga não diz e só ela sabe: se tem algo que reprova o candidato direto, ou o que fez uma " +
-        `contratação passada não dar certo. Uma pergunta só, curta e natural (ex.: '${PERGUNTA_CONTEXTO}'). ${SEM_LOGISTICA}`
+        "Pergunte o que a descrição da vaga não diz e só ela sabe: o que reprova o candidato direto, ou o que fez uma " +
+        `contratação passada não dar certo. Uma pergunta só, curta, natural e aberta, que peça o que é, não se existe ` +
+        `(ex.: '${PERGUNTA_CONTEXTO}'). ${SEM_LOGISTICA}`
       );
+    case "pedir_o_que_faltou": {
+      if (passo.sobre === "contexto") {
+        return (
+          "Ela disse que existe algo que reprova direto (ou que já deu errado numa contratação), mas não disse o quê. " +
+          `Pergunte só qual é, numa pergunta curta e aberta (ex.: '${PERGUNTA_O_QUE_REPROVA}'). ` +
+          `Não repita a pergunta anterior inteira e não faça outra pergunta. ${SEM_LOGISTICA}`
+        );
+      }
+      const area = nomeAreaFala(passo.area, r.mode);
+      const padrao = CATALOGO[r.mode]
+        .filter((c) => c.focus === passo.area)
+        .map((c) => c.description)
+        .join(" ");
+      return (
+        `Você perguntou sobre ${area} e a resposta dela fez sentido, mas foi vaga: não diz como isso aparece na entrevista. ` +
+        "Peça o concreto, com as palavras dela: ofereça duas formas concretas de como isso apareceria na entrevista, ou peça um exemplo. " +
+        `As opções saem do que a entrevista observa nesse assunto: ${padrao}\n` +
+        "Uma frase só, com um único '?' no fim (ex.: para 'só que ele raciocine': 'Raciocinar como: explicar por que escolheu " +
+        "um banco, ou estimar o volume antes de desenhar?'; não copie esse exemplo). Não diga que a resposta foi vaga. " +
+        SEM_LOGISTICA
+      );
+    }
     case "informar_formato_indisponivel":
       return (
         "Ela pediu system design, que ainda não está disponível nesta versão. Diga isso numa frase curta, sem pedir desculpa, " +
@@ -987,11 +1010,12 @@ function mesmaPerguntaDoPasso(a: Passo, b: Passo | undefined): boolean {
  * Reserva para o modelo rápido, que às vezes não declara o movimento: se a fala traz quase a mesma pergunta que estava
  * em aberto e o planejador tinha escolhido outra pergunta, o modelo repetiu, e a fala conta como `repetir`.
  * Não vale quando a repetição é o próprio passo: nova tentativa da mesma pergunta, resposta a dúvida (que retoma a
- * pergunta) e pergunta de nível (sempre as mesmas palavras, inclusive quando a abertura já a fez). Função pura.
+ * pergunta), pergunta de nível (sempre as mesmas palavras, inclusive quando a abertura já a fez) e pedido do que
+ * faltou na resposta (usa as palavras da pergunta anterior: "E o que é que reprova direto pra vocês?"). Função pura.
  */
 export function movimentoDaFala(declarado: Movimento, fala: string, sessao: Sessao, passo: Passo): Movimento {
   if (declarado !== "seguir") return declarado;
-  if (passo.tipo === "responder_duvida" || passo.tipo === "perguntar_nivel") return declarado;
+  if (passo.tipo === "responder_duvida" || passo.tipo === "perguntar_nivel" || passo.tipo === "pedir_o_que_faltou") return declarado;
   if (mesmaPerguntaDoPasso(passo, passoEmCurso(sessao))) return declarado;
   const aberta = perguntaEmAberto(sessao.transcricao);
   // A pergunta que vai para a voz: com `seguir`, a fala é cortada na primeira pergunta (`cortar_na_primeira_pergunta`).
@@ -1097,8 +1121,16 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
     const doBanco = perguntasDoBanco(sessao, areaAprofundada)[0];
     if (doBanco) aplicar("pergunta_do_banco", trocarPergunta(texto, doBanco.texto));
   }
-  if (texto && segue && passo.tipo === "perguntar_contexto" && (!texto.includes("?") || perguntaObvia(texto))) {
-    aplicar("pergunta_de_contexto", trocarPergunta(texto, PERGUNTA_CONTEXTO));
+  // Pergunta de contexto (e o pedido de qual é o eliminatório): sem "?" ou no molde óbvio, sai a pergunta fixa, que é
+  // aberta (pede o que é, não se existe: "Tem alguma coisa que...?" convidava um "Tem" seco).
+  const perguntaDeContexto =
+    passo.tipo === "perguntar_contexto"
+      ? PERGUNTA_CONTEXTO
+      : passo.tipo === "pedir_o_que_faltou" && passo.sobre === "contexto"
+        ? PERGUNTA_O_QUE_REPROVA
+        : undefined;
+  if (texto && segue && perguntaDeContexto && (!texto.includes("?") || perguntaObvia(texto))) {
+    aplicar("pergunta_de_contexto", trocarPergunta(texto, perguntaDeContexto));
   }
   // A leitura da resposta dela confere a pergunta em aberto, que precisa trazer as três opções.
   if (texto && segue && passo.tipo === "perguntar_nivel" && !pedeONivel(ultimaPergunta(texto))) {

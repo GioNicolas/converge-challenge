@@ -4,7 +4,7 @@
  * O Jev responde, em uma chamada, uma pergunta de sim/não por item (`noul` = probabilidade de sim).
  *  - Tópicos (`topicosDo`) são cumulativos: uma vez cobertos (probabilidade de pelo menos 0,6), seguem cobertos.
  *  - Sinais (`sinaisDo`) valem a leitura do turno atual, porque a recrutadora pode mudar de ideia:
- *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
+ *    quer/dispensa por área, se a última resposta foi vaga ou incompleta e se ela aprovou o resumo.
  * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo do Totti.
  */
 import { choice, noul } from "@typesafe-ai/sdk";
@@ -228,8 +228,8 @@ const DISSE_ELIMINATORIO: Pergunta = {
 };
 
 /**
- * Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo e a escolha
- * sobre a troca de formato (só faz sentido logo depois da oferta, mas o Jev responde sempre; o planejador decide se usa).
+ * Sinais do turno: quer/dispensa por área, resposta vaga, contexto incompleto, dúvida, pedido de mudança, aprovação do
+ * resumo e a escolha sobre a troca de formato (só faz sentido logo depois da oferta, mas o Jev responde sempre; o planejador decide se usa).
  */
 function sinaisDo(): Pergunta[] {
   return [
@@ -266,7 +266,21 @@ function sinaisDo(): Pergunta[] {
         "Sim se ela respondeu de forma vaga: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', " +
         "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
       sinal_nao:
-        "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, ou respondeu outra coisa.",
+        "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, " +
+        "respondeu outra coisa, ou a fala não faz sentido como resposta (truncada, quebrada ou sem relação com a pergunta).",
+    },
+    {
+      // Depois da pergunta de contexto: o planejador pede o que faltou, uma vez (ver `pedir_o_que_faltou`).
+      id: "disse_que_tem_sem_dizer",
+      pergunta:
+        "Na última fala, a recrutadora confirmou que existe algo que reprova o candidato direto, ou algo que deu errado numa " +
+        "contratação passada, mas sem dizer o que é?",
+      sinal_sim:
+        "Sim se ela só confirmou que existe, sem dizer o quê: 'tem', 'sim', 'tem sim', 'algumas coisas', 'tem uma coisa, sim', " +
+        "'já aconteceu'. Esta pergunta é justamente sobre a resposta incompleta: a confirmação seca conta como sim.",
+      sinal_nao:
+        "Não se ela disse o que é, mesmo curto ('não saber SQL', 'quem não testa'), disse que não tem nada, respondeu outra coisa, " +
+        "ou a fala não faz sentido como resposta (truncada, quebrada ou sem relação com a pergunta).",
     },
     {
       id: "pediu_system_design",

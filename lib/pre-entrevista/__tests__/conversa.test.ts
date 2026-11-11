@@ -314,3 +314,53 @@ describe("movimentoDaFala: reserva para quando o modelo não declara o movimento
     assert.equal(movimentoDaFala("seguir", PERGUNTA, sessao, { tipo: "perguntar_nivel" }), "seguir");
   });
 });
+
+// Issue #72: resposta que faz sentido, mas não diz o conteúdo. O pedido do que faltou chega pelo PASSO.
+describe("pedir o que faltou (issue #72)", () => {
+  const CONTEXTO: Passo = { tipo: "perguntar_contexto" };
+  const FALTOU_CONTEXTO: Passo = { tipo: "pedir_o_que_faltou", sobre: "contexto" };
+  const FALTOU_CRITERIO: Passo = { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "escala_produto" };
+  const PERGUNTA_DE_CONTEXTO = "O que reprova um candidato direto pra vocês, ou o que fez uma contratação passada não dar certo?";
+
+  /** O Totti fez a pergunta de contexto e ela respondeu "Tem". */
+  function depoisDoTem() {
+    const sessao = sessaoAberta([ela("isso"), totti(PERGUNTA_DE_CONTEXTO), ela("Tem")]);
+    sessao.plano = aplicarPasso(sessao.plano, CONTEXTO);
+    return sessao;
+  }
+
+  it("'Tem' seco: a instrução do passo pede só qual é", () => {
+    const [, entrada] = montarMensagensConversa(depoisDoTem(), FALTOU_CONTEXTO);
+    assert.match(entrada.content, /PASSO DESTA FALA:\n.*não disse o quê/);
+    assert.match(entrada.content, /E o que é que reprova direto\?/);
+  });
+
+  it("'Tem' seco: fala sem pergunta ganha a pergunta fixa de qual é", async () => {
+    const r = await responder(depoisDoTem(), FALTOU_CONTEXTO, { chat: chatFalso(saida("Entendi.")).chat });
+    assert.equal(r.texto, "Entendi. E o que é que reprova direto?");
+    assert.deepEqual(
+      r.travas.map((t) => t.trava),
+      ["pergunta_de_contexto"],
+    );
+  });
+
+  it("'Tem' seco: pedir qual é com as palavras da pergunta anterior não conta como repetir", () => {
+    const fala = "E o que é que reprova direto pra vocês?";
+    assert.equal(movimentoDaFala("seguir", fala, depoisDoTem(), FALTOU_CONTEXTO), "seguir");
+    assert.equal(movimentoDaFala("seguir", fala, depoisDoTem(), { tipo: "resumo_final" }), "repetir");
+  });
+
+  it("'Somente que ele raciocine': a instrução pede o concreto, em uma pergunta, com opções do que a entrevista observa", async () => {
+    const pergunta = "Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?";
+    const sessao = sessaoAberta([ela("isso"), totti(pergunta), ela("Somente que ele raciocine.")]);
+    sessao.plano = aplicarPasso(sessao.plano, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
+    const [, entrada] = montarMensagensConversa(sessao, FALTOU_CRITERIO);
+    assert.match(entrada.content, /PASSO DESTA FALA:\n.*foi vaga/);
+    assert.match(entrada.content, /duas formas concretas/);
+
+    const fala = "Raciocinar como: explicar por que escolheu o banco, ou estimar o volume antes de desenhar?";
+    const r = await responder(sessao, FALTOU_CRITERIO, { chat: chatFalso(saida(fala)).chat });
+    assert.equal(r.texto, fala);
+    assert.equal(r.movimento, "seguir");
+  });
+});
