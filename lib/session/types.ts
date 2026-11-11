@@ -6,6 +6,7 @@ import type { Fase } from "@/lib/agents/fase";
 import type { HiddenTestsResult } from "@/lib/agents/hiddenTests";
 import type { Blip, FocusArea, InterviewConfig, LineRange, Report, SessionEvent } from "@/lib/contracts";
 import type { LlmStatsSnapshot } from "@/lib/llm";
+import type { EstadoFechamento } from "@/lib/totti/fechamento";
 
 /**
  * explicar: justificar uma decisão já tomada no código. sondar: perguntar direto sobre um critério
@@ -168,6 +169,15 @@ export interface SessionState {
   coverage: Record<string, CriterionCoverage>;
   checkIns: CheckIn[];
   empecilho?: EmpecilhoState;
+  fechamento?: EstadoFechamento;
+  /** Código no início do fechamento, usado para detectar retorno à edição. */
+  fechamentoCodigoInicial?: string;
+  /** Instante da sessão em que o fechamento começou. */
+  fechamentoIniciadoEm?: number;
+  /** Balão real da conversa de fechamento. */
+  fechamentoBlipId?: string;
+  /** Quantas etapas o candidato concluiu antes deste turno. */
+  conclusoes?: number;
   report?: ReportStatus;
   /** Relógio da sessão em ms; só a simulação (scripts/simulate.ts) define. Senão, Date.now() - startedAt. */
   clock?: () => number;

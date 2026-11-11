@@ -20,6 +20,8 @@ import {
 import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
+import { candidatasDoFechamento } from "@/lib/agents/fechamento";
+import { gatilhoDoFechamento, iniciarFechamento, proximoPasso } from "@/lib/totti/fechamento";
 
 /** Falha do LLM: pede para repetir. Varia para não soar como gravação quando acontece mais de uma vez. */
 const FALLBACK_REPLIES = FALAS_DE_REPETICAO;
@@ -73,6 +75,12 @@ async function turno(
   session: SessionState,
   req: { blipId?: string; messages: ChatMessage[]; reconheceu?: boolean },
 ): Promise<ChatResponse> {
+  if (session.fechamento && req.blipId === session.fechamentoBlipId && req.messages.length === 0 && session.fechamento.etapa === "anuncio") {
+    const t = elapsedMs(session);
+    const passo = proximoPasso(session.fechamento, undefined, "", { tempoRestanteMs: Math.max(0, session.config.durationMin * 60_000 - t) });
+    session.fechamento = passo.estado;
+    return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
+  }
   const found = req.blipId !== undefined ? findBlipQuestion(session, req.blipId) : undefined;
   if (req.blipId !== undefined && !found) throw new Error(`blip desconhecido: ${req.blipId}`);
 
@@ -164,7 +172,13 @@ async function turno(
 
   // Solução funcionando e ele repete que já terminou: é para encerrar, não para mais perguntas.
   if (!found && input.fase === "funcionando" && querEncerrar(req.messages)) {
-    return { reply: "", commands: [], end: true, finish: true };
+    const t = elapsedMs(session);
+    const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - t);
+    session.fechamento = iniciarFechamento({ sala: "codigo", gatilho: "pediu_encerrar", candidatas: candidatasDoFechamento(session, t), tempoRestanteMs, perguntasJaFeitas: falasDoAgente(session, req.messages) });
+    session.fechamentoIniciadoEm = t;
+    const passo = proximoPasso(session.fechamento);
+    session.fechamento = passo.estado;
+    return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, despedida: true };
   }
   const perguntou = candidatoPerguntou(req.messages);
   const system = buildInterviewerSystem(session.config, problem);
@@ -216,17 +230,44 @@ async function turno(
     return paraSaidaDoLiveCoding(decidido.leitura, o);
   };
   /** A saída do modelo depois das travas da fala, das decisões do turno e do limite de perguntas desta sala. */
-  const lida = (o: InterviewerOutput): InterviewerOutput => limitarPerguntas(comTurno(comGuardas(o)), question, req.messages, opening);
+  const lida = (o: InterviewerOutput): InterviewerOutput => {
+    const guardada = comGuardas(o);
+    if (session.fechamento) return paraSaidaDoLiveCoding(deSaidaDoLiveCoding(guardada, situacao), guardada);
+    return limitarPerguntas(comTurno(guardada), question, req.messages, opening);
+  };
   const calou = (o: InterviewerOutput): boolean => o.respond === false || o.reply.trim() === "";
   let output: InterviewerOutput;
   const prazo = Date.now() + PRAZO_TURNO_MS;
   const sobra = () => prazo - Date.now();
   try {
     output = lida(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra())));
-    // Pediu para encerrar a entrevista: quem se despede e fecha é a IDE (como no botão Finalizar).
-    if (!opening && output.finish === true) {
-      registrarEvidencia(session, output);
-      return { reply: "", commands: [], end: true, finish: true };
+    const t = elapsedMs(session);
+    const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - t);
+    const leituraFechamento = deSaidaDoLiveCoding(output, situacao);
+    const conclusoesAntes = session.conclusoes ?? 0;
+    const gatilho = session.fechamento ? null : gatilhoDoFechamento({
+      concluiu: leituraFechamento.concluiu,
+      conclusoesAntes,
+      materialPronto: faseDaEntrevista(session) === "funcionando",
+      tempoRestanteMs,
+      pediuEncerrar: leituraFechamento.encerrar || querEncerrar(req.messages),
+    });
+    if (gatilho) {
+      if (leituraFechamento.concluiu) {
+        session.conclusoes = (session.conclusoes ?? 0) + 1;
+        session.etapaConcluidaEm = t;
+      }
+      session.fechamento = iniciarFechamento({ sala: "codigo", gatilho, candidatas: candidatasDoFechamento(session, t), tempoRestanteMs, perguntasJaFeitas: falasDoAgente(session, req.messages) });
+      session.fechamentoCodigoInicial = latestCode(session);
+      session.fechamentoIniciadoEm = t;
+      // Começou no meio de uma conversa: o fechamento segue nela, sem abrir outro balão por cima.
+      session.fechamentoBlipId = req.blipId;
+    }
+    if (session.fechamento) {
+      const passo = proximoPasso(session.fechamento, leituraFechamento, situacao.falaDoCandidato, { tempoRestanteMs });
+      session.fechamento = passo.estado;
+      if (passo.encerrar) return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa, despedida: true };
+      return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
     }
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
@@ -388,7 +429,10 @@ async function turno(
   if (output.end) session.lastConversationEndedAt = t;
   // Concluiu uma etapa: a próxima análise é um momento-chave (ver consumirEtapaConcluida no analista).
   const concluded = output.concluded === true && !opening;
-  if (concluded) session.etapaConcluidaEm = t;
+  if (concluded) {
+    session.etapaConcluidaEm = t;
+    session.conclusoes = (session.conclusoes ?? 0) + 1;
+  }
 
   return { reply: output.reply, commands, end: output.end, ...(concluded ? { concluded } : {}) };
 }

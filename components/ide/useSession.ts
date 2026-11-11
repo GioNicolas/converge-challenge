@@ -79,11 +79,11 @@ export function useSession(
   );
 
   const endSession = useCallback(
-    (reason: "timeout" | "button") => {
+    async (reason: "timeout" | "button") => {
       if (endedRef.current) return;
       endedRef.current = true;
       setEnded(true);
-      void sendEvent({ type: "session_ended", reason });
+      await sendEvent({ type: "session_ended", reason });
     },
     [sendEvent],
   );
@@ -128,10 +128,9 @@ export function useSession(
     const id = setInterval(() => {
       const elapsed = nowT();
       setElapsedMs(elapsed);
-      if (elapsed >= durationMs) endSession("timeout");
     }, 1000);
     return () => clearInterval(id);
-  }, [nowT, endSession, durationMs]);
+  }, [nowT, durationMs]);
 
   return {
     sessionId,
