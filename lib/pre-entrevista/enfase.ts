@@ -96,6 +96,10 @@ export function acumularEnfase(
     }
   }
   if (opcoes.divisao) novo.divisao = opcoes.divisao;
+  else if (novo.divisao?.tipo === "equilibrio" && FocusArea.options.some((area) => niveis[area] === "central" || niveis[area] === "reduzir")) {
+    // Equilíbrio é vago e cede a uma ênfase nova ("o foco é pressão"). Proporção com números fica até ela dizer outra.
+    delete novo.divisao;
+  }
   return novo;
 }
 
@@ -189,7 +193,7 @@ const RE_EQUILIBRIO = new RegExp(
   "\\b(" +
     [
       "mais equilibrad\\w*",
-      "(deix\\w*|fica\\w*|fique|ser|seja) equilibrad\\w*",
+      "deix\\w* equilibrad\\w*",
       "equilibrad\\w* entre",
       "equilibr\\w* (os pesos|as areas|melhor|mais|isso|o foco|a avaliacao|as duas|as coisas)",
       "meio a meio",
@@ -208,7 +212,7 @@ const AREA_NA_PROPORCAO: Record<FocusArea, RegExp> = {
   tecnico: new RegExp(`tecnic|${PALAVRAS_AREA.tecnico.source}`, "i"),
   pressao: PALAVRAS_AREA.pressao,
   escala_produto: PALAVRAS_AREA.escala_produto,
-  uso_ia: /\bia\b|llm|agente|rag|prompt/i,
+  uso_ia: /\b(ia|llms?|agentes?|rag|prompts?)\b/i,
 };
 
 const DEZENAS: Record<string, number> = {
@@ -269,7 +273,10 @@ export function lerDivisao(fala: string, foco: FocusArea[]): Divisao | undefined
     const a = Number(x[0]);
     const b = Number(y[0]);
     if (a + b !== 100 || a === 0 || b === 0) continue;
-    if ((y.index ?? 0) - ((x.index ?? 0) + x[0].length) > 30) continue;
+    const fimX = (x.index ?? 0) + x[0].length;
+    if ((y.index ?? 0) - fimX > 30) continue;
+    // "60 e 40 minutos" é duração, não proporção.
+    if (/^ (minutos?|min|horas?|h|segundos?|dias?|semanas?|meses|anos?)\b/.test(texto.slice((y.index ?? 0) + y[0].length))) continue;
     if (a === b) return { tipo: "equilibrio", frase };
     const pesos = atribuir([a / 100, b / 100], areasCitadas(texto), foco);
     if (pesos) return { tipo: "proporcao", pesos, frase };

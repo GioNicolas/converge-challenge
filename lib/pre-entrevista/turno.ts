@@ -24,6 +24,7 @@ import {
   declararCentral,
   dispensasPendentes,
   lerDivisao,
+  recusarDispensa,
   type Divisao,
   type EstadoEnfase,
   type NivelEnfase,
@@ -80,6 +81,7 @@ function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
   // Área que ela já tratou na fala (respondeu ou declarou central): o básico dela já foi dito, não se pergunta de novo.
   const enfase = sessao.enfaseEstado;
   const areasFaladas = AREAS.filter((a) => (enfase[a].falou && enfase[a].maximo >= 2) || enfase[a].declarado === "central");
+  const sugerida = sugestaoDeEquilibrio(sessao);
   return {
     ...sessao.plano,
     focus: sessao.rascunho.focus,
@@ -88,7 +90,7 @@ function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
     nivelEmAberto: aberto,
     areasFaladas,
     dispensasPendentes: dispensasPendentes(enfase),
-    ...(sugestaoDeEquilibrio(sessao) ? { sugestaoDeEquilibrio: sugestaoDeEquilibrio(sessao) } : {}),
+    ...(sugerida ? { sugestaoDeEquilibrio: sugerida } : {}),
   };
 }
 
@@ -134,7 +136,9 @@ export function comSugestaoAceita(
   if (ultimoPasso?.tipo !== "confirmar_mudanca_foco" || !ultimoPasso.sugerir) return niveis;
   const area = ultimoPasso.sugerir;
   if ((niveis[area] ?? "nao_falou") !== "nao_falou") return niveis;
-  const aceitou = (sinais[`quer_${area}`] ?? 0) >= LIMIAR || RE_ACEITE.test(normalizarTexto(fala));
+  const dita = normalizarTexto(fala);
+  // Aceite é fala curta: "pode, mas só se for rápido" não é aceite.
+  const aceitou = (sinais[`quer_${area}`] ?? 0) >= LIMIAR || (RE_ACEITE.test(dita) && dita.split(" ").length <= 4);
   return aceitou ? { ...niveis, [area]: "secundaria" } : niveis;
 }
 
@@ -148,8 +152,9 @@ export function confirmarDispensasPerguntadas(
   sinais: Record<string, number>,
 ): EstadoEnfase {
   if (ultimoPasso?.tipo !== "confirmar_mudanca_foco" || !ultimoPasso.confirmarTirar?.length) return estado;
-  if ((sinais.confirmou_tirar_area ?? 0) < LIMIAR) return estado;
-  return ultimoPasso.confirmarTirar.reduce((e, area) => confirmarDispensa(e, area), estado);
+  const confirmou = (sinais.confirmou_tirar_area ?? 0) >= LIMIAR;
+  // Sem confirmação ("não, conta sim"), a dispensa pendente vira "pesar menos" e a pergunta não se repete.
+  return ultimoPasso.confirmarTirar.reduce((e, area) => (confirmou ? confirmarDispensa(e, area) : recusarDispensa(e, area)), estado);
 }
 
 /**

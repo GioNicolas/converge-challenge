@@ -17,13 +17,16 @@ export function normalizarTexto(texto: string): string {
  * Ponto que não termina frase: o de nome de tecnologia ("Next.js", "Node.js", "ASP.NET"), inclusive quando a transcrição
  * de voz põe espaço depois dele ("Next. js"), e o de abreviação comum ("ex.", "vs.").
  */
-const PONTO_SEM_FIM = /(?:\b(?:ex|vs|sr|sra|dr|dra)\.|\.(?=\s*(?:js|ts|net|io|py)\b))/gi;
+const PONTO_ABREVIACAO = /\b(?:ex|vs|sr|sra|dr|dra)\./gi;
+/** Sem a flag "i" de propósito: "Sim. TS não importa" é uma frase nova, "Next. js" não. */
+const PONTO_TECNOLOGIA = /(?<=\w)\.(?=\s*(?:js|ts|net|NET|io|py)\b)/g;
 const MARCA_PONTO = "\u0000";
 
 /** Frases de um texto, cortadas depois de cada pontuação final. Não corta em "Next.js", "Node. js" nem em "ex.". */
 export function frasesDe(texto: string): string[] {
   return texto
-    .replace(PONTO_SEM_FIM, (m) => m.replace(".", MARCA_PONTO))
+    .replace(PONTO_ABREVIACAO, (m) => m.replace(".", MARCA_PONTO))
+    .replace(PONTO_TECNOLOGIA, MARCA_PONTO)
     .split(/(?<=[.!?])\s+/)
     .map((f) => f.split(MARCA_PONTO).join("."))
     .map((f) => f.trim())

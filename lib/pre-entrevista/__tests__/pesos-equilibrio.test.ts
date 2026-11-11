@@ -18,7 +18,7 @@ import { fraseDaDivisao, pesosPelaEnfase, percentualPorExtenso, type EntradaPeso
 import { montarGuia, ordemDoGuia, type EntradaGuia } from "@/lib/pre-entrevista/guia";
 import { frasesDe } from "@/lib/pre-entrevista/frases";
 import { nomeAreaFala } from "@/lib/pre-entrevista/cobertura";
-import { proximoPasso, planoInicial, type EstadoPlanejamento } from "@/lib/pre-entrevista/planejador";
+import { proximoPasso, planoInicial, type EstadoPlanejamento, type Passo } from "@/lib/pre-entrevista/planejador";
 import { comSugestaoAceita, confirmarDispensasPerguntadas, divisaoDaFala } from "@/lib/pre-entrevista/turno";
 import type { Foco } from "@/lib/pre-entrevista/rascunho";
 
@@ -177,7 +177,11 @@ describe("live coding: tirar a área técnica pede confirmação", () => {
     const pendente = acumularEnfase(estadoInicialEnfase(), { tecnico: "dispensou" }, "Pode tirar a parte técnica.", { mode: "live_coding" });
     const depois = confirmarDispensasPerguntadas(pendente, passo, { confirmou_tirar_area: 0.9 });
     assert.deepEqual(leituraDoEstado(depois).dispensadas, ["tecnico"]);
-    assert.equal(confirmarDispensasPerguntadas(pendente, passo, { confirmou_tirar_area: 0.1 }), pendente);
+    // Sem confirmação ("não, conta sim"), a dispensa pendente vira "pesar menos": a área fica e a pergunta não se repete.
+    const recusada = confirmarDispensasPerguntadas(pendente, passo, { confirmou_tirar_area: 0.1 });
+    assert.deepEqual(leituraDoEstado(recusada).dispensadas, []);
+    assert.equal(recusada.tecnico.declarado, "reduzir");
+    assert.equal(recusada.tecnico.pendente, false);
   });
 });
 
@@ -242,5 +246,48 @@ describe("corte de frase", () => {
       "O time é pequeno.",
     ]);
     assert.deepEqual(frasesDe("Usamos Next. js e Node. js. O time é pequeno."), ["Usamos Next. js e Node. js.", "O time é pequeno."]);
+  });
+});
+
+describe("correções da revisão do #77", () => {
+  it("a divisão pedida deixa de valer quando ela declara uma ênfase nova", () => {
+    const com = acumularEnfase(estadoInicialEnfase(), {}, "Deixa mais equilibrado.", { divisao: { tipo: "equilibrio" } });
+    assert.equal(com.divisao?.tipo, "equilibrio");
+    const depois = acumularEnfase(com, { pressao: "central" }, "O foco mesmo é pressão.");
+    assert.equal(depois.divisao, undefined);
+  });
+
+  it("equilíbrio do candidato não é pedido de equilíbrio entre áreas", () => {
+    assert.equal(lerDivisao("Ele precisa ser equilibrado sob pressão.", ["tecnico", "pressao"]), undefined);
+    assert.equal(lerDivisao("Deixa mais equilibrado.", ["tecnico"])?.tipo, "equilibrio");
+  });
+
+  it("palavras que só contêm 'rag' não citam a área de IA", () => {
+    const d = lerDivisao("70 técnico e 30 pressão, tipo storage de dados", ["tecnico", "pressao"]);
+    assert.deepEqual(d?.tipo === "proporcao" && d.pesos, { tecnico: 0.7, pressao: 0.3 });
+  });
+
+  it("dois números que somam 100 como duração não viram proporção", () => {
+    assert.equal(lerDivisao("Uns 60 e 40 minutos.", ["tecnico", "pressao"]), undefined);
+  });
+
+  it("aceite da sugestão é fala curta", () => {
+    const passo: Passo = { tipo: "confirmar_mudanca_foco", entra: [], sai: [], duvida: [], sugerir: "pressao" };
+    assert.equal(comSugestaoAceita({}, passo, {}, "pode ser").pressao, "secundaria");
+    assert.equal(comSugestaoAceita({}, passo, {}, "pode, mas só se for rápido").pressao, undefined);
+  });
+
+  it("percentuais falados somam 100", () => {
+    const nome = (a: string) => a;
+    const frase = fraseDaDivisao(
+      [{ area: "tecnico", weight: 0.45 }, { area: "pressao", weight: 0.3 }, { area: "escala_produto", weight: 0.25 }],
+      nome as never,
+    );
+    assert.equal(frase, "tecnico fica com quarenta e cinco por cento e pressao com trinta e escala_produto com vinte e cinco");
+  });
+
+  it("ponto de 'Sim. TS' em maiúscula separa frases; 'Next. js' não", () => {
+    assert.deepEqual(frasesDe("Sim. TS não importa."), ["Sim.", "TS não importa."]);
+    assert.deepEqual(frasesDe("Uso Next. js no front."), ["Uso Next. js no front."]);
   });
 });

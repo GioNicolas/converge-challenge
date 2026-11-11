@@ -272,6 +272,21 @@ export function percentualPorExtenso(n: number): string {
   return unidade ? `${dezena} e ${unidade}` : dezena;
 }
 
+/** Pesos em percentuais múltiplos de 5, de 5 a 95, que somam exatamente 100 (maior resto). */
+function percentuaisDe5em5(pesos: number[]): number[] {
+  const total = pesos.reduce((a, p) => a + p, 0) || 1;
+  const partes = pesos.map((p) => Math.max(1, Math.floor((p / total) * 20)));
+  const exatos = pesos.map((p) => (p / total) * 20);
+  let falta = 20 - partes.reduce((a, p) => a + p, 0);
+  const porResto = exatos.map((e, i) => ({ i, r: e - Math.floor(e) })).sort((a, b) => b.r - a.r);
+  for (let k = 0; falta > 0; k = (k + 1) % porResto.length, falta--) partes[porResto[k].i]++;
+  const porTamanho = partes.map((p, i) => ({ i, p })).sort((a, b) => b.p - a.p);
+  for (let k = 0; falta < 0; k = (k + 1) % porTamanho.length) {
+    if (partes[porTamanho[k].i] > 1) { partes[porTamanho[k].i]--; falta++; }
+  }
+  return partes.map((p) => p * 5);
+}
+
 /**
  * A divisão do foco em palavras, para o Totti dizer depois de uma mudança: "fica metade algoritmos e código, metade
  * lidar com pressão e imprevistos", "fica um terço pra cada", "algoritmos e código fica com setenta por cento e lidar
@@ -284,7 +299,7 @@ export function fraseDaDivisao(focus: Foco[], nome: (area: FocusArea) => string)
   const empatadas = ordem[0].weight - ordem[ordem.length - 1].weight < 0.05;
   if (empatadas && ordem.length === 2) return `fica metade ${nome(ordem[0].area)}, metade ${nome(ordem[1].area)}`;
   if (empatadas) return `fica o mesmo peso pra ${listar(ordem.map((f) => nome(f.area)))}`;
-  const pct = ordem.map((f) => Math.min(95, Math.max(5, Math.round((f.weight * 100) / 5) * 5)));
+  const pct = percentuaisDe5em5(ordem.map((f) => f.weight));
   const [primeira, ...resto] = ordem;
   const partes = resto.map((f, i) => `${nome(f.area)} com ${percentualPorExtenso(pct[i + 1])}`);
   return `${nome(primeira.area)} fica com ${percentualPorExtenso(pct[0])} por cento e ${listar(partes)}`;
