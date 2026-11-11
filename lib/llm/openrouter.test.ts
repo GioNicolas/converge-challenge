@@ -15,11 +15,12 @@ test("pedido HTTP de conversa prioriza latência e relatório mantém throughput
   const pedidos: { provider: { sort: string } }[] = [];
   t.mock.method(globalThis, "fetch", async (_url: Parameters<typeof fetch>[0], opcoes?: RequestInit) => {
     pedidos.push(JSON.parse(String(opcoes?.body)));
-    return Response.json({ choices: [{ message: { content: '{"texto":"Resposta"}' }, finish_reason: "stop" }], usage: {} });
+    return Response.json({ choices: [{ message: { content: '{"texto":"Resposta"}' }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 7 } } });
   });
   for (const role of ["interviewer", "fast", "evaluator"] as const) {
     const r = await completeJson({ role, system: "Teste", user: "Teste", schema: z.object({ texto: z.string() }) });
     assert.equal(r.data.texto, "Resposta");
+    if (role === "interviewer") assert.equal(r.cachedTokens, 7);
   }
   assert.deepEqual(pedidos.map((p) => p.provider.sort), ["latency", "latency", "throughput"]);
 });
@@ -74,4 +75,27 @@ test("relatório e evaluator: Featherless primeiro; a reserva na OpenRouter é o
     { host: "api.featherless.ai", model: "zai-org/GLM-5.2" },
     { host: "openrouter.ai", model: "google/gemini-3.5-flash-lite" },
   ]);
+});
+
+test("disjuntor aberto marca como reserva o provedor que respondeu", async (t) => {
+  const anterior = { openrouter: process.env.OPENROUTER_API_KEY, featherless: process.env.FEATHERLESS_API_KEY };
+  process.env.OPENROUTER_API_KEY = "chave-ficticia-de-teste";
+  process.env.FEATHERLESS_API_KEY = "chave-ficticia-de-teste";
+  t.after(() => {
+    if (anterior.openrouter === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = anterior.openrouter;
+    if (anterior.featherless === undefined) delete process.env.FEATHERLESS_API_KEY;
+    else process.env.FEATHERLESS_API_KEY = anterior.featherless;
+  });
+  t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0]) => {
+    if (String(url).includes("featherless")) return new Response('{"error":"fora do ar"}', { status: 400 });
+    return Response.json({ choices: [{ message: { content: '{"texto":"Reserva"}' }, finish_reason: "stop" }], usage: {} });
+  });
+
+  let resposta;
+  for (let tentativa = 0; tentativa < 4; tentativa += 1) {
+    resposta = await completeJson({ role: "evaluator", system: "Teste", user: "Teste", schema: z.object({ texto: z.string() }) });
+  }
+  assert.equal(resposta?.provider, "openrouter");
+  assert.equal(resposta?.reservaDisparada, true);
 });

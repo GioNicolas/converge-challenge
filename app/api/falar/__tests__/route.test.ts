@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { NextRequest } from "next/server";
 import { POST } from "../route";
+import { registrarUsoVoz } from "@/lib/voz/uso";
+import { getOrCreateSession } from "@/lib/session/store";
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => {
@@ -56,6 +58,17 @@ test("bloqueia origem externa e não permite cache mesmo sem configuração", as
   assert.equal((await POST(externo)).status, 403);
   const semChave = await POST(pedido({ texto: "oi" }));
   assert.equal(semChave.headers.get("cache-control"), "no-store");
+});
+
+test("registra voz_uso plano no live coding", async () => {
+  const sessao = getOrCreateSession(`voz-uso-${Date.now()}`);
+  await registrarUsoVoz({ sessao_id: sessao.sessionId, contexto: "coding", fala_id: "fala-1" }, "Olá Totti");
+  const evento = sessao.events.at(-1);
+  assert.equal(evento?.type, "voz_uso");
+  if (evento?.type === "voz_uso") {
+    assert.equal(evento.caracteres, 9);
+    assert.equal(evento.fala_id, "fala-1");
+  }
 });
 
 test("rejeita horários incompletos em vez de produzir legenda sem sincronia", async () => {

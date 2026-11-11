@@ -7,6 +7,7 @@
  * e não varia de uma execução para outra.
  */
 import type { FocusArea } from "@/lib/contracts";
+import { ultimoEvento } from "@/lib/session/eventos";
 import type { SessionState } from "@/lib/session/types";
 
 /** Áreas que precisam de pergunta própria. */
@@ -56,7 +57,7 @@ function momentoDoFoco(session: SessionState, area: FocusArea, t: number): boole
 }
 
 /** Foco mais pesado que ainda não teve sua pergunta e está no momento dela, ou undefined. */
-export function focoPendente(session: SessionState, t = session.events.at(-1)?.t ?? 0): FocusArea | undefined {
+export function focoPendente(session: SessionState, t = ultimoEvento(session)?.t ?? 0): FocusArea | undefined {
   return session.config.focus
     .filter((f) => f.weight > 0 && AREAS_DE_PROCESSO.includes(f.area))
     .filter((f) => jaPerguntadas(session, f.area) < MAX_POR_AREA && geradas(session, f.area) < MAX_GERADAS_POR_AREA)

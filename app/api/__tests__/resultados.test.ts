@@ -110,12 +110,12 @@ describe("System Design no painel da vaga", () => {
     assert.equal(item?.ended, true);
   });
 
-  it("falha do modelo marca a entrevista com 'error' na lista e libera nova tentativa", async () => {
+  it("falha do modelo mantém a entrevista gerando e libera a tentativa encadeada", async () => {
     definirContextoParaTestes({ repositorio: repo, llm: criarClienteFalso([new Error("fora do ar")]), agora: () => Date.now(), fake: false });
     const id = await novaSessao(ID_VAGA);
     const r = await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id));
-    assert.equal(r.status, 502);
-    assert.equal((await lista()).find((i) => i.sessionId === id)?.state, "error");
+    assert.equal(r.status, 202);
+    assert.equal((await lista()).find((i) => i.sessionId === id)?.state, "running");
     // nova tentativa (agora com o modelo de mentira que funciona) gera o scorecard
     definirContextoParaTestes({ repositorio: repo, llm: criarLlmFalsoDeterministico(), agora: () => Date.now(), fake: true });
     assert.equal((await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id))).status, 200);

@@ -55,11 +55,11 @@ export async function postChat(req: ChatRequest & { code?: string; language?: st
 }
 
 /** POST /api/encerramento: o balão da última conversa, ou nada se o agente não tem mais o que perguntar. */
-export async function postEncerramento(sessionId: string): Promise<EventsResponse> {
+export async function postEncerramento(sessionId: string, gatilho: "concluiu" | "tempo" | "pediu_encerrar" = "concluiu"): Promise<EventsResponse> {
   const res = await fetch("/api/encerramento", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, gatilho }),
   });
   if (!res.ok) throw new Error(`POST /api/encerramento respondeu ${res.status}`);
   return EventsResponse.parse(await res.json());

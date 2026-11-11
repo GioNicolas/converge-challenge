@@ -5,6 +5,7 @@ import { findBlipQuestion } from "@/lib/agents/policy";
 import { ChatRequest } from "@/lib/contracts";
 import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 import { appendEvent, latestCode, sessionNow } from "@/lib/session/store";
+import { ultimoEvento } from "@/lib/session/eventos";
 
 /** Teto do código aceito na conversa (o mesmo espírito do limite de snapshot). */
 const MAX_CODE_CHARS = 100_000;
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
   // Gravar no Supabase (ler a cópia remota, juntar e gravar) são duas idas e voltas: ficam para depois da resposta,
   // que é o que o candidato está esperando ouvir.
   // Concluiu uma etapa: o analista olha o código agora (momento-chave), e a próxima pergunta já vem sobre o que segue.
-  const gatilho = session.events.at(-1);
+  const gatilho = ultimoEvento(session);
   after(async () => {
     await guardarSessao(session);
     if (!response.concluded || !gatilho) return;

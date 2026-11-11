@@ -166,6 +166,11 @@ export type EmpecilhoPublico = z.infer<typeof EmpecilhoPublico>;
 const base = { sessionId: z.string(), t: z.number().nonnegative() };
 
 export const SessionEvent = z.discriminatedUnion("type", [
+  /** Gravado pelo servidor para contabilizar o uso de LLM. */
+  z.object({ ...base, type: z.literal("llm_uso"), papel: z.enum(["fala", "filtro", "analise", "relatorio"]), modelo: z.string(), provedor: z.string(), reserva_disparada: z.boolean(), ms: z.number(), tokens_entrada: z.number(), tokens_saida: z.number(), tokens_cache: z.number().optional(), custo_usd: z.number() }),
+  z.object({ ...base, type: z.literal("transcricao_uso"), contexto: z.enum(["quadro", "coding", "pre"]), escuta_id: z.string(), audioEnviadoS: z.number(), sessaoS: z.number(), conexoes: z.number().int(), reconexoes: z.number().int(), final: z.boolean() }),
+  z.object({ ...base, type: z.literal("voz_uso"), contexto: z.enum(["quadro", "coding", "pre"]), caracteres: z.number().int(), fala_id: z.string().optional() }),
+  z.object({ ...base, type: z.literal("voz_descartada"), contexto: z.enum(["quadro", "coding", "pre"]), caracteres: z.number().int(), fala_id: z.string().optional(), motivo: z.enum(["substituida", "cancelada"]) }),
   z.object({ ...base, type: z.literal("session_started"), configId: z.string(), problemId: z.string(), language: z.string() }),
   /** Código inteiro. Mandar ~1,5 s depois de parar de digitar, ou no máximo a cada 5 s. */
   z.object({ ...base, type: z.literal("snapshot"), code: z.string(), version: z.number().int(), language: z.string() }),
@@ -233,7 +238,7 @@ export type Blip = z.infer<typeof Blip>;
  * Resposta de POST /api/events e de GET /api/blip/pending (a IDE consulta a cada ~3 s).
  * `dismissBlipId`: o balão com esse id expirou sem clique — a IDE deve tirá-lo da tela.
  */
-export const EventsResponse = z.object({ blip: Blip.optional(), dismissBlipId: z.string().optional() });
+export const EventsResponse = z.object({ blip: Blip.optional(), dismissBlipId: z.string().optional(), despedida: z.string().optional() });
 export type EventsResponse = z.infer<typeof EventsResponse>;
 
 /** Resposta de GET /api/blip/:id/context — o que a conversa (voz ou texto) recebe ao abrir. */
@@ -283,10 +288,11 @@ export const ChatResponse = z.object({
   end: z.boolean(),
   /** O agente só está ouvindo (o candidato pensa em voz alta ou continua explicando): reply vem "" e nada é falado. */
   listening: z.boolean().optional(),
+  fechamento: z.enum(["anuncio", "perguntas_finais", "ultima_palavra", "despedida", "encerrada"]).optional(),
+  /** reply é a despedida, que a IDE deve falar antes de encerrar. */
+  despedida: z.boolean().optional(),
   /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
   concluded: z.boolean().optional(),
-  /** O candidato pediu para encerrar a entrevista: a IDE se despede e encerra a sessão. */
-  finish: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 

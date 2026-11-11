@@ -83,8 +83,8 @@ async function main() {
     const r = await runInterviewerTurn(s, { blipId: caso.blip ? "q-1" : undefined, messages: mensagens });
     const ms = Date.now() - inicio;
     tempos.push(ms);
-    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, finish: !!r.finish, reply: r.reply }));
-    if (caso.encerra !== undefined && !!r.finish !== caso.encerra) falhas.push(`${caso.nome}: ${caso.encerra ? "devia encerrar" : "não devia encerrar"}`);
+    console.log(JSON.stringify({ caso: caso.nome, ms, silent: r.listening ?? false, end: r.end, despedida: !!r.despedida, reply: r.reply }));
+    if (caso.encerra !== undefined && !!r.despedida !== caso.encerra) falhas.push(`${caso.nome}: ${caso.encerra ? "devia encerrar" : "não devia encerrar"}`);
     const respondeu = !r.listening && r.reply.trim() !== "";
     if (respondeu !== caso.responde) falhas.push(`${caso.nome}: ${caso.responde ? "devia responder" : "devia ficar quieto"}`);
     else if (respondeu) {

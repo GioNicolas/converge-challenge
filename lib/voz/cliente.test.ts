@@ -266,3 +266,42 @@ test("o fetch padrão é chamado com o this do navegador (sem Illegal invocation
   assert.equal(pedidos, 1);
   assert.equal(tocou, true);
 });
+
+test("avisa descarte uma vez se áudio recém sintetizado é cancelado antes de tocar", async () => {
+  const envios: unknown[] = [];
+  const falar = criarVoz({
+    metadados: () => ({ sessao_id: "s1", contexto: "coding" }),
+    fetch: async (_url, init) => {
+      if (String(init?.method) === "POST" && String(init?.body).includes("voz_descartada")) envios.push(JSON.parse(String(init?.body)));
+      return Response.json(dadosVoz);
+    },
+    tocar: async () => assert.fail("não deve tocar"),
+  });
+  const controlador = new AbortController();
+  await assert.rejects(falar("Esta fala é longa o bastante para não ser guardada.", controlador.signal, eventos(), async () => {
+    controlador.abort();
+    return true;
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(envios.length, 1);
+  assert.equal((envios[0] as { dados: { motivo: string } }).dados.motivo, "substituida");
+});
+
+test("avisa cancelamento pelo portão e ignora fala curta guardada no cache", async () => {
+  const envios: unknown[] = [];
+  const falar = criarVoz({
+    metadados: () => ({ sessao_id: "s1", contexto: "coding" }),
+    fetch: async (_url, init) => {
+      if (String(init?.body).includes("voz_descartada")) envios.push(JSON.parse(String(init?.body)));
+      return Response.json(dadosVoz);
+    },
+    tocar: async () => assert.fail("não deve tocar"),
+  });
+  await falar("Esta resposta é longa demais para entrar no cache de falas curtas.", new AbortController().signal, eventos(), async () => false);
+  assert.equal(envios.length, 1);
+  assert.equal((envios[0] as { dados: { motivo: string } }).dados.motivo, "cancelada");
+  falar.preparar(["Uhum."]);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await falar("Uhum.", new AbortController().signal, eventos(), async () => false);
+  assert.equal(envios.length, 1);
+});

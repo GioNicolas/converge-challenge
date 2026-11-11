@@ -9,7 +9,7 @@ import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { ErroLimite } from "../armazenamento";
 import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
-import { analisar, refiltrarComEstadoAtual, respostaSilencio } from "../analisar";
+import { analisar, assinaturaDaAnalise, perguntaBloqueadaNaAnalise, refiltrarComEstadoAtual, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
 import type { Kit, Problema } from "../kits/tipos";
@@ -217,11 +217,16 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   const estado = sincronizarFase(sessao.estado, pedido.fase, t0);
   let resposta: RespostaAnalise = respostaSilencio();
   let origem = "sem_llm";
+  let usoAnalise: Record<string, unknown> | undefined;
+  const assinatura = assinaturaDaAnalise(pedido, estado.conversa.length + pedido.conversa_recente.length);
+  const bloqueadaAgora = perguntaBloqueadaNaAnalise(estado, pedido, t0);
 
-  if (ctx.llm) {
+  if (estado.ultimaAnalise?.assinatura === assinatura && (!estado.ultimaAnalise.bloqueada || bloqueadaAgora)) {
+    origem = "sem_novidade";
+  } else if (ctx.llm) {
     const sinal = AbortSignal.timeout(PRAZO_ANALISE_DO_DESENHO_MS);
     const r = await comPrazo(
-      analisar({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema }, estado, pedido, t0, sinal).catch(
+      analisar({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema }, estado, pedido, t0, sinal, bloqueadaAgora).catch(
         () => null,
       ),
       PRAZO_ANALISE_DO_DESENHO_MS,
@@ -230,6 +235,11 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     if (r) {
       resposta = r.resposta;
       origem = r.diagnostico.origem;
+      const u = r.diagnostico.uso;
+      if (u) usoAnalise = {
+        modelo: u.modelo, provedor: u.provedor, reserva_disparada: u.reservaDisparada ?? false, ms: r.diagnostico.ms,
+        tokens_entrada: u.entrada, tokens_saida: u.saida, ...(u.cache !== undefined ? { tokens_cache: u.cache } : {}), custo_usd: u.custo,
+      };
     } else {
       origem = "prazo";
     }
@@ -246,12 +256,16 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, fim).estado;
     novo = {
       ...novo,
+      ultimaAnalise: { assinatura, bloqueada: bloqueadaAgora },
       observacoes: novo.observacoes.map((o, i) => i < anteriores ? o : {
         ...o, desenho: { horario: new Date(t0).toISOString(), grafo: pedido.grafo },
       }),
     };
+  } else if (origem === "sem_novidade") {
+    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, ctx.agora()).estado;
   }
   await ctx.repositorio.salvarEstado(id, novo);
+  if (usoAnalise) void ctx.repositorio.anexarEventos(id, [{ horario: new Date(ctx.agora()).toISOString(), tipo: "analise_uso", dados: usoAnalise }]).catch(() => []);
   console.warn("[agente] rota_analisar", { sessao_id: id, fase: pedido.fase, origem, status: resposta.status });
 
   // Formato exato do contrato (sem diagnóstico).

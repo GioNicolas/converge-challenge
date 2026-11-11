@@ -117,6 +117,7 @@ export default function PaginaPreEntrevista() {
   const [finalizando, setFinalizando] = useState(false);
   const [final, setFinal] = useState<{ config?: InterviewConfig; erros?: string[] } | null>(null);
   const ditado = useTranscricao({
+    sessaoId,
     bloqueada: enviando || !sessaoId || revisando || finalizando || !!final,
     aoTexto: (texto) => setFala((atual) => acrescentarFala(atual, texto)),
   });
@@ -124,6 +125,7 @@ export default function PaginaPreEntrevista() {
   const voz = useVozAgente({
     ultimaFala: ultimaFala?.role === "agente" ? { id: `${sessaoId}:${estado?.transcricao.length}`, texto: ultimaFala.text } : null,
     bloqueada: enviando || !sessaoId || revisando || finalizando || !!final,
+    sessao: sessaoId ? { sessao_id: sessaoId, contexto: "pre" } : null,
   });
 
   // Atualiza o estado da sessão a cada 1 s enquanto ela está aberta.
