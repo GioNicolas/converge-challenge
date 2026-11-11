@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { caracteresAlterados, linhasAlteradas, voltouATrabalhar } from "../fechamento";
+import { candidatasDoFechamento, caracteresAlterados, linhasAlteradas, PERGUNTA_DO_CRITERIO, voltouATrabalhar } from "../fechamento";
+import { DEFAULT_CONFIG } from "@/lib/config/default";
+import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 import { iniciarFechamento, proximoPasso } from "@/lib/totti/fechamento";
 import { decideBlip } from "../policy";
 import type { SessionState } from "@/lib/session/types";
@@ -55,5 +57,19 @@ describe("fechamento live coding", () => {
     assert.equal(voltouATrabalhar(estado, pequeno, "a\nb"), false);
     assert.equal(voltouATrabalhar(estado, grande, "a\nb"), true);
     assert.equal(voltouATrabalhar(estado, run, "a\nb"), false);
+  });
+
+  it("critério sem evidência e sem pergunta preparada vira pergunta final", () => {
+    const s = getOrCreateSession(`fechamento-criterios-${Date.now()}`, DEFAULT_CONFIG);
+    s.clock = () => 0;
+    appendEvent(s, { type: "session_started", sessionId: s.sessionId, t: 0, configId: DEFAULT_CONFIG.id, problemId: DEFAULT_CONFIG.problemId, language: "python" });
+    s.coverage.abordagem = { status: "coberto", outcomes: [] };
+    const perguntas = candidatasDoFechamento(s, 60_000).map((c) => c.pergunta);
+    assert.ok(perguntas.includes(PERGUNTA_DO_CRITERIO.complexidade));
+    assert.ok(perguntas.includes(PERGUNTA_DO_CRITERIO.bordas));
+    // Já tem evidência: não pergunta de novo.
+    assert.ok(!perguntas.includes(PERGUNTA_DO_CRITERIO.abordagem));
+    // Comunicação não vira pergunta montada.
+    assert.equal(perguntas.length, 2);
   });
 });

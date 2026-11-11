@@ -7,6 +7,15 @@ import type { EstadoFechamento } from "@/lib/totti/fechamento";
 import type { SessionEvent } from "@/lib/contracts";
 
 export const MIN_LINHAS_PARA_VOLTA = 3;
+
+/** Pergunta final de um critério sem evidência que não tem pergunta preparada. Só os técnicos de id conhecido
+ * (corretude sai dos testes): comunicação, pressão e os critérios próprios da vaga ficam fora, porque uma pergunta
+ * montada do nome soava robótica. */
+export const PERGUNTA_DO_CRITERIO: Record<string, string> = {
+  complexidade: "Qual é o custo de tempo e de memória da sua solução? E o que acontece com uma entrada bem grande?",
+  bordas: "Que casos de borda você testaria nessa solução, tipo entrada vazia ou valores repetidos?",
+  abordagem: "Por que você escolheu essa abordagem e não outra?",
+};
 export const MIN_CARACTERES_PARA_VOLTA = 80;
 
 /** Decide sem efeitos colaterais se um evento de código suspende o fechamento. */
@@ -42,10 +51,16 @@ export function candidatasDoFechamento(session: SessionState, t: number): Pergun
   if (cola) candidatas.push({ pergunta: "Você colou esse trecho. De onde veio e como ele funciona?", origem: "colagem", apontar: cola.highlight });
   const prepared = copia.queue.filter((q) => q.kind !== "encerramento" && q.status === "stale" && q.kind !== "cola");
   for (const q of prepared) candidatas.push({ pergunta: q.question, origem: "analise", apontar: q.highlight });
-  // Critérios descobertos pelo fechamento legado só viram pergunta quando existe pergunta preparada para eles.
+  // Critério descoberto com pergunta preparada: entra a pergunta preparada.
   const idsCobertos = new Set(uncoveredCriteria(session));
   for (const q of elegiveis.filter((item) => item.criterionId && idsCobertos.has(item.criterionId) && item.question.trim())) {
     if (!candidatas.some((c) => c.pergunta === q.question)) candidatas.push({ pergunta: q.question, origem: "criterio", apontar: q.highlight });
+  }
+  // Critério sem evidência e sem pergunta preparada: entra com a pergunta escrita à mão, por último.
+  const comPergunta = new Set(elegiveis.map((q) => q.criterionId));
+  for (const id of idsCobertos) {
+    const pergunta = PERGUNTA_DO_CRITERIO[id];
+    if (pergunta && !comPergunta.has(id) && !candidatas.some((c) => c.pergunta === pergunta)) candidatas.push({ pergunta, origem: "criterio" });
   }
   return candidatas;
 }
