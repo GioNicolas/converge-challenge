@@ -65,6 +65,33 @@ export type RelatorioVisto = {
   adaptacao: AdaptacaoVista | null;
 };
 
+/**
+ * Linha de conexão do grafo ("Entrada dos dados → Quadro (ponta perto, sem encostar)") -> nome legível para a
+ * prova: "Entrada dos dados → Quadro", "seta de Entrada dos dados" (sem destino) ou "seta para Quadro" (sem origem).
+ * Nunca devolve "?" nem as marcas internas. Também entende grafos antigos ("A → ?", "? → B", "(seta solta)").
+ */
+function nomeDeConexao(id: string, linha: string): string | null {
+  if (!id.startsWith("s")) return null;
+  let t = linha.trim();
+  for (;;) {
+    const antes = t;
+    t = t
+      .replace(/\s*\((?:ponta perto, sem encostar|tracejada|seta solta|linha solta)\)$/, "")
+      .replace(/\s*\("(?:[^"\\]|\\.)*"\)$/, "")
+      .trim();
+    if (t === antes) break;
+  }
+  const par = /^(.*?) (→|↔|—) (.*)$/.exec(t);
+  if (!par) return null;
+  const [, a, seta, b] = par;
+  const semOrigem = a === "(sem origem)" || a === "?";
+  const semDestino = b === "(sem destino)" || b === "?";
+  if (semOrigem && semDestino) return "seta solta";
+  if (semDestino) return `seta de ${a}`;
+  if (semOrigem) return `seta para ${b}`;
+  return `${a} ${seta} ${b}`;
+}
+
 /** "- [e1] Postgres (elipse)  dentro de [m1] ..." -> e1: "Postgres". Vale o nome mais recente. */
 export function nomesDosElementos(eventos: EventoArmazenado[]): Map<string, string> {
   const nomes = new Map<string, string>();
@@ -72,6 +99,8 @@ export function nomesDosElementos(eventos: EventoArmazenado[]): Map<string, stri
     const grafo = (e.dados as { grafo?: unknown } | null)?.grafo;
     if (e.tipo !== "desenho" || typeof grafo !== "string") continue;
     for (const [, id, resto] of grafo.matchAll(/^- \[([^\]]+)\] (.+)$/gm)) {
+      const conexao = nomeDeConexao(id, resto);
+      if (conexao) { nomes.set(id, conexao); continue; }
       const nome = resto
         .replace(/\s{2}dentro de \[.*$/, "")
         .replace(/, perto de \[.*$/, "")
