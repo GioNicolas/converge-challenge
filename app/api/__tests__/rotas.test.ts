@@ -162,6 +162,55 @@ describe("POST /api/sessoes", () => {
 });
 
 describe("POST /api/sessoes/[id]/analisar", () => {
+  it("pula assinatura igual já analisada sem bloqueio", async () => {
+    const { sessao_id } = await novaSessao();
+    const falso = criarClienteFalso(Array.from({ length: 2 }, () => ({ status: "ok" as const, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] })));
+    definirContextoParaTestes({ repositorio: repo, llm: falso, agora: () => relogio });
+    await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    assert.equal(falso.chamadas.length, 1);
+  });
+
+  it("reanalisa assinatura igual quando o bloqueio anterior foi liberado", async () => {
+    const { sessao_id } = await novaSessao();
+    const sessao = (await repo.obter(sessao_id))!;
+    await repo.salvarEstado(sessao_id, { ...sessao.estado, fase: "APROFUNDAMENTO", perguntasFeitas: 5 });
+    const falso = criarClienteFalso(Array.from({ length: 2 }, () => ({ status: "ok" as const, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] })));
+    definirContextoParaTestes({ repositorio: repo, llm: falso, agora: () => relogio });
+    await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    const atual = (await repo.obter(sessao_id))!;
+    await repo.salvarEstado(sessao_id, { ...atual.estado, perguntasFeitas: 0 });
+    await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    assert.equal(falso.chamadas.length, 2);
+  });
+
+  it("pula assinatura igual quando segue bloqueada", async () => {
+    const { sessao_id } = await novaSessao();
+    const sessao = (await repo.obter(sessao_id))!;
+    await repo.salvarEstado(sessao_id, { ...sessao.estado, fase: "APROFUNDAMENTO", perguntasFeitas: 5 });
+    const falso = criarClienteFalso(Array.from({ length: 2 }, () => ({ status: "ok" as const, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] })));
+    definirContextoParaTestes({ repositorio: repo, llm: falso, agora: () => relogio });
+    await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    assert.equal(falso.chamadas.length, 1);
+  });
+
+  it("handler marca semReserva quando a cota de perguntas está bloqueada", async () => {
+    const { sessao_id } = await novaSessao();
+    const sessao = (await repo.obter(sessao_id))!;
+    await repo.salvarEstado(sessao_id, { ...sessao.estado, fase: "APROFUNDAMENTO", perguntasFeitas: 5 });
+    const falso = criarClienteFalso([{ status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] }]);
+    let semReserva: boolean | undefined;
+    const llm = { ...falso, async completarJson<T>(args: Parameters<typeof falso.completarJson<T>>[0]) {
+      semReserva = args.semReserva;
+      return falso.completarJson(args);
+    } };
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const r = await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.equal(semReserva, true);
+  });
+
   it("sincroniza a fase do quadro e devolve EXATAMENTE os campos de RespostaAnalise", async () => {
     const { sessao_id } = await novaSessao();
     const r = await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));

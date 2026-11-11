@@ -24,11 +24,11 @@ import { latestCode, numberCode } from "@/lib/session/store";
 import { ultimoEvento } from "@/lib/session/eventos";
 import type { CodeVersion, ProbeKind, ReportStatus, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
+import { TEMPO_POR_TENTATIVA_RELATORIO_MS, TENTATIVAS_FEATHERLESS_RELATORIO } from "@/lib/session/persistencia";
 
 /** Colagem a partir disso conta como "grande" nos sinais. */
 const LARGE_PASTE_LINES = 5;
 const MAX_CODE_VERSIONS = 6;
-const LLM_ATTEMPTS = 2;
 
 // Em globalThis, como o store: o hot reload do Next não pode perder uma avaliação em curso.
 const globalWithEvals = globalThis as typeof globalThis & {
@@ -40,13 +40,24 @@ const inFlight = (globalWithEvals.__evaluations ??= new WeakMap<SessionState, Pr
  * Começa a avaliação se ainda não começou (ou se falhou e `retry`). Idempotente: o session_ended
  * e o GET /api/report podem chamar à vontade. Devolve o estado atual.
  */
-export function startEvaluation(session: SessionState, opts: { retry?: boolean } = {}): ReportStatus {
+export function startEvaluation(session: SessionState, opts: { retry?: boolean; rota?: "primario" | "reserva" } = {}): ReportStatus {
   const current = session.report;
   if (current && !(opts.retry && current.state === "error")) return current;
 
-  const status: ReportStatus = { state: "running", startedAt: Date.now(), costUsd: 0 };
+  const now = Date.now();
+  const attempt = (current?.attempt ?? 0) + 1;
+  const status: ReportStatus = {
+    state: "running",
+    startedAt: now,
+    attempt,
+    reservaTentada: current?.reservaTentada ?? false,
+    ...(current?.missingCriteria ? { missingCriteria: current.missingCriteria } : {}),
+    costUsd: current?.costUsd ?? 0,
+  };
   session.report = status;
-  const job = evaluate(session, status)
+  const rota = opts.rota ?? (attempt <= TENTATIVAS_FEATHERLESS_RELATORIO ? "primario" : "reserva");
+  if (rota === "reserva") status.reservaTentada = true;
+  const job = evaluate(session, status, rota)
     .then((report) => {
       status.report = report;
       status.state = "done";
@@ -76,7 +87,7 @@ export async function waitForEvaluation(session: SessionState): Promise<ReportSt
   return session.report;
 }
 
-async function evaluate(session: SessionState, status: ReportStatus): Promise<Report> {
+async function evaluate(session: SessionState, status: ReportStatus, rota: "primario" | "reserva"): Promise<Report> {
   const { config } = session;
   const problem = getProblem(config.problemId);
   const code = latestCode(session);
@@ -134,7 +145,7 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     learning: aprendizado?.hasMoment ? aprendizado.lines : undefined,
   });
 
-  const output = await judge(system, user, judgedIds, status, session);
+  const output = await judge(system, user, judgedIds, status, session, rota);
   const byId = new Map(output.criteria.map((c) => [c.id, c]));
 
   const scoredCriteria = config.criteria.map((c) => {
@@ -343,19 +354,15 @@ function adaptationScore(judged: number | null, facts: AdaptationFacts): number 
   return facts.total > 0 && facts.passed < facts.total ? Math.min(judged, 2) : judged;
 }
 
-/** Chama o LLM; tenta de novo se faltar critério na resposta. */
-async function judge(system: string, user: string, judgedIds: string[], status: ReportStatus, session: SessionState): Promise<EvaluatorOutput> {
-  let lastError = "";
-  for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
-    const result = await completeJson({ role: "relatorio", system, user, schema: EvaluatorOutput });
-    registrarUsoLlm(session, "relatorio", result);
-    status.costUsd += result.costUsd;
-    const missing = judgedIds.filter((id) => !result.data.criteria.some((c) => c.id === id));
-    if (missing.length === 0) return result.data;
-    lastError = `o modelo não avaliou: ${missing.join(", ")}`;
-    console.warn(`[evaluator] tentativa ${attempt}: ${lastError}`);
-  }
-  throw new Error(lastError);
+/** Uma chamada por execução; ausência de critério fica para a próxima tentativa encadeada. */
+async function judge(system: string, user: string, judgedIds: string[], status: ReportStatus, session: SessionState, rota: "primario" | "reserva"): Promise<EvaluatorOutput> {
+  const result = await completeJson({ role: "relatorio", system, user, schema: EvaluatorOutput, prazoMs: TEMPO_POR_TENTATIVA_RELATORIO_MS, rota });
+  registrarUsoLlm(session, "relatorio", result);
+  status.costUsd += result.costUsd;
+  const missing = judgedIds.filter((id) => !result.data.criteria.some((c) => c.id === id));
+  if (missing.length === 0) return result.data;
+  status.missingCriteria = missing;
+  throw new Error(`o modelo não avaliou: ${missing.join(", ")}`);
 }
 
 // ---------------------------------------------------------------------------

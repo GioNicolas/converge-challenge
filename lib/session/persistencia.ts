@@ -9,7 +9,10 @@ import { kvRemoto } from "@/lib/storage/kv";
 
 const NS = "sessoes-live";
 /** Reivindicação de avaliação: depois disso a avaliação "em andamento" de outra instância é dada como perdida. */
-export const AVALIACAO_PERDIDA_MS = 150_000;
+/** 2 × ~280 s ≈ 9,5 min de espera quando seguidas; decisão de 2026-11-11. */
+export const TENTATIVAS_FEATHERLESS_RELATORIO = 2;
+export const TEMPO_POR_TENTATIVA_RELATORIO_MS = 280_000;
+export const AVALIACAO_PERDIDA_MS = TEMPO_POR_TENTATIVA_RELATORIO_MS + 20_000;
 
 /** A sessão pelo id: da memória, ou restaurada do Supabase quando esta instância não a viu (ou está atrasada). */
 export async function sessaoViva(sessionId: string): Promise<SessionState | undefined> {

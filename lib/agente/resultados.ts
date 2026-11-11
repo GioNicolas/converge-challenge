@@ -18,6 +18,9 @@ export type ResumoDoQuadro = {
   startedAt: number;
   ended: boolean;
   state: "running" | "done" | "error";
+  /** Número de tentativas encadeadas e se a reserva foi tentada. */
+  reportAttempt?: number;
+  reportReservaTentada?: boolean;
   /** Média 1 a 4 do scorecard. */
   overallScore?: number;
   recommendation?: RecomendacaoDoResultado;

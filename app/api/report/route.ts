@@ -7,7 +7,7 @@ import { listarDoIndice } from "@/lib/agente/resultados";
 import { exemploHabilitado, relatorioExemplo } from "@/lib/session/relatorio-exemplo";
 import { findReport, listReports } from "@/lib/session/reports";
 import { cartaoDoRelatorio } from "@/lib/session/cartao";
-import { AVALIACAO_PERDIDA_MS, guardarSessao, sessaoViva } from "@/lib/session/persistencia";
+import { AVALIACAO_PERDIDA_MS, TENTATIVAS_FEATHERLESS_RELATORIO, guardarSessao, sessaoViva } from "@/lib/session/persistencia";
 import { listSessions } from "@/lib/session/store";
 import { lerDecisoes, type DecisaoRegistrada } from "@/lib/vagas/decisao";
 import { kvPadrao } from "@/lib/storage/kv";
@@ -123,11 +123,19 @@ export async function GET(request: NextRequest) {
   // Avaliação começada por outra instância (a cópia restaurada diz "gerando"): espera, a menos que tenha se perdido.
   if (session.report?.state === "running" && !avaliacaoLocal(session)) {
     if (Date.now() - session.report.startedAt < AVALIACAO_PERDIDA_MS) return NextResponse.json({ status: "gerando" }, { status: 202 });
-    session.report = undefined;
+    session.report.state = "error";
   }
-  const status = startEvaluation(session, { retry: params.get("retry") === "1" });
+  const manual = params.get("retry") === "1";
+  const atual = session.report;
+  if (atual?.state === "error" && !manual && (atual.attempt ?? 0) > TENTATIVAS_FEATHERLESS_RELATORIO) {
+    return NextResponse.json({ error: atual.error }, { status: 500 });
+  }
+  const status = startEvaluation(session, { retry: manual || atual?.state === "error", ...(manual ? { rota: "reserva" as const } : {}) });
   await guardarSessao(session);
   if (status.state === "running") return NextResponse.json({ status: "gerando" }, { status: 202 });
+  if (status.state === "error" && (status.attempt ?? 0) <= TENTATIVAS_FEATHERLESS_RELATORIO) {
+    return NextResponse.json({ status: "gerando" }, { status: 202 });
+  }
   if (status.state === "error") return NextResponse.json({ error: status.error }, { status: 500 });
   return NextResponse.json(status.report);
 }

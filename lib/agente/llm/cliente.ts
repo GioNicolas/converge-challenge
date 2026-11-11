@@ -26,6 +26,9 @@ export type LlmArgs<T> = {
   sinal?: AbortSignal;
   /** Foto do quadro (data URL JPEG/PNG/WebP), para o modelo ver o desenho além do grafo em texto. */
   imagem?: string | null;
+  /** Não dispara a reserva por lentidão; ainda tenta a reserva se o primário falhar. */
+  semReserva?: boolean;
+  rota?: "primario" | "reserva";
 };
 
 export type LlmResultado<T> = {

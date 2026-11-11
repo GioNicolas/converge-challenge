@@ -144,6 +144,8 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
             maxTokens: args.maxTokens !== undefined && args.maxTokens >= MIN_TOKENS_RESPEITADOS ? args.maxTokens : undefined,
             signal: cancelar.signal,
             prazoMs,
+            ...(args.semReserva ? { semReserva: true } : {}),
+            ...(args.rota ? { rota: args.rota } : {}),
             ...(args.imagem ? { imageDataUrl: args.imagem } : {}),
           }),
           prazoMs,
