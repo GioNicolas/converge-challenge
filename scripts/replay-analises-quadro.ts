@@ -25,7 +25,7 @@ const original: EstadoSessao = dump.estado[0].value;
 const eventos: Evento[] = dump.eventos.map((x: { value: { evento: Evento } }) => x.value.evento)
   .sort((a: Evento, b: Evento) => Date.parse(a.horario) - Date.parse(b.horario));
 const t0 = original.iniciadaEm ?? Date.parse(eventos[0].horario);
-const problema = kit.problemas.find((p) => p.titulo === "Chat em tempo real") ?? kit.problemas[0];
+const problema = kit.problemas.find((p) => p.titulo === "Chat de mensagens em tempo real") ?? kit.problemas[0];
 
 async function main() {
   const llm = criarClientePrincipal();

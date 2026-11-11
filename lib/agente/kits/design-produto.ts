@@ -35,7 +35,8 @@ const RUBRICA_DESIGN_PRODUTO: Criterio[] = [
   },
   {
     id: "comunicacao",
-    nome: "Comunicação (medida nas respostas aos plins e nas perguntas de requisito)",
+    nome: "Comunicação",
+    provaSoPorFala: true,
     niveis: {
       1: "Respostas confusas ou evasivas",
       2: "Responde em parte, sem justificar",

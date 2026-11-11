@@ -190,6 +190,18 @@ describe("briefing por etapa", () => {
     assert.equal(r.criterios.length, kit.criterios.length - 1);
   });
 
+  it("o critério fora da cobertura vem do campo provaSoPorFala, não do nome (e o nome antigo salvo continua valendo)", () => {
+    const base = { niveis: { 1: "a", 2: "b", 3: "c", 4: "d" } };
+    const criterios = [
+      { ...base, id: "requisitos", nome: "Requisitos e escopo" },
+      { ...base, id: "fala_livre", nome: "Fala livre", provaSoPorFala: true },
+      { ...base, id: "comunicacao", nome: "Comunicação (medida nas respostas aos plins e nas perguntas de requisito)" },
+      { ...base, id: "outro", nome: "Outro", provaSoPorFala: false },
+    ];
+    const ids = resumoDaCobertura(criterios, comObservacoes([]), INICIO + 10 * MIN).criterios.map((c) => c.id);
+    assert.deepEqual(ids, ["requisitos", "outro"]);
+  });
+
   it("no fechamento o alvo é o critério de maior peso ainda aberto", () => {
     const e = { ...emFase("FECHAMENTO"), plano: plano([{ area: "escala_produto", peso: 0.9 }]) };
     assert.match(blocoDoBriefing(kit, e, INICIO + 36 * MIN), /Próximo alvo, se houver gancho no desenho: Escalabilidade/);

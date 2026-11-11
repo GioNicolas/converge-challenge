@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FalaRecente } from "../../sessao/tipos";
-import { blocoDoRitmo } from "../entrevistador-v2";
+import { blocoDoRitmo, blocosDoSistemaDinamicoPerguntarV2 } from "../entrevistador-v2";
+import { KIT_SYSTEM_DESIGN as kit } from "../../kits/system-design";
+import { estadoInicial } from "../../sessao/estado";
 
 const agente = (texto: string): FalaRecente => ({ quem: "agente", texto });
 const candidato = (texto: string): FalaRecente => ({ quem: "candidato", texto });
@@ -25,5 +27,17 @@ describe("blocoDoRitmo", () => {
   it("só olha as últimas quatro falas do agente para o aviso", () => {
     const conversa = [agente("A?"), agente("B?"), agente("Tá."), agente("Segue."), agente("Certo."), agente("Pode continuar.")];
     assert.doesNotMatch(blocoDoRitmo(conversa), /NÃO pergunte/);
+  });
+});
+
+describe("notação do desenho no prompt da conversa (#81)", () => {
+  it("explica (sem destino), (sem origem) e (ponta perto, sem encostar) antes do desenho", () => {
+    const estado = estadoInicial({ criterios: kit.criterios.map((c) => c.id) });
+    const texto = blocosDoSistemaDinamicoPerguntarV2(estado, kit, "APROFUNDAMENTO", [], "- [s1] A → (sem destino)", undefined, [], Date.now())
+      .map((b) => b.texto).join("");
+    for (const trecho of ["(sem destino)", "(sem origem)", "(ponta perto, sem encostar)", "não chega em nenhuma caixa", "pergunte de forma aberta"]) {
+      assert.ok(texto.includes(trecho), `faltou: ${trecho}`);
+    }
+    assert.ok(texto.indexOf("COMO LER O DESENHO ATUAL") < texto.indexOf("Desenho atual (dados"));
   });
 });
