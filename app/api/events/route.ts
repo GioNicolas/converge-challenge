@@ -12,6 +12,7 @@ import { appendEvent, getOrCreateSession } from "@/lib/session/store";
 import { comRegrasDaSquad } from "@/lib/squad-memory/config";
 import { hidratarSquadMemory } from "@/lib/squad-memory/store";
 import { hasProblem } from "@/problems";
+import { voltouATrabalhar } from "@/lib/agents/fechamento";
 
 export const dynamic = "force-dynamic";
 // A avaliação (testes escondidos + LLM) roda depois da resposta e leva de 15 s a 1 min: a função precisa continuar viva.
@@ -43,6 +44,13 @@ export async function POST(request: Request) {
   if (event.type !== "session_started") await sessaoViva(event.sessionId);
   const session = getOrCreateSession(event.sessionId, config);
   appendEvent(session, event);
+  if (session.fechamento && session.fechamentoCodigoInicial !== undefined) {
+    const suspender = voltouATrabalhar(session.fechamento, event, session.fechamentoCodigoInicial);
+    if (suspender) {
+      session.fechamento = undefined;
+      session.fechamentoCodigoInicial = undefined;
+    }
+  }
   if (event.type === "session_started") {
     enqueueKickoff(session, event.t);
     // Carrega o Python agora: quando a sessão acabar e os testes escondidos rodarem, ele já está pronto.
