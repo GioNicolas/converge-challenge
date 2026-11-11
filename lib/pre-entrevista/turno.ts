@@ -16,9 +16,18 @@
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
 import { isDeepStrictEqual } from "node:util";
-import { ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
+import { mede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ultimaFalaDoAgente } from "./cobertura";
-import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
+import {
+  acumularEnfase,
+  confirmarDispensa,
+  declararCentral,
+  dispensasPendentes,
+  lerDivisao,
+  type Divisao,
+  type EstadoEnfase,
+  type NivelEnfase,
+} from "./enfase";
 import {
   aberturaDoAgente,
   falaDeEncerramento,
@@ -57,7 +66,7 @@ import { lerFormato } from "./formato";
 import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
-import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
+import { aplicarDecisoesTradeoff, areasFora, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
 
@@ -78,7 +87,69 @@ function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
     mode: sessao.rascunho.mode,
     nivelEmAberto: aberto,
     areasFaladas,
+    dispensasPendentes: dispensasPendentes(enfase),
+    ...(sugestaoDeEquilibrio(sessao) ? { sugestaoDeEquilibrio: sugestaoDeEquilibrio(sessao) } : {}),
   };
+}
+
+/**
+ * Área para somar quando ela pede equilíbrio e o foco tem uma área só: a de maior nota da vaga entre as que estão fora
+ * do foco, que o formato mede, que ela não dispensou e não deixou de fora pela troca de formato.
+ */
+function sugestaoDeEquilibrio(sessao: Sessao): FocusArea | undefined {
+  const r = sessao.rascunho;
+  const fora = new Set(areasFora(sessao.plano.decisoesTradeoff));
+  const candidatas = sessao.classificacao.focusScores
+    .filter((f) => !r.focus.some((x) => x.area === f.area) && mede(r.mode, f.area) && !fora.has(f.area))
+    .filter((f) => sessao.enfaseEstado[f.area].declarado !== "dispensou")
+    .sort((a, b) => b.score - a.score);
+  if (candidatas[0]) return candidatas[0].area;
+  // Sem nota da vaga, a primeira área que o formato mede fora do foco.
+  return AREAS.find((a) => !r.focus.some((x) => x.area === a) && mede(r.mode, a) && !fora.has(a) && sessao.enfaseEstado[a].declarado !== "dispensou");
+}
+
+/**
+ * A divisão que a fala dela pede (ver `lerDivisao`). Sem número nem palavra de equilíbrio que o código reconheça, o
+ * sinal `pediu_equilibrio` do Jev ainda vale como pedido de equilíbrio. `foco`: do mais pesado para o menos. Função pura.
+ */
+export function divisaoDaFala(fala: string, foco: FocusArea[], sinais: Record<string, number>): Divisao | undefined {
+  const lida = lerDivisao(fala, foco);
+  if (lida) return lida;
+  return (sinais.pediu_equilibrio ?? 0) >= LIMIAR ? { tipo: "equilibrio", frase: limitarPalavras(fala) } : undefined;
+}
+
+/** Resposta curta de aceite: "pode", "pode ser", "sim", "isso", "beleza". */
+const RE_ACEITE = /^(sim|pode|pode ser|pode sim|isso|claro|beleza|ok|ta bom|ta|fechado|bora|vamos|perfeito|combinado)\b/;
+
+/**
+ * O Totti sugeriu somar uma área (equilíbrio com uma área só no foco) e ela aceitou: a área conta como "secundaria",
+ * mesmo que o Jev não tenha lido nada sobre ela num "pode ser". Função pura.
+ */
+export function comSugestaoAceita(
+  niveis: Partial<Record<FocusArea, NivelEnfase>>,
+  ultimoPasso: Passo | undefined,
+  sinais: Record<string, number>,
+  fala: string,
+): Partial<Record<FocusArea, NivelEnfase>> {
+  if (ultimoPasso?.tipo !== "confirmar_mudanca_foco" || !ultimoPasso.sugerir) return niveis;
+  const area = ultimoPasso.sugerir;
+  if ((niveis[area] ?? "nao_falou") !== "nao_falou") return niveis;
+  const aceitou = (sinais[`quer_${area}`] ?? 0) >= LIMIAR || RE_ACEITE.test(normalizarTexto(fala));
+  return aceitou ? { ...niveis, [area]: "secundaria" } : niveis;
+}
+
+/**
+ * O Totti perguntou se podia tirar uma área (dispensa pendente) e ela confirmou: a área sai. Se ela disse que a área
+ * conta, `acumularEnfase` já desfez a dispensa. Sem a pergunta, nada muda. Função pura.
+ */
+export function confirmarDispensasPerguntadas(
+  estado: EstadoEnfase,
+  ultimoPasso: Passo | undefined,
+  sinais: Record<string, number>,
+): EstadoEnfase {
+  if (ultimoPasso?.tipo !== "confirmar_mudanca_foco" || !ultimoPasso.confirmarTirar?.length) return estado;
+  if ((sinais.confirmou_tirar_area ?? 0) < LIMIAR) return estado;
+  return ultimoPasso.confirmarTirar.reduce((e, area) => confirmarDispensa(e, area), estado);
 }
 
 /**
@@ -88,7 +159,13 @@ function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
  * do plano até o fim. Função pura.
  */
 export function semDispensaContrariada(sinais: Record<string, number>, enfase: EstadoEnfase): Record<string, number> {
-  const contrariadas = AREAS.filter((a) => enfase[a].declarado === "central" || (enfase[a].declarado !== "dispensou" && enfase[a].maximo >= 2));
+  // Pesar menos ("reduzir") também contraria a dispensa: ela quer a área com menos peso, não fora.
+  const contrariadas = AREAS.filter(
+    (a) =>
+      enfase[a].declarado === "central" ||
+      enfase[a].declarado === "reduzir" ||
+      (enfase[a].declarado !== "dispensou" && enfase[a].maximo >= 2),
+  );
   if (!contrariadas.some((a) => (sinais[`dispensa_${a}`] ?? 0) > 0)) return sinais;
   return { ...sinais, ...Object.fromEntries(contrariadas.map((a) => [`dispensa_${a}`, 0])) };
 }
@@ -113,8 +190,21 @@ async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno, aoReceberJe
     const porFala = await (deps.avaliarEnfaseDaFala ?? avaliarEnfaseDaFala)(sessao.transcricao);
     // Até aqui a sessão pode ter sido gravada pela extração; daqui em diante, as escritas são síncronas.
     aoReceberJev?.();
-    if (ultimaDela) sessao.enfaseEstado = acumularEnfase(sessao.enfaseEstado, porFala.niveis, ultimaDela);
-    sessao.plano = { ...sessao.plano, sinais: semDispensaContrariada(cob.sinais, sessao.enfaseEstado) };
+    // Divisão pedida (equilíbrio ou proporção): declaração explícita, vale sobre a ênfase (ver `pesosPelaEnfase`).
+    let sinaisDaDivisao: Record<string, number> = { disse_divisao: 0, disse_equilibrio: 0 };
+    if (ultimaDela) {
+      const ultimoPasso = sessao.plano.ultimoPasso;
+      const foco = [...sessao.rascunho.focus].sort((a, b) => b.weight - a.weight).map((f) => f.area);
+      const divisao = divisaoDaFala(ultimaDela, foco, cob.sinais);
+      const niveis = comSugestaoAceita(porFala.niveis, ultimoPasso, cob.sinais, ultimaDela);
+      sessao.enfaseEstado = acumularEnfase(sessao.enfaseEstado, niveis, ultimaDela, {
+        mode: sessao.rascunho.mode,
+        ...(divisao ? { divisao } : {}),
+      });
+      sessao.enfaseEstado = confirmarDispensasPerguntadas(sessao.enfaseEstado, ultimoPasso, cob.sinais);
+      if (divisao) sinaisDaDivisao = { disse_divisao: 1, disse_equilibrio: divisao.tipo === "equilibrio" ? 1 : 0 };
+    }
+    sessao.plano = { ...sessao.plano, sinais: { ...semDispensaContrariada(cob.sinais, sessao.enfaseEstado), ...sinaisDaDivisao } };
 
     // Falas dela que mostram tom, dicas e eliminatório: entram no guia como trecho, sem passar pelo extrator.
     if (ultimaDela) {

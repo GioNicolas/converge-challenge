@@ -20,6 +20,7 @@ import { registrarEvento } from "./log";
 import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
+import { fraseDaDivisao } from "./pesos";
 import { LIMIAR_DUPLICADA, sobreposicao } from "@/lib/agente/guardas";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
@@ -450,6 +451,32 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
 /** Lembrete em todo passo antes do resumo: duração, tom e dicas não são perguntados, só entram no resumo como padrão. */
 const SEM_LOGISTICA = "Não pergunte duração, tom nem dicas: isso fica para o resumo, que usa o padrão do formato.";
 
+/**
+ * Pergunta antes de tirar uma área que só sai com a confirmação dela. Em live coding, tirar a área técnica é tirar o
+ * próprio código da avaliação: "Então o código em si não conta na avaliação, só como ele lida com pressão. É isso?".
+ */
+function instrucaoConfirmarTirar(areas: FocusArea[], sessao: Sessao): string {
+  const r = sessao.rascunho;
+  const ficam = r.focus.map((f) => f.area).filter((a) => !areas.includes(a)).map((a) => nomeAreaFala(a, r.mode));
+  const resto = ficam.length ? `, só ${listar(ficam)}` : "";
+  const exemplo =
+    areas.includes("tecnico") && r.mode === "live_coding"
+      ? `'Então o código em si não conta na avaliação${resto ? `, só como ele lida com ${listar(ficam)}` : ""}. É isso?'`
+      : `'Então ${listar(areas.map((a) => nomeAreaFala(a, r.mode)))} não conta na avaliação${resto}. É isso?'`;
+  return (
+    "Ela pediu para tirar uma parte da avaliação. Ainda não tire: confirme com ela numa pergunta só, com as palavras dela, " +
+    `do jeito deste exemplo: ${exemplo} Não faça outra pergunta. ${SEM_LOGISTICA}`
+  );
+}
+
+/** Na revisão depois do resumo, com divisão pedida nesta fala, o Totti diz como ficou a divisão. */
+function divisaoNaRevisao(sessao: Sessao): string {
+  if ((sessao.plano.sinais.disse_divisao ?? 0) < LIMIAR) return "";
+  const r = sessao.rascunho;
+  const divisao = fraseDaDivisao(r.focus, (a) => nomeAreaFala(a, r.mode));
+  return divisao ? `Se a mudança foi na divisão entre as áreas, diga como ficou, com estas palavras: '${divisao}'. ` : "";
+}
+
 /** Instrução específica para o passo escolhido pelo planejador. */
 function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
   const r = sessao.rascunho;
@@ -507,11 +534,29 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
       );
     }
     case "confirmar_mudanca_foco": {
+      // Tirar uma área que só sai com a confirmação dela (a técnica em live coding): pergunta se é isso, e nada mais.
+      if (passo.confirmarTirar?.length) return instrucaoConfirmarTirar(passo.confirmarTirar, sessao);
+      const nome = (a: FocusArea) => nomeAreaFala(a, r.mode);
+      // Equilíbrio com uma área só: sugere somar outra e pergunta se pode, dizendo como ficaria a divisão.
+      if (passo.sugerir) {
+        const so = r.focus[0] ? nome(r.focus[0].area) : "";
+        return (
+          `Ela pediu para deixar a avaliação mais equilibrada, mas hoje ela está toda em ${so}. ` +
+          `Sugira somar ${nome(passo.sugerir)} e pergunte se pode, dizendo como ficaria ` +
+          `(ex.: 'Posso somar ${nome(passo.sugerir)}? Aí fica metade ${so}, metade ${nome(passo.sugerir)}.'). ` +
+          `Uma pergunta só. Não diga que tirou nada: somar não tira ${so}. ${SEM_LOGISTICA}`
+        );
+      }
       const partes: string[] = [];
       if (passo.entra.length) partes.push(`${listar(passo.entra.map((a) => nomeAreaFala(a, r.mode)))} passa a fazer parte da avaliação`);
       if (passo.sai.length)
         partes.push(`${listar(passo.sai.map((a) => nomeAreaFala(a, r.mode)))} deixa de ser prioridade ou pesa menos, como ela disse`);
       let texto = partes.length ? `Confirme a mudança numa frase, com as palavras dela: ${partes.join("; ")}.` : "";
+      // O resultado em palavras, para ela corrigir na conversa e não na tela.
+      const divisao = fraseDaDivisao(r.focus, nome);
+      if (divisao && (passo.divisao || partes.length)) {
+        texto += ` ${partes.length ? "Na mesma frase, diga" : "Confirme numa frase"} como ficou a divisão, com estas palavras: '${divisao}'.`;
+      }
       if (passo.duvida.length) {
         texto += ` Pergunte se ${listar(passo.duvida.map((a) => nomeAreaFala(a, r.mode)))} ainda contam para a avaliação ou se ficam de lado. Uma pergunta só. ${SEM_LOGISTICA}`;
       } else if (passo.proximo) {
@@ -524,6 +569,7 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         return (
           "Ela pediu uma mudança depois do resumo. Confirme só o que mudou, numa frase curta com as palavras dela, sem repetir o resumo. " +
           "Se a mudança for sobre dicas, diga 'sem dicas' ou 'com uma dica leve se ele travar'. " +
+          divisaoNaRevisao(sessao) +
           "Depois pergunte se pode finalizar. Não faça outra pergunta."
         );
       }
@@ -682,6 +728,7 @@ function perguntaParaRetomar(passo: Passo, sessao: Sessao): string {
     case "resumo_final":
       return "pergunte se ela quer mudar algo ou se pode finalizar.";
     case "confirmar_mudanca_foco":
+      if (passo.confirmarTirar?.length || passo.sugerir) return instrucaoDoPasso(passo, sessao);
       if (passo.duvida.length) {
         return `pergunte se ${listar(passo.duvida.map((a) => nomeAreaFala(a, sessao.rascunho.mode)))} ainda contam para a avaliação ou se ficam de lado.`;
       }
@@ -717,7 +764,7 @@ export function naoAvaliadoParaFalar(sessao: Sessao): string[] {
     AREAS.filter(
       (a) =>
         sessao.plano.decisoesTradeoff[a] === "proxima_etapa" ||
-        sessao.enfaseEstado[a].declarado === "dispensou" ||
+        (sessao.enfaseEstado[a].declarado === "dispensou" && !sessao.enfaseEstado[a].pendente) ||
         semMedicaoNoFormato(r.mode, a),
     ).map((a) => ROTULO_NAO_AVALIADO[a]),
   );

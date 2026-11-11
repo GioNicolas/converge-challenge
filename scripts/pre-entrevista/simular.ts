@@ -8,7 +8,7 @@
  *   npm run pre:simular -- questionadora muda_foco       # várias
  */
 import { pago } from "../_gasto";
-import type { FocusArea, InterviewConfig } from "@/lib/contracts";
+import { FocusArea, type InterviewConfig } from "@/lib/contracts";
 import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { classificarVaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias } from "@/lib/pre-entrevista/competencias";
@@ -49,6 +49,10 @@ interface Verdade {
   dicas: "leves" | "nenhuma";
   /** Duração que ela disse. Sem ela, vale o padrão do formato. */
   duracaoMin?: number;
+  /** Ela pediu equilíbrio: o foco final tem pelo menos duas áreas, com pesos perto de iguais (#77). */
+  equilibrado?: boolean;
+  /** Proporção que ela disse (fração por área). O foco final tem de bater, com 0,05 de folga (#77). */
+  proporcao?: Partial<Record<FocusArea, number>>;
 }
 
 interface Persona {
@@ -203,6 +207,32 @@ const PERSONAS: Persona[] = [
       dicas: "leves",
       duracaoMin: 45,
     },
+  },
+  // Casos da #77: pedir equilíbrio com o foco numa área só, somar uma área sem tirar a outra e dizer uma proporção.
+  {
+    id: "equilibrada",
+    vagaId: "frontend-junior",
+    descricao:
+      "Você responde curto, em uma frase. Quando o Totti propuser o plano, diga: 'deixa mais equilibrado, não quero tudo numa coisa só'. " +
+      "Se ele sugerir somar outra área, aceite com 'pode ser'. Quando perguntarem um comportamento, diga que ruim é não explicar o que o código faz. " +
+      "Aceita dica leve se ele travar.",
+    verdade: { ordemFoco: ["tecnico"], dispensa: [], tom: "amigavel", dicas: "leves", equilibrado: true },
+  },
+  {
+    id: "soma_pressao",
+    vagaId: "frontend-junior",
+    descricao:
+      "Você responde curto, em uma frase. Quando o Totti propuser o plano, diga: 'tá bom o código, mas pode colocar pressão também, sem tirar o código'. " +
+      "Pressão para você é ver como ele reage quando o requisito muda no meio. Aceita dica leve se ele travar.",
+    verdade: { ordemFoco: ["tecnico", "pressao"], dispensa: [], tom: "amigavel", dicas: "leves" },
+  },
+  {
+    id: "setenta_trinta",
+    vagaId: "frontend-junior",
+    descricao:
+      "Você responde curto, em uma frase. Quando o Totti propuser o plano, diga: 'quero setenta por cento código e trinta por cento pressão'. " +
+      "Não muda essa proporção depois. Aceita dica leve se ele travar.",
+    verdade: { ordemFoco: ["tecnico", "pressao"], dispensa: [], tom: "amigavel", dicas: "leves", proporcao: { tecnico: 0.7, pressao: 0.3 } },
   },
 ];
 
@@ -568,9 +598,15 @@ function imprimirConfig(sessao: Sessao): InterviewConfig | undefined {
     if (d.fixou) console.log(`      fixou: "${d.fixou}"`);
   }
   console.log("  estado acumulado por área:");
-  for (const [area, e] of Object.entries(sessao.enfaseEstado)) {
-    const declarado = e.declarado ?? "(sem declaração explícita)";
+  for (const area of FocusArea.options) {
+    const e = sessao.enfaseEstado[area];
+    const declarado = `${e.declarado ?? "(sem declaração explícita)"}${e.pendente ? " (pendente: espera confirmação)" : ""}`;
     console.log(`    ${area}: falou=${e.falou} | máximo=${e.maximo} | ${declarado}${e.frase ? ` | frase: "${e.frase}"` : ""}`);
+  }
+  const divisao = sessao.enfaseEstado.divisao;
+  if (divisao) {
+    const pesos = divisao.tipo === "proporcao" ? ` ${Object.entries(divisao.pesos).map(([a, p]) => `${a}=${p}`).join(" ")}` : "";
+    console.log(`    divisão pedida: ${divisao.tipo}${pesos}${divisao.frase ? ` | frase: "${divisao.frase}"` : ""}`);
   }
 
   console.log("\n--- critérios e origem ---");
@@ -664,6 +700,25 @@ function verificarFidelidade(persona: Persona, sessao: Sessao, config: Interview
     ok: config.durationMin === duracaoEsperada,
     detalhe: `config=${config.durationMin} esperado=${duracaoEsperada}${v.duracaoMin === undefined ? " (padrão do formato)" : ""}`,
   });
+
+  if (v.equilibrado) {
+    const pesos = config.focus.map((f) => f.weight);
+    const semCriterio = config.focus.filter((f) => !config.criteria.some((c) => c.focus === f.area)).map((f) => f.area);
+    itens.push({
+      nome: "pediu equilíbrio: duas ou mais áreas, pesos perto de iguais, critérios de cada uma",
+      ok: pesos.length >= 2 && Math.max(...pesos) - Math.min(...pesos) <= 0.1 && semCriterio.length === 0,
+      detalhe: `${config.focus.map((f) => `${f.area}=${f.weight.toFixed(2)}`).join(" ")}${semCriterio.length ? ` | sem critério: ${semCriterio.join(", ")}` : ""}`,
+    });
+  }
+
+  if (v.proporcao) {
+    const esperado = Object.entries(v.proporcao) as [FocusArea, number][];
+    itens.push({
+      nome: "proporção dita bate com o foco",
+      ok: esperado.every(([a, p]) => Math.abs(peso(a) - p) <= 0.05),
+      detalhe: esperado.map(([a, p]) => `${a}=${peso(a).toFixed(2)} (esperado ${p})`).join(" "),
+    });
+  }
 
   // Todo critério com origem de fala tem o trecho na fala que a origem aponta (e a fala é da recrutadora).
   const origens = sessao.rascunho.origens;

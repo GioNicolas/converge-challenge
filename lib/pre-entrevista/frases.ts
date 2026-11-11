@@ -13,10 +13,19 @@ export function normalizarTexto(texto: string): string {
     .trim();
 }
 
-/** Frases de um texto, cortadas depois de cada pontuação final. */
+/**
+ * Ponto que não termina frase: o de nome de tecnologia ("Next.js", "Node.js", "ASP.NET"), inclusive quando a transcrição
+ * de voz põe espaço depois dele ("Next. js"), e o de abreviação comum ("ex.", "vs.").
+ */
+const PONTO_SEM_FIM = /(?:\b(?:ex|vs|sr|sra|dr|dra)\.|\.(?=\s*(?:js|ts|net|io|py)\b))/gi;
+const MARCA_PONTO = "\u0000";
+
+/** Frases de um texto, cortadas depois de cada pontuação final. Não corta em "Next.js", "Node. js" nem em "ex.". */
 export function frasesDe(texto: string): string[] {
   return texto
+    .replace(PONTO_SEM_FIM, (m) => m.replace(".", MARCA_PONTO))
     .split(/(?<=[.!?])\s+/)
+    .map((f) => f.split(MARCA_PONTO).join("."))
     .map((f) => f.trim())
     .filter(Boolean);
 }

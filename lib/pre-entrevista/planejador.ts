@@ -85,6 +85,15 @@ export type Passo =
       duvida: FocusArea[];
       /** Próximo aprofundamento, emendado na mesma fala quando não há dúvida pendente. */
       proximo?: AprofundarPasso;
+      /**
+       * Áreas que ela pediu para tirar e que só saem com a confirmação dela (a técnica em live coding): o Totti
+       * pergunta se é isso, e a fala não emenda outra pergunta.
+       */
+      confirmarTirar?: FocusArea[];
+      /** Ela pediu uma divisão (equilíbrio ou proporção) nesta fala: o Totti diz como ficou a divisão. */
+      divisao?: boolean;
+      /** Ela pediu equilíbrio com uma área só no foco: o Totti sugere somar esta área e pergunta se pode. */
+      sugerir?: FocusArea;
     }
   /** Ela pediu system design e o formato não está disponível (trava desligada): a Totti avisa, uma vez, e segue em live coding. */
   | { tipo: "informar_formato_indisponivel" }
@@ -146,6 +155,13 @@ export interface EstadoPlanejamento extends PlanoEstado {
    * Formato atual. Sem ele (testes antigos), nenhuma área é tratada como não medida e não há oferta de troca.
    */
   mode?: InterviewMode;
+  /** Áreas que ela pediu para tirar e que esperam a confirmação dela (a técnica em live coding, ver `enfase.ts`). */
+  dispensasPendentes?: FocusArea[];
+  /**
+   * Área que o Totti sugere somar quando ela pede equilíbrio e o foco tem uma área só: a de maior nota da vaga, fora do
+   * foco, que o formato mede e que ela não dispensou.
+   */
+  sugestaoDeEquilibrio?: FocusArea;
 }
 
 const criterio = (area: FocusArea) => `criterio_${area}`;
@@ -372,11 +388,31 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   const indecisa = (a: FocusArea) =>
     emJogo.includes(a) && medida(a) && !coberto(criterio(a)) && sinal(`quer_${a}`) < LIMIAR && sinal(`dispensa_${a}`) < LIMIAR;
 
-  if (entra.length + sai.length > 0) {
+  // Divisão pedida nesta fala (equilíbrio ou proporção): mesmo sem área entrando ou saindo, o Totti diz a divisão.
+  // Depois do resumo, vale a revisão (passo 2c), que também diz a divisão.
+  const pediuDivisao = e.resumos === 0 && sinal("disse_divisao") >= LIMIAR;
+  if (entra.length + sai.length > 0 || pediuDivisao) {
+    // Dispensa que espera confirmação: o Totti pergunta se é isso, sem emendar outra pergunta.
+    // Em live coding, tirar a área técnica sempre passa por essa confirmação: o formato é um problema de código.
+    const confirmarTirar = sai.filter((a) => (e.dispensasPendentes ?? []).includes(a) || (a === "tecnico" && e.mode === "live_coding"));
+    // Equilíbrio com uma área só no foco: o Totti sugere somar outra e pergunta se pode.
+    const sugerir =
+      pediuDivisao && sinal("disse_equilibrio") >= LIMIAR && e.focus.length === 1 && entra.length === 0
+        ? e.sugestaoDeEquilibrio
+        : undefined;
     // Áreas indecisas ainda não perguntadas: a mudança deixa dúvida, e o Totti pergunta uma vez.
-    const duvida = focoAtual.filter((a) => indecisa(a) && perguntas(`duvida_${a}`) === 0);
-    const proximo = duvida.length === 0 ? aprofundarPasso(e, emJogo) : undefined;
-    return { tipo: "confirmar_mudanca_foco", entra, sai, duvida, ...(proximo ? { proximo } : {}) };
+    const duvida = confirmarTirar.length || sugerir ? [] : focoAtual.filter((a) => indecisa(a) && perguntas(`duvida_${a}`) === 0);
+    const proximo = duvida.length === 0 && !confirmarTirar.length && !sugerir ? aprofundarPasso(e, emJogo) : undefined;
+    return {
+      tipo: "confirmar_mudanca_foco",
+      entra,
+      sai,
+      duvida,
+      ...(proximo ? { proximo } : {}),
+      ...(confirmarTirar.length ? { confirmarTirar } : {}),
+      ...(pediuDivisao ? { divisao: true } : {}),
+      ...(sugerir ? { sugerir } : {}),
+    };
   }
 
   // 2c. Depois do resumo, ela pediu mudança: o Totti confirma só a mudança e pergunta se pode finalizar.
@@ -467,6 +503,9 @@ export function descreverPasso(passo: Passo): string {
       return "informar_formato_indisponivel";
     case "confirmar_mudanca_foco": {
       const partes = [`entra=[${passo.entra.join(",")}]`, `sai=[${passo.sai.join(",")}]`, `duvida=[${passo.duvida.join(",")}]`];
+      if (passo.confirmarTirar?.length) partes.push(`confirmar_tirar=[${passo.confirmarTirar.join(",")}]`);
+      if (passo.divisao) partes.push("divisao");
+      if (passo.sugerir) partes.push(`sugerir=${passo.sugerir}`);
       return `confirmar_mudanca_foco ${partes.join(" ")}${passo.proximo ? ` + ${descreverPasso(passo.proximo)}` : ""}`;
     }
     case "resumo_final":
