@@ -1,3 +1,5 @@
+import { normalizarTermos } from "../transcricao/vocabulario";
+
 export type TrechoTranscrito = { texto: string; final: boolean; inicio: number };
 export type EstadoTranscricao = {
   parcial: (TrechoTranscrito & { chave: string }) | null;
@@ -131,13 +133,41 @@ export function pcm16LE(amostras: Float32Array): Uint8Array {
   return bytes;
 }
 
-/** Contrato WebSocket público: autenticação apenas pelo token temporário. */
-export function urlDoScribe(token: string): string {
+/**
+ * Contrato WebSocket público: autenticação apenas pelo token temporário. `termos` vira `keyterms` repetido na URL
+ * (mesmo formato do `@elevenlabs/client`), já limitado a 50 termos de 20 caracteres.
+ */
+export function urlDoScribe(token: string, termos: readonly string[] = []): string {
   const parametros = new URLSearchParams({
     model_id: "scribe_v2_realtime", token, audio_format: "pcm_16000", language_code: "pt",
     commit_strategy: "vad", vad_silence_threshold_secs: "0.9", include_timestamps: "false",
   });
+  for (const termo of normalizarTermos(termos)) parametros.append("keyterms", termo);
   return `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${parametros}`;
+}
+
+/**
+ * Frase inventada: o Scribe "ouve" frases inteiras em ruído ou fala distante ("Tchau. Até mais, Fábio."). Um trecho
+ * só passa se a voz medida no microfone combina com o tamanho do texto: no mínimo VOZ_MINIMA_MS e, acima de
+ * PALAVRAS_SEM_PROVA palavras, pelo menos MS_POR_PALAVRA de voz por palavra. A conta é folgada de propósito
+ * (fala normal tem ~3 palavras por segundo, e a voz medida só conta os blocos acima do limiar).
+ */
+export const PALAVRAS_SEM_PROVA = 5;
+export const MS_POR_PALAVRA = 1000 / 6;
+
+export function trechoPlausivel(texto: string, vozMs: number): boolean {
+  if (vozMs < VOZ_MINIMA_MS) return false;
+  const palavras = texto.trim().split(/\s+/u).filter(Boolean).length;
+  if (palavras <= PALAVRAS_SEM_PROVA) return true;
+  return vozMs >= Math.max(1000, palavras * MS_POR_PALAVRA);
+}
+
+/** O modelo só começa a processar com ~2 s de áudio no trecho: fala curta ("sim", "o que tu acha") é completada. */
+export const AMOSTRAS_MINIMAS_TRECHO = 32_000;
+
+/** Silêncio que falta para o trecho chegar ao mínimo que o Scribe processa (vazio se já chegou). */
+export function silencioParaCompletar(amostrasNoTrecho: number, minimo = AMOSTRAS_MINIMAS_TRECHO): Float32Array {
+  return new Float32Array(Math.max(0, minimo - Math.max(0, amostrasNoTrecho)));
 }
 
 export function mensagemDeAudio(amostras: Float32Array, commit = false): string {
