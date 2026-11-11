@@ -64,6 +64,20 @@ describe("aprofundar: uma pergunta por área", () => {
     const anterior = { tipo: "aprofundar" as const, area: "pressao" as const, motivo: "inicial" as const };
     const passo = proximoPasso(
       estado({
+        focus: [{ area: "pressao", weight: 1 }],
+        ultimoPasso: anterior,
+        perguntasPorTopico: { confirmou_inicio: 1, criterio_pressao: 1 },
+        sinais: { resposta_vaga: 1 },
+        mode: "live_coding",
+      }),
+    );
+    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "pressao" });
+  });
+
+  it("o pedido do concreto não toma a vaga de outra área ainda não perguntada", () => {
+    const anterior = { tipo: "aprofundar" as const, area: "pressao" as const, motivo: "inicial" as const };
+    const passo = proximoPasso(
+      estado({
         focus: [
           { area: "pressao", weight: 0.5 },
           { area: "escala_produto", weight: 0.5 },
@@ -74,7 +88,7 @@ describe("aprofundar: uma pergunta por área", () => {
         mode: "live_coding",
       }),
     );
-    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "pressao" });
+    assert.deepEqual(passo, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
   });
 
   it("área que já teve sua pergunta não volta, mesmo sem resposta boa", () => {
@@ -642,10 +656,10 @@ describe("pedir o que faltou", () => {
     assert.notEqual(passo.tipo, "pedir_o_que_faltou");
   });
 
-  it("vale também para o aprofundamento emendado numa confirmação de mudança de foco", () => {
+  it("não vale para o aprofundamento emendado numa confirmação de mudança de foco ('pode ser' responde à mudança)", () => {
     const mudanca = { tipo: "confirmar_mudanca_foco" as const, entra: ["escala_produto" as const], sai: [], duvida: [], proximo: ESCALA };
     const passo = proximoPasso(depoisDoAprofundamento({ ultimoPasso: mudanca, mudancasPerguntadas: ["escala_produto"], sinais: { resposta_vaga: 0.9 } }));
-    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "escala_produto" });
+    assert.notEqual(passo.tipo, "pedir_o_que_faltou");
   });
 
   it("depois do resumo, nada de pedido do que faltou", () => {

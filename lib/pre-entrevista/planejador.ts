@@ -223,8 +223,9 @@ function aprofundarPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): Aprofundar
  * Pedido do que faltou na resposta à última pergunta, se cabe (ver `PedirOQueFaltouPasso`). Só antes do primeiro resumo.
  *  - Depois da pergunta de contexto: ela disse que existe algo sem dizer o quê (`disse_que_tem_sem_dizer`) e nenhum
  *    eliminatório foi coberto. Uma vez.
- *  - Depois de um aprofundamento: resposta vaga (`resposta_vaga`), o critério da área continua sem cobertura e a área
- *    segue em jogo. Uma vez por conversa, e só abaixo de `MAX_APROFUNDAMENTOS`.
+ *  - Depois de um aprofundamento (sozinho, não emendado numa mudança de foco): resposta vaga (`resposta_vaga`), o
+ *    critério da área continua sem cobertura e a área segue em jogo. Uma vez por conversa, só abaixo de
+ *    `MAX_APROFUNDAMENTOS`, e nunca no lugar de uma área ainda não perguntada.
  * Função pura.
  */
 function pedirOQueFaltouPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): PedirOQueFaltouPasso | undefined {
@@ -239,12 +240,15 @@ function pedirOQueFaltouPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): Pedir
     return faltou && perguntas(TOPICO_FALTOU.contexto) === 0 ? { tipo: "pedir_o_que_faltou", sobre: "contexto" } : undefined;
   }
 
-  // A área que a última pergunta aprofundou, sozinha ou emendada numa confirmação de mudança de foco.
-  const area =
-    emCurso?.tipo === "aprofundar" ? emCurso.area : emCurso?.tipo === "confirmar_mudanca_foco" ? emCurso.proximo?.area : undefined;
+  // Só depois de um aprofundamento sozinho: emendado numa confirmação de mudança de foco, um "pode ser" vago pode estar
+  // respondendo à mudança, não ao critério.
+  const area = emCurso?.tipo === "aprofundar" ? emCurso.area : undefined;
   if (!area || sinal("resposta_vaga") < LIMIAR || coberto(criterio(area)) || !emJogo.includes(area)) return undefined;
   if (e.mode !== undefined && !mede(e.mode, area)) return undefined;
-  if (perguntas(TOPICO_FALTOU.criterio) > 0 || aprofundamentosFeitos(e.perguntasPorTopico) >= MAX_APROFUNDAMENTOS) return undefined;
+  const feitas = aprofundamentosFeitos(e.perguntasPorTopico);
+  if (perguntas(TOPICO_FALTOU.criterio) > 0 || feitas >= MAX_APROFUNDAMENTOS) return undefined;
+  // O pedido conta no teto, mas não toma a vaga de uma área que ainda não foi perguntada: a área nova vem antes.
+  if (feitas + 1 >= MAX_APROFUNDAMENTOS && aprofundarPasso(e, emJogo)) return undefined;
   return { tipo: "pedir_o_que_faltou", sobre: "criterio", area };
 }
 

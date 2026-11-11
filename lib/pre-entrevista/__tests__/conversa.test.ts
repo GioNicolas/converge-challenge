@@ -332,12 +332,14 @@ describe("pedir o que faltou (issue #72)", () => {
   it("'Tem' seco: a instrução do passo pede só qual é", () => {
     const [, entrada] = montarMensagensConversa(depoisDoTem(), FALTOU_CONTEXTO);
     assert.match(entrada.content, /PASSO DESTA FALA:\n.*não disse o quê/);
-    assert.match(entrada.content, /E o que é que reprova direto\?/);
+    assert.match(entrada.content, /E o que é: o que reprova direto, ou o que deu errado\?/);
+    // "Já aconteceu" fala da contratação passada: a instrução manda perguntar o que deu errado.
+    assert.match(entrada.content, /já aconteceu.*o que deu errado/);
   });
 
   it("'Tem' seco: fala sem pergunta ganha a pergunta fixa de qual é", async () => {
     const r = await responder(depoisDoTem(), FALTOU_CONTEXTO, { chat: chatFalso(saida("Entendi.")).chat });
-    assert.equal(r.texto, "Entendi. E o que é que reprova direto?");
+    assert.equal(r.texto, "Entendi. E o que é: o que reprova direto, ou o que deu errado?");
     assert.deepEqual(
       r.travas.map((t) => t.trava),
       ["pergunta_de_contexto"],
@@ -362,5 +364,24 @@ describe("pedir o que faltou (issue #72)", () => {
     const r = await responder(sessao, FALTOU_CRITERIO, { chat: chatFalso(saida(fala)).chat });
     assert.equal(r.texto, fala);
     assert.equal(r.movimento, "seguir");
+  });
+
+  /** O Totti aprofundou escalabilidade e ela respondeu de forma vaga. */
+  function depoisDaVaga(pergunta: string) {
+    const sessao = sessaoAberta([ela("isso"), totti(pergunta), ela("Somente que ele raciocine.")]);
+    sessao.plano = aplicarPasso(sessao.plano, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
+    return sessao;
+  }
+
+  it("resposta vaga: fala sem pergunta ganha o pedido de exemplo", async () => {
+    const sessao = depoisDaVaga("Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?");
+    const r = await responder(sessao, FALTOU_CRITERIO, { chat: chatFalso(saida("Faz sentido.")).chat });
+    assert.equal(r.texto, "Faz sentido. Pode me dar um exemplo de como isso apareceria na entrevista?");
+    assert.deepEqual(r.travas.map((t) => t.trava), ["pergunta_no_fim"]);
+  });
+
+  it("resposta vaga: repetir a pergunta do aprofundamento conta como repetir", () => {
+    const pergunta = "Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?";
+    assert.equal(movimentoDaFala("seguir", pergunta, depoisDaVaga(pergunta), FALTOU_CRITERIO), "repetir");
   });
 });

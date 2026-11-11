@@ -105,8 +105,12 @@ function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
  */
 async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno, aoReceberJev?: () => void): Promise<void> {
   try {
+    const ultimo = sessao.plano.ultimoPasso;
+    const emCurso = ultimo?.tipo === "responder_duvida" ? ultimo.retomar : ultimo;
     const cob = await (deps.avaliarCobertura ?? avaliarCobertura)(sessao.rascunho, sessao.transcricao.slice(), {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
+      // A dúvida respondida não conta: vale o passo que ela retomou (como em `pedirOQueFaltouPasso`).
+      depoisDoContexto: emCurso?.tipo === "perguntar_contexto",
     });
     // A ênfase é por fala: classifica só a última fala dela, e o acumulado é feito no código (ver `enfase.ts`).
     const ultimaDela = ultimaFalaDaRecrutadora(sessao.transcricao);

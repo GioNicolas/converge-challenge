@@ -242,10 +242,12 @@ function emCurso(sessao: Sessao): Passo | undefined {
   return ultimo?.tipo === "responder_duvida" ? ultimo.retomar : ultimo;
 }
 
-/** A última pergunta do Totti foi de aprofundamento (sozinha ou emendada numa confirmação de mudança de foco). */
+/**
+ * A última pergunta do Totti foi de aprofundamento, sozinha. Emendada numa confirmação de mudança de foco, a resposta
+ * vaga pode ser à mudança, e o planejador não pede o concreto (ver `pedirOQueFaltouPasso`).
+ */
 function emAprofundamento(sessao: Sessao): boolean {
-  const passo = emCurso(sessao);
-  return passo?.tipo === "aprofundar" || (passo?.tipo === "confirmar_mudanca_foco" && passo.proximo !== undefined);
+  return emCurso(sessao)?.tipo === "aprofundar";
 }
 
 // ---------------------------------------------------------------------------
