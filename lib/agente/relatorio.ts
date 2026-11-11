@@ -45,6 +45,8 @@ export type RelatorioVisto = {
   candidatoId: string;
   area: string;
   problema: string;
+  /** O enunciado que o candidato recebeu (público): dá contexto ao desenho final. */
+  enunciado: string;
   /** Já formatado no servidor (fuso do evento), para não mudar entre servidor e navegador. */
   realizadaEm: string;
   duracao: string | null;
@@ -190,6 +192,7 @@ export function montarRelatorio(p: {
     candidatoId: sessao.candidatoId,
     area: kit.area,
     problema: p.problema.titulo,
+    enunciado: p.problema.enunciado.trim(),
     realizadaEm: new Intl.DateTimeFormat("pt-BR", {
       day: "numeric",
       month: "long",

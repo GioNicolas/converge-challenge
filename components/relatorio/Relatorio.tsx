@@ -428,22 +428,33 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
           </Surgir>
         )}
 
-        {r.desenhoFinal && (
+        {(r.enunciado || r.desenhoFinal) && (
           <Surgir ordem={3}>
-            <section className="flex flex-col gap-3">
-              <h2 className="text-sm font-medium text-texto-suave">Desenho final</h2>
-              <button
-                onClick={() => setImagem(r.desenhoFinal)}
-                aria-label="Ampliar o desenho final"
-                className="group overflow-hidden rounded-padrao bg-superficie shadow-padrao outline-none focus-visible:ring-2 focus-visible:ring-marca"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element -- PNG servido pela sessão */}
-                <img
-                  src={r.desenhoFinal}
-                  alt="Desenho final do candidato"
-                  className="max-h-[420px] w-full object-contain p-4 transition-transform duration-500 ease-suave group-hover:scale-[1.01]"
-                />
-              </button>
+            {/* O desenho só se lê com o problema ao lado: primeiro o que foi pedido, depois o que ele desenhou. */}
+            <section className="flex flex-col overflow-hidden rounded-padrao bg-superficie shadow-padrao">
+              {r.enunciado && (
+                <div className="flex flex-col gap-2 p-6">
+                  <h2 className="text-sm font-medium text-texto-suave">O problema proposto</h2>
+                  <p className="max-w-[68ch] leading-relaxed text-pretty">{r.enunciado}</p>
+                </div>
+              )}
+              {r.desenhoFinal && (
+                <div className={`flex flex-col gap-2 ${r.enunciado ? "border-t border-borda" : ""} px-6 pt-5 pb-2`}>
+                  <h2 className="text-sm font-medium text-texto-suave">Desenho final, como estava ao encerrar</h2>
+                  <button
+                    onClick={() => setImagem(r.desenhoFinal)}
+                    aria-label="Ampliar o desenho final"
+                    className="group overflow-hidden rounded-pequeno outline-none focus-visible:ring-2 focus-visible:ring-marca"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- PNG servido pela sessão */}
+                    <img
+                      src={r.desenhoFinal}
+                      alt="Desenho final do candidato"
+                      className="max-h-[420px] w-full object-contain p-2 transition-transform duration-500 ease-suave group-hover:scale-[1.01]"
+                    />
+                  </button>
+                </div>
+              )}
             </section>
           </Surgir>
         )}

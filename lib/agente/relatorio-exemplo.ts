@@ -7,6 +7,8 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
   candidatoId: "Marina Duarte",
   area: "system design",
   problema: "Encurtador de URL",
+  enunciado:
+    "Projete um serviço como o bit.ly: recebe uma URL longa e devolve uma curta. Quem acessa a curta é redirecionado. No quadro, mostre a arquitetura de ponta a ponta: as peças do sistema (clientes, serviços, bancos de dados, filas), como elas se ligam e o caminho de um link, da criação até o redirecionamento. Não precisa desenhar telas.",
   realizadaEm: "7 de novembro, 15:02",
   duracao: "34 min",
   perguntas: 4,
