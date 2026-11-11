@@ -451,6 +451,15 @@ describe("conduzirTurno: fala que não faz sentido como resposta (issue #76)", (
     assert.equal(sessao.plano.ultimoPasso?.tipo, "aprofundar");
     assert.equal(naoEntendidasSeguidas([...sessao.transcricao, { role: "recrutadora", text: "direto pra solução" }]), 0);
   });
+
+  it("depois da oferta, a contagem recomeça: a 4ª e a 5ª vêm do modelo, a 6ª oferece de novo", async () => {
+    const quebradas = [1, 2, 3, 4, 5, 6].map(() => ({ ela: "expresso diz ele", totti: saida(NAO_PEGUEI, "nao_entendi") }));
+    const { resultados } = await conversar([...ATE_A_ESCOLHA, ...quebradas]);
+    assert.match(resultados[3].fala, /digite a resposta/);
+    assert.equal(resultados[4].fala, NAO_PEGUEI);
+    assert.equal(resultados[5].fala, NAO_PEGUEI);
+    assert.match(resultados[6].fala, /digite a resposta/);
+  });
 });
 
 describe("conduzirTurno: a confirmação da revisão diz o que foi pedido (issue #76)", () => {
@@ -483,6 +492,6 @@ describe("conduzirTurno: a confirmação da revisão diz o que foi pedido (issue
     ]);
     assert.equal(resultados[2].fala, resposta);
     assert.equal(falso.chamadas.length, 3);
-    assert.match(falso.chamadas[2][1].content, /nada mudou no plano/);
+    assert.match(falso.chamadas[2][1].content, /não mudaram\..*não diga que ajustou nada/);
   });
 });

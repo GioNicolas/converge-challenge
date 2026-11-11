@@ -255,6 +255,11 @@ export function perguntaEmAberto(transcricao: Turno[]): string | undefined {
   return undefined;
 }
 
+/** Última fala dela na transcrição, se houver. Função pura. */
+export function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
+  return transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
+}
+
 const FORMATO_FALA: Record<Rascunho["mode"], string> = {
   live_coding: "live coding, com código na IDE",
   system_design: "system design, desenhando a arquitetura num quadro",
@@ -557,8 +562,11 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
         // Nada do que ela pediu virou mudança no plano: confirmar seria inventar, ou dizer um efeito colateral.
         if (mudou && !mudou.algo) {
           return (
-            "Ela pediu uma mudança depois do resumo, mas nada mudou no plano. Não diga que ajustou nada. " +
-            "Diga em uma frase curta o que você entendeu do pedido dela e pergunte se é isso. Não faça outra pergunta."
+            "Ela pediu uma mudança depois do resumo, mas formato, nível, foco, tom, dicas, duração e linguagem não mudaram. " +
+            "Se o pedido é sobre o que avaliar (um critério, uma competência, o que entra ou sai), ele é aplicado depois, pela " +
+            "leitura da conversa: confirme numa frase curta com as palavras dela e pergunte se pode finalizar. " +
+            "Se não, não diga que ajustou nada: diga em uma frase curta o que você entendeu do pedido dela e pergunte se é isso. " +
+            "Não faça outra pergunta."
           );
         }
         const lista = mudou ? descreverMudancas(mudou, sessao.rascunho) : [];
@@ -965,6 +973,7 @@ function descreverMudancas(m: MudancasDoResumo, r: Rascunho): string[] {
  *  - o formato mudou: a confirmação começa pela troca e só depois diz o que mudou junto, por consequência
  *    ("Troquei para system design, no quadro. Com isso a entrevista fica com quarenta e cinco minutos. Posso finalizar?");
  *  - o nível mudou (sem mudar o foco): começa pelo nível;
+ *  - o formato mudou junto com o foco: a troca e depois o foco como fica;
  *  - o foco mudou sem troca de formato, ou nada mudou: undefined, e o modelo confirma (ou diz o que entendeu e pergunta);
  *  - ela pediu um formato que não foi aplicado: undefined, para não confirmar como pedido o que mudou por outro caminho.
  */
@@ -973,6 +982,10 @@ export function confirmacaoDeterministica(sessao: Sessao): string | undefined {
   const m = mudancasDesdeOResumo(sessao);
   const r = sessao.rascunho;
   if (!m.algo) return undefined;
+  // Ela pediu um formato e ele não mudou: o pedido não virou mudança, e o resto (nível, duração, tom...) seria
+  // efeito colateral confirmado como se fosse o pedido. Vai ao modelo.
+  const formatoPedido = lerFormato(ultimaFalaDaRecrutadora(sessao.transcricao) ?? "");
+  if (formatoPedido && formatoPedido !== r.mode) return undefined;
   // Mudança de foco sem troca de formato vai ao modelo: são as palavras dela que dizem o que entrou ou saiu.
   if (m.foco && !m.formato) return undefined;
 
@@ -981,6 +994,8 @@ export function confirmacaoDeterministica(sessao: Sessao): string | undefined {
     if (m.formato) {
       const comoFica = r.mode === "system_design" ? "system design, no quadro" : "live coding, com código na IDE";
       frases.push(`Troquei para ${comoFica}${m.nivel ? `, nível ${SENIORIDADE_FALA[r.seniority]}` : ""}.`);
+      // O foco que mudou junto (pela troca ou por pedido dela no mesmo turno) é dito, para ela não aprovar sem ouvir.
+      if (m.foco) frases.push(`O foco fica em ${nomesDoFoco(r)}.`);
     } else {
       frases.push(`Mudei o nível para ${SENIORIDADE_FALA[r.seniority]}.`);
     }
@@ -994,10 +1009,6 @@ export function confirmacaoDeterministica(sessao: Sessao): string | undefined {
     return frases.join(" ");
   }
 
-  // Ela pediu um formato e ele não mudou: o pedido não virou mudança, e o resto seria efeito colateral. Vai ao modelo.
-  const ultimaDela = sessao.transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text ?? "";
-  const formatoPedido = lerFormato(ultimaDela);
-  if (formatoPedido && formatoPedido !== r.mode) return undefined;
   const partes = ajustesDeLogistica(m, sessao, true);
   if (partes.length === 0) return undefined;
   return `Ajustei ${partes.join(" e ")}. Posso finalizar?`;
@@ -1265,8 +1276,7 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   };
 
   // A fala dela repetida no começo da fala do Totti ("Ele diz expresso. ..."): sai, seja qual for o movimento.
-  const ultimaDela = sessao.transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
-  if (texto) aplicar("repeticao_da_fala_dela", semRepeticaoDaFalaDela(texto, ultimaDela));
+  if (texto) aplicar("repeticao_da_fala_dela", semRepeticaoDaFalaDela(texto, ultimaFalaDaRecrutadora(sessao.transcricao)));
   // Palavra de reconhecimento no começo ("Certo.", "Entendi,"): só sai numa fala que executa o passo. Ao responder,
   // repetir ou esclarecer, ela é a reação natural ao que ela disse e fica.
   if (texto && segue) aplicar("reconhecimento_inicial", limparFala(texto));
