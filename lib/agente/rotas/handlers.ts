@@ -217,6 +217,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   const estado = sincronizarFase(sessao.estado, pedido.fase, t0);
   let resposta: RespostaAnalise = respostaSilencio();
   let origem = "sem_llm";
+  let usoAnalise: Record<string, unknown> | undefined;
 
   if (ctx.llm) {
     const sinal = AbortSignal.timeout(PRAZO_ANALISE_DO_DESENHO_MS);
@@ -230,6 +231,11 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     if (r) {
       resposta = r.resposta;
       origem = r.diagnostico.origem;
+      const u = r.diagnostico.uso;
+      if (u) usoAnalise = {
+        modelo: u.modelo, provedor: u.provedor, reserva_disparada: u.reservaDisparada ?? false, ms: r.diagnostico.ms,
+        tokens_entrada: u.entrada, tokens_saida: u.saida, ...(u.cache !== undefined ? { tokens_cache: u.cache } : {}), custo_usd: u.custo,
+      };
     } else {
       origem = "prazo";
     }
@@ -252,6 +258,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     };
   }
   await ctx.repositorio.salvarEstado(id, novo);
+  if (usoAnalise) void ctx.repositorio.anexarEventos(id, [{ horario: new Date(ctx.agora()).toISOString(), tipo: "analise_uso", dados: usoAnalise }]).catch(() => []);
   console.warn("[agente] rota_analisar", { sessao_id: id, fase: pedido.fase, origem, status: resposta.status });
 
   // Formato exato do contrato (sem diagnóstico).

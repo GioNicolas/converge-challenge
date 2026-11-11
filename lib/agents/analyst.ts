@@ -15,6 +15,7 @@ import { checkQuestion } from "@/lib/agents/spoilerFilter";
 import { PRIORIDADE_FOCO } from "@/lib/agents/focoQuota";
 import type { FocusArea, LineRange, SessionEvent } from "@/lib/contracts";
 import { completeJson } from "@/lib/llm";
+import { registrarUsoLlm } from "./uso";
 import { latestCode, numberCode } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -183,6 +184,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
 
     // Papel "codigo": gemini-3.7-flash no OpenRouter, com o GLM da Featherless de reserva (ver lib/llm/index.ts).
     const result = await completeJson({ role: "codigo", system, user, schema: AnalystOutput });
+    registrarUsoLlm(session, "analise", result);
     const { questions, focusQuestion, ...insights } = result.data;
 
     // Cada análise substitui a fila, mas sobrevivem: pergunta adiada pelo candidato ("agora não") e
@@ -233,7 +235,7 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
           candidateSaid: session.events.flatMap((e) =>
             e.type === "speech" && e.role === "candidate" ? [e.text] : [],
           ).slice(-6),
-        }),
+        }, session),
       ),
     );
 

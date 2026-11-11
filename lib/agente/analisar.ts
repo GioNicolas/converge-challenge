@@ -41,7 +41,7 @@ export type ResultadoAnalise = {
     /** Por que a resposta do LLM foi rebaixada/alterada pelas guardas. */
     ajustes: string[];
     ms?: number;
-    uso?: { entrada: number; saida: number; cache?: number; custo?: number };
+    uso?: { entrada: number; saida: number; cache?: number; custo?: number; modelo?: string; provedor?: string; reservaDisparada?: boolean };
   };
 };
 
@@ -107,6 +107,7 @@ export async function analisar(
     bruta = EsquemaRespostaAnalise.parse(r.dados);
     ms = r.ms;
     uso = r.uso;
+    if (uso) uso = { ...uso, modelo: r.modelo, provedor: r.provedor, reservaDisparada: r.reservaDisparada };
   } catch (e) {
     // Só metadados: o tipo do erro, nunca mensagem com conteúdo, grafo ou chave.
     const codigo = (e as { codigo?: string }).codigo ?? "desconhecido";

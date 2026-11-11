@@ -15,10 +15,12 @@ import { dadoEmLinha, tentativasDeInjecao, type TentativaDeInjecao } from "@/lib
 import { CONCEITOS_EMPECILHO, type Report, type SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
+import { registrarUsoLlm } from "./uso";
 import { gravacaoDaSessao } from "@/lib/session/gravacao";
 import { saveReport } from "@/lib/session/reports";
 import { regrasDoCriterio } from "@/lib/squad-memory/prompt";
 import { latestCode, numberCode } from "@/lib/session/store";
+import { ultimoEvento } from "@/lib/session/eventos";
 import type { CodeVersion, ProbeKind, ReportStatus, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
@@ -131,7 +133,7 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     learning: aprendizado?.hasMoment ? aprendizado.lines : undefined,
   });
 
-  const output = await judge(system, user, judgedIds, status);
+  const output = await judge(system, user, judgedIds, status, session);
   const byId = new Map(output.criteria.map((c) => [c.id, c]));
 
   const scoredCriteria = config.criteria.map((c) => {
@@ -281,10 +283,11 @@ function adaptationScore(judged: number | null, facts: AdaptationFacts): number 
 }
 
 /** Chama o LLM; tenta de novo se faltar critério na resposta. */
-async function judge(system: string, user: string, judgedIds: string[], status: ReportStatus): Promise<EvaluatorOutput> {
+async function judge(system: string, user: string, judgedIds: string[], status: ReportStatus, session: SessionState): Promise<EvaluatorOutput> {
   let lastError = "";
   for (let attempt = 1; attempt <= LLM_ATTEMPTS; attempt++) {
     const result = await completeJson({ role: "relatorio", system, user, schema: EvaluatorOutput });
+    registrarUsoLlm(session, "relatorio", result);
     status.costUsd += result.costUsd;
     const missing = judgedIds.filter((id) => !result.data.criteria.some((c) => c.id === id));
     if (missing.length === 0) return result.data;
@@ -532,7 +535,7 @@ function pickCodeVersions(session: SessionState): CodeVersion[] {
 
 function endTime(session: SessionState): number {
   const ended = session.events.find((e) => e.type === "session_ended");
-  return ended?.t ?? session.events.at(-1)?.t ?? 0;
+  return ended?.t ?? ultimoEvento(session)?.t ?? 0;
 }
 
 function truncate(text: string, max: number): string {

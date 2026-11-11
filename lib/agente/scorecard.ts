@@ -258,6 +258,7 @@ export type ParametrosGuardas = {
   fontes: FontesDeProva;
   origem: "llm" | "fake";
   agora?: () => Date;
+  aoUsar?: (uso: { modelo?: string; provedor?: string; reservaDisparada?: boolean; ms: number; entrada?: number; saida?: number; cache?: number; custo?: number }) => void;
 };
 
 const arred1 = (n: number) => Math.round(n * 10) / 10;
@@ -551,6 +552,7 @@ export type DepsScorecard = {
   problema: Problema;
   modelo?: string;
   agora?: () => Date;
+  aoUsar?: (uso: { modelo?: string; provedor?: string; reservaDisparada?: boolean; ms: number; entrada?: number; saida?: number; cache?: number; custo?: number }) => void;
 };
 
 export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorecard): Promise<Scorecard> {
@@ -576,6 +578,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       timeoutMs,
       sinal: controle.signal,
     })]);
+    deps.aoUsar?.({ modelo: r.modelo, provedor: r.provedor, reservaDisparada: r.reservaDisparada, ms: r.ms, entrada: r.uso?.entrada, saida: r.uso?.saida, cache: r.uso?.cache, custo: r.uso?.custo });
     return comAlertaDeInjecao(comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(r.dados, {
       sessaoId: entrada.sessaoId,
       candidatoId: entrada.candidatoId,

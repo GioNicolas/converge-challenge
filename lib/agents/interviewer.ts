@@ -12,6 +12,7 @@ import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import { completeJson } from "@/lib/llm";
+import { registrarUsoLlm } from "./uso";
 import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -217,7 +218,7 @@ async function turno(
     const aberturaDaColagem = opening && question?.kind === "cola";
     if (!aberturaDaColagem && !(opening && isAboutTheSame(output.reply, found.question.question)) && !falaSoDeReconhecer(output.reply)
       && podeEntregarAlgo(output.reply, code)) {
-      const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()));
+      const verdict = await checkReply(output.reply, candidateLines, permitido, code, Math.min(PRAZO_FILTRO_MS, sobra()), session);
       session.analyst.costUsd += verdict.costUsd;
       if (!verdict.safe && sobra() < MIN_PARA_REGERAR_MS) {
         // Sem tempo para outra geração: a reserva segura, sem arriscar a fala barrada.
@@ -241,7 +242,7 @@ async function turno(
             ? { ...barrada, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
             : { ...barrada, reply: falaSegura(perguntou, falasDoAgente(session, req.messages)), highlight: null, end: perguntou, gaveHint: false, challenge: null };
         });
-        const second = await checkReply(output.reply, candidateLines, permitido, code, Math.max(500, Math.min(PRAZO_FILTRO_MS, sobra())));
+        const second = await checkReply(output.reply, candidateLines, permitido, code, Math.max(500, Math.min(PRAZO_FILTRO_MS, sobra())), session);
         session.analyst.costUsd += second.costUsd;
         if (!second.safe) {
           console.info(`[interviewer] fala barrada de novo (${second.reason}): ${output.reply}`);
@@ -580,6 +581,7 @@ async function generate(session: SessionState, system: string, user: string, pra
     signal: AbortSignal.timeout(Math.max(500, prazoMs)),
   });
   session.analyst.costUsd += result.costUsd;
+  registrarUsoLlm(session, "fala", result);
   return { ...result.data, reply: pedidoViraPergunta(result.data.reply) };
 }
 

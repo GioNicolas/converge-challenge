@@ -46,6 +46,7 @@
     "agente:chat": "tsx scripts/agente-chat.ts",
     "placar:quadro": "tsx --env-file-if-exists=.env.local scripts/placar-quadro/index.ts",
     "test:llm": "tsx --test lib/llm/*.test.ts",
+    "test:custo": "tsx --test lib/custo/*.test.ts",
     "test:conversa": "tsx --test lib/conversa/__tests__/*.test.ts lib/audio/filaFalas.test.ts lib/llm/*.test.ts"
   },
   "dependencies": {

@@ -187,6 +187,22 @@ describe("POST /api/sessoes/[id]/analisar", () => {
     assert.equal(c.status, "ok");
     assert.equal(c.pergunta, null);
   });
+  it("grava analise_uso com provedor, reserva e tokens", async () => {
+    const { sessao_id } = await novaSessao();
+    const falso = criarClienteFalso([{ status: "duvida", pergunta: "Por que cache?", nota: "latência", elementos: ["e1"], degrau: 1, observacoes: [] }]);
+    const llm = { ...falso, async completarJson<T>(args: Parameters<typeof falso.completarJson<T>>[0]) {
+      return { ...(await falso.completarJson(args)), modelo: "modelo-teste", provedor: "openrouter", reservaDisparada: true,
+        ms: 12, uso: { entrada: 90, saida: 20, cache: 30, custo: .001 } };
+    } };
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    await analisarPost(post("/x", pedido(sessao_id)), params(sessao_id));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const eventos = await repo.listarEventos(sessao_id);
+    const uso = eventos.find((e) => e.tipo === "analise_uso");
+    assert.ok(uso);
+    assert.deepEqual(uso.dados, { modelo: "modelo-teste", provedor: "openrouter", reserva_disparada: true, ms: 12,
+      tokens_entrada: 90, tokens_saida: 20, tokens_cache: 30, custo_usd: .001 });
+  });
   it("a fase só avança: o quadro atrasado não faz o servidor voltar", async () => {
     const { sessao_id } = await novaSessao();
     await analisarPost(post("/x", pedido(sessao_id, { fase: "ALTO_NIVEL" })), params(sessao_id));
