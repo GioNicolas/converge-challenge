@@ -23,7 +23,7 @@ import { VAGAS } from "@/fixtures/pre-entrevista/vagas";
 import { normalizar, sobreposicao } from "@/lib/agente/guardas";
 import { classificarVaga, type Classificacao, type Vaga } from "@/lib/pre-entrevista/classificador";
 import { extrairCompetencias, type ResultadoCompetencias } from "@/lib/pre-entrevista/competencias";
-import { contarFrases } from "@/lib/pre-entrevista/conversa";
+import { contarFrases, falaDelaNaoEraResposta } from "@/lib/pre-entrevista/conversa";
 import { normalizarTexto } from "@/lib/pre-entrevista/frases";
 import { descreverPasso, nivelEmAberto, type Passo } from "@/lib/pre-entrevista/planejador";
 import { criarSessao, extrairAgora, type Sessao } from "@/lib/pre-entrevista/sessoes";
@@ -337,6 +337,36 @@ export const CASOS: Caso[] = [
       passoNaoAvanca(r),
     ],
   },
+  // Transcrição quebrada depois de uma pergunta de escolha (issue #76): o Totti diz que não entendeu e refaz a pergunta.
+  {
+    id: "fala-sem-sentido",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_APROFUNDAR,
+    situacao: NO_APROFUNDAMENTO,
+    fala: "Ele diz expresso.",
+    conferir: (r) => [
+      terminaEmPergunta(r),
+      {
+        nome: "movimento nao_entendi",
+        ok: movimentoDaUltimaFala(r.sessao) === "nao_entendi",
+        detalhe: `movimento: ${movimentoDaUltimaFala(r.sessao)}`,
+      },
+      {
+        nome: "não repete a frase dela",
+        ok: !normalizarTexto(r.depois.fala).includes("ele diz expresso"),
+      },
+      (() => {
+        const s = semelhanca(perguntaDe(r.depois.fala), perguntaDe(r.antes.fala));
+        return { nome: "refaz a pergunta em aberto", ok: s >= 0.25, detalhe: `sobreposição ${s.toFixed(2)} (limiar 0.25)` };
+      })(),
+      {
+        nome: "a fala dela fica fora da extração",
+        ok: r.sessao.transcricao.filter((t) => t.role === "recrutadora").at(-1)?.naoEntendida === true,
+      },
+      planoIgual(r),
+      passoNaoAvanca(r),
+    ],
+  },
   {
     id: "pede-tempo",
     vaga: "backend-senior-pagamentos",
@@ -474,6 +504,28 @@ export const CASOS: Caso[] = [
     fala: "peraí, deixa eu ler aqui na tela",
     conferir: (r) => [falaCurta(r), naoEncerra(r), semOutroResumo(r)],
   },
+  // Troca de formato pedida no resumo (issue #76): a confirmação fala do formato primeiro, e não só da duração.
+  {
+    id: "resumo-troca-formato",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "Eu quero de live coding a entrevista",
+    conferir: (r) => {
+      const primeira = normalizarTexto(frasesDe(r.depois.fala)[0] ?? "");
+      return [
+        { nome: "o formato muda", ok: r.depois.modo !== r.antes.modo, detalhe: `${r.antes.modo} -> ${r.depois.modo}` },
+        {
+          nome: "a primeira frase fala do formato",
+          ok: /live coding|codigo|system design|quadro/.test(primeira),
+          detalhe: `primeira frase: "${frasesDe(r.depois.fala)[0] ?? ""}"`,
+        },
+        { nome: "não começa pela duração", ok: !/minutos?/.test(primeira) },
+        naoEncerra(r),
+        terminaEmPergunta(r),
+      ];
+    },
+  },
   {
     id: "resumo-pergunta-duracao",
     vaga: "backend-senior-pagamentos",
@@ -591,9 +643,9 @@ async function rodarCaso(caso: Caso): Promise<Rodada> {
     const { passo } = await conduzirTurno(sessao, caso.fala);
     const esperaMs = Math.round(performance.now() - inicio);
     // A extração também roda depois da fala testada: ela pode mudar foco e preferências, e `planoIgual` precisa ver isso.
-    // Como na rota `mensagem`, não roda em turno de `repetir`/`esclarecer`.
+    // Como na rota `mensagem`, não roda em turno de `repetir`/`esclarecer`/`nao_entendi`.
     const movimentoTestado = movimentoDaUltimaFala(sessao);
-    if (movimentoTestado !== "repetir" && movimentoTestado !== "esclarecer") await extrairAgora(sessao);
+    if (!falaDelaNaoEraResposta(movimentoTestado)) await extrairAgora(sessao);
     const depois = fotografar(sessao);
     console.log(`  >> Recrutadora: ${caso.fala}`);
     console.log(`  >> Totti [${descreverPasso(passo)} | movimento: ${movimentoTestado} | ${esperaMs} ms]: ${depois.fala}`);
