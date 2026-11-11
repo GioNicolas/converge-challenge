@@ -19,6 +19,8 @@ import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
+import { TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
+import { criarEncerrarComDespedida } from "./ide/encerrarComDespedida";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
 import { pausaDasMaosParaFalarMs } from "@/lib/interrupcao/politica";
 import { esperaDoFimDaFala } from "@/lib/audio/fimDaFala";
@@ -100,6 +102,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const [confirmandoFim, setConfirmandoFim] = useState(false);
   /** Pediu para finalizar: a sessão encerra quando a última conversa (os pontos pendentes) fechar. */
   const [finalizando, setFinalizando] = useState(false);
+  const [encerrando, setEncerrando] = useState(false);
   const finalizandoRef = useRef(false);
   finalizandoRef.current = finalizando;
   /** Mudança no problema que o Totti trouxe (empecilho): entra no painel e os testes dela rodam junto. */
@@ -107,7 +110,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const problemaRodado = mudanca ? { ...problem, visibleTests: [...problem.visibleTests, ...mudanca.tests.map(({ name, args, expected }) => ({ name, args, expected }))] } : problem;
   // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
-  const voz = useVozAgente({ bloqueada: session.ended });
+  const voz = useVozAgente({ bloqueada: session.ended && !encerrando });
   const [parcial, setParcial] = useState("");
   const vozEstadoRef = useRef(voz.estado);
   vozEstadoRef.current = voz.estado;
@@ -179,6 +182,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     vozTocando: () => vozEstadoRef.current === "falando",
     getLiveCode: capture.getLiveCode,
     onFinishRequest: () => encerrarPelaVozRef.current(),
+    onDespedida: (texto) => encerrarComDespedidaRef.current("button", texto),
     onFioFechado: (blip) => fioFechadoRef.current(blip),
     onSemVoz: (texto) => setLegendaSemVoz({ quem: "agente", texto, ate: texto.length }),
     falandoAgora: () => falaParcialRef.current || !!bufferFalaRef.current,
@@ -191,7 +195,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const ultimaFalaLongaEmRef = useRef(0);
   falaRef.current = (texto) => {
     const limpo = texto.trim();
-    if (!limpo || session.ended) return;
+    if (!limpo || session.ended || encerrando) return;
     if (limpo.split(/\s+/).length >= PALAVRAS_FALA_LONGA) ultimaFalaLongaEmRef.current = Date.now();
     conversa.ouvir(limpo);
   };
@@ -229,7 +233,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const escuta = useTranscricao({
     stream: midia.stream,
     // A escuta só para enquanto a voz do agente toca (preparando, ela ainda ouve: o candidato pode continuar falando).
-    ativo: midia.microfoneLigado && !session.ended && voz.estado !== "falando",
+    ativo: midia.microfoneLigado && !session.ended && !encerrando && voz.estado !== "falando",
     sessaoId: session.sessionId,
     aoParcial: receberParcial,
     aoFinal: aoFalar,
@@ -247,7 +251,6 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const saudacaoTerminadaEmRef = useRef(0);
   const dizer = conversa.dizer;
   const duracaoMin = vaga.durationMin;
-  const cargo = vaga.roleTitle;
   const prepararVoz = voz.preparar;
   useEffect(() => {
     if (!session.sessionId || session.ended || saudacaoFeitaRef.current) return;
@@ -258,12 +261,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       if (falaParcialRef.current && agora - desde < APRESENTACAO_ESPERA_MAX_MS) return;
       saudacaoFeitaRef.current = true;
       clearInterval(id);
-      void dizer(comoFuncionaLiveCoding(duracaoMin, cargo)).finally(() => { saudacaoTerminadaEmRef.current = Date.now(); });
+      void dizer(comoFuncionaLiveCoding(duracaoMin)).finally(() => { saudacaoTerminadaEmRef.current = Date.now(); });
       // O "uhum" de quando ele termina de falar fica pronto durante a apresentação, para sair sem espera.
       prepararVoz(RECONHECIMENTOS);
     }, 200);
     return () => clearInterval(id);
-  }, [session.sessionId, session.ended, dizer, duracaoMin, cargo, prepararVoz]);
+  }, [session.sessionId, session.ended, dizer, duracaoMin, prepararVoz]);
 
   useEffect(() => warmUp(), []);
   const pedirMidia = midia.pedir;
@@ -271,25 +274,28 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     void pedirMidia().catch(() => {});
   }, [pedirMidia]);
 
-  // Fim da sessão (botão ou tempo): vai para o agradecimento. O relatório é só da recrutadora.
-  useEffect(() => {
-    if (!session.ended || !session.sessionId) return;
-    const id = setTimeout(() => router.push("/obrigado"), 400);
-    return () => clearTimeout(id);
-  }, [session.ended, session.sessionId, router]);
-
-  // Um assunto fechou: o foco volta para o código, ou, se era a conversa do encerramento, a sessão acaba.
-  const encerrar = session.endSession;
-  /** O assunto do encerramento (os pontos pendentes): quando ele fecha, o Totti se despede e a sessão acaba. */
-  const fioDoEncerramentoRef = useRef<string | null>(null);
-  fioFechadoRef.current = (blip) => {
-    if (blip.id !== fioDoEncerramentoRef.current) {
-      editorRef.current?.focus();
-      return;
-    }
-    fioDoEncerramentoRef.current = null;
-    void conversa.dizer(DESPEDIDA_LIVE_CODING).catch(() => false).finally(() => encerrar("button"));
-  };
+  // Despedida centralizada para botão, voz, fechamento e timeout.
+  const encerrarComDespedidaRef = useRef<(motivo: "button" | "timeout", texto?: string) => void>(() => {});
+  const { endSession, sendEvent, sessionId, setIncomingBlip } = session;
+  const pararConversa = conversa.parar;
+  const falarVoz = voz.falar;
+  const encerrarComDespedida = useCallback(async (motivo: "button" | "timeout", texto?: string) => {
+    if (finalizandoRef.current) return;
+    finalizandoRef.current = true; setFinalizando(true); setEncerrando(true);
+    setIncomingBlip(null);
+    pararConversa();
+    await criarEncerrarComDespedida({
+      dizer: (fala) => falarVoz(fala),
+      registrarFala: async (fala) => { await sendEvent({ type: "speech", role: "agent", text: fala }); },
+      endSession,
+      navegar: () => router.push("/obrigado"),
+      pedirEncerramento: async () => sessionId ? (await postEncerramento(sessionId, "pediu_encerrar")).despedida : undefined,
+      mostrarTexto: (fala, ms) => new Promise<void>((resolve) => { setLegendaSemVoz({ quem: "agente", texto: fala, ate: Date.now() + ms }); setTimeout(resolve, ms); }),
+      reserva: DESPEDIDA_LIVE_CODING,
+    })(motivo, texto);
+  }, [pararConversa, router, endSession, sendEvent, sessionId, setIncomingBlip, falarVoz]);
+  encerrarComDespedidaRef.current = (motivo, texto) => { void encerrarComDespedida(motivo, texto); };
+  fioFechadoRef.current = () => { editorRef.current?.focus(); };
 
   // As perguntas do Totti (lib/agents/policy.ts decide o quê e quando pode) são faladas numa pausa natural:
   // ninguém falando, sem transcrição parcial, sem digitar, sem outro assunto aberto e com um respiro desde a
@@ -352,51 +358,19 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   }
 
   /** Pediu, falando, para encerrar: o Totti se despede e a sessão fecha, sem a última pergunta do botão. */
-  async function encerrarPelaVoz() {
-    if (session.sessionId === null || session.ended) return;
-    // Já na última conversa (os pontos pendentes do Finalizar): pedir para encerrar fecha ela, e o fechamento dela
-    // se despede e encerra. Antes o pedido era ignorado e ele ficava preso perguntando "como eu encerro?".
-    if (finalizandoRef.current) {
-      if (fioDoEncerramentoRef.current && conversa.fioRef.current?.blip.id === fioDoEncerramentoRef.current) conversa.fecharFio("agent");
-      return;
-    }
-    finalizandoRef.current = true;
-    setFinalizando(true);
-    session.setIncomingBlip(null);
-    conversa.parar();
-    await Promise.all([
-      conversa.dizer(DESPEDIDA_LIVE_CODING).catch(() => false),
-      capture.flushSnapshot().catch(() => {}),
-    ]);
-    session.endSession("button");
-  }
+  async function encerrarPelaVoz() { await encerrarComDespedida("button"); }
   encerrarPelaVozRef.current = () => void encerrarPelaVoz();
 
-  /** Confirmou que quer finalizar: se o agente ainda tem o que perguntar, abre a última conversa antes. */
   async function finalizar() {
     setConfirmandoFim(false);
-    if (session.sessionId === null || finalizandoRef.current) return;
-    finalizandoRef.current = true;
-    setFinalizando(true);
-    session.setIncomingBlip(null);
+    if (!session.sessionId || finalizandoRef.current) return;
     try {
-      // O último código chega ao servidor antes do encerramento olhar para ele.
       await capture.flushSnapshot().catch(() => {});
-      const res = await postEncerramento(session.sessionId);
-      if (res.blip) {
-        // Os pontos que ficaram pendentes viram a última conversa; a sessão acaba quando ELA fechar (fechar o
-        // assunto que estava aberto antes não encerra nada).
-        if (conversa.fioRef.current) conversa.fecharFio("button");
-        fioDoEncerramentoRef.current = res.blip.id;
-        void conversa.abrirFio(res.blip);
-        return;
-      }
-    } catch (err) {
-      console.error("POST /api/encerramento falhou", err);
-    }
-    conversa.parar();
-    await conversa.dizer(DESPEDIDA_LIVE_CODING).catch(() => false);
-    session.endSession("button");
+      const res = await postEncerramento(session.sessionId, "concluiu");
+      if (res.blip) { if (conversa.fioRef.current) conversa.fecharFio("button"); void conversa.abrirFio(res.blip); return; }
+      if (res.despedida) { await encerrarComDespedida("button", res.despedida); return; }
+    } catch (err) { console.error("POST /api/encerramento falhou", err); }
+    await encerrarComDespedida("button");
   }
 
   /**
@@ -461,10 +435,24 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   }
 
   const remaining = Math.max(0, DURATION_MS - session.elapsedMs);
+  const fechamentoTempoPedidoRef = useRef(false);
+  useEffect(() => {
+    if (!sessionId || session.ended || finalizando || conversa.fio || remaining > Math.min(TEMPO_PARA_FECHAR_MS, DURATION_MS * 0.2)) return;
+    if (fechamentoTempoPedidoRef.current) return;
+    fechamentoTempoPedidoRef.current = true;
+    void postEncerramento(sessionId, "tempo").then((res) => {
+      if (res.blip) setIncomingBlip(res.blip);
+      else void encerrarComDespedida("timeout", res.despedida);
+    }).catch(() => { fechamentoTempoPedidoRef.current = false; });
+  }, [sessionId, session.ended, finalizando, conversa.fio, remaining, DURATION_MS, encerrarComDespedida, setIncomingBlip]);
+  useEffect(() => {
+    if (remaining <= 0 && !session.ended) void encerrarComDespedida("timeout");
+  }, [remaining, session.ended, encerrarComDespedida]);
 
   return (
     <main className="h-screen p-3">
       <section ref={sectionRef} className="relative h-full overflow-hidden rounded-padrao bg-superficie shadow-cartao">
+        {encerrando && <div role="status" className="absolute top-3 right-4 z-30 rounded-full bg-superficie px-4 py-2 text-sm shadow-cartao">Encerrando a entrevista…</div>}
         {/* O editor começa depois do painel do problema, para não ficar escondido */}
         {/* Coluna do editor: editor e testes. Com a conversa aberta, abre espaço à direita para a barra lateral. */}
         <div
@@ -478,7 +466,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             <CodeEditor
               value={capture.code}
               language={capture.language}
-              readOnly={session.ended}
+              readOnly={session.ended || encerrando}
               onChange={(codigo: string) => {
                 ultimaDigitacaoEmRef.current = Date.now();
                 const linhas = codigo.split("\n").length;
@@ -513,7 +501,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             <select
               value={capture.language}
               onChange={(e) => trocarLinguagem(e.target.value)}
-              disabled={session.ended}
+              disabled={session.ended || encerrando}
               aria-label="Linguagem"
               className="vidro rounded-full px-3 py-2 font-medium shadow-cartao outline-none"
             >
@@ -526,7 +514,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             <button
               type="button"
               onClick={() => setConfirmandoFim(true)}
-              disabled={session.ended || finalizando}
+              disabled={session.ended || finalizando || encerrando}
               className="vidro flex items-center gap-2 rounded-full px-4 py-2 font-medium shadow-cartao disabled:opacity-50"
             >
               <Flag size={16} strokeWidth={1.75} />
@@ -535,7 +523,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             <button
               type="button"
               onClick={rodar}
-              disabled={run.status === "running" || session.ended}
+              disabled={run.status === "running" || session.ended || encerrando}
               className="flex items-center gap-2 rounded-full bg-marca px-4 py-2 font-medium text-sobre-marca shadow-cartao disabled:opacity-60"
             >
               <Play size={16} strokeWidth={1.75} />
@@ -602,6 +590,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
             <input
               value={digitado}
               onChange={(e) => setDigitado(e.target.value)}
+              disabled={encerrando}
               aria-label="Escrever para o Totti"
               placeholder={escuta.erro ?? "Microfone desligado: escreva para o Totti e aperte Enter"}
               className="vidro min-w-0 flex-1 rounded-full px-4 py-2 text-[14px] shadow-cartao outline-none"

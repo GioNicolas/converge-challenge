@@ -21,6 +21,11 @@ export type Conexao = Readonly<{
   rotulo: string;
   /** Seta ou linha desenhada tracejada ou pontilhada. */
   tracejada?: boolean;
+  /**
+   * Alguma ponta não encostava na caixa nem tinha vínculo: foi ligada pela direção da seta
+   * (o prolongamento do último trecho cruza a caixa). É uma ligação provável, não certa.
+   */
+  inferida?: true;
 }>;
 
 export type Secao = Readonly<{
@@ -61,7 +66,8 @@ export function entreAspas(texto: string): string {
 }
 
 export function nomeDoElemento(instantaneo: Instantaneo, id: string | null): string {
-  if (id === null) return "?";
+  // Só chega aqui sem id em contextos sem direção; nas conexões, `descreverConexao` diz sem origem/sem destino.
+  if (id === null) return "(sem elemento)";
   const componente = instantaneo.componentes.find((item) => item.id === id);
   if (componente?.nome) return textoCurto(componente.nome);
   const nota = instantaneo.anotacoes.find((item) => item.id === id);
@@ -71,5 +77,10 @@ export function nomeDoElemento(instantaneo: Instantaneo, id: string | null): str
 }
 
 export function descreverConexao(instantaneo: Instantaneo, conexao: Conexao): string {
-  return `${nomeDoElemento(instantaneo, conexao.de)} ${conexao.seta} ${nomeDoElemento(instantaneo, conexao.para)}`;
+  const de = conexao.de === null ? "(sem origem)" : nomeDoElemento(instantaneo, conexao.de);
+  const para = conexao.para === null ? "(sem destino)" : nomeDoElemento(instantaneo, conexao.para);
+  return `${de} ${conexao.seta} ${para}`;
 }
+
+/** Marca de uma conexão ligada pela direção da seta, usada no grafo e no diff. */
+export const MARCA_PONTA_PERTO = "(ponta perto, sem encostar)";

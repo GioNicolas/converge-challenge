@@ -1,5 +1,5 @@
 import {
-  descreverConexao, entreAspas, nomeDoElemento, textoCurto, tiposEmPortugues,
+  MARCA_PONTA_PERTO, descreverConexao, entreAspas, nomeDoElemento, textoCurto, tiposEmPortugues,
   type Conexao, type Instantaneo, type Secao,
 } from "./instantaneo";
 
@@ -62,7 +62,7 @@ export function descreverMudancas(anterior: Instantaneo | null, atual: Instantan
   for (const c of atual.conexoes) {
     const antigo = conexoesAntes.get(c.id);
     if (!antigo || !mesmoPar(antigo, c)) {
-      linhas.push(`+ conectou ${descreverConexao(atual, c)}${rotulo(c.rotulo)}`);
+      linhas.push(`+ conectou ${descreverConexao(atual, c)}${rotulo(c.rotulo)}${c.inferida ? ` ${MARCA_PONTA_PERTO}` : ""}`);
       continue;
     }
     // Mesmas pontas, outra direção: a seta foi invertida ou ganhou/perdeu uma cabeça.

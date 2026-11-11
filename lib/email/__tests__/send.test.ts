@@ -1,19 +1,25 @@
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
+import * as React from "react";
 import { EmailDeliveryError, sendEmail, type EmailClient } from "@/lib/email/send";
+import { triagemConviteSubject } from "@/lib/email";
 
 const SECRET_HTML = "CONTEUDO-PII-Maria-Silva";
+Object.assign(globalThis, { React });
 const template = createElement("p", null, SECRET_HTML);
 const args = { to: "maria@exemplo.com", subject: "Assunto", template, templateName: "teste" };
 
 const env = process.env as Record<string, string | undefined>;
-const saved = { key: env.RESEND_API_KEY, node: env.NODE_ENV };
+const saved = { key: env.RESEND_API_KEY, node: env.NODE_ENV, from: env.EMAIL_FROM, replyTo: env.EMAIL_REPLY_TO };
 
 type SendResult = Awaited<ReturnType<EmailClient["emails"]["send"]>>;
 
 function fakeClient(result: SendResult) {
-  const send = mock.fn(async (..._args: Parameters<EmailClient["emails"]["send"]>) => result);
+  const send = mock.fn(async (...args: Parameters<EmailClient["emails"]["send"]>) => {
+    void args;
+    return result;
+  });
   return { client: { emails: { send } } as EmailClient, send };
 }
 
@@ -37,6 +43,10 @@ describe("sendEmail", () => {
     else env.RESEND_API_KEY = saved.key;
     if (saved.node === undefined) delete env.NODE_ENV;
     else env.NODE_ENV = saved.node;
+    if (saved.from === undefined) delete env.EMAIL_FROM;
+    else env.EMAIL_FROM = saved.from;
+    if (saved.replyTo === undefined) delete env.EMAIL_REPLY_TO;
+    else env.EMAIL_REPLY_TO = saved.replyTo;
   });
 
   it("simula sem RESEND_API_KEY fora de produção, sem chamar o cliente", async () => {
@@ -102,6 +112,10 @@ describe("cliente padrão (Resend via fetch)", () => {
     else env.RESEND_API_KEY = saved.key;
     if (saved.node === undefined) delete env.NODE_ENV;
     else env.NODE_ENV = saved.node;
+    if (saved.from === undefined) delete env.EMAIL_FROM;
+    else env.EMAIL_FROM = saved.from;
+    if (saved.replyTo === undefined) delete env.EMAIL_REPLY_TO;
+    else env.EMAIL_REPLY_TO = saved.replyTo;
   });
 
   it("declara charset=utf-8, preserva acentos no corpo e mapeia replyTo para reply_to", async () => {
@@ -122,6 +136,31 @@ describe("cliente padrão (Resend via fetch)", () => {
     assert.ok(corpo.html.includes("Olá, João — avaliação concluída"));
     assert.ok(typeof corpo.text === "string" && corpo.text.includes("avaliação"));
     assert.ok(!("replyTo" in corpo));
+  });
+
+  it("usa assunto e remetente pessoal no convite, sem List-Unsubscribe", async () => {
+    const chamadas: { url: string; init: RequestInit }[] = [];
+    env.EMAIL_FROM = "Entrevistas <entrevistas@totti.ia.br>";
+    env.EMAIL_REPLY_TO = "responder@totti.ia.br";
+    mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+      chamadas.push({ url, init });
+      return new Response(JSON.stringify({ id: "em_triagem" }), { status: 200 });
+    });
+    assert.equal(triagemConviteSubject("Engenheira", "Giorgio Nicolas"), "Giorgio, vamos marcar sua entrevista para Engenheira");
+    assert.equal(triagemConviteSubject("Engenheira"), "Sua entrevista para Engenheira");
+    await sendEmail({
+      ...args,
+      fromDisplayName: "Ana, do time de recrutamento",
+    });
+    await sendEmail(args);
+    await sendEmail({ ...args, fromDisplayName: 'Ana "Nina" Lima, do time de recrutamento' });
+    const [corpo, corpoSemNome, corpoComAspas] = chamadas.map(({ init }) => JSON.parse(String(init.body)));
+    assert.equal(corpo.from, '"Ana, do time de recrutamento" <entrevistas@totti.ia.br>');
+    assert.equal(corpoSemNome.from, "Entrevistas <entrevistas@totti.ia.br>");
+    assert.equal(corpoComAspas.from, '"Ana \\"Nina\\" Lima, do time de recrutamento" <entrevistas@totti.ia.br>');
+    assert.equal(corpo.reply_to, "responder@totti.ia.br");
+    assert.ok(!("headers" in corpo) || !("List-Unsubscribe" in corpo.headers));
+    assert.doesNotMatch(JSON.stringify(corpo), /List-Unsubscribe|X-Campaign/i);
   });
 
   it("resposta de erro do Resend vira EmailDeliveryError com a mensagem da API", async () => {

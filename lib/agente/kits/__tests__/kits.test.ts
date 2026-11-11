@@ -51,7 +51,7 @@ test("modos de leitura e problemas por kit", () => {
   assert.equal(obterProblema("system_design_ia", "chatbot_atendimento_ia")?.titulo, "Chatbot de atendimento com IA");
   assert.equal(obterKit("inexistente"), undefined);
   assert.equal(obterKit("__proto__"), undefined);
-  assert.equal(obterProblema("system_design", "chat_tempo_real")?.titulo, "Chat em tempo real");
+  assert.equal(obterProblema("system_design", "chat_tempo_real")?.titulo, "Chat de mensagens em tempo real");
   assert.equal(obterProblema("system_design", "x"), undefined);
 });
 

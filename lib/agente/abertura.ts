@@ -3,7 +3,7 @@
 import { limitarFrases } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
-import { EsquemaAbertura, montarPromptAbertura, NOME_SCHEMA_ABERTURA, type Abertura, type ContextoAbertura } from "./prompts/abertura";
+import { apresentacaoReserva, EsquemaAbertura, montarPromptAbertura, NOME_SCHEMA_ABERTURA, type Abertura, type ContextoAbertura } from "./prompts/abertura";
 import { logPadrao, type LogMeta } from "./analisar";
 
 export type DepsAbertura = {
@@ -14,7 +14,8 @@ export type DepsAbertura = {
   log?: LogMeta;
 } & ContextoAbertura;
 
-const MAX_FRASES_APRESENTACAO = 4;
+export const MAX_FRASES = 2;
+export const MAX_CARACTERES_APRESENTACAO = 160;
 const MAX_FRASES_DESPEDIDA = 3;
 export const PRAZO_ABERTURA_MS = 6000;
 
@@ -31,7 +32,10 @@ export async function gerarAbertura(deps: DepsAbertura, sinal?: AbortSignal): Pr
       timeoutMs: PRAZO_ABERTURA_MS,
       sinal,
     });
-    const apresentacao = limitarFrases(r.dados.apresentacao, MAX_FRASES_APRESENTACAO);
+    const apresentacaoLimitada = limitarFrases(r.dados.apresentacao, MAX_FRASES);
+    const apresentacao = apresentacaoLimitada.length <= MAX_CARACTERES_APRESENTACAO && apresentacaoLimitada
+      ? apresentacaoLimitada
+      : apresentacaoReserva(deps.kit, { duracaoMin: deps.duracaoMin, etapas: deps.etapas });
     const despedida = limitarFrases(r.dados.despedida, MAX_FRASES_DESPEDIDA);
     if (!apresentacao || !despedida) return null;
     return { apresentacao, despedida };

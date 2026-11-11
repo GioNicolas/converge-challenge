@@ -6,6 +6,7 @@ type SendArgs = {
   to: string;
   subject: string;
   template: ReactElement;
+  fromDisplayName?: string;
   /** Nome do template, só pra log (sem PII). */
   templateName?: string;
 };
@@ -85,11 +86,14 @@ export const resendFetchClient: EmailClient = {
  * EmailDeliveryError. Logs trazem só metadados — nunca o HTML (PII).
  */
 export async function sendEmail(
-  { to, subject, template, templateName = "unknown" }: SendArgs,
+  { to, subject, template, templateName = "unknown", fromDisplayName }: SendArgs,
   /** Seam de teste: cliente alternativo (padrão: Resend via fetch). */
   client: EmailClient = resendFetchClient,
 ): Promise<EmailSendResult> {
-  const from = process.env.EMAIL_FROM ?? "Time de Recrutamento <onboarding@resend.dev>";
+  const configuredFrom = process.env.EMAIL_FROM ?? "Time de Recrutamento <onboarding@resend.dev>";
+  const address = configuredFrom.match(/<([^<>]+)>/)?.[1] ?? configuredFrom;
+  // Entre aspas: a vírgula de "Ana, do time de recrutamento" é caractere especial no cabeçalho From (RFC 5322).
+  const from = fromDisplayName ? `"${fromDisplayName.replace(/["\\]/g, "\\$&")}" <${address}>` : configuredFrom;
   const replyTo = process.env.EMAIL_REPLY_TO || undefined;
   const domain = to.split("@")[1] ?? "?";
 

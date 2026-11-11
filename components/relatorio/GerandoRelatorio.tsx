@@ -4,7 +4,7 @@
 // junta-se ao mesmo pedido) e recarrega a página quando ficar pronto.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import Perola from "@/components/totti/Perola";
 
 const CURVA = [0.32, 0.72, 0, 1] as const;
@@ -17,17 +17,37 @@ const ETAPAS = [
   "Escrevendo o relatório",
 ];
 
+/**
+ * Segundos (desde o pedido) em que cada etapa começa. A geração real leva de 1 a 4,5 min, então as etapas
+ * se espaçam para cobrir esse tempo e a última fica esperando até o servidor responder.
+ */
+const INICIO_DAS_ETAPAS_S = [0, 20, 60, 110];
+
+/** Etapa em andamento para o tempo decorrido; nunca passa da última. */
+function etapaNoTempo(segundos: number): number {
+  let etapa = 0;
+  INICIO_DAS_ETAPAS_S.forEach((inicio, i) => {
+    if (segundos >= inicio) etapa = i;
+  });
+  return etapa;
+}
+
+/** 102 -> "1:42". */
+function relogio(segundos: number): string {
+  return `${Math.floor(segundos / 60)}:${String(segundos % 60).padStart(2, "0")}`;
+}
+
 export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoId: string; area: string; problema: string }) {
   const router = useRouter();
   const reduzir = useReducedMotion();
-  const [etapa, setEtapa] = useState(0);
+  const [segundos, setSegundos] = useState(0);
   const [erro, setErro] = useState<string | null>(null);
   const tentativa = useRef(0);
 
-  const gerar = useCallback(async (reiniciarAnimacao = true) => {
+  const gerar = useCallback(async (reiniciarRelogio = true) => {
     const minha = ++tentativa.current;
     setErro(null);
-    if (reiniciarAnimacao) setEtapa(0);
+    if (reiniciarRelogio) setSegundos(0);
     try {
       const r = await fetch(`/api/sessoes/${encodeURIComponent(sessaoId)}/finalizar`, { method: "POST" });
       if (minha !== tentativa.current) return;
@@ -50,12 +70,18 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
     void gerar();
   }, [gerar]);
 
-  // Avança as etapas no ritmo típico da geração (para na última até o servidor responder).
+  // Conta o tempo desde o pedido (pelo relógio, não por ticks, para não atrasar com a aba em segundo plano).
+  // As etapas e o indicador de espera derivam desse tempo.
   useEffect(() => {
     if (erro) return;
-    const t = setInterval(() => setEtapa((e) => Math.min(e + 1, ETAPAS.length - 1)), 4500);
+    const inicio = Date.now();
+    setSegundos(0);
+    const t = setInterval(() => setSegundos(Math.floor((Date.now() - inicio) / 1000)), 1000);
     return () => clearInterval(t);
   }, [erro]);
+
+  const etapa = etapaNoTempo(segundos);
+  const naUltima = etapa === ETAPAS.length - 1;
 
   return (
     <main className="flex min-h-dvh w-full items-center justify-center bg-fundo px-6">
@@ -84,48 +110,42 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
             </button>
           </div>
         ) : (
-          <>
-          <p className="-mt-3 text-[12px] text-texto-suave">A análise pode levar alguns minutos.</p>
           <ol className="flex flex-col gap-3" aria-live="polite">
             {ETAPAS.map((texto, i) => {
               const feita = i < etapa;
               const atual = i === etapa;
               return (
                 <li key={texto} className="flex items-center gap-3">
+                  {/* Sem AnimatePresence: a bolinha some na hora em que o visto entra, nunca os dois juntos. */}
                   <span className="relative flex size-4 shrink-0 items-center justify-center">
-                    <AnimatePresence initial={false}>
-                      {feita ? (
-                        <motion.svg
-                          key="feita"
-                          viewBox="0 0 16 16"
-                          className="absolute size-4 text-sucesso"
-                          initial={{ opacity: 0, scale: 0.6 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ duration: 0.28, ease: CURVA }}
-                          aria-hidden
-                        >
-                          <motion.path
-                            d="M3.5 8.5 6.5 11.5 12.5 4.5"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={1.75}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            initial={{ pathLength: reduzir ? 1 : 0 }}
-                            animate={{ pathLength: 1 }}
-                            transition={{ duration: 0.36, ease: CURVA }}
-                          />
-                        </motion.svg>
-                      ) : (
-                        <motion.span
-                          key="ponto"
-                          exit={{ opacity: 0, scale: 0.4 }}
-                          className={`size-2 rounded-full ${atual ? "bg-marca" : "bg-superficie-2"}`}
-                          animate={atual && !reduzir ? { scale: [1, 1.5, 1], opacity: [1, 0.6, 1] } : { scale: 1 }}
-                          transition={atual ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
+                    {feita ? (
+                      <motion.svg
+                        viewBox="0 0 16 16"
+                        className="size-4 text-sucesso"
+                        initial={reduzir ? false : { opacity: 0, scale: 0.6 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.28, ease: CURVA }}
+                        aria-hidden
+                      >
+                        <motion.path
+                          d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={1.75}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          initial={reduzir ? false : { pathLength: 0 }}
+                          animate={{ pathLength: 1 }}
+                          transition={{ duration: 0.36, ease: CURVA }}
                         />
-                      )}
-                    </AnimatePresence>
+                      </motion.svg>
+                    ) : (
+                      <motion.span
+                        className={`size-2 rounded-full ${atual ? "bg-marca" : "bg-superficie-2"}`}
+                        animate={atual && !reduzir ? { scale: [1, 1.5, 1], opacity: [1, 0.6, 1] } : { scale: 1, opacity: 1 }}
+                        transition={atual && !reduzir ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" } : { duration: 0.2 }}
+                      />
+                    )}
                   </span>
                   <span
                     className={`transition-colors duration-300 ease-suave ${atual ? "text-texto" : "text-texto-suave"}`}
@@ -136,10 +156,17 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
               );
             })}
           </ol>
-          </>
+        )}
+        {!erro && naUltima && (
+          <p className="flex items-center gap-2 font-mono text-[12.5px] text-texto-suave">
+            <span className="tabular-nums text-texto" aria-hidden>
+              {relogio(segundos)}
+            </span>
+            <span>Pode levar alguns minutos.</span>
+          </p>
         )}
         <p className="text-xs leading-relaxed text-texto-suave">
-          Toda nota precisa de uma prova da sessão; o que não tiver prova fica sem nota.
+          Costuma levar de 1 a 5 minutos. Toda nota precisa de uma prova da sessão; o que não tiver prova fica sem nota.
         </p>
       </motion.div>
     </main>

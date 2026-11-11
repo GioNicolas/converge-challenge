@@ -27,6 +27,7 @@ import {
 import { idProblemaDaVaga } from "./gerar";
 import { resolverAvaliacaoEstatica } from "./index";
 import { repositorioAvaliacoesPadrao, type RepositorioAvaliacoes } from "./repositorio";
+import { revisarProblema } from "./revisar";
 import { Problema, type Kit } from "./tipos";
 import { errosDoProblema } from "./validar";
 
@@ -88,7 +89,7 @@ export function geraQuestao(config: InterviewConfig): boolean {
 }
 
 /** Uma chamada para o problema e, se o validador recusar, uma segunda com os erros. */
-async function gerarProblema(config: InterviewConfig, llm: LlmCliente): Promise<{ problema: Problema; ms: number; modelo?: string; tentativas: number }> {
+export async function gerarProblema(config: InterviewConfig, llm: LlmCliente): Promise<{ problema: Problema; ms: number; modelo?: string; tentativas: number }> {
   const inicio = Date.now();
   const id = idProblemaDaVaga(config.id);
   const mensagens: { role: "user" | "assistant"; content: string }[] = [
@@ -116,6 +117,11 @@ async function gerarProblema(config: InterviewConfig, llm: LlmCliente): Promise<
       const problema: Problema = { ...r.dados, id };
       erros = errosDoProblema(problema);
       if (!erros.length) return { problema, ms: Date.now() - inicio, modelo, tentativas: tentativa };
+      // Última tentativa e só a coerência do texto reclama (o título tem falsos positivos): segue, e a revisão pode corrigir.
+      if (tentativa === 2 && !errosDoProblema(problema, { semCoerencia: true }).length) {
+        console.warn("[agente] questão aceita com erros de coerência do texto:", erros);
+        return { problema, ms: Date.now() - inicio, modelo, tentativas: tentativa };
+      }
     } catch (e) {
       if (!(e instanceof ErroLlm && e.codigo === "invalido")) throw e;
       erros = [`schema: ${e.message}`];
@@ -138,7 +144,19 @@ export async function gerarQuestaoDaVaga(config: InterviewConfig, deps: DepsQues
   if (!geraQuestao(config)) return undefined;
   const repositorio = deps.repositorio ?? repositorioAvaliacoesPadrao();
   const base = kitBase(config);
-  const r = await gerarProblema(config, deps.llm);
+  const gerado = await gerarProblema(config, deps.llm);
+  // Revisão de texto (português, título, fala curta). Nunca falha nem bloqueia: sem revisão, vale o texto gerado.
+  const rev = await revisarProblema(gerado.problema, deps.llm);
+  const r = { ...gerado, problema: rev.problema };
+  console.warn("[agente] questao_da_vaga_revisada", {
+    config_id: config.id,
+    aceita: rev.aceita,
+    mudou: rev.mudou,
+    problemas: rev.problemas.length,
+    descartada: rev.descartada,
+    modelo: rev.modelo,
+    ms: rev.ms,
+  });
   // Sem empecilho: ele é escrito à mão por problema (ver `Empecilho` em tipos.ts), e o quadro segue sem ele.
   const kit: Kit = { ...base, problemas: [r.problema] };
   const avaliacaoId = avaliacaoGeradaDaConfig(config.id);

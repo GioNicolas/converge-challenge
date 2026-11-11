@@ -129,7 +129,7 @@ export async function substituirAvaliacaoHandler(req: Request, { params }: Param
     bruto && typeof bruto === "object" && !Array.isArray(bruto)
       ? imporIdsDoRegistro(bruto as Record<string, unknown>, atual)
       : bruto;
-  const v = validarKit(comIds);
+  const v = validarKit(comIds, { edicao: true });
   if (!v.ok) return erro(400, "kit inválido", v.erros.slice(0, 20));
   const novo = await repo.substituirKit(id, v.kit, v.kit.problemas[0]);
   if (!novo) return naoEncontrada();

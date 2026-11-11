@@ -6,7 +6,7 @@
 // A cobertura é calculada aqui, em código, a partir das observações que a análise já grava. O texto só
 // descreve o resultado: quem decide o que perguntar continua sendo o modelo. Só servidor.
 import type { FocusArea } from "../contracts";
-import type { Criterio, Kit } from "./kits/tipos";
+import { criterioIndireto, type Criterio, type Kit } from "./kits/tipos";
 import { tempoDaEntrevista, type EstadoSessao, type EvidenciaDoCriterio, type ObservacaoRegistrada } from "./sessao/estado";
 import type { Fase } from "./sessao/tipos";
 
@@ -20,12 +20,6 @@ const AREA_DO_CRITERIO: Record<string, FocusArea> = {
   componentes_fluxo: "tecnico",
   dados_consistencia: "tecnico",
 };
-
-/**
- * Critérios que não têm pergunta própria: aparecem nas respostas aos outros (a rubrica diz que a comunicação é
- * "medida nas respostas aos plins e nas perguntas de requisito"). Ficam fora da cobertura e nunca viram alvo.
- */
-const CRITERIOS_INDIRETOS = new Set(["comunicacao"]);
 
 /** O critério só se pergunta na etapa de requisitos; depois dela, não é mais alvo de pergunta. */
 const CRITERIO_DE_REQUISITOS = "requisitos";
@@ -111,7 +105,7 @@ export function ritmoDaCobertura(coberturaPonderada: number, tempoGasto: number)
 
 /** A situação de cada critério da rubrica e o ritmo geral, tudo calculado do estado da sessão. */
 export function resumoDaCobertura(criterios: Criterio[], estado: EstadoSessao, agora: number): ResumoDaCobertura {
-  const situacao: SituacaoDoCriterio[] = criterios.filter((c) => !CRITERIOS_INDIRETOS.has(c.id)).map((c) => {
+  const situacao: SituacaoDoCriterio[] = criterios.filter((c) => !criterioIndireto(c)).map((c) => {
     const contagem = estado.cobertura[c.id];
     const total = contagem ? contagem.positivo + contagem.negativo + contagem.neutro : 0;
     return {
