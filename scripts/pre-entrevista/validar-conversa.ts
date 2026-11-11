@@ -650,6 +650,36 @@ export const CASOS: Caso[] = [
     fala: "acho que sim… a duração ficou quanto mesmo?",
     conferir: (r) => [naoEncerra(r), contem(r, "responde a duração", ["minutos"]), terminaEmPergunta(r), semOutroResumo(r)],
   },
+  // Questão pedida pelo nome (#78): o Totti só confirma o que existe no banco, e nada é prometido.
+  {
+    id: "pede-two-sum",
+    vaga: "frontend-junior",
+    historico: ["isso, pode seguir assim"],
+    situacao: NO_APROFUNDAMENTO,
+    fala: "ah, e quero que use o two sum na entrevista",
+    conferir: (r) => [
+      contem(r, "confirma a questão", ["two sum"]),
+      { nome: "não diz que anotou", ok: !/\banotad[oa]\b/i.test(r.depois.fala), detalhe: undefined },
+      {
+        nome: "a questão fica fixada no rascunho",
+        ok: r.sessao.rascunho.problemId === "two-sum" && r.sessao.rascunho.pedidoProblema?.resultado === "reconhecido",
+        detalhe: JSON.stringify(r.sessao.rascunho.pedidoProblema),
+      },
+    ],
+  },
+  {
+    id: "pede-questao-que-nao-existe",
+    vaga: "frontend-junior",
+    historico: ["isso, pode seguir assim"],
+    situacao: NO_APROFUNDAMENTO,
+    fala: "quero o problema das N rainhas",
+    conferir: (r) => [
+      contem(r, "diz que não tem", [["não está disponível", "não temos", "não tenho", "não tem", "não está no banco", "não existe"]]),
+      { nome: "não promete as N rainhas", ok: !/\b(anotad[oa]|vai ser (o|a)? ?(problema das )?n rainhas)\b/i.test(r.depois.fala), detalhe: undefined },
+      terminaEmPergunta(r),
+      { nome: "nenhuma questão fixada", ok: r.sessao.rascunho.problemId === undefined, detalhe: r.sessao.rascunho.problemId },
+    ],
+  },
   ...CASOS_O_QUE_FALTOU,
 ];
 

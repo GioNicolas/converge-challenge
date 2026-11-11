@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * `?config=<id>` abre a entrevista da vaga (config gerada pela pré-entrevista); sem ele, a config padrão.
- * A questão é sorteada a cada entrevista entre as que servem à vaga; `?problema=<id>` fixa uma em testes.
+ * A questão é sorteada a cada entrevista entre as que servem à vaga, a menos que a recrutadora tenha pedido uma
+ * (`problemaFixado` na config: toda entrevista da vaga abre com ela); `?problema=<id>` fixa uma em testes.
  * Com `?convite=` de horário marcado, fora do horário volta para a tela de espera (a raiz com o mesmo link).
  */
 export default async function Interview({ searchParams }: { searchParams: Promise<{ problema?: string; config?: string; convite?: string }> }) {

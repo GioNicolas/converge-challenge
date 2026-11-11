@@ -11,6 +11,7 @@ import { ArrowLeft, ArrowRight, Minus, Pencil, Plus, Trash2 } from "lucide-react
 import { FocusArea, type Criterion, type InterviewMode } from "@/lib/contracts";
 import { ajustarCriterios, mede, modoAlternativoQueMede } from "@/lib/pre-entrevista/catalogo";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
+import { problemaFixado } from "@/lib/pre-entrevista/problema-pedido";
 import { curvaSuave } from "@/lib/design/motion";
 import { DESCRICAO_FORMATO, NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
 
@@ -144,7 +145,7 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
     const novos = pesosDoFormato(ligar ? { ...pesos, [ligar]: Math.max(pesos[ligar], 30) } : pesos, mode);
     setPesos(novos);
     // A questão escolhida era do outro formato: sem ela, a finalização escolhe uma do formato novo.
-    setR({ ...r, mode, problemId: undefined, criteria: ajustarCriterios(mode, ativas(novos), r.criteria) });
+    setR({ ...r, mode, problemId: undefined, pedidoProblema: undefined, criteria: ajustarCriterios(mode, ativas(novos), r.criteria) });
   }
 
   function mudarPeso(area: FocusArea, valor: number) {
@@ -156,6 +157,8 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
   const soma = Object.values(pesos).reduce((a, b) => a + b, 0);
   const porcento = (a: FocusArea) => (soma > 0 ? Math.round((pesos[a] / soma) * 100) : 0);
   const duracao = r.durationMin ?? (r.mode === "system_design" ? 45 : 30);
+  // Questão que ela pediu pelo nome: aparece no plano (sem controle novo). Sem pedido, a entrevista sorteia.
+  const questaoFixada = problemaFixado(r);
   const medidas = FocusArea.options.filter((a) => mede(r.mode, a));
   const naoMedidas = FocusArea.options.filter((a) => !mede(r.mode, a));
 
@@ -241,6 +244,11 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
               </Campo>
             </div>
             <p className="text-[14px] leading-relaxed text-texto-suave">{DESCRICAO_FORMATO[r.mode]}</p>
+            {questaoFixada && (
+              <p className="text-[14px] leading-relaxed text-texto-suave">
+                Questão: <span className="text-texto">{questaoFixada.title}</span>, a pedido seu. Todos os candidatos recebem essa.
+              </p>
+            )}
           </Cartao>
 
           <Cartao titulo="O que mais pesa" dica="Arraste para mudar. Área em 0% fica de fora.">

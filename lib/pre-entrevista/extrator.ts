@@ -15,6 +15,8 @@ import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa }
 import { acharEvidencia } from "./pesos";
 import { fraseComTrecho, normalizarTexto, RE_CONTEXTO, RE_LOGISTICA, RE_REQUISITO } from "./frases";
 import { alinharPesos, mudarModo, Origem, Rascunho, type Turno } from "./rascunho";
+import { aplicarProblemaDoExtrator, problemaTemEvidencia } from "./problema-pedido";
+import { titulosDoBanco } from "@/lib/problems/selecao";
 
 const TEMPERATURA = 0.2;
 const MAX_TOKENS_EXTRATOR = 12000;
@@ -106,7 +108,9 @@ Regras:
 7. confirmado: marque true só para mode, seniority ou focus que ela confirmou ou corrigiu explicitamente nesta conversa.
    Um "sim" a uma proposta que cobre formato, senioridade e foco de uma vez conta para os três.
 8. durationMin: inteiro, em minutos, só se ela disse.
-9. problemId: só se ela pediu um problema específico. Caso contrário, não envie.
+9. problemId: só se ela pediu uma questão específica pelo nome ("usa o two sum"). Devolva o id da lista QUESTÕES DO BANCO
+   (por exemplo "two-sum"), nunca o nome que ela falou. Se ela pediu uma que não está na lista, devolva o nome que ela
+   disse, curto. Se ela não pediu, não envie.
 
 Áreas válidas: tecnico, pressao, escala_produto, uso_ia.
 Modos válidos: live_coding (código ao vivo, codar, programar, construir um algoritmo, IDE), system_design (quadro, Excalidraw, desenhar a arquitetura ou o sistema).
@@ -296,7 +300,7 @@ export function aplicarPatch(r: Rascunho, p: Patch, avisos: Avisos = []): Rascun
   const criteria = alinharPesos(ajustarCriterios(comFator, areas, mode, avisos), r.focus);
   const ids = new Set(criteria.map((c) => c.id));
 
-  return {
+  const aplicado: Rascunho = {
     ...r,
     mode,
     seniority: p.seniority ?? r.seniority,
@@ -306,7 +310,8 @@ export function aplicarPatch(r: Rascunho, p: Patch, avisos: Avisos = []): Rascun
     contexto: p.contexto ?? r.contexto,
     durationMin: p.durationMin ?? r.durationMin,
     // Problema escolhido para o modo antigo não serve para o novo; volta ao padrão do modo.
-    problemId: p.problemId ?? (modeMudou ? undefined : r.problemId),
+    problemId: modeMudou ? undefined : r.problemId,
+    pedidoProblema: modeMudou ? undefined : r.pedidoProblema,
     // Confirmação é irreversível: uma vez que ela confirmou, não volta para falso.
     confirmado: {
       mode: r.confirmado.mode || p.confirmado?.mode === true,
@@ -314,6 +319,8 @@ export function aplicarPatch(r: Rascunho, p: Patch, avisos: Avisos = []): Rascun
       focus: r.confirmado.focus || p.confirmado?.focus === true,
     },
   };
+  // O valor do modelo passa pelo banco: id, título ou apelido viram o id; nome que não existe não vira questão.
+  return aplicarProblemaDoExtrator(aplicado, p.problemId, avisos);
 }
 
 function formatarTranscricao(turnos: Turno[]): string {
@@ -327,6 +334,7 @@ export function montarMensagens(r: Rascunho, transcricao: Turno[]): Mensagem[] {
   const entrada = [
     `RASCUNHO ATUAL:\n${JSON.stringify(semVaga, null, 2)}`,
     `CRITÉRIOS DO CATÁLOGO PARA O MODO ATUAL (${r.mode}):\n${JSON.stringify(CATALOGO[r.mode], null, 2)}`,
+    `QUESTÕES DO BANCO (id: título):\n${titulosDoBanco().join("\n")}`,
     `TRANSCRIÇÃO:\n${formatarTranscricao(transcricao)}`,
   ].join("\n\n");
   return [
@@ -440,6 +448,11 @@ export async function extrair(r: Rascunho, transcricao: Turno[], contexto: Conte
     tentativasJson.push({ resposta: resposta.content });
     const checado = checarDuracao(patch, transcricao, avisos);
     const aceito = validarEvidencias(checado, transcricao, checado.mode ?? r.mode, avisos);
+    // O modelo só fixa questão que a recrutadora citou; sem a citação é palpite.
+    if (aceito.problemId !== undefined && !problemaTemEvidencia(aceito.problemId, transcricao)) {
+      avisar(avisos, `problemId "${aceito.problemId}" descartado: a recrutadora não citou essa questão`);
+      aceito.problemId = undefined;
+    }
     const aplicado = aplicarPatch(r, aceito, avisos);
     return {
       rascunho: modoEscolhido ? mudarModo(aplicado, modoEscolhido) : aplicado,

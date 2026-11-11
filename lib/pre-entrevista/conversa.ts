@@ -20,6 +20,7 @@ import { registrarEvento } from "./log";
 import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type OferecerTradeoffPasso, type Passo } from "./planejador";
 import { PERGUNTA_CONTEXTO, PERGUNTA_EXEMPLO, PERGUNTA_O_QUE_REPROVA, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
+import { fraseDaQuestao, linhasDoPedido } from "./problema-pedido";
 import { lerFormato } from "./formato";
 import { LIMIAR_DUPLICADA, sobreposicao } from "@/lib/agente/guardas";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
@@ -83,6 +84,9 @@ Como falar:
 - Nunca ofereça escolher o tema, o tipo ou o enunciado da questão ("lógica pura ou listas?", "otimização de rotas ou
   restrições de horário?"). A questão de algoritmo é sorteada do banco pelo nível e pelo que pesa, e não tem o tema da vaga.
   Pergunte sobre o que avaliar no candidato, nunca sobre qual problema dar.
+- Se ela pedir uma questão específica, não diga que anotou nem prometa a questão por conta própria: responda só com o
+  que a linha "questão" de "O QUE JÁ SE SABE" diz (se a questão existe, se não existe e quais oferecer, ou, no quadro,
+  que a questão é gerada para a vaga). Sem essa linha, diga que não reconheceu a questão e peça o nome dela.
 
 O formato de uma boa pergunta: parte do que ela acabou de dizer ou de um detalhe concreto desta vaga, e oferece duas
 posturas que times diferentes escolheriam diferente, em palavras de RH. Uma mudança que ela pediu é confirmada numa frase
@@ -473,6 +477,9 @@ function saberEmLinguagemNatural(sessao: Sessao): string {
       : `- duração: não definida (padrão do formato: ${DURACAO_PADRAO[r.mode]} min)`,
   );
   if (r.recruiterNotes) linhas.push(`- notas da recrutadora: ${r.recruiterNotes}`);
+  // A questão que ela pediu pelo nome: o que responder, se o pedido veio na última fala dela; senão, o que ficou.
+  const ultimaDela = sessao.transcricao.findLastIndex((t) => t.role === "recrutadora") + 1;
+  linhas.push(...linhasDoPedido(r, ultimaDela > 0 && r.pedidoProblema?.turno === ultimaDela));
   const memoria = memoriaDoFormato(sessao);
   if (memoria.length) {
     linhas.push(
@@ -1358,6 +1365,7 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
     const variante = Math.floor(Math.random() * 3);
     texto = [
       texto,
+      fraseDaQuestao(sessao.rascunho),
       fraseNaoAvaliado(naoAvaliadoParaFalar(sessao)),
       resumoDaMemoria(memoriaDoFormato(sessao)),
       fraseLogistica(sessao.rascunho, sessao.preferencias, variante),
