@@ -18,7 +18,7 @@ const kitRuim = () => {
 describe("gerarKit", () => {
   it("caminho feliz: uma chamada, raciocínio ligado, timeout longo, ids do servidor", async () => {
     const llm = criarClienteFalso([kitDoModelo()]);
-    const kit = await gerarKit({ llm, vaga });
+    const kit = await gerarKit({ llm, revisar: false, vaga });
     assert.equal(llm.chamadas.length, 1);
     const c = llm.chamadas[0];
     assert.equal(c.raciocinio, true);
@@ -39,7 +39,7 @@ describe("gerarKit", () => {
       outOfScope: ["custo detalhado de infraestrutura"],
       summary: "s",
     };
-    await gerarKit({ llm, vaga, plano });
+    await gerarKit({ llm, revisar: false, vaga, plano });
     const msg = llm.chamadas[0].mensagens[0].content;
     assert.match(msg, /Engenheiro\(a\) Staff de Sistemas Distribuídos/);
     assert.match(msg, /fronteiras entre serviços/);
@@ -48,13 +48,13 @@ describe("gerarKit", () => {
 
   it("respeita AGENTE_MODELO_FINAL e o parâmetro modelo", async () => {
     const llm = criarClienteFalso([kitDoModelo()]);
-    await gerarKit({ llm, vaga, modelo: "anthropic/claude-sonnet-5.5" });
+    await gerarKit({ llm, revisar: false, vaga, modelo: "anthropic/claude-sonnet-5.5" });
     assert.equal(llm.chamadas[0].modelo, "anthropic/claude-sonnet-5.5");
   });
 
   it("retry: inválido na 1ª, válido na 2ª, com os erros devolvidos ao modelo", async () => {
     const llm = criarClienteFalso([kitRuim(), kitDoModelo()]);
-    const r = await gerarKitDetalhado({ llm, vaga });
+    const r = await gerarKitDetalhado({ llm, revisar: false, vaga });
     assert.equal(llm.chamadas.length, 2);
     assert.equal(r.tentativas, 2);
     assert.ok(r.errosPrimeiraTentativa.some((e) => e.includes("ficha")));
@@ -66,13 +66,13 @@ describe("gerarKit", () => {
 
   it("retry também quando a saída vem fora do schema", async () => {
     const llm = criarClienteFalso([{ lixo: true }, kitDoModelo()]);
-    const r = await gerarKitDetalhado({ llm, vaga });
+    const r = await gerarKitDetalhado({ llm, revisar: false, vaga });
     assert.equal(r.tentativas, 2);
   });
 
   it("falha final tipada depois de 2 tentativas inválidas", async () => {
     const llm = criarClienteFalso([kitRuim(), kitRuim()]);
-    await assert.rejects(gerarKit({ llm, vaga }), (e) => {
+    await assert.rejects(gerarKit({ llm, revisar: false, vaga }), (e) => {
       assert.ok(e instanceof ErroGeracaoKit);
       assert.equal(e.codigo, "invalido");
       assert.ok(e.erros.length > 0);
@@ -83,7 +83,7 @@ describe("gerarKit", () => {
 
   it("erro de transporte vira ErroGeracaoKit 'llm', sem retry", async () => {
     const llm = criarClienteFalso([new ErroLlm("timeout", "demorou")]);
-    await assert.rejects(gerarKit({ llm, vaga }), (e) => e instanceof ErroGeracaoKit && e.codigo === "llm");
+    await assert.rejects(gerarKit({ llm, revisar: false, vaga }), (e) => e instanceof ErroGeracaoKit && e.codigo === "llm");
     assert.equal(llm.chamadas.length, 1);
   });
 
@@ -92,7 +92,7 @@ describe("gerarKit", () => {
     delete process.env.AGENTE_MODELO_FINAL;
     try {
       const llm = criarClienteFalso([new ErroLlm("http", "HTTP 404", 404), kitDoModelo()]);
-      const r = await gerarKitDetalhado({ llm, vaga });
+      const r = await gerarKitDetalhado({ llm, revisar: false, vaga });
       assert.equal(r.modelo, "anthropic/claude-sonnet-5.5");
       assert.equal(llm.chamadas.length, 2);
     } finally {
@@ -102,7 +102,7 @@ describe("gerarKit", () => {
 
   it("funciona para todas as vagas mock (ids seguros)", async () => {
     for (const v of JOB_POSTINGS) {
-      const kit = await gerarKit({ llm: criarClienteFalso([kitDoModelo()]), vaga: v });
+      const kit = await gerarKit({ llm: criarClienteFalso([kitDoModelo()]), revisar: false, vaga: v });
       assert.match(kit.id, /^[a-z][a-z0-9_]+$/);
     }
   });

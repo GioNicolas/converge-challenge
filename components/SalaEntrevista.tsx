@@ -408,12 +408,12 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
                   </p>
                   <h1 className="text-2xl font-semibold tracking-tight">Pronto para começar?</h1>
                   <p className="leading-relaxed text-texto-suave">
-                    O entrevistador vai apresentar o problema no quadro e acompanhar o seu desenho. Fale com
-                    ele sempre que quiser. Quando terminar uma etapa ou quiser um comentário sobre o desenho,
-                    é só avisar. O agente também pode fazer perguntas nas pausas da conversa.
+                    A entrevista passa por entender o problema, desenhar uma visão geral e aprofundar alguns
+                    pontos. Você pode perguntar, dizer que não sabe ou pular uma parte. O entrevistador acompanha
+                    seu desenho e também pode fazer perguntas.
                   </p>
                   <p className="text-sm leading-relaxed text-texto-suave">
-                    Vamos pedir a câmera e o microfone. A sua câmera aparece só para você: não é gravada nem
+                    Vamos pedir acesso à câmera e ao microfone. A câmera aparece só para você: não é gravada nem
                     analisada.
                   </p>
                   <button
