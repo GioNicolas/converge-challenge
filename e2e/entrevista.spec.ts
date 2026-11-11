@@ -90,7 +90,7 @@ test("entrevista no quadro roda 3 vezes seguidas sem erro", async ({ page }) => 
     await test.step(`rodada ${rodada}: página limpa`, async () => {
       // O desenho fica salvo no navegador até encerrar: limpa para cada rodada começar do zero.
       await page.evaluate(() => localStorage.clear());
-      await page.reload();
+      await page.goto(ROTA);
       erros.length = 0;
       analise.length = 0;
     });
@@ -181,7 +181,8 @@ test("entrevista no quadro roda 3 vezes seguidas sem erro", async ({ page }) => 
       await janela.encerrar.click();
       await expect(confirmar).toBeVisible();
       await confirmar.getByRole("button", { name: "Encerrar", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Entrevista encerrada" })).toBeVisible();
+      await expect(page).toHaveURL(/\/obrigado$/);
+      await expect(page.getByRole("heading", { name: "Obrigado pela conversa." })).toBeVisible();
     });
 
     await test.step(`rodada ${rodada}: nenhum erro no console`, async () => {

@@ -24,9 +24,10 @@ type Props = {
    */
   onDesenhoMudou?: (elementos: NonDeletedExcalidrawElement[]) => void;
   onPronto?: (quadro: Quadro) => void;
+  bloqueado?: boolean;
 };
 
-export default function Canvas({ onDesenhoMudou, onPronto }: Props) {
+export default function Canvas({ onDesenhoMudou, onPronto, bloqueado = false }: Props) {
   const ultimaVersao = useRef(-1);
   const agente = useRef<CamadaAgente | null>(null);
 
@@ -49,6 +50,7 @@ export default function Canvas({ onDesenhoMudou, onPronto }: Props) {
   return (
     <div className="h-full w-full">
       <Excalidraw
+        viewModeEnabled={bloqueado}
         langCode="pt-BR"
         excalidrawAPI={aoApiPronta}
         onChange={aoMudar}

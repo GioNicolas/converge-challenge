@@ -163,7 +163,7 @@ export async function enviarEventos(sessaoId: string, lote: { horario: string; t
 
 /** Encerra a sessão no servidor e pede o scorecard. O candidato não recebe o scorecard: só o aviso de que saiu. */
 export async function finalizar(sessaoId: string): Promise<void> {
-  await requisitar(rotaDaSessao(sessaoId, "finalizar"), jsonPost({}));
+  await requisitar(rotaDaSessao(sessaoId, "finalizar"), { ...jsonPost({}), keepalive: true });
 }
 
 export async function enviarImagem(sessaoId: string, imagem: Blob, horario: string): Promise<string> {
