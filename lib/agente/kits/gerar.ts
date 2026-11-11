@@ -13,6 +13,7 @@ import {
   NOME_SCHEMA_KIT,
   SISTEMA_GERADOR_KIT,
 } from "../prompts/gerador-kit";
+import { revisarProblema, type ResultadoRevisao } from "./revisar";
 import { Kit } from "./tipos";
 import { paraSlug, validarKit } from "./validar";
 
@@ -47,6 +48,8 @@ export type ArgsGerarKit = {
   modelo?: string;
   sinal?: AbortSignal;
   timeoutMs?: number;
+  /** Revisa o texto do problema depois de validar (padrão: sim). Nunca bloqueia: sem revisão, vale o texto gerado. */
+  revisar?: boolean;
 };
 
 export type UsoGeracao = { entrada: number; saida: number; custo?: number };
@@ -60,6 +63,8 @@ export type ResultadoGeracao = {
   uso: UsoGeracao;
   /** Erros do validador na 1ª tentativa (vazio se passou de primeira). */
   errosPrimeiraTentativa: string[];
+  /** Resultado da revisão de texto do problema (ausente se `revisar: false`). */
+  revisao?: ResultadoRevisao;
 };
 
 export const idKitDaVaga = (vagaId: string) => paraSlug(vagaId, "vaga");
@@ -142,8 +147,19 @@ export async function gerarKitDetalhado(args: ArgsGerarKit): Promise<ResultadoGe
     const kit = imporIds(dados, vaga.id);
     const v = validarKit(kit);
     if (v.ok) {
+      let kitFinal = v.kit;
+      let revisao: ResultadoRevisao | undefined;
+      if (args.revisar !== false && v.kit.problemas[0]) {
+        revisao = await revisarProblema(v.kit.problemas[0], llm, { sinal: args.sinal });
+        if (revisao.aceita) {
+          const novo = validarKit({ ...v.kit, problemas: [revisao.problema, ...v.kit.problemas.slice(1)] });
+          if (novo.ok) kitFinal = novo.kit;
+          else revisao = { ...revisao, problema: v.kit.problemas[0], aceita: false, mudou: false, descartada: "kit reprovado no validador depois da revisão" };
+        }
+      }
       return {
-        kit: v.kit,
+        kit: kitFinal,
+        revisao,
         avisos: v.avisos,
         modelo,
         tentativas: tentativa,

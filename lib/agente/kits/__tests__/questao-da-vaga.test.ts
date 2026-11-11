@@ -105,7 +105,7 @@ describe("questão do quadro gerada para a vaga", () => {
 
     assert.equal(id, avaliacaoGeradaDaConfig(config.id));
     assert.equal(await fundo, id);
-    assert.equal(llm.chamadas.length, 1, "uma geração só");
+    assert.equal(llm.chamadas.filter((c) => c.nomeSchema === "problema_quadro").length, 1, "uma geração só");
     assert.equal((await repositorio.obter(id!))?.problema.titulo, "Roteirização de entregas");
   });
 
