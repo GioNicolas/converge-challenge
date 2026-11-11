@@ -105,3 +105,101 @@ export const RELATORIO_EXEMPLO: RelatorioVisto = {
     falasDepois: 5,
   },
 };
+
+const SEM_PROVA = "Sem evidência suficiente para atribuir nota a este critério.";
+const semProva = (id: string, nome: string) => ({ id, nome, nota: null, significado: null, justificativa: SEM_PROVA, provas: [] });
+
+/**
+ * Caso da issue #89 (só em desenvolvimento, em /relatorio/exemplo-encerrado): entrevista de 15 min encerrada pelo
+ * candidato aos 8 min, 2 de 6 critérios com prova. Mostra como o relatório trata a falha do entrevistador e a
+ * entrevista curta: nada de culpa, recomendação "evidência insuficiente" e "o que faltou" com fatos.
+ */
+export const RELATORIO_EXEMPLO_ENCERRADO: RelatorioVisto = {
+  ...RELATORIO_EXEMPLO,
+  sessaoId: "exemplo-encerrado",
+  candidatoId: "Rafael Nunes",
+  duracao: "8 min",
+  perguntas: 2,
+  notaGeral: 2,
+  recomendacao: "evidencia_insuficiente",
+  criterios: [
+    {
+      id: "requisitos",
+      nome: "Requisitos e escopo",
+      nota: 2,
+      significado: "Perguntou pouco, esqueceu a escala",
+      justificativa: "Pediu o volume antes de desenhar e usou o número combinado no quadro; não perguntou sobre retenção nem latência.",
+      provas: [{ tipo: "fala", momento: "01:12", texto: "Me fala um pouco do volume, então." }],
+    },
+    {
+      id: "componentes_fluxo",
+      nome: "Componentes e fluxo",
+      nota: 2,
+      significado: "Os componentes estão lá, mas o fluxo fica solto",
+      justificativa: "Desenhou API, banco e cache e ligou cliente, API e banco; o cache ficou sem ligação.",
+      provas: [{ tipo: "desenho", momento: "04:00", elementos: ["API", "Postgres"], imagem: null, observacao: null }],
+    },
+    semProva("escalabilidade", "Escalabilidade"),
+    semProva("dados_consistencia", "Dados e consistência"),
+    semProva("tradeoffs", "Trade-offs"),
+    semProva("comunicacao", "Comunicação"),
+  ],
+  pontosFortes: [],
+  pontosAAprofundar: [
+    "Escalabilidade: sem prova nesta entrevista. Sinal esperado que não apareceu: o candidato falar de pico de acesso e de crescimento.",
+    "Dados e consistência: sem prova nesta entrevista; vale perguntar diretamente sobre isso.",
+    "Trade-offs: sem prova nesta entrevista; vale perguntar diretamente sobre isso.",
+    "Comunicação: não houve fala do candidato explicando ou respondendo algo de conteúdo; vale ouvi-lo explicar a solução.",
+  ],
+  resumoDaSolucao: "API na frente de um Postgres, com um cache para a leitura.",
+  resumoDaEntrevista: "Houve prova em 2 de 6 critérios: Requisitos e escopo (2 de 4), Componentes e fluxo (2 de 4). A entrevista durou 8 de 15 minutos; 4 de 6 critérios ficaram sem prova.",
+  briefing:
+    "Sem evidência suficiente para recomendar avançar ou não avançar. A entrevista durou 8 de 15 minutos; 4 de 6 critérios ficaram sem prova. Sem prova: Escalabilidade, Dados e consistência, Trade-offs, Comunicação. Vale cobrir esses pontos na próxima conversa.",
+  provasConferidas: 2,
+  ajustes: [
+    "evidência de fala descartada em Comunicação: pedido de repetição ou esclarecimento não é prova",
+    "nota de Comunicação removida: sem evidência",
+    "menos da metade dos critérios com evidência: recomendação neutra",
+  ],
+  adaptacao: null,
+};
+
+/** Entrevista inteira e 4 de 6 critérios com prova e nota baixa: "Não avançar" vale (/relatorio/exemplo-nao-avancar). */
+export const RELATORIO_EXEMPLO_NAO_AVANCAR: RelatorioVisto = {
+  ...RELATORIO_EXEMPLO_ENCERRADO,
+  sessaoId: "exemplo-nao-avancar",
+  duracao: "14 min",
+  notaGeral: 1.5,
+  recomendacao: "nao_avancar",
+  criterios: [
+    RELATORIO_EXEMPLO_ENCERRADO.criterios[0],
+    RELATORIO_EXEMPLO_ENCERRADO.criterios[1],
+    {
+      id: "escalabilidade",
+      nome: "Escalabilidade",
+      nota: 1,
+      significado: "Não considerou carga",
+      justificativa: "Disse que um servidor aguenta qualquer quantidade de acessos, sem estimar o volume.",
+      provas: [{ tipo: "fala", momento: "10:05", texto: "Um servidor deve aguentar qualquer quantidade." }],
+    },
+    semProva("dados_consistencia", "Dados e consistência"),
+    {
+      id: "tradeoffs",
+      nome: "Trade-offs",
+      nota: 1,
+      significado: "Não justifica escolhas",
+      justificativa: "Escolheu o banco sem comparar com outra opção.",
+      provas: [{ tipo: "fala", momento: "11:30", texto: "Escolhi o banco porque gosto dele." }],
+    },
+    semProva("comunicacao", "Comunicação"),
+  ],
+  pontosAAprofundar: [
+    "Dados e consistência: sem prova nesta entrevista; vale perguntar diretamente sobre isso.",
+    "Comunicação: não houve fala do candidato explicando ou respondendo algo de conteúdo; vale ouvi-lo explicar a solução.",
+  ],
+  resumoDaEntrevista: "Houve prova em 4 de 6 critérios: Requisitos e escopo (2 de 4), Componentes e fluxo (2 de 4), Escalabilidade (1 de 4), Trade-offs (1 de 4). A entrevista durou 14 de 15 minutos; 2 de 6 critérios ficaram sem prova.",
+  briefing:
+    "A entrevista durou 14 de 15 minutos; 2 de 6 critérios ficaram sem prova. Sem prova: Dados e consistência, Comunicação. As notas baixas em Escalabilidade e Trade-offs se apoiam em falas do próprio candidato.",
+  provasConferidas: 4,
+  ajustes: [],
+};
