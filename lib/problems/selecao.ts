@@ -69,3 +69,83 @@ export function sortearProblema(c: Omit<CriterioSelecao, "semente">, aleatorio: 
   const empatadas = questoesDaVaga(c);
   return empatadas[Math.floor(aleatorio() * empatadas.length)];
 }
+
+// ---------------------------------------------------------------------------
+// Questão pedida pela recrutadora
+// ---------------------------------------------------------------------------
+
+/**
+ * Outros nomes de cada questão do banco, além do id e do título: o nome em inglês (como aparece no LeetCode) e o
+ * jeito como se fala em português. Escritos sem acento e em minúsculas, como `normalizarPedido` deixa o texto.
+ */
+export const APELIDOS: Record<string, string[]> = {
+  "two-sum": ["two sum", "twosum", "2 sum", "soma de dois", "soma de dois numeros", "soma dois", "dois numeros que somam"],
+  "best-time-stock": ["best time to buy and sell stock", "best time to buy and sell", "comprar e vender acoes", "compra e venda de acoes", "melhor momento para comprar e vender"],
+  "valid-parentheses": ["valid parentheses", "parenteses validos", "parenteses", "parenteses balanceados", "balanceamento de parenteses"],
+  "binary-search": ["binary search", "busca binaria", "pesquisa binaria"],
+  "climbing-stairs": ["climbing stairs", "subindo escadas", "subir escadas", "escada", "escadas"],
+  "top-k-frequent": ["top k frequent", "top k frequent elements", "top k", "k mais frequentes", "k elementos mais frequentes", "elementos mais frequentes"],
+  "maximum-subarray": ["maximum subarray", "max subarray", "subarray de soma maxima", "soma maxima", "kadane"],
+  "daily-temperatures": ["daily temperatures", "temperaturas diarias", "temperatura diaria"],
+  "longest-substring-no-repeat": ["longest substring without repeating characters", "longest substring", "maior substring sem repeticao", "substring sem repeticao", "maior substring"],
+  "search-rotated": ["search in rotated sorted array", "rotated sorted array", "busca em array rotacionado", "array rotacionado", "vetor rotacionado"],
+};
+
+/** Minúsculas, sem acento, sem pontuação e com espaços simples. "Parênteses válidos!" vira "parenteses validos". */
+export function normalizarPedido(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[-_]/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Os nomes de uma questão (id, título e apelidos), já normalizados, do mais longo ao mais curto. */
+function nomesDa(p: PublicProblem): string[] {
+  return [...new Set([p.id, p.title, ...(APELIDOS[p.id] ?? [])].map(normalizarPedido))].sort((a, b) => b.length - a.length);
+}
+
+/** Onde um nome aparece no texto, como palavra inteira, ou -1. */
+function posicaoDoNome(texto: string, nome: string): number {
+  return ` ${texto} `.indexOf(` ${nome} `);
+}
+
+/**
+ * A questão do banco que um texto nomeia, ou undefined. Casa id, título em português e apelidos (em inglês e em
+ * português), sem acento e sem caixa: "Two sum", "two-sum", "soma de dois", "parênteses válidos". Se o texto nomeia
+ * mais de uma, vence o nome mais longo (o mais específico). Função pura.
+ */
+export function resolverProblemaPedido(texto: string | undefined): PublicProblem | undefined {
+  if (!texto) return undefined;
+  const t = normalizarPedido(texto);
+  if (!t) return undefined;
+  let melhor: { p: PublicProblem; tamanho: number } | undefined;
+  for (const nivel of Object.values(problemsByDifficulty)) {
+    for (const p of nivel) {
+      const nome = nomesDa(p).find((n) => posicaoDoNome(t, n) >= 0);
+      if (nome && (!melhor || nome.length > melhor.tamanho)) melhor = { p, tamanho: nome.length };
+    }
+  }
+  return melhor?.p;
+}
+
+/** Os títulos do banco com o id, para o extrator escolher um id que existe ("two-sum: Two Sum"). */
+export function titulosDoBanco(): string[] {
+  return Object.values(problemsByDifficulty)
+    .flat()
+    .map((p) => `${p.id}: ${p.title}`);
+}
+
+/**
+ * Questões para oferecer quando a pedida não existe: as do nível da vaga, das que mais servem ao foco para as que
+ * menos servem, com desempate estável pelo título. Função pura.
+ */
+export function alternativasDoNivel(c: Omit<CriterioSelecao, "semente">, quantas = 3): PublicProblem[] {
+  const nivel = c.difficulty ?? difficultyForSeniority(c.seniority);
+  return [...problemsByDifficulty[nivel]]
+    .sort((a, b) => pontuar(b.id, c.focus) - pontuar(a.id, c.focus) || a.title.localeCompare(b.title))
+    .slice(0, quantas);
+}

@@ -71,6 +71,11 @@ export const InterviewConfig = z.object({
   difficulty: z.enum(["facil", "medio"]).optional(),
   /** Questão escolhida do banco pelo agente; deve ser do nível `difficulty`. */
   problemId: z.string(),
+  /**
+   * A recrutadora pediu esta questão pelo nome na pré-entrevista: toda entrevista da vaga abre com ela (não há sorteio),
+   * e o pedido vence o nível padrão da senioridade (`difficulty` passa a ser o da questão). Sem valor: sorteio.
+   */
+  problemaFixado: z.boolean().optional(),
   languages: z.array(z.string()).min(1),
   durationMin: z.number().int().positive().default(30),
   /** Regras ativas da squad quando a entrevista começou. Sem valor: nenhuma regra aprendida. */

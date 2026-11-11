@@ -56,6 +56,7 @@ import { lerDuracao, perguntouSobreTempo } from "./duracao";
 import { lerFormato } from "./formato";
 import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
+import { aplicarPedidoDeProblema } from "./problema-pedido";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
 import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
@@ -389,6 +390,10 @@ async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Pr
   }
   resolverTradeoff(sessao);
   resolverPedidoDeFormato(sessao);
+  // Questão pedida pelo nome ("usa o two sum"): lida depois do formato, porque no quadro não há banco. Antes do
+  // planejador e da fala do Totti, que precisa dizer se a questão existe (ver `linhasDoPedido` em `conversa.ts`).
+  const falaDoTotti = ultimaFalaDoAgente(sessao.transcricao);
+  sessao.rascunho = aplicarPedidoDeProblema(sessao.rascunho, texto, sessao.transcricao.length, falaDoTotti);
   return antes;
 }
 

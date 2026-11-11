@@ -376,7 +376,13 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     const nivelDeVolta = sessao.rascunho.confirmado.seniority
       ? { seniority: sessao.rascunho.seniority, confirmado: { ...ext.rascunho.confirmado, seniority: true } }
       : {};
-    sessao.rascunho = { ...extraido, ...nivelDeVolta, cobertura: mesclarCobertura(sessao.rascunho.cobertura, cob.cobertura) };
+    // Questão pedida na fala enquanto esta rodada rodava (ou antes dela): a leitura da fala vale sobre a do extrator.
+    const atual = sessao.rascunho;
+    const pedidoDeVolta =
+      atual.pedidoProblema?.origem === "fala" && atual.mode === extraido.mode
+        ? { problemId: atual.problemId, pedidoProblema: atual.pedidoProblema }
+        : {};
+    sessao.rascunho = { ...extraido, ...nivelDeVolta, ...pedidoDeVolta, cobertura: mesclarCobertura(atual.cobertura, cob.cobertura) };
     aplicarPesosNaSessao(sessao, "segundo plano");
     const mudancas = diff(antes, sessao.rascunho);
     registrarEvento(sessao, {
