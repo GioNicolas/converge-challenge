@@ -12,6 +12,7 @@ import VoltarLink from "@/components/VoltarLink";
 import AprendidoComOTime from "@/components/squad/AprendidoComOTime";
 import type { AdaptacaoVista, CriterioVisto, ProvaVista, RelatorioVisto } from "@/lib/agente/relatorio";
 import type { Recomendacao } from "@/lib/agente/scorecard";
+import { semTermosInternos } from "@/lib/totti/relatorio";
 
 const CURVA = [0.32, 0.72, 0, 1] as const;
 const CURVA_SAIDA = [0.16, 1, 0.3, 1] as const;
@@ -31,6 +32,17 @@ const RECOMENDACAO: Record<Recomendacao, { rotulo: string; classe: string; ponto
     classe: "bg-superficie text-texto-suave shadow-[inset_0_0_0_1.5px_rgb(28_24_18/0.22)]",
     ponto: "border-[1.5px] border-dashed border-texto-suave box-border",
   },
+};
+
+/** Termo interno do time nunca aparece na tela, mesmo que venha de um relatório já salvo. */
+const limpo = semTermosInternos;
+
+/** "Próxima conversa" só faz sentido quando a pessoa segue no processo ou ainda falta evidência. */
+const ROTULO_DO_BRIEFING: Record<Recomendacao, string> = {
+  avancar: "para a próxima conversa",
+  avancar_com_ressalvas: "para a próxima conversa",
+  evidencia_insuficiente: "para a próxima conversa",
+  nao_avancar: "o que sustenta a recomendação",
 };
 
 const nota1 = (n: number) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -175,8 +187,7 @@ function Criterio({ c, ordem, aoAbrirImagem }: { c: CriterioVisto; ordem: number
       <article className="flex flex-col gap-4 rounded-padrao bg-superficie p-6 shadow-padrao transition-[transform,box-shadow] duration-[240ms] ease-saida hover:-translate-y-0.5 hover:shadow-flutuante">
         <header className="flex items-start justify-between gap-6">
           <div className="flex flex-col gap-1">
-            <h3 className="font-display text-[20px] font-semibold tracking-[-0.02em]">{c.nome}</h3>
-            {c.significado && <p className="text-sm text-texto-suave">{c.significado}</p>}
+            <h3 className="font-display text-[20px] font-semibold tracking-[-0.02em]">{limpo(c.nome)}</h3>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1">
             {c.nota === null ? (
@@ -187,7 +198,13 @@ function Criterio({ c, ordem, aoAbrirImagem }: { c: CriterioVisto; ordem: number
             <Escala nota={c.nota} />
           </div>
         </header>
-        <p className="leading-relaxed text-texto">{c.justificativa}</p>
+        <p className="leading-relaxed text-texto">{limpo(c.justificativa)}</p>
+        {/* O texto do nível é a régua da rubrica, não um fato sobre o candidato: a justificativa acima é que o descreve. */}
+        {c.nota !== null && c.significado && (
+          <p className="text-sm text-texto-suave">
+            Nível {c.nota} da rubrica: {limpo(c.significado)}
+          </p>
+        )}
         <AprendidoComOTime regras={c.aprendidoComOTime} />
         {c.provas.length > 0 && (
           <ul className="flex flex-col gap-3.5 border-t border-borda pt-4">
@@ -214,7 +231,6 @@ function Adaptacao({ a, ordem, aoAbrirImagem }: { a: AdaptacaoVista; ordem: numb
               Mudança no problema{a.momento ? `, aos ${a.momento}` : ""}
             </p>
             <h3 className="text-lg font-semibold tracking-tight">Como se adaptou</h3>
-            {a.significado && <p className="text-sm text-texto-suave">{a.significado}</p>}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1">
             {a.nota === null ? (
@@ -226,7 +242,12 @@ function Adaptacao({ a, ordem, aoAbrirImagem }: { a: AdaptacaoVista; ordem: numb
           </div>
         </header>
         <p className="w-fit rounded-pequeno bg-superficie-2 px-3 py-1.5 text-sm">{a.mudanca}</p>
-        <p className="leading-relaxed text-texto">{a.justificativa}</p>
+        <p className="leading-relaxed text-texto">{limpo(a.justificativa)}</p>
+        {a.nota !== null && a.significado && (
+          <p className="text-sm text-texto-suave">
+            Nível {a.nota} da escala: {limpo(a.significado)}
+          </p>
+        )}
         <p className="text-sm text-texto-suave">
           Depois da mudança: {vezes(a.falasDepois, "fala", "falas")} e {vezes(a.desenhosDepois, "versão nova do desenho", "versões novas do desenho")}. Esta nota fica fora da nota geral.
         </p>
@@ -246,7 +267,7 @@ function Resumo({ titulo, texto }: { titulo: string; texto: string }) {
   return (
     <section className="flex flex-col gap-3 rounded-padrao bg-superficie p-6 shadow-padrao">
       <h2 className="text-sm font-medium text-texto-suave">{titulo}</h2>
-      <p className="leading-relaxed text-pretty">{texto}</p>
+      <p className="leading-relaxed text-pretty">{limpo(texto)}</p>
     </section>
   );
 }
@@ -264,7 +285,7 @@ function Lista({ titulo, icone, itens, vazio }: { titulo: string; icone: "check"
               <span className={`mt-1 ${icone === "check" ? "text-sucesso" : "text-marca"}`}>
                 <Icone nome={icone} tamanho={15} />
               </span>
-              {t}
+              {limpo(t)}
             </li>
           ))}
         </ul>
@@ -390,8 +411,8 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
               <Escala nota={r.notaGeral} grande />
               {r.briefing && (
                 <div className="flex flex-col gap-1.5">
-                  <p className="font-mono text-[12.5px] text-texto-suave">para a próxima conversa</p>
-                  <p className="text-[17px] leading-[1.6] text-pretty">{r.briefing}</p>
+                  <p className="font-mono text-[12.5px] text-texto-suave">{ROTULO_DO_BRIEFING[r.recomendacao]}</p>
+                  <p className="text-[17px] leading-[1.6] text-pretty">{limpo(r.briefing)}</p>
                 </div>
               )}
             </div>
@@ -437,11 +458,13 @@ export default function Relatorio({ r }: { r: RelatorioVisto }) {
           {semProva.length > 0 && (
             <Surgir ordem={5 + avaliados.length}>
               <article className="flex flex-col gap-3 rounded-padrao border border-dashed border-borda p-6">
-                <h3 className="font-display text-[18px] font-semibold">Sem prova: ficam para a próxima conversa</h3>
+                <h3 className="font-display text-[18px] font-semibold">
+                  {r.recomendacao === "nao_avancar" ? "O que ficou sem prova" : "Sem prova: ficam para a próxima conversa"}
+                </h3>
                 <ul className="flex flex-wrap gap-1.5">
                   {semProva.map((c) => (
                     <li key={c.id} className="rounded-full bg-superficie-2 px-3 py-1 text-sm text-texto-suave">
-                      {c.nome}
+                      {limpo(c.nome)}
                     </li>
                   ))}
                 </ul>

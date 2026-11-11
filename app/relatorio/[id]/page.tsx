@@ -8,14 +8,21 @@ import { notFound } from "next/navigation";
 import GerandoRelatorio from "@/components/relatorio/GerandoRelatorio";
 import Relatorio from "@/components/relatorio/Relatorio";
 import { resolverAvaliacao } from "@/lib/agente/kits";
-import { montarRelatorio } from "@/lib/agente/relatorio";
-import { RELATORIO_EXEMPLO } from "@/lib/agente/relatorio-exemplo";
+import { montarRelatorio, type RelatorioVisto } from "@/lib/agente/relatorio";
+import { RELATORIO_EXEMPLO, RELATORIO_EXEMPLO_ENCERRADO, RELATORIO_EXEMPLO_NAO_AVANCAR } from "@/lib/agente/relatorio-exemplo";
 import { contexto } from "@/lib/agente/rotas/contexto";
 import { devHabilitado } from "@/lib/agente/rotas/scorecard";
 import { CABECALHO_AUTENTICADO } from "@/lib/painel/acesso";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Relatório da entrevista", robots: { index: false } };
+
+/** Relatórios de exemplo, só em desenvolvimento: dá para revisar o visual sem rodar uma entrevista. */
+const EXEMPLOS: Record<string, RelatorioVisto | undefined> = Object.assign(Object.create(null), {
+  exemplo: RELATORIO_EXEMPLO,
+  "exemplo-encerrado": RELATORIO_EXEMPLO_ENCERRADO,
+  "exemplo-nao-avancar": RELATORIO_EXEMPLO_NAO_AVANCAR,
+});
 
 function podeVer(chave: string | undefined): boolean {
   if (devHabilitado()) return true;
@@ -43,7 +50,7 @@ async function Conteudo({ params, searchParams }: Props) {
   const [{ id }, { chave }, cabecalhos] = await Promise.all([params, searchParams, headers()]);
   const pelaSenhaDoPainel = cabecalhos.get(CABECALHO_AUTENTICADO) === "1";
   if (!(pelaSenhaDoPainel || podeVer(chave)) || id.length > 80) notFound();
-  if (id === "exemplo" && devHabilitado()) return <Relatorio r={RELATORIO_EXEMPLO} />;
+  if (devHabilitado() && EXEMPLOS[id]) return <Relatorio r={EXEMPLOS[id]} />;
 
   const { repositorio } = contexto();
   const sessao = await repositorio.obter(id);
