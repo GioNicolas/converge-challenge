@@ -54,9 +54,13 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
     setEstado("inativa");
   }, []);
 
-  const iniciar = useCallback(async () => {
-    if (bloqueada || referencia.current) return;
-    const atual: CapturaAtual = { controlador: new AbortController() };
+  /**
+   * `captura`: microfone já aberto por quem chama (o detector de interrupção), com o áudio de antes guardado. O hook
+   * passa a ser o dono dela.
+   */
+  const iniciar = useCallback(async (captura?: CapturaAntecipada) => {
+    if (bloqueada || referencia.current) { captura?.cancelar(); return; }
+    const atual: CapturaAtual = { controlador: new AbortController(), antecipada: captura };
     referencia.current = atual;
     atual.liberar = focoAudio.assumir("entrada", cancelar);
     const vigente = () => referencia.current === atual;
@@ -87,7 +91,7 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
       if (!window.isSecureContext) throw new Error("Abra o projeto por HTTPS ou localhost para usar o microfone.");
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador não oferece acesso ao microfone.");
       // Começa a ouvir já: o token e o socket levam ~1 s, e era esse o começo da fala que se perdia.
-      if (ultimoProvedor !== "navegador") atual.antecipada = iniciarCapturaAntecipada({ stream: obterStream?.() });
+      if (ultimoProvedor !== "navegador") atual.antecipada ??= iniciarCapturaAntecipada({ stream: obterStream?.() });
       const resposta = await fetch("/api/transcricao/sessao", {
         method: "POST", signal: atual.controlador.signal, cache: "no-store",
       });
