@@ -67,25 +67,34 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // Os filtros (da fala ao vivo e das perguntas da análise) usam o papel "filtro".
   },
   evaluator: {
-    // Kit da vaga, plano e o que não tem papel próprio: a recrutadora espera na tela, então a reserva entra aos 30 s.
+    // Kit da vaga, plano e o que não tem papel próprio: a recrutadora espera na tela. O kit roda em
+    // app/api/avaliacoes (maxDuration 120 s) e gerarKit tenta até 2 vezes. scripts/gerar-kit.ts em 2026-11-10: o
+    // GLM-5.2 na Featherless estourou os 90 s da tentativa; o gemini-3.5-flash-lite gerou o kit em 9–10 s
+    // (validou de primeira, US$ 0,0067). Reserva aos 45 s: duas tentativas (2 × 45 s + 2 × 10 s) cabem nos 120 s.
+    // No kit a reserva ainda entra quase sempre, mas a Featherless é plano fixo: o que custa é o modelo da reserva,
+    // e o gemini sai ~10× mais barato que o GLM-5.2 na OpenRouter (US$ 6,80 por milhão de tokens de saída).
     featherlessEnv: "EVALUATOR_MODEL",
     featherlessDefault: "zai-org/GLM-5.2",
     openrouterEnv: "EVALUATOR_FALLBACK_MODEL",
-    openrouterDefault: "z-ai/glm-5.2",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
     maxTokens: 6000,
-    hedgeMs: 30_000,
+    hedgeMs: 45_000,
   },
   relatorio: {
     // Relatório final da entrevista (live coding e quadro). Ninguém espera por ele na hora: vale qualidade e custo.
     // O GLM-5.2 na Featherless leva ~3 min (scripts/run-evaluator.ts sem OpenRouter: 177 s, US$ 0,014 em créditos);
     // com a reserva em 30 s o OpenRouter corria junto e era pago em toda entrevista (US$ 0,014–0,045, o maior custo
-    // dela). Agora a Featherless tem 4,5 min sozinha, numa tentativa só, e o OpenRouter só entra se ela não entregar:
-    // o GLM-5.2 lá leva 5–19 s, então ainda cabe nos 300 s da função na Vercel (plano Hobby).
+    // dela). Agora a Featherless tem 4,5 min sozinha, numa tentativa só, e o OpenRouter só entra se ela não entregar.
     // Com função mais longa (Pro): LLM_HEDGE_RELATORIO em ms.
+    // Reserva medida em 2026-11-10 (scripts/eval-scorecard.ts, 6 cenários /base, e scripts/run-evaluator.ts
+    // fixtures/forca-bruta.json, 2 rodadas cada): gemini-3.5-flash-lite 12/12 scorecards sem falha e sem reparo de
+    // JSON, 4–6 s, ~US$ 0,0045 por scorecard e ~US$ 0,002 por relatório do live coding (o GLM-5.2 na OpenRouter
+    // custava ~US$ 0,034); notas a no máximo 1 ponto do GLM-5.2 da Featherless. gpt-oss-120b precisou de reparo de JSON
+    // nas duas rodadas e deixou complexidade e bordas sem nota no live coding; glm-5.3-flash falhou 2 de 4 scorecards.
     featherlessEnv: "RELATORIO_MODEL",
     featherlessDefault: "zai-org/GLM-5.2",
     openrouterEnv: "RELATORIO_FALLBACK_MODEL",
-    openrouterDefault: "z-ai/glm-5.2",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
     maxTokens: 6000,
     hedgeMs: 270_000,
     tempoPorTentativaMs: 290_000,

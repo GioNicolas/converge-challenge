@@ -42,3 +42,36 @@ test("Gemini vai primeiro ao Google AI Studio (com reserva); outros modelos, sem
   const glm = openrouter.buildExtraBody({ model: "z-ai/glm-5.2" }) as { provider: Record<string, unknown> };
   assert.equal(glm.provider.order, undefined);
 });
+
+test("relatório e evaluator: Featherless primeiro; a reserva na OpenRouter é o gemini-3.5-flash-lite", async (t) => {
+  const chaves = ["OPENROUTER_API_KEY", "FEATHERLESS_API_KEY", "RELATORIO_FALLBACK_MODEL", "EVALUATOR_FALLBACK_MODEL"];
+  const antes = Object.fromEntries(chaves.map((k) => [k, process.env[k]]));
+  process.env.OPENROUTER_API_KEY = "chave-ficticia-de-teste";
+  process.env.FEATHERLESS_API_KEY = "chave-ficticia-de-teste";
+  delete process.env.RELATORIO_FALLBACK_MODEL;
+  delete process.env.EVALUATOR_FALLBACK_MODEL;
+  t.after(() => {
+    for (const [k, v] of Object.entries(antes)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+  const pedidos: { host: string; model: string }[] = [];
+  t.mock.method(globalThis, "fetch", async (url: Parameters<typeof fetch>[0], opcoes?: RequestInit) => {
+    const host = new URL(String(url)).host;
+    pedidos.push({ host, model: JSON.parse(String(opcoes?.body)).model });
+    // A Featherless cai na hora (400 não tem retry): a reserva entra no erro, sem esperar o hedge.
+    if (host.includes("featherless")) return new Response('{"error":"fora do ar"}', { status: 400 });
+    return Response.json({ choices: [{ message: { content: '{"texto":"Resposta"}' }, finish_reason: "stop" }], usage: {} });
+  });
+  for (const role of ["relatorio", "evaluator"] as const) {
+    const r = await completeJson({ role, system: "Teste", user: "Teste", schema: z.object({ texto: z.string() }) });
+    assert.equal(r.provider, "openrouter");
+  }
+  assert.deepEqual(pedidos, [
+    { host: "api.featherless.ai", model: "zai-org/GLM-5.2" },
+    { host: "openrouter.ai", model: "google/gemini-3.5-flash-lite" },
+    { host: "api.featherless.ai", model: "zai-org/GLM-5.2" },
+    { host: "openrouter.ai", model: "google/gemini-3.5-flash-lite" },
+  ]);
+});
