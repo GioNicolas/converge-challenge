@@ -142,6 +142,7 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
             signal: cancelar.signal,
             prazoMs,
             ...(args.semReserva ? { semReserva: true } : {}),
+            ...(args.rota ? { rota: args.rota } : {}),
             ...(args.imagem ? { imageDataUrl: args.imagem } : {}),
           }),
           prazoMs,

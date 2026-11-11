@@ -324,7 +324,7 @@ describe("finalizar", () => {
     const ch = finais[0];
     assert.equal(ch.raciocinio, true);
     assert.equal(ch.maxTokens, MAX_TOKENS_SCORECARD);
-    assert.equal(ch.timeoutMs, 290_000);
+    assert.equal(ch.timeoutMs, 280_000);
     assert.ok(ch.modelo);
     // guardas no caminho real: nota_geral recomputada e fala validada contra a conversa
     assert.equal(a.corpo.nota_geral, 3);
@@ -333,7 +333,7 @@ describe("finalizar", () => {
     assert.ok(!JSON.stringify(ch.mensagens).includes("FICHA"), "mensagens do usuário não carregam a ficha");
   });
 
-  it("sem chave e sem fake: erro amigável (503), nunca 500; falha do modelo: 502 e pode tentar de novo", async () => {
+  it("sem chave e sem fake: erro amigável (503); falha do modelo retorna 202 e pode tentar de novo", async () => {
     definirContextoParaTestes({ repositorio: repo, llm: null, agora: () => relogio, fake: false });
     const { id } = await novaSessao();
     const sem = await ler(await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id)));
@@ -343,10 +343,28 @@ describe("finalizar", () => {
     const llm = criarClienteFalso([new Error("boom"), saidaLlm()]);
     definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: false });
     const falha = await ler(await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id)));
-    assert.equal(falha.status, 502);
-    assert.ok(!JSON.stringify(falha.corpo).includes("boom"));
+    assert.equal(falha.status, 202);
+    assert.deepEqual(falha.corpo, { gerando: true });
     const ok = await ler(await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id)));
     assert.equal(ok.status, 200);
+  });
+
+  it("tenta Featherless duas vezes e uma reserva; só um novo POST tenta a reserva novamente", async () => {
+    const chamadas: string[] = [];
+    const base = criarClienteFalso([new Error("indisponível"), new Error("indisponível"), new Error("indisponível"), saidaLlm()]);
+    const llm: LlmCliente = { completarJson: async args => {
+      chamadas.push(args.rota ?? "automatico");
+      return base.completarJson(args);
+    } };
+    const { id } = await novaSessao();
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: false });
+    assert.equal((await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id))).status, 202);
+    assert.equal((await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id))).status, 202);
+    assert.deepEqual(chamadas, ["primario", "primario"]);
+    assert.equal((await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id))).status, 502);
+    assert.deepEqual(chamadas, ["primario", "primario", "reserva"]);
+    assert.equal((await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id))).status, 200);
+    assert.deepEqual(chamadas, ["primario", "primario", "reserva", "reserva"]);
   });
 
   it("sessão inexistente: 404", async () => {
@@ -365,8 +383,7 @@ describe("finalizar", () => {
       } };
       definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio, fake: false });
       const resposta = await ler(await finalizarPost(post(`/api/sessoes/${id}/finalizar`, {}), params(id)));
-      assert.equal(resposta.status, 502);
-      assert.match(resposta.corpo.erro, /excedeu o prazo/);
+      assert.equal(resposta.status, 202);
       assert.equal(sinal?.aborted, true);
       assert.equal(await repo.obterScorecard(id), null);
       assert.equal((await repo.obter(id))?.estado.fase, "ENCERRADA");

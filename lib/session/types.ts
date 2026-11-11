@@ -138,6 +138,12 @@ export interface ReportStatus {
   hiddenTests?: HiddenTestsResult;
   error?: string;
   costUsd: number;
+  /** Número de tentativas encadeadas já iniciadas. */
+  attempt?: number;
+  /** A tentativa automática da reserva já foi consumida. */
+  reservaTentada?: boolean;
+  /** Critérios omitidos pela tentativa anterior: nova tentativa ocorre no próximo GET. */
+  missingCriteria?: string[];
 }
 
 export interface CodeVersion {

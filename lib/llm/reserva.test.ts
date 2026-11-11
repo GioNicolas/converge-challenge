@@ -49,6 +49,30 @@ test("semReserva usa reserva se o primário falhar", async (t) => {
   assert.notEqual(modelos[0], modelos[1]);
 });
 
+test("rota primario não usa reserva nem em erro; rota reserva começa direto nela", async (t) => {
+  const modelos: string[] = [];
+  ambiente(t, async (_input, init) => {
+    const corpo = JSON.parse(String(init?.body)) as { model: string };
+    modelos.push(corpo.model);
+    return modelos.length === 1 ? Response.json({ error: { message: "indisponível" } }, { status: 400 }) : ok();
+  });
+  await assert.rejects(completeJson({ role: "relatorio", system: "s", user: "u", schema, rota: "primario" }));
+  assert.equal(modelos.length, 1);
+  await completeJson({ role: "relatorio", system: "s", user: "u", schema, rota: "reserva" });
+  assert.equal(modelos.length, 2);
+  assert.equal(modelos[1], "google/gemini-3.5-flash-lite");
+});
+
+test("rota primario não dispara reserva por lentidão", async (t) => {
+  let chamadas = 0;
+  ambiente(t, (_input, init) => new Promise<Response>((_resolve, reject) => {
+    chamadas += 1;
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+  }));
+  await assert.rejects(completeJson({ role: "relatorio", system: "s", user: "u", schema, rota: "primario", prazoMs: 20 }));
+  assert.equal(chamadas, 1);
+});
+
 test("disjuntor aberto mantém quadro no primário; papel comum continua na rota direta", async (t) => {
   const modelos: string[] = [];
   const antes = { f: process.env.FEATHERLESS_API_KEY, o: process.env.OPENROUTER_API_KEY };

@@ -24,13 +24,17 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
   const [erro, setErro] = useState<string | null>(null);
   const tentativa = useRef(0);
 
-  const gerar = useCallback(async () => {
+  const gerar = useCallback(async (reiniciarAnimacao = true) => {
     const minha = ++tentativa.current;
     setErro(null);
-    setEtapa(0);
+    if (reiniciarAnimacao) setEtapa(0);
     try {
       const r = await fetch(`/api/sessoes/${encodeURIComponent(sessaoId)}/finalizar`, { method: "POST" });
       if (minha !== tentativa.current) return;
+      if (r.status === 202) {
+        window.setTimeout(() => { if (minha === tentativa.current) void gerar(false); }, 3000);
+        return;
+      }
       if (!r.ok) {
         const corpo = (await r.json().catch(() => null)) as { erro?: string } | null;
         setErro(corpo?.erro ?? "Não foi possível gerar o relatório agora.");
@@ -80,6 +84,8 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
             </button>
           </div>
         ) : (
+          <>
+          <p className="-mt-3 text-[12px] text-texto-suave">A análise pode levar alguns minutos.</p>
           <ol className="flex flex-col gap-3" aria-live="polite">
             {ETAPAS.map((texto, i) => {
               const feita = i < etapa;
@@ -130,9 +136,10 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
               );
             })}
           </ol>
+          </>
         )}
         <p className="text-xs leading-relaxed text-texto-suave">
-          Leva cerca de um minuto. Toda nota precisa de uma prova da sessão; o que não tiver prova fica sem nota.
+          Toda nota precisa de uma prova da sessão; o que não tiver prova fica sem nota.
         </p>
       </motion.div>
     </main>

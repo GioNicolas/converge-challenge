@@ -28,6 +28,7 @@ export type LlmArgs<T> = {
   imagem?: string | null;
   /** Não dispara a reserva por lentidão; ainda tenta a reserva se o primário falhar. */
   semReserva?: boolean;
+  rota?: "primario" | "reserva";
 };
 
 export type LlmResultado<T> = {

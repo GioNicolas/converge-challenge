@@ -264,12 +264,12 @@ describe("scorecard: regressões de proveniência", () => {
   it("timeout configurável valida o intervalo seguro e não aceita NaN ou negativos", () => {
     const anterior = process.env.AGENTE_TIMEOUT_SCORECARD_MS;
     try {
-      // Padrão e teto de 290 s: o relatório roda na Featherless, sem pressa, dentro dos 300 s da função na Vercel.
-      for (const valor of ["", "-1", "NaN", "290001", "1.5"]) {
-        process.env.AGENTE_TIMEOUT_SCORECARD_MS = valor; assert.equal(timeoutScorecardMs(), 290_000);
+      // Padrão e teto de 280 s: o relatório cabe na função de 300 s com folga para gravar.
+      for (const valor of ["", "-1", "NaN", "280001", "1.5"]) {
+        process.env.AGENTE_TIMEOUT_SCORECARD_MS = valor; assert.equal(timeoutScorecardMs(), 280_000);
       }
       process.env.AGENTE_TIMEOUT_SCORECARD_MS = "30000"; assert.equal(timeoutScorecardMs(), 30_000);
-      process.env.AGENTE_TIMEOUT_SCORECARD_MS = "290000"; assert.equal(timeoutScorecardMs(), 290_000);
+      process.env.AGENTE_TIMEOUT_SCORECARD_MS = "280000"; assert.equal(timeoutScorecardMs(), 280_000);
     } finally {
       if (anterior === undefined) delete process.env.AGENTE_TIMEOUT_SCORECARD_MS; else process.env.AGENTE_TIMEOUT_SCORECARD_MS = anterior;
     }

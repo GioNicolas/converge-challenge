@@ -23,9 +23,9 @@ import { blocoDasRegras, regrasDoCriterio } from "../squad-memory/prompt";
 
 export const MODELO_FINAL_PADRAO = "anthropic/claude-opus-5.5";
 // Medido em produção (Vercel): o scorecard com raciocínio passou de 45 s e a geração estourava sem salvar nada.
-export const TIMEOUT_SCORECARD_MS = 290_000;
+export const TIMEOUT_SCORECARD_MS = 280_000;
 /** Teto configurável: cabe no maxDuration (300 s) da rota, com folga para salvar. */
-export const TIMEOUT_SCORECARD_MAX_MS = 290_000;
+export const TIMEOUT_SCORECARD_MAX_MS = 280_000;
 export function timeoutScorecardMs(): number {
   const valor = Number(process.env.AGENTE_TIMEOUT_SCORECARD_MS);
   return Number.isInteger(valor) && valor > 0 && valor <= TIMEOUT_SCORECARD_MAX_MS ? valor : TIMEOUT_SCORECARD_MS;
@@ -551,6 +551,7 @@ export type DepsScorecard = {
   kit: Kit;
   problema: Problema;
   modelo?: string;
+  rota?: "primario" | "reserva";
   agora?: () => Date;
   aoUsar?: (uso: { modelo?: string; provedor?: string; reservaDisparada?: boolean; ms: number; entrada?: number; saida?: number; cache?: number; custo?: number }) => void;
 };
@@ -576,6 +577,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       maxTokens: MAX_TOKENS_SCORECARD,
       raciocinio: true,
       timeoutMs,
+      ...(deps.rota ? { rota: deps.rota } : {}),
       sinal: controle.signal,
     })]);
     deps.aoUsar?.({ modelo: r.modelo, provedor: r.provedor, reservaDisparada: r.reservaDisparada, ms: r.ms, entrada: r.uso?.entrada, saida: r.uso?.saida, cache: r.uso?.cache, custo: r.uso?.custo });
