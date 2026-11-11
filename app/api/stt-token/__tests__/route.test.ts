@@ -37,7 +37,12 @@ test("devolve o token e nunca a chave", async () => {
   }) as typeof fetch;
   const resposta = await GET(pedido());
   assert.equal(cabecalho, "chave-secreta");
-  assert.deepEqual(await resposta.json(), { token: "tk" });
+  const dados = await resposta.json() as { token: string; termos: string[] };
+  assert.equal(dados.token, "tk");
+  assert.ok(!JSON.stringify(dados).includes("chave-secreta"));
+  // Live coding: o vocabulário vem do problema e da linguagem da sessão, nos limites do Scribe.
+  assert.ok(dados.termos.includes("dicionário de pares"), dados.termos.join(", "));
+  assert.ok(dados.termos.length <= 50 && dados.termos.every((t) => t.length <= 20));
 });
 
 test("falha do ElevenLabs vira 502", async () => {
@@ -80,7 +85,11 @@ test("autoriza sessões reais do quadro e recusa quadro encerrado", async () => 
   const sessao = await repo.criar({ avaliacaoId: "demo", candidatoId: "teste", estado: estadoInicial() });
   globalThis.fetch = async () => Response.json({ token: "temporario" });
   const query = `?sessao_id=${sessao.id}&contexto=quadro`;
-  assert.equal((await GET(pedido(query))).status, 200);
+  const resposta = await GET(pedido(query));
+  assert.equal(resposta.status, 200);
+  // Quadro: os termosTranscricao do kit da avaliação viram o vocabulário do Scribe.
+  const { termos } = await resposta.json() as { termos: string[] };
+  assert.ok(termos.length > 0 && termos.length <= 50, termos.join(", "));
   await repo.salvarEstado(sessao.id, { ...sessao.estado, fase: "ENCERRADA" });
   assert.equal((await GET(pedido(query))).status, 409);
   assert.equal((await GET(pedido("?sessao_id=fantasma&contexto=quadro"))).status, 404);

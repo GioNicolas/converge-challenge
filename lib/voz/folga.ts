@@ -16,6 +16,32 @@ const TAXA = 44100;
 export const QUADROS_ANTES = 10;
 export const QUADROS_DEPOIS = 8;
 export const FOLGA_ANTES_S = (QUADROS_ANTES * AMOSTRAS_POR_QUADRO) / TAXA;
+/**
+ * Primeira fala, ou fala depois de a saída ficar parada: ~0,7 s antes da voz. O relato (#73) perdia de 0,5 a 0,7 s
+ * ("...otti, vou montar"), mais que os 0,26 s da folga normal, porque a saída de som dormia entre as falas.
+ */
+export const QUADROS_ANTES_DEPOIS_DE_PARADA = 27;
+/** Sem som há mais que isso, a saída pode ter dormido: a próxima fala usa a folga maior. */
+export const PARADA_LONGA_MS = 5_000;
+
+export const segundosDeQuadros = (quadros: number) => (quadros * AMOSTRAS_POR_QUADRO) / TAXA;
+
+let ultimaSaidaEm: number | null = null;
+
+/** Registra que a voz do Totti acabou de sair (fim de uma fala ou de uma parte dela). */
+export function marcarSaidaDeSom(agora = performance.now()): void {
+  ultimaSaidaEm = agora;
+}
+
+/** Quantos quadros de silêncio vão antes da próxima fala: mais quando a saída esteve parada (ou nunca tocou). */
+export function quadrosAntesDaFala(agora = performance.now()): number {
+  return ultimaSaidaEm === null || agora - ultimaSaidaEm > PARADA_LONGA_MS ? QUADROS_ANTES_DEPOIS_DE_PARADA : QUADROS_ANTES;
+}
+
+/** Só para testes: volta ao estado de "nada tocou ainda". */
+export function esquecerSaidaDeSom(): void {
+  ultimaSaidaEm = null;
+}
 
 let quadro: Uint8Array | null = null;
 function quadroDeSilencio(): Uint8Array {
@@ -31,16 +57,21 @@ export function semId3(bytes: Uint8Array): Uint8Array {
   return bytes.subarray(Math.min(bytes.length, 10 + tamanho + rodape));
 }
 
-export function comFolga(bytes: Uint8Array, alinhamento: Alinhamento): { bytes: Uint8Array; alinhamento: Alinhamento } {
+export function comFolga(
+  bytes: Uint8Array,
+  alinhamento: Alinhamento,
+  quadrosAntes = QUADROS_ANTES,
+): { bytes: Uint8Array; alinhamento: Alinhamento } {
   const silencio = quadroDeSilencio();
   const voz = semId3(bytes);
-  const saida = new Uint8Array(silencio.length * (QUADROS_ANTES + QUADROS_DEPOIS) + voz.length);
+  const saida = new Uint8Array(silencio.length * (quadrosAntes + QUADROS_DEPOIS) + voz.length);
   let pos = 0;
-  for (let i = 0; i < QUADROS_ANTES; i++, pos += silencio.length) saida.set(silencio, pos);
+  for (let i = 0; i < quadrosAntes; i++, pos += silencio.length) saida.set(silencio, pos);
   saida.set(voz, pos);
   pos += voz.length;
   for (let i = 0; i < QUADROS_DEPOIS; i++, pos += silencio.length) saida.set(silencio, pos);
-  const deslocar = (t: number[]) => t.map((s) => s + FOLGA_ANTES_S);
+  const folgaS = segundosDeQuadros(quadrosAntes);
+  const deslocar = (t: number[]) => t.map((s) => s + folgaS);
   return {
     bytes: saida,
     alinhamento: {

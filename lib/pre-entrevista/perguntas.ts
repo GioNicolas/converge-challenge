@@ -117,10 +117,19 @@ export function perguntasDaArea(
 
 /**
  * Pergunta de contexto: o que a vaga não diz e só a recrutadora sabe. A resposta vira eliminatório ou contexto
- * nas notas do entrevistador (ver `extrator.ts` e `guia.ts`).
+ * nas notas do entrevistador (ver `extrator.ts` e `guia.ts`). É aberta: "Tem alguma coisa que...?" convidava um "Tem" seco.
  */
 export const PERGUNTA_CONTEXTO =
-  "Tem alguma coisa que reprova direto pra vocês, ou algo que fez uma contratação passada não dar certo?";
+  "O que reprova um candidato direto pra vocês, ou o que fez uma contratação passada não dar certo?";
+
+/**
+ * Ela disse que existe algo (que reprova direto, ou que deu errado numa contratação), sem dizer o quê: o Totti pergunta
+ * só qual é (passo `pedir_o_que_faltou`). Cobre as duas metades da pergunta de contexto: "já aconteceu" fala da contratação.
+ */
+export const PERGUNTA_O_QUE_REPROVA = "E o que é: o que reprova direto, ou o que deu errado?";
+
+/** Resposta vaga a um aprofundamento: sem pergunta na fala do modelo, o Totti pede um exemplo (passo `pedir_o_que_faltou`). */
+export const PERGUNTA_EXEMPLO = "Pode me dar um exemplo de como isso apareceria na entrevista?";
 
 /**
  * Molde de pergunta que só rende o óbvio: "o que separa / diferencia um ótimo de um fraco", "o que faz você achar

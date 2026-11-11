@@ -35,11 +35,13 @@ export function normalizarConfig(config: InterviewConfig): InterviewConfig {
   // System design não usa o banco de questões da IDE: o problemId é do catálogo da pré-entrevista.
   if (config.mode !== "live_coding") return config;
   const existe = hasProblem(config.problemId);
+  // Questão pedida pela recrutadora: o pedido vence o nível padrão, e o nível passa a ser o da questão.
+  if (existe && config.problemaFixado) return { ...config, difficulty: problems[config.problemId]?.difficulty ?? config.difficulty };
   if (existe && (!config.difficulty || problems[config.problemId]?.difficulty === config.difficulty)) return config;
   const escolhida = selecionarProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty, semente: config.roleTitle });
   const motivo = existe ? `é de nível ${problems[config.problemId]?.difficulty}, e a config pede ${config.difficulty}` : "não existe no banco do agente";
   console.warn(`[config] ${config.id}: problema "${config.problemId}" ${motivo}; usando "${escolhida.id}"`);
-  return { ...config, problemId: escolhida.id, difficulty: escolhida.difficulty };
+  return { ...config, problemId: escolhida.id, difficulty: escolhida.difficulty, problemaFixado: undefined };
 }
 
 export async function saveConfig(config: InterviewConfig): Promise<void> {
@@ -55,12 +57,14 @@ export async function saveConfig(config: InterviewConfig): Promise<void> {
 }
 
 /**
- * A questão desta entrevista: sorteada entre as que servem ao nível e ao foco da vaga (ver `sortearProblema`).
+ * A questão desta entrevista: sorteada entre as que servem ao nível e ao foco da vaga (ver `sortearProblema`), a menos
+ * que a recrutadora tenha pedido uma (`problemaFixado`): aí toda entrevista da vaga abre com ela.
  * Só a página da entrevista chama: ela passa a questão para a IDE, e a IDE manda o id no `session_started`,
  * então o agente fala da mesma questão que o candidato vê (`withProblem` em /api/events).
  */
 export function comQuestaoSorteada(config: InterviewConfig): InterviewConfig {
   if (config.mode !== "live_coding") return config;
+  if (config.problemaFixado && hasProblem(config.problemId)) return config;
   const sorteada = sortearProblema({ seniority: config.seniority, focus: config.focus, difficulty: config.difficulty });
   if (!hasProblem(sorteada.id)) return config;
   return { ...config, problemId: sorteada.id, difficulty: sorteada.difficulty };

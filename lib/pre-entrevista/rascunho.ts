@@ -12,9 +12,14 @@ import { problems } from "@/lib/problems";
 import { selecionarProblema } from "@/lib/problems/selecao";
 import { CATALOGO, criteriosIniciais, modoAtivo, problemaPadrao } from "./catalogo";
 import { LINGUAGENS_IDE } from "./linguagens";
+import { notaDoTema, problemaFixado } from "./problema-pedido";
 
 /** Uma fala da conversa de pré-entrevista. */
-export type Turno = { role: "recrutadora" | "agente"; text: string };
+/**
+ * Uma fala da conversa. `naoEntendida`: fala dela que o Totti não entendeu (transcrição quebrada, sem relação com a
+ * pergunta); fica na tela e no contexto do modelo, mas não vai para a extração nem para a cobertura (issue #76).
+ */
+export type Turno = { role: "recrutadora" | "agente"; text: string; naoEntendida?: true };
 
 /**
  * O que a recrutadora decidiu quando o formato não mede uma área: troca de formato, deixa para a próxima etapa
@@ -71,6 +76,20 @@ export const Rascunho = z.object({
   recruiterNotes: z.string().default(""),
   durationMin: z.number().int().positive().optional(),
   problemId: z.string().optional(),
+  /**
+   * Questão que ela pediu pelo nome (ver `problema-pedido.ts`). `reconhecido`: está no banco e fica fixada em `problemId`;
+   * `nao_existe`: não está no banco; `system_design`: no quadro a questão é gerada para a vaga (`tema` vira contexto);
+   * `sorteio`: ela preferiu o sorteio. `turno` é a fala dela que trouxe o pedido. Interno: não vai no InterviewConfig.
+   */
+  pedidoProblema: z
+    .object({
+      texto: z.string(),
+      resultado: z.enum(["reconhecido", "nao_existe", "system_design", "sorteio"]),
+      turno: z.number().int(),
+      origem: z.enum(["fala", "extrator"]),
+      tema: z.string().optional(),
+    })
+    .optional(),
   /** Se a recrutadora já confirmou (ou corrigiu) o que o Jev sugeriu. */
   confirmado: z.object({ mode: z.boolean(), seniority: z.boolean(), focus: z.boolean() }),
   /** Probabilidade máxima já observada de cada tópico estar coberto (ver `cobertura.ts`). Só sobe. */
@@ -160,7 +179,7 @@ export function mudarModo(r: Rascunho, modo: InterviewMode): Rascunho {
     criteriosIniciais(modo, areas).filter((c) => areas.includes(c.focus)),
     r.focus,
   );
-  return { ...r, mode: modo, criteria, problemId: undefined };
+  return { ...r, mode: modo, criteria, problemId: undefined, pedidoProblema: undefined };
 }
 
 /** Formato desligado pela trava (`SYSTEM_DESIGN_ATIVO = false`) volta para live coding; com ela ligada, não muda nada. Função pura. */
@@ -248,15 +267,18 @@ function gerarId(): string {
 }
 
 /**
- * Questão da entrevista. Se a recrutadora pediu uma específica, vale a dela. Senão, em live coding o agente
- * escolhe do banco pelo nível da senioridade e pelo foco da vaga (ver `lib/problems/selecao.ts`).
+ * Questão da entrevista. Se a recrutadora pediu uma do banco, vale a dela, fixada (sem sorteio na entrevista) e com o
+ * nível da própria questão. Senão, em live coding o agente escolhe do banco pelo nível da senioridade e pelo foco da
+ * vaga (ver `lib/problems/selecao.ts`), e a entrevista sorteia entre as do mesmo nível e foco.
  */
-function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil" | "medio" } {
+function escolherProblema(r: Rascunho): { problemId: string; difficulty?: "facil" | "medio"; problemaFixado?: true } {
   if (r.mode !== "live_coding") {
     const textoDaVaga = `${r.roleTitle}\n${r.jobDescription ?? ""}`;
     return { problemId: r.problemId ?? problemaPadrao(r.mode, r.focus, textoDaVaga) };
   }
-  if (r.problemId) return { problemId: r.problemId, difficulty: problems[r.problemId]?.difficulty };
+  const fixado = problemaFixado(r);
+  if (fixado) return { problemId: fixado.id, difficulty: fixado.difficulty, problemaFixado: true };
+  if (r.problemId && problems[r.problemId]) return { problemId: r.problemId, difficulty: problems[r.problemId].difficulty };
   const escolhida = selecionarProblema({ seniority: r.seniority, focus: r.focus, semente: r.roleTitle });
   return { problemId: escolhida.id, difficulty: escolhida.difficulty };
 }
@@ -301,7 +323,7 @@ export function paraInterviewConfig(
     jobDescription: r.jobDescription,
     seniority: r.seniority,
     focus: r.focus,
-    recruiterNotes: acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado),
+    recruiterNotes: [acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado), notaDoTema(r)].filter(Boolean).join("\n"),
     tone: preferencias?.tom ?? "amigavel",
     hints: preferencias?.dicas ?? "leves",
     criteria,

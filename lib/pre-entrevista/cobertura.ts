@@ -4,7 +4,7 @@
  * O Jev responde, em uma chamada, uma pergunta de sim/não por item (`noul` = probabilidade de sim).
  *  - Tópicos (`topicosDo`) são cumulativos: uma vez cobertos (probabilidade de pelo menos 0,6), seguem cobertos.
  *  - Sinais (`sinaisDo`) valem a leitura do turno atual, porque a recrutadora pode mudar de ideia:
- *    quer/dispensa por área, se a última resposta foi vaga e se ela aprovou o resumo.
+ *    quer/dispensa por área, se a última resposta foi vaga ou incompleta e se ela aprovou o resumo.
  * O planejador (`planejador.ts`) usa os sinais para escolher o próximo passo do Totti.
  */
 import { choice, noul } from "@typesafe-ai/sdk";
@@ -103,6 +103,11 @@ export interface Cobertura extends ChamadaJev {
 export interface ContextoCobertura {
   /** Última fala do Totti, para os sinais que dependem do que foi perguntado (resposta vaga, aprovação do resumo). */
   ultimaFalaAgente?: string;
+  /**
+   * O Totti acabou de fazer a pergunta de contexto: só então o Jev lê se ela confirmou que existe algo sem dizer o quê
+   * (`disse_que_tem_sem_dizer`). Nos outros turnos o planejador não usa esse sinal, e ele fica fora da chamada.
+   */
+  depoisDoContexto?: boolean;
 }
 
 const TAREFA_COBERTURA =
@@ -236,11 +241,29 @@ const DISSE_ELIMINATORIO: Pergunta = {
 };
 
 /**
- * Sinais do turno: quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo e a escolha
- * sobre a troca de formato (só faz sentido logo depois da oferta, mas o Jev responde sempre; o planejador decide se usa).
+ * Depois da pergunta de contexto: ela confirmou que existe algo sem dizer o quê. O planejador pede o que faltou, uma vez
+ * (ver `pedir_o_que_faltou`). Só entra na chamada do Jev no turno logo depois da pergunta de contexto.
  */
-function sinaisDo(): Pergunta[] {
-  return [
+const DISSE_QUE_TEM_SEM_DIZER: Pergunta = {
+  id: "disse_que_tem_sem_dizer",
+  pergunta:
+    "Na última fala, a recrutadora confirmou que existe algo que reprova o candidato direto, ou algo que deu errado numa " +
+    "contratação passada, mas sem dizer o que é?",
+  sinal_sim:
+    "Sim se ela só confirmou que existe, sem dizer o quê: 'tem', 'sim', 'tem sim', 'algumas coisas', 'tem uma coisa, sim', " +
+    "'já aconteceu'. Esta pergunta é justamente sobre a resposta incompleta: a confirmação seca conta como sim.",
+  sinal_nao:
+    "Não se ela disse o que é, mesmo curto ('não saber SQL', 'quem não testa'), disse que não tem nada, respondeu outra coisa, " +
+    "ou a fala não faz sentido como resposta (truncada, quebrada ou sem relação com a pergunta).",
+};
+
+/**
+ * Sinais do turno: quer/dispensa por área, resposta vaga, contexto incompleto (só depois da pergunta de contexto), dúvida,
+ * pedido de mudança, aprovação do resumo e a escolha sobre a troca de formato (só faz sentido logo depois da oferta, mas o
+ * Jev responde sempre; o planejador decide se usa).
+ */
+function sinaisDo(depoisDoContexto = false): Pergunta[] {
+  const sinais: Pergunta[] = [
     ...AREAS.map(quererDaArea),
     ...AREAS.map(dispensaDaArea),
     DISSE_ELIMINATORIO,
@@ -293,7 +316,8 @@ function sinaisDo(): Pergunta[] {
         "Sim se ela respondeu de forma vaga: 'quero alguém bom', 'alguém que saiba bem', 'um pouco de cada', " +
         "'implementar bem os algoritmos', 'depende'. Genérico continua sendo genérico mesmo que seja bem-intencionado.",
       sinal_nao:
-        "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, ou respondeu outra coisa.",
+        "Não se ela deu um comportamento concreto ('ruim é não saber explicar o que a solução faz'), escolheu entre opções concretas, " +
+        "respondeu outra coisa, ou a fala não faz sentido como resposta (truncada, quebrada ou sem relação com a pergunta).",
     },
     {
       id: "pediu_system_design",
@@ -366,6 +390,7 @@ function sinaisDo(): Pergunta[] {
       sinal_nao: "Não se ela pediu mudança ('muda o tom', 'tira pressão', 'espera'), fez pergunta ou respondeu outra coisa.",
     },
   ];
+  return depoisDoContexto ? [...sinais, DISSE_QUE_TEM_SEM_DIZER] : sinais;
 }
 
 /** Última fala do agente na transcrição, se houver. */
@@ -408,7 +433,7 @@ function faltandoDo(topicos: Topico[], cobertura: Record<string, number>, emJogo
  */
 export async function avaliarCobertura(r: Rascunho, transcricao: Turno[], contexto: ContextoCobertura = {}): Promise<Cobertura> {
   const topicos = topicosDo(r);
-  const sinais = sinaisDo();
+  const sinais = sinaisDo(contexto.depoisDoContexto);
   const inicio = Date.now();
 
   const request = {

@@ -53,6 +53,8 @@ export type OpcoesTraco = {
   semente: number;
   /** Cor do traço. Padrão: a cor do agente. */
   cor?: string;
+  /** 0 a 100. Padrão: 100. Os destaques do Totti usam menos, para parecer marca de caneta de quem comenta. */
+  opacidade?: number;
 };
 
 export type CamadaAgente = {
@@ -70,7 +72,7 @@ export type CamadaAgente = {
   candidatoOcupado(): boolean;
   /** Espera o candidato terminar o que está fazendo (até `limiteMs`). */
   esperarCandidatoLivre(limiteMs?: number): Promise<void>;
-  /** Apaga (com esmaecer) todos os elementos de um grupo. */
+  /** Apaga (com esmaecer) todos os elementos de um grupo e dos subgrupos dele (`<grupo>:...`). */
   apagarGrupo(grupo: string): Promise<void>;
   /** Chamar a cada onChange: restaura o que o candidato tiver mexido e reposiciona as anotações ancoradas. */
   proteger(cena: readonly ExcalidrawElement[]): void;
@@ -219,6 +221,7 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
         points: pontos,
         strokeColor: o.cor ?? corDoAgente(),
         strokeWidth: o.espessura ?? 2,
+        opacity: o.opacidade ?? 100,
         roughness: 0,
         roundness: null,
         seed: o.semente,
@@ -286,16 +289,18 @@ export function criarCamadaAgente(api: ExcalidrawImperativeAPI): CamadaAgente {
     },
 
     async apagarGrupo(grupo) {
-      const doGrupo = [...oficiais.values()].filter((e) => e.customData?.grupo === grupo);
+      const pertence = (g: unknown) => typeof g === "string" && (g === grupo || g.startsWith(`${grupo}:`));
+      const doGrupo = [...oficiais.values()].filter((e) => pertence(e.customData?.grupo));
+      for (const g of [...ancoras.keys()]) if (pertence(g)) ancoras.delete(g);
       if (doGrupo.length === 0) return;
       const passos = 8;
       for (let p = passos - 1; p >= 0; p--) {
-        aplicar(doGrupo.map((e) => newElementWith(e, { opacity: Math.round((100 * p) / passos) })));
+        // Esmaece a partir da opacidade de cada um (o destaque já é translúcido).
+        aplicar(doGrupo.map((e) => newElementWith(e, { opacity: Math.round((e.opacity * p) / passos) })));
         await esperar(30);
       }
       aplicar([], doGrupo.map((e) => e.id));
-      ancoras.delete(grupo);
-      deslocamento.delete(grupo);
+      for (const g of [...deslocamento.keys()]) if (pertence(g)) deslocamento.delete(g);
     },
 
     proteger(cena) {

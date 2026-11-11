@@ -19,6 +19,8 @@ const eslintConfig = [
       "build/**",
       "next-env.d.ts",
       ".cate/**",
+      "playwright-report/**",
+      "test-results/**",
       "public/pyodide/**",
       "public/monaco/**",
     ],

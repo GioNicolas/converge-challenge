@@ -6,13 +6,14 @@
  *
  * `proximoPasso` é função pura: recebe o foco, a cobertura, os sinais e o que já foi perguntado,
  * e devolve um `Passo`. Regras:
- *  - cada área recebe no máximo uma pergunta de aprofundamento, e não se pergunta de novo por resposta curta;
+ *  - cada área recebe no máximo uma pergunta de aprofundamento; resposta vaga a ela ganha um pedido do concreto
+ *    (`pedir_o_que_faltou`), uma vez por conversa e dentro de `MAX_APROFUNDAMENTOS`;
  *  - área que ela já tratou na fala (respondeu ou declarou central) não é perguntada de novo;
  *  - no máximo `MAX_APROFUNDAMENTOS` perguntas de aprofundamento por conversa, e só em área que ela pediu ou na de
  *    maior peso: perguntar de uma área que ela não trouxe puxa a resposta para ela e infla o peso dessa área;
  *  - se ela já falou da área principal antes de qualquer aprofundamento, uma pergunta de escolha sobre o que ela disse;
  *  - antes do primeiro resumo, uma pergunta de contexto (o que reprova direto, o que não deu certo antes), se ela ainda
- *    não disse nenhum eliminatório;
+ *    não disse nenhum eliminatório; se ela disse que existe, mas não disse o quê ("Tem"), o Totti pergunta qual é, uma vez;
  *  - pedido de system design: com o formato disponível, vira a troca escolhida (ver `trocaPedida`); com a trava
  *    desligada (`SYSTEM_DESIGN_ATIVO = false`), aviso uma vez, e a conversa segue;
  *  - cada mudança de foco (e cada área ainda sem definição depois de uma mudança) é perguntada uma vez;
@@ -33,7 +34,7 @@ import type { DecisaoTradeoff, DecisoesTradeoff, Foco } from "./rascunho";
 
 /** Quantas vezes o início e o nível podem ser perguntados: a pergunta e uma nova tentativa. */
 export const MAX_PERGUNTAS_POR_TOPICO = 2;
-/** Teto de perguntas de aprofundamento na conversa inteira (uma por área, no máximo). */
+/** Teto de perguntas de aprofundamento na conversa inteira (uma por área, no máximo), contando o pedido do concreto. */
 export const MAX_APROFUNDAMENTOS = 2;
 /** Depois de tantos resumos, o Totti para de pedir revisão e encerra. */
 export const MAX_RESUMOS = 3;
@@ -43,7 +44,7 @@ export const MAX_DUVIDAS_SEGUIDAS = 2;
 export interface AprofundarPasso {
   tipo: "aprofundar";
   area: FocusArea;
-  /** Pergunta o que separa o ótimo do fraco na área. (Não há follow-up: uma pergunta por área.) */
+  /** Pergunta o que separa o ótimo do fraco na área. Resposta vaga ganha `pedir_o_que_faltou`, não outro aprofundamento. */
   motivo: "inicial";
   /** Troca de formato recém-feita: o Totti confirma a troca numa frase antes da pergunta. */
   confirmaTroca?: InterviewMode;
@@ -58,6 +59,20 @@ export interface OferecerTradeoffPasso {
   area: FocusArea;
   modoAlternativo: InterviewMode;
 }
+
+/**
+ * A resposta dela faz sentido, mas faltou o conteúdo. O Totti pede só o que faltou, uma vez:
+ *  - `contexto`: depois da pergunta de contexto, ela disse que existe algo ("Tem", "tem sim") sem dizer o quê;
+ *  - `criterio`: depois de um aprofundamento, a resposta foi vaga ("Somente que ele raciocine"). Uma vez por conversa,
+ *    não por área, e conta no teto de `MAX_APROFUNDAMENTOS`. Não muda peso de área: só busca o que faltou.
+ * Fala sem sentido como resposta (transcrição quebrada) não é este passo: os sinais dizem não para ela.
+ */
+export type PedirOQueFaltouPasso =
+  | { tipo: "pedir_o_que_faltou"; sobre: "contexto" }
+  | { tipo: "pedir_o_que_faltou"; sobre: "criterio"; area: FocusArea };
+
+/** Tópico da contagem de perguntas de cada pedido do que faltou (ver `aplicarPasso`). */
+export const TOPICO_FALTOU = { contexto: "faltou_contexto", criterio: "faltou_criterio" } as const;
 
 export interface ResponderDuvidaPasso {
   tipo: "responder_duvida";
@@ -74,6 +89,7 @@ export type Passo =
   /** O que a vaga não diz: o que reprova direto e o que não deu certo antes. Uma vez, antes do primeiro resumo. */
   | { tipo: "perguntar_contexto" }
   | AprofundarPasso
+  | PedirOQueFaltouPasso
   | OferecerTradeoffPasso
   | {
       tipo: "confirmar_mudanca_foco";
@@ -105,7 +121,10 @@ export type Passo =
 export interface PlanoEstado {
   /** Sinais do último turno (quer/dispensa por área, resposta vaga, dúvida, pedido de mudança, aprovação do resumo, escolha de formato). */
   sinais: Record<string, number>;
-  /** Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `nivel`, `criterio_<area>`, `duvida_<area>`, `tradeoff_<area>`, `formato_indisponivel`). */
+  /**
+   * Quantas vezes cada tópico já foi perguntado (`confirmou_inicio`, `nivel`, `contexto`, `criterio_<area>`, `duvida_<area>`,
+   * `tradeoff_<area>`, `formato_indisponivel`, `faltou_contexto`, `faltou_criterio`).
+   */
   perguntasPorTopico: Record<string, number>;
   /** Áreas que já entraram numa confirmação de mudança de foco ou numa dúvida. */
   mudancasPerguntadas: FocusArea[];
@@ -166,19 +185,25 @@ export interface EstadoPlanejamento extends PlanoEstado {
 
 const criterio = (area: FocusArea) => `criterio_${area}`;
 
+/** Perguntas de aprofundamento já feitas: as de cada área e o pedido do concreto depois de resposta vaga. */
+function aprofundamentosFeitos(perguntasPorTopico: Record<string, number>): number {
+  return Object.entries(perguntasPorTopico)
+    .filter(([id]) => id.startsWith("criterio_") || id === TOPICO_FALTOU.criterio)
+    .reduce((soma, [, n]) => soma + n, 0);
+}
+
 /**
  * Próximo aprofundamento: a área que ela mais pediu (depois pelo peso no foco) que ainda não foi perguntada.
- * Área já tratada na fala, área que o formato não mede e área com dúvida pendente ficam de fora. Não há follow-up:
- * resposta curta não reabre a área. Depois de `MAX_APROFUNDAMENTOS` perguntas, não há aprofundamento. Função pura.
+ * Área já tratada na fala, área que o formato não mede e área com dúvida pendente ficam de fora. Resposta vaga não
+ * reabre a área com outro aprofundamento: o pedido do concreto é outro passo (`pedirOQueFaltouPasso`), e conta no teto.
+ * Depois de `MAX_APROFUNDAMENTOS` perguntas, não há aprofundamento. Função pura.
  */
 function aprofundarPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): AprofundarPasso | undefined {
   const coberto = (id: string) => (e.cobertura[id] ?? 0) >= LIMIAR;
   const perguntas = (id: string) => e.perguntasPorTopico[id] ?? 0;
   const medida = (area: FocusArea) => e.mode === undefined || mede(e.mode, area);
 
-  const feitas = Object.entries(e.perguntasPorTopico)
-    .filter(([id]) => id.startsWith("criterio_"))
-    .reduce((soma, [, n]) => soma + n, 0);
+  const feitas = aprofundamentosFeitos(e.perguntasPorTopico);
   if (feitas >= MAX_APROFUNDAMENTOS) return undefined;
 
   const peso = (area: FocusArea) => e.focus.find((f) => f.area === area)?.weight ?? 0;
@@ -208,6 +233,39 @@ function aprofundarPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): Aprofundar
     .filter((a) => medida(a) && jaFalou.has(a) && perguntas(`duvida_${a}`) === 0)
     .sort((a, b) => peso(b) - peso(a))[0];
   return principal ? { tipo: "aprofundar", area: principal, motivo: "inicial" } : undefined;
+}
+
+/**
+ * Pedido do que faltou na resposta à última pergunta, se cabe (ver `PedirOQueFaltouPasso`). Só antes do primeiro resumo.
+ *  - Depois da pergunta de contexto: ela disse que existe algo sem dizer o quê (`disse_que_tem_sem_dizer`) e nenhum
+ *    eliminatório foi coberto. Uma vez.
+ *  - Depois de um aprofundamento (sozinho, não emendado numa mudança de foco): resposta vaga (`resposta_vaga`), o
+ *    critério da área continua sem cobertura e a área segue em jogo. Uma vez por conversa, só abaixo de
+ *    `MAX_APROFUNDAMENTOS`, e nunca no lugar de uma área ainda não perguntada.
+ * Função pura.
+ */
+function pedirOQueFaltouPasso(e: EstadoPlanejamento, emJogo: FocusArea[]): PedirOQueFaltouPasso | undefined {
+  if (e.resumos > 0) return undefined;
+  const coberto = (id: string) => (e.cobertura[id] ?? 0) >= LIMIAR;
+  const perguntas = (id: string) => e.perguntasPorTopico[id] ?? 0;
+  const sinal = (id: string) => e.sinais[id] ?? 0;
+  const emCurso = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
+
+  if (emCurso?.tipo === "perguntar_contexto") {
+    const faltou = sinal("disse_que_tem_sem_dizer") >= LIMIAR && !coberto("eliminatorios");
+    return faltou && perguntas(TOPICO_FALTOU.contexto) === 0 ? { tipo: "pedir_o_que_faltou", sobre: "contexto" } : undefined;
+  }
+
+  // Só depois de um aprofundamento sozinho: emendado numa confirmação de mudança de foco, um "pode ser" vago pode estar
+  // respondendo à mudança, não ao critério.
+  const area = emCurso?.tipo === "aprofundar" ? emCurso.area : undefined;
+  if (!area || sinal("resposta_vaga") < LIMIAR || coberto(criterio(area)) || !emJogo.includes(area)) return undefined;
+  if (e.mode !== undefined && !mede(e.mode, area)) return undefined;
+  const feitas = aprofundamentosFeitos(e.perguntasPorTopico);
+  if (perguntas(TOPICO_FALTOU.criterio) > 0 || feitas >= MAX_APROFUNDAMENTOS) return undefined;
+  // O pedido conta no teto, mas não toma a vaga de uma área que ainda não foi perguntada: a área nova vem antes.
+  if (feitas + 1 >= MAX_APROFUNDAMENTOS && aprofundarPasso(e, emJogo)) return undefined;
+  return { tipo: "pedir_o_que_faltou", sobre: "criterio", area };
 }
 
 /**
@@ -426,7 +484,12 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
     return { tipo: "confirmar_inicio" };
   }
 
-  // 4. Aprofundar: follow-up da resposta genérica, ou a próxima área. Depois de uma troca, confirma a troca antes.
+  // 4. Resposta que faz sentido mas não diz o conteúdo ("Tem", "Somente que ele raciocine"): pede o que faltou, uma vez.
+  // Vem antes da próxima área e do resumo: depois que o resumo é escolhido, nem o modelo pode mais perguntar.
+  const faltou = pedirOQueFaltouPasso(e, emJogo);
+  if (faltou) return faltou;
+
+  // 4a. Aprofundar: a próxima área. Depois de uma troca, confirma a troca antes.
   const aprofundar = aprofundarPasso(e, emJogo);
   if (aprofundar) return e.trocaPendente ? { ...aprofundar, confirmaTroca: e.trocaPendente } : aprofundar;
 
@@ -463,6 +526,9 @@ export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
     case "aprofundar":
       contar(criterio(passo.area));
       break;
+    case "pedir_o_que_faltou":
+      contar(TOPICO_FALTOU[passo.sobre]);
+      break;
     case "oferecer_tradeoff":
       contar(`tradeoff_${passo.area}`);
       break;
@@ -497,6 +563,8 @@ export function descreverPasso(passo: Passo): string {
       return "perguntar_contexto";
     case "aprofundar":
       return `aprofundar ${passo.area} (${passo.motivo})${passo.confirmaTroca ? ` com troca confirmada para ${passo.confirmaTroca}` : ""}`;
+    case "pedir_o_que_faltou":
+      return passo.sobre === "contexto" ? "pedir_o_que_faltou contexto" : `pedir_o_que_faltou ${passo.area} (resposta vaga)`;
     case "oferecer_tradeoff":
       return `oferecer_tradeoff ${passo.area} -> ${passo.modoAlternativo}`;
     case "informar_formato_indisponivel":
