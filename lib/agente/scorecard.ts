@@ -7,7 +7,8 @@ import { neutralizar, tentativasEmTextos } from "../seguranca/injecao";
 import { z } from "zod";
 import type { EventoArmazenado } from "./armazenamento/repositorio";
 import { ErroLlm, type LlmCliente } from "./llm/cliente";
-import type { Criterio, Kit, Problema } from "./kits/tipos";
+import { criterioSoPorFala, type Criterio, type Kit, type Problema } from "./kits/tipos";
+import { ehItemGenerico, ehPedidoDeRepeticao, falaDeProximaConversa, fatoDeCobertura, semTermosInternos, textoCulpaOCandidatoPorPedido } from "../totti/relatorio";
 import {
   montarSistemaDinamicoScorecard,
   montarSistemaEstaticoScorecard,
@@ -15,8 +16,8 @@ import {
   NOME_SCHEMA_SCORECARD,
 } from "./prompts/scorecard";
 
-export { NIVEIS_ADAPTACAO };
-import type { EstadoSessao } from "./sessao/estado";
+export { NIVEIS_ADAPTACAO, ehItemGenerico };
+import { tempoDaEntrevista, type EstadoSessao } from "./sessao/estado";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { SquadRule } from "../contracts";
 import { blocoDasRegras, regrasDoCriterio } from "../squad-memory/prompt";
@@ -188,7 +189,8 @@ export function extrairFontes(estado: EstadoSessao, eventos: EventoArmazenado[],
   // desenhou. Resolve no fim da sessão, quando inclusive os lotes tardios chegaram.
   const registros = [...eventos].filter(e => e.tipo === "desenho" && typeof dadosComo(e.dados).grafo === "string")
     .sort((a, b) => Date.parse(a.horario) - Date.parse(b.horario));
-  const observacoes = estado.observacoes.map(o => {
+  // Pedido de repetição não é sinal sobre o candidato: a observação "pediu repetições sucessivas" nunca vira prova.
+  const observacoes = estado.observacoes.filter(o => !textoCulpaOCandidatoPorPedido(o.evidencia)).map(o => {
     if (!o.desenho) return o;
     const anteriores = registros.filter(e => Date.parse(e.horario) <= Date.parse(o.desenho!.horario));
     let indice = anteriores.length - 1;
@@ -254,11 +256,69 @@ export type ParametrosGuardas = {
   sessaoId: string;
   candidatoId: string;
   problemaId: string;
-  rubrica: (Pick<Criterio, "id"> & Partial<Pick<Criterio, "niveis" | "nome">>)[];
+  rubrica: (Pick<Criterio, "id"> & Partial<Pick<Criterio, "niveis" | "nome" | "provaSoPorFala">>)[];
   fontes: FontesDeProva;
   origem: "llm" | "fake";
   agora?: () => Date;
+  /** Quanto durou a entrevista e quanto estava previsto. Ausente: duração desconhecida (conta só a cobertura). */
+  duracao?: DuracaoDaSessao | null;
+  /** Sinais esperados do problema: dizem o que faltou observar nos critérios sem prova. */
+  problema?: Pick<Problema, "sinaisEsperados">;
 };
+
+export type DuracaoDaSessao = { decorridoMin: number; previstoMin: number };
+
+/** "Não avançar" exige entrevista com pelo menos esta fração do tempo previsto... */
+export const FRACAO_MINIMA_DE_DURACAO = 0.6;
+/** ...ou esta fração dos critérios com nota. */
+export const FRACAO_MINIMA_DE_COBERTURA = 2 / 3;
+
+/**
+ * Do começo ao último registro da sessão (não até "agora": gerar de novo depois não alonga a entrevista).
+ * null quando a sessão não guardou o começo (estado antigo): a duração fica desconhecida.
+ */
+export function duracaoDaSessao(estado: EstadoSessao, eventos: EventoArmazenado[]): DuracaoDaSessao | null {
+  if (!estado.iniciadaEm) return null;
+  const fim = Math.max(estado.iniciadaEm,
+    ...eventos.map(e => Date.parse(e.horario)).filter(Number.isFinite),
+    ...estado.conversa.map(f => f.em));
+  const previstoMin = tempoDaEntrevista(estado, fim).totalMin;
+  return previstoMin > 0 ? { decorridoMin: (fim - estado.iniciadaEm) / 60_000, previstoMin } : null;
+}
+
+const LIMITADA_AS_REFERENCIAS = "Avaliação limitada às referências verificadas abaixo.";
+
+/** "Nome (xxx)" -> "Nome": tira UM parêntese final, se o nome terminar com um. */
+function semParenteses(nome: string): string {
+  const t = nome.trim();
+  if (!t.endsWith(")")) return t;
+  const abre = t.lastIndexOf("(");
+  if (abre < 0) return t;
+  const dentro = t.slice(abre + 1, -1);
+  if (dentro.includes("(") || dentro.includes(")")) return t;
+  return t.slice(0, abre).trim();
+}
+
+/** Tira . ; : do fim do texto. */
+function semPontuacaoFinal(texto: string): string {
+  let fim = texto.length;
+  while (fim > 0 && ".;:".includes(texto[fim - 1])) fim--;
+  return texto.slice(0, fim);
+}
+
+/**
+ * O que faltou observar num critério sem prova, a partir dos sinais esperados do problema que combinam com o
+ * critério (por raiz de palavra do nome). Sem sinal que combine, diz isso com franqueza em vez de inventar.
+ */
+export function textoDoQueFaltou(nome: string, id: string, soPorFala: boolean, sinaisEsperados: string[]): string {
+  if (soPorFala) return `${nome}: não houve fala do candidato explicando ou respondendo algo de conteúdo; vale ouvi-lo explicar a solução.`;
+  const raizes = (s: string) => normalizar(s).split(" ").filter(w => w.length >= 5).map(w => w.slice(0, 5));
+  const chaves = new Set([...raizes(nome), ...raizes(id.replaceAll("_", " "))]);
+  const sinal = sinaisEsperados.find(s => raizes(s).some(r => chaves.has(r)));
+  if (!sinal) return `${nome}: sem prova nesta entrevista; vale perguntar diretamente sobre isso.`;
+  const frase = semPontuacaoFinal(sinal.trim());
+  return `${nome}: sem prova nesta entrevista. Sinal esperado que não apareceu: ${frase[0].toLowerCase()}${frase.slice(1)}.`;
+}
 
 const arred1 = (n: number) => Math.round(n * 10) / 10;
 export const JANELA_DESENHO_MS = 1500;
@@ -323,7 +383,7 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
   const { fontes } = p;
   const vistos = new Set<string>();
 
-  const criterios: CriterioAvaliado[] = p.rubrica.map(({ id, niveis, nome }) => {
+  const criterios: CriterioAvaliado[] = p.rubrica.map(({ id, niveis, nome, provaSoPorFala }) => {
     const candidatos = saida.criterios.filter((c) => c.criterio === id);
     if (candidatos.length > 1) ajustes.push(`critério ${id} repetido: usei o primeiro`);
     const c = candidatos[0];
@@ -341,10 +401,16 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
           ajustes.push(`evidência de fala descartada em ${id}: citação não encontrada`);
           continue;
         }
+        // Pedir para repetir, dizer que não entendeu, corrigir o entrevistador ou pedir para encerrar é neutro:
+        // nunca prova nota nenhuma. Se era a única prova, a nota cai para "sem prova" logo abaixo.
+        if (ehPedidoDeRepeticao(e.texto)) {
+          ajustes.push(`evidência de fala descartada em ${id}: pedido de repetição ou esclarecimento não é prova`);
+          continue;
+        }
         const origem = fontes.falas[r.indice];
         evidencias.push({ tipo: "fala", horario: origem?.horario ?? e.horario, texto: e.texto });
       } else {
-        if (nome && /\b(oral|verbal|plins)\b|comunicacao.*\brespostas\b/.test(normalizar(nome))) {
+        if (criterioSoPorFala({ id, nome, provaSoPorFala })) {
           ajustes.push(`evidência de desenho descartada em ${id}: rubrica exige fala`);
           continue;
         }
@@ -378,6 +444,10 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
     }
     if (nota === null) justificativa = SEM_EVIDENCIA;
     else if (evidencias.length < c.evidencias.length) justificativa = "Avaliação limitada às referências verificadas abaixo; a justificativa original foi removida após descarte de evidências.";
+    else if (textoCulpaOCandidatoPorPedido(justificativa)) {
+      ajustes.push(`justificativa de ${id} trocada: culpava o candidato por pedir repetição`);
+      justificativa = LIMITADA_AS_REFERENCIAS;
+    }
     return { criterio: id, nota, justificativa, evidencias };
   });
 
@@ -393,6 +463,15 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
     : notaGeral! < 2 ? "nao_avancar" : notaGeral! < 3 ? "avancar_com_ressalvas" : "avancar";
   // Cobertura parcial não permite avanço sem ressalvas.
   if (recomendacao === "avancar" && notas.length < criterios.length) recomendacao = "avancar_com_ressalvas";
+  // "Não avançar" é a recomendação mais pesada: só com entrevista que durou o bastante OU critérios cobertos. Uma
+  // entrevista curta com metade da rubrica sem prova (como a encerrada aos 8 de 15 minutos) não permite concluir isso.
+  const duracao = p.duracao ?? null;
+  const duracaoSuficiente = duracao !== null && duracao.decorridoMin >= FRACAO_MINIMA_DE_DURACAO * duracao.previstoMin;
+  const coberturaSuficiente = criterios.length > 0 && notas.length / criterios.length >= FRACAO_MINIMA_DE_COBERTURA;
+  if (recomendacao === "nao_avancar" && !duracaoSuficiente && !coberturaSuficiente) {
+    recomendacao = "evidencia_insuficiente";
+    ajustes.push("recomendação 'não avançar' trocada por evidência insuficiente: entrevista curta e menos de 2/3 dos critérios com prova");
+  }
   if (recomendacao !== saida.recomendacao) ajustes.push(`recomendação corrigida de ${saida.recomendacao} para ${recomendacao}: média e cobertura da rubrica`);
   const corrigiuCriterios = ajustes.some(a => !a.startsWith("recomendação") && !a.startsWith("menos da metade"));
   const reverResumo = corrigiuCriterios || insuficiente || notas.length < criterios.length;
@@ -400,19 +479,62 @@ export function aplicarGuardas(saida: SaidaParaGuardas, p: ParametrosGuardas): S
   const nomes = new Map(p.rubrica.map(c => [c.id, c.nome ?? c.id]));
   let corrigiuTexto = false;
   const legivel = (texto: string) => {
-    const resultado = humanizar(texto);
+    const resultado = semTermosInternos(humanizar(texto));
     corrigiuTexto ||= resultado !== texto;
     return resultado;
   };
   const criteriosLegiveis = criterios.map(c => ({ ...c, justificativa: legivel(c.justificativa) }));
-  const pontosFortes = (reverResumo ? [] : saida.pontos_fortes).map(legivel);
-  const pontosAAprofundar = (reverResumo ? criterios.filter(c => c.nota === null || c.nota < 3)
-    .map(c => `Aprofundar ${nomes.get(c.criterio)}.`) : saida.pontos_a_aprofundar).map(legivel);
-  const briefing = legivel(reverResumo ? "Revisar as evidências por critério e aprofundar os pontos sem cobertura antes de decidir." : saida.briefing_para_proxima_etapa);
-  // Resumo da entrevista feito antes de uma correção das guardas pode contradizer as notas finais: sai, e o cartão usa as justificativas.
+
+  // Quando as guardas mexeram nas notas, os textos do modelo que falam de critério SEM prova deixam de valer, mas
+  // o resto fica: só some o que se apoiava em prova que não existe mais. Nunca vira frase fixa para todo critério.
+  const nomeLegivel = (id: string) => semParenteses(semTermosInternos(nomes.get(id) ?? id));
+  const semNota = criterios.filter(c => c.nota === null);
+  const chavesSemNota = semNota.flatMap(c => [nomeLegivel(c.criterio), c.criterio.replaceAll("_", " ")]).map(normalizar).filter(Boolean);
+  const citaCriterioSemProva = (texto: string) => {
+    const t = normalizar(texto);
+    return chavesSemNota.some(k => t.includes(k));
+  };
+  const aproveitavel = (texto: string) => texto.trim() !== "" && !textoCulpaOCandidatoPorPedido(texto)
+    && !(reverResumo && citaCriterioSemProva(texto));
+  const sinais = p.problema?.sinaisEsperados ?? [];
+  const soPorFala = new Map(p.rubrica.map(c => [c.id, criterioSoPorFala(c)]));
+  const pontosFortes = saida.pontos_fortes.filter(aproveitavel).map(legivel);
+  const doModelo = saida.pontos_a_aprofundar.filter(t => aproveitavel(t) && !ehItemGenerico(t));
+  const faltas = reverResumo ? [
+    ...semNota.map(c => textoDoQueFaltou(nomeLegivel(c.criterio), c.criterio, soPorFala.get(c.criterio) ?? false, sinais)),
+  ] : [];
+  const pontosAAprofundar = [...doModelo, ...faltas].map(legivel);
+
+  const fato = fatoDeCobertura({
+    duracaoMin: duracao ? duracao.decorridoMin : null,
+    previstoMin: duracao?.previstoMin ?? null,
+    criteriosSemProva: semNota.length,
+    totalCriterios: criterios.length,
+  });
+  const listaSemProva = semNota.map(c => nomeLegivel(c.criterio)).join(", ");
+  const briefingDoModelo = saida.briefing_para_proxima_etapa.trim();
+  const modeloServe = !reverResumo && briefingDoModelo !== "" && !textoCulpaOCandidatoPorPedido(briefingDoModelo)
+    // "Não avançar" não manda a conversa para a próxima etapa.
+    && !(recomendacao === "nao_avancar" && falaDeProximaConversa(normalizar(briefingDoModelo)));
+  const briefingComposto = [
+    recomendacao === "evidencia_insuficiente" ? "Sem evidência suficiente para recomendar avançar ou não avançar." : "",
+    fato ?? "",
+    listaSemProva ? `Sem prova: ${listaSemProva}.` : "",
+    recomendacao !== "nao_avancar" && semNota.length ? "Vale cobrir esses pontos na próxima conversa." : "",
+  ].filter(Boolean).join(" ");
+  const briefing = legivel(modeloServe ? briefingDoModelo : briefingComposto);
+  // O resumo da entrevista fica quando não fala de critério sem prova; senão, vira um resumo factual das provas aceitas.
+  const resumoDoModelo = (saida.resumo_da_entrevista ?? "").trim();
+  const comProva = criterios.filter(c => c.nota !== null);
+  const resumoFactual = reverResumo ? [
+    comProva.length
+      ? `Houve prova em ${comProva.length} de ${criterios.length} critérios: ${comProva.map(c => `${nomeLegivel(c.criterio)} (${c.nota} de 4)`).join(", ")}.`
+      : "Nenhum critério teve prova suficiente.",
+    fato ?? "",
+  ].filter(Boolean).join(" ") : "";
+  const resumoDaEntrevista = legivel(resumoDoModelo && aproveitavel(resumoDoModelo) ? resumoDoModelo : resumoFactual);
   const resumoDaSolucao = legivel((saida.resumo_da_solucao ?? "").trim());
-  const resumoDaEntrevista = reverResumo ? "" : legivel((saida.resumo_da_entrevista ?? "").trim());
-  const ajustesLegiveis = ajustes.map(legivel);
+  const ajustesLegiveis = [...new Set(ajustes)].map(legivel);
   if (corrigiuTexto) ajustesLegiveis.push("Referências técnicas substituídas por nomes nos textos explicativos.");
 
   return {
@@ -513,7 +635,7 @@ function resumoDoEvento(e: EventoArmazenado): string {
         Array.isArray(d.observacoes) ? ` observacoes=${JSON.stringify(d.observacoes).slice(0, 500)}` : ""
       }`;
     case "pergunta":
-      return `candidato clicou no plin: ${cortar(String(d.pergunta ?? ""), 300)}`;
+      return `candidato abriu a pergunta do entrevistador: ${cortar(String(d.pergunta ?? ""), 300)}`;
     case "fase":
       return `fase=${String(d.fase ?? "")}`;
     case "empecilho":
@@ -584,6 +706,8 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       fontes,
       origem: "llm",
       agora: deps.agora,
+      duracao: duracaoDaSessao(entrada.estado, entrada.eventos),
+      problema: deps.problema,
     }), entrada.estado), r.dados.adaptacao, entrada.estado, fontes), entrada.eventos);
   } finally {
     clearTimeout(timer);
@@ -629,6 +753,8 @@ export function gerarScorecardFalso(deps: Omit<DepsScorecard, "llm">, entrada: E
     fontes,
     origem: "fake",
     agora: deps.agora,
+    duracao: duracaoDaSessao(entrada.estado, entrada.eventos),
+    problema: deps.problema,
   }), entrada.estado), null, entrada.estado, fontes), entrada.eventos);
 }
 

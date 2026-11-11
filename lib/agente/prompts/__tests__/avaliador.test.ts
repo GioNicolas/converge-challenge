@@ -42,7 +42,7 @@ describe("bloco estático", () => {
       "COMPONENTES", "CONEXÕES", "ANOTAÇÕES SOLTAS", "SEÇÕES", "DESENHOS SEM TEXTO", "ORDEM NA TELA",
       "r retângulo", "e elipse", "l losango", "s seta", "t texto", "m moldura", "f desenho", "i imagem",
       "\"A → B\" é uma seta com direção, de A para B", "\"A — B\" é uma linha sem direção",
-      "\"?\"", "(seta solta)", "— dentro de [x]", "rótulo",
+      "(sem destino)", "(sem origem)", "(ponta perto, sem encostar)", "não chega em nenhuma caixa", "— dentro de [x]", "rótulo",
       "NÃO implica protocolo", "NUNCA infira uma conexão ou um destino",
       "fato sobre o desenho",
     ]) {

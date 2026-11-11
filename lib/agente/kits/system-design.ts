@@ -101,7 +101,7 @@ export const KIT_SYSTEM_DESIGN: Kit = {
     },
     {
       id: "chat_tempo_real",
-      titulo: "Chat em tempo real",
+      titulo: "Chat de mensagens em tempo real",
       enunciado:
         "Projete um app de mensagens usado por milhões de pessoas: conversas um a um e em grupo, com a mensagem chegando na hora. No quadro, mostre a arquitetura de ponta a ponta: as peças do sistema (clientes, serviços, bancos de dados, filas), como elas se ligam e o caminho de uma mensagem, de quem envia até quem recebe (online ou não). Não precisa desenhar telas.",
       falaDoDesafio:

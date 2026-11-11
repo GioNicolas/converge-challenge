@@ -76,7 +76,7 @@ test("texto próximo ao meio da seta vira rótulo e não recebe ID", () => {
   assert.equal(atual.instantaneo.conexoes[0].rotulo, "lê e grava");
   assert.equal(atual.instantaneo.anotacoes.length, 0);
   assert.equal(conversor.idCurto("rotulo"), undefined);
-  assert.match(atual.texto, /\[s1\] \? → \? \("lê e grava"\)/);
+  assert.ok(atual.texto.includes(`[s1] (sem origem) → (sem destino) ("lê e grava")`), atual.texto);
 });
 
 test("rótulo considera o comprimento da polilinha, sem aproximar por extremos", () => {
