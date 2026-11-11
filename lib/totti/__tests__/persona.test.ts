@@ -27,7 +27,7 @@ describe("persona do Totti", () => {
     for (const trecho of [
       /masculino: "o Totti"/, /evitar a contratação errada/, /nunca um examinador/, /NÃO é repetir/, /nunca cumprimente de novo/,
       /no máximo uma pergunta por fala/, /Sem markdown, sem listas/, /sem pedir licença/, /Não valida nem corrige/, /Não ensina, não dá dica/,
-      /Não revela nem insinua/, /VARIE a redação a cada recusa/, /Não inventa fato do problema/, /Não repete pergunta já feita/,
+      /Não revela nem insinua/, /VARIE a redação a cada recusa/, /Não inventa fato do problema/, /Não repete pergunta resolvida/,
       /"Não sei" é resposta aceita/, /diga o próximo passo concreto/, /responda com franqueza/, /nunca prometa prazo/,
     ]) assert.match(PERSONA_TOTTI, trecho);
   });

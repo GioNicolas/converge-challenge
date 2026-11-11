@@ -68,6 +68,13 @@ async function falaNoLiveCoding(falaDoModelo: string, falaDoCandidato: string): 
 }
 
 describe("as mesmas travas nas duas salas (casos reais de 11/11)", () => {
+  it("esclarecer uma resposta vaga preserva a pergunta nas duas salas", async () => {
+    const esclarecimento = "Melhor em que sentido?";
+    const vaga = "Acho que fica melhor assim.";
+    assert.equal(await falaNoQuadro(esclarecimento, vaga), esclarecimento);
+    assert.equal(await falaNoLiveCoding(esclarecimento, vaga), esclarecimento);
+  });
+
   it("cumprimento no meio da entrevista: sai nas duas, e a pergunta fica", async () => {
     const doModelo = "Oi, tudo bem? E quando o serviço cai no meio, quem avisa o outro lado?";
     const esperado = "E quando o serviço cai no meio, quem avisa o outro lado?";
