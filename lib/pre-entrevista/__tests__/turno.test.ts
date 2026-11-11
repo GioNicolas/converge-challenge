@@ -396,6 +396,21 @@ describe("desfazerValor: desfaz a leitura sem pisar no que outro caminho gravou"
   });
 });
 
+describe("conduzirTurno: sinal de contexto incompleto só depois da pergunta de contexto", () => {
+  it("o Jev só lê 'disse que tem sem dizer' no turno logo depois da pergunta de contexto", async () => {
+    const { sessao, deps } = await conversar(ATE_APROFUNDAR);
+    const lidos: Array<boolean | undefined> = [];
+    const ler = deps.avaliarCobertura!;
+    const espiao = { ...deps, avaliarCobertura: async (...args: Parameters<typeof ler>) => (lidos.push(args[2]?.depoisDoContexto), ler(...args)) };
+    // Depois do aprofundamento: o sinal fica fora.
+    await conduzirTurno(sessao, "quem não explica o código", { ...espiao, chat: chatFalso(saida(CONTEXTO)).chat });
+    assert.equal(sessao.plano.ultimoPasso?.tipo, "perguntar_contexto");
+    // Depois da pergunta de contexto: o sinal entra.
+    await conduzirTurno(sessao, "Tem", { ...espiao, chat: chatFalso(saida(RESUMO)).chat });
+    assert.deepEqual(lidos, [false, true]);
+  });
+});
+
 describe("conduzirTurno: fala que não faz sentido como resposta (issue #76)", () => {
   const ESCOLHA = "Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?";
   const NAO_PEGUEI = `Não peguei essa. ${ESCOLHA}`;

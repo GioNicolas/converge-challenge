@@ -326,6 +326,77 @@ describe("movimentoDaFala: reserva para quando o modelo não declara o movimento
   });
 });
 
+// Issue #72: resposta que faz sentido, mas não diz o conteúdo. O pedido do que faltou chega pelo PASSO.
+describe("pedir o que faltou (issue #72)", () => {
+  const CONTEXTO: Passo = { tipo: "perguntar_contexto" };
+  const FALTOU_CONTEXTO: Passo = { tipo: "pedir_o_que_faltou", sobre: "contexto" };
+  const FALTOU_CRITERIO: Passo = { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "escala_produto" };
+  const PERGUNTA_DE_CONTEXTO = "O que reprova um candidato direto pra vocês, ou o que fez uma contratação passada não dar certo?";
+
+  /** O Totti fez a pergunta de contexto e ela respondeu "Tem". */
+  function depoisDoTem() {
+    const sessao = sessaoAberta([ela("isso"), totti(PERGUNTA_DE_CONTEXTO), ela("Tem")]);
+    sessao.plano = aplicarPasso(sessao.plano, CONTEXTO);
+    return sessao;
+  }
+
+  it("'Tem' seco: a instrução do passo pede só qual é", () => {
+    const [, entrada] = montarMensagensConversa(depoisDoTem(), FALTOU_CONTEXTO);
+    assert.match(entrada.content, /PASSO DESTA FALA:\n.*não disse o quê/);
+    assert.match(entrada.content, /E o que é: o que reprova direto, ou o que deu errado\?/);
+    // "Já aconteceu" fala da contratação passada: a instrução manda perguntar o que deu errado.
+    assert.match(entrada.content, /já aconteceu.*o que deu errado/);
+  });
+
+  it("'Tem' seco: fala sem pergunta ganha a pergunta fixa de qual é", async () => {
+    const r = await responder(depoisDoTem(), FALTOU_CONTEXTO, { chat: chatFalso(saida("Entendi.")).chat });
+    assert.equal(r.texto, "Entendi. E o que é: o que reprova direto, ou o que deu errado?");
+    assert.deepEqual(
+      r.travas.map((t) => t.trava),
+      ["pergunta_de_contexto"],
+    );
+  });
+
+  it("'Tem' seco: pedir qual é com as palavras da pergunta anterior não conta como repetir", () => {
+    const fala = "E o que é que reprova direto pra vocês?";
+    assert.equal(movimentoDaFala("seguir", fala, depoisDoTem(), FALTOU_CONTEXTO), "seguir");
+    assert.equal(movimentoDaFala("seguir", fala, depoisDoTem(), { tipo: "resumo_final" }), "repetir");
+  });
+
+  it("'Somente que ele raciocine': a instrução pede o concreto, em uma pergunta, com opções do que a entrevista observa", async () => {
+    const pergunta = "Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?";
+    const sessao = sessaoAberta([ela("isso"), totti(pergunta), ela("Somente que ele raciocine.")]);
+    sessao.plano = aplicarPasso(sessao.plano, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
+    const [, entrada] = montarMensagensConversa(sessao, FALTOU_CRITERIO);
+    assert.match(entrada.content, /PASSO DESTA FALA:\n.*foi vaga/);
+    assert.match(entrada.content, /duas formas concretas/);
+
+    const fala = "Raciocinar como: explicar por que escolheu o banco, ou estimar o volume antes de desenhar?";
+    const r = await responder(sessao, FALTOU_CRITERIO, { chat: chatFalso(saida(fala)).chat });
+    assert.equal(r.texto, fala);
+    assert.equal(r.movimento, "seguir");
+  });
+
+  /** O Totti aprofundou escalabilidade e ela respondeu de forma vaga. */
+  function depoisDaVaga(pergunta: string) {
+    const sessao = sessaoAberta([ela("isso"), totti(pergunta), ela("Somente que ele raciocine.")]);
+    sessao.plano = aplicarPasso(sessao.plano, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
+    return sessao;
+  }
+
+  it("resposta vaga: fala sem pergunta ganha o pedido de exemplo", async () => {
+    const sessao = depoisDaVaga("Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?");
+    const r = await responder(sessao, FALTOU_CRITERIO, { chat: chatFalso(saida("Faz sentido.")).chat });
+    assert.equal(r.texto, "Faz sentido. Pode me dar um exemplo de como isso apareceria na entrevista?");
+    assert.deepEqual(r.travas.map((t) => t.trava), ["pergunta_no_fim"]);
+  });
+
+  it("resposta vaga: repetir a pergunta do aprofundamento conta como repetir", () => {
+    const pergunta = "Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?";
+    assert.equal(movimentoDaFala("seguir", pergunta, depoisDaVaga(pergunta), FALTOU_CRITERIO), "repetir");
+  });
+});
+
 describe("movimento nao_entendi (issue #76)", () => {
   const ESCOLHA = "Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?";
   const APROFUNDAR: Passo = { tipo: "aprofundar", area: "tecnico", motivo: "inicial" };

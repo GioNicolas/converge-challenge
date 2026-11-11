@@ -242,10 +242,12 @@ function emCurso(sessao: Sessao): Passo | undefined {
   return ultimo?.tipo === "responder_duvida" ? ultimo.retomar : ultimo;
 }
 
-/** A última pergunta do Totti foi de aprofundamento (sozinha ou emendada numa confirmação de mudança de foco). */
+/**
+ * A última pergunta do Totti foi de aprofundamento, sozinha. Emendada numa confirmação de mudança de foco, a resposta
+ * vaga pode ser à mudança, e o planejador não pede o concreto (ver `pedirOQueFaltouPasso`).
+ */
 function emAprofundamento(sessao: Sessao): boolean {
-  const passo = emCurso(sessao);
-  return passo?.tipo === "aprofundar" || (passo?.tipo === "confirmar_mudanca_foco" && passo.proximo !== undefined);
+  return emCurso(sessao)?.tipo === "aprofundar";
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +301,120 @@ const VAGA_SEM_NIVEL: Vaga = {
 
 /** Termos de uma resposta a "o candidato vai ver essa conversa": de quem ela fala ou do que é visto. */
 export const TERMOS_DUVIDA_CONVERSA = ["candidat", "conversa", "acess", "compartilh", "visivel", "enxerg", "mostr", "privad"];
+
+// ---------------------------------------------------------------------------
+// Resposta que faz sentido, mas não diz o conteúdo (issue #72): o planejador pede o que faltou, uma vez.
+// ---------------------------------------------------------------------------
+
+/**
+ * Leva a vaga de pagamentos até a pergunta de contexto, com respostas concretas nos aprofundamentos (um ou dois,
+ * conforme o modelo). Se a pergunta de contexto chegar antes, o resto do histórico não é enviado.
+ */
+const ATE_O_CONTEXTO = [
+  "isso, pode seguir assim",
+  "o pior é cobrar o cliente duas vezes quando a rede cai no meio do pagamento",
+  "quero ver se ele estima o volume de pagamentos antes de escolher o banco",
+];
+const NO_CONTEXTO = { descricao: "último passo do Totti: perguntar_contexto", chegou: (s: Sessao) => emCurso(s)?.tipo === "perguntar_contexto" };
+const NO_PEDIDO_DO_CONTEXTO = {
+  descricao: "último passo do Totti: pedir_o_que_faltou contexto",
+  chegou: (s: Sessao) => {
+    const passo = emCurso(s);
+    return passo?.tipo === "pedir_o_que_faltou" && passo.sobre === "contexto";
+  },
+};
+
+const passoE = (r: Resultado, esperado: string): Checagem => ({
+  nome: `o passo é ${esperado}`,
+  ok: descrever(r.passo).startsWith(esperado),
+  detalhe: `passo: ${descrever(r.passo)}`,
+});
+const umaPerguntaSo = (r: Resultado): Checagem => {
+  const n = perguntasDe(r.depois.fala).length;
+  return { nome: "uma pergunta só", ok: n === 1, detalhe: `${n} pergunta(s)` };
+};
+
+const CASOS_O_QUE_FALTOU: Caso[] = [
+  {
+    id: "contexto-tem-seco",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_CONTEXTO,
+    situacao: NO_CONTEXTO,
+    fala: "Tem",
+    conferir: (r) => [
+      passoE(r, "pedir_o_que_faltou contexto"),
+      terminaEmPergunta(r),
+      umaPerguntaSo(r),
+      contem(r, "pergunta qual é o que reprova", [["reprova", "elimina", "qual", "o que"]]),
+      semOutroResumo(r),
+    ],
+  },
+  {
+    id: "contexto-tem-depois-diz",
+    vaga: "backend-senior-pagamentos",
+    // O "Tem" vai logo depois do primeiro aprofundamento, o caminho comum. Com um segundo aprofundamento, ele cai
+    // na pergunta errada e o caso sai como não montado.
+    historico: [...ATE_O_CONTEXTO.slice(0, 2), "Tem"],
+    situacao: NO_PEDIDO_DO_CONTEXTO,
+    fala: "reprova direto quem trata o pagamento como se a rede nunca falhasse",
+    conferir: (r) => [
+      passoE(r, "resumo_final"),
+      contem(r, "o eliminatório que ela disse aparece no resumo", [["rede", "falha"]]),
+      {
+        nome: "o pedido do que faltou foi feito uma vez só",
+        ok: (r.depois.perguntasPorTopico.faltou_contexto ?? 0) === 1,
+        detalhe: `faltou_contexto: ${r.depois.perguntasPorTopico.faltou_contexto ?? 0}`,
+      },
+    ],
+  },
+  {
+    id: "aprofundamento-resposta-vaga",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_APROFUNDAR,
+    // Com a pergunta "contas de volume, ou basta raciocinar sobre o pico?", "Somente que ele raciocine" é uma escolha,
+    // não uma resposta vaga: o caso só vale para uma pergunta que não oferece o raciocínio como opção (a da tela:
+    // "o que é pior: perder ou duplicar um dado, ou ficar fora do ar?").
+    situacao: {
+      descricao: "último passo do Totti: aprofundar, numa pergunta que não oferece 'raciocinar' como opção",
+      chegou: (s: Sessao) => emAprofundamento(s) && !/raciocin/i.test(perguntaDe(s.transcricao.filter((t) => t.role === "agente").at(-1)?.text ?? "")),
+    },
+    fala: "Somente que ele raciocine.",
+    conferir: (r) => [
+      passoE(r, "pedir_o_que_faltou"),
+      terminaEmPergunta(r),
+      umaPerguntaSo(r),
+      semJargaoNemRotulo(r),
+      {
+        nome: "não diz que a resposta foi vaga",
+        ok: !/\b(vag[ao]|gen[ée]ric[ao])\b/i.test(r.depois.fala),
+        detalhe: undefined,
+      },
+    ],
+  },
+  {
+    // Vaga para qualquer pergunta do banco: este caso sempre monta, o de cima depende da pergunta que o modelo escolheu.
+    id: "aprofundamento-resposta-generica",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_APROFUNDAR,
+    situacao: NO_APROFUNDAMENTO,
+    fala: "ah, que ele seja bom nisso, que saiba o que tá fazendo",
+    conferir: (r) => [passoE(r, "pedir_o_que_faltou"), terminaEmPergunta(r), umaPerguntaSo(r), semJargaoNemRotulo(r)],
+  },
+  {
+    id: "aprofundamento-resposta-concreta",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_APROFUNDAR,
+    situacao: NO_APROFUNDAMENTO,
+    fala: "o pior é cobrar o cliente duas vezes quando a rede cai no meio do pagamento",
+    conferir: (r) => [
+      {
+        nome: "resposta concreta não ganha follow-up",
+        ok: r.passo.tipo !== "pedir_o_que_faltou",
+        detalhe: `passo: ${descrever(r.passo)}`,
+      },
+    ],
+  },
+];
 
 export const CASOS: Caso[] = [
   {
@@ -534,6 +650,7 @@ export const CASOS: Caso[] = [
     fala: "acho que sim… a duração ficou quanto mesmo?",
     conferir: (r) => [naoEncerra(r), contem(r, "responde a duração", ["minutos"]), terminaEmPergunta(r), semOutroResumo(r)],
   },
+  ...CASOS_O_QUE_FALTOU,
 ];
 
 // ---------------------------------------------------------------------------
