@@ -281,7 +281,8 @@ export const FRACAO_MINIMA_DE_COBERTURA = 2 / 3;
 export function duracaoDaSessao(estado: EstadoSessao, eventos: EventoArmazenado[]): DuracaoDaSessao | null {
   if (!estado.iniciadaEm) return null;
   const fim = Math.max(estado.iniciadaEm,
-    ...eventos.map(e => Date.parse(e.horario)).filter(Number.isFinite),
+    // Uso de modelo (o do relatório chega na hora de gerar) não é a entrevista acontecendo.
+    ...eventos.filter(e => !e.tipo.endsWith("_uso")).map(e => Date.parse(e.horario)).filter(Number.isFinite),
     ...estado.conversa.map(f => f.em));
   const previstoMin = tempoDaEntrevista(estado, fim).totalMin;
   return previstoMin > 0 ? { decorridoMin: (fim - estado.iniciadaEm) / 60_000, previstoMin } : null;
