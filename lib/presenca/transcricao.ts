@@ -40,6 +40,37 @@ export function esperaParaReconectar(tentativa: number): number | null {
  */
 export const LIMIAR_VOZ_RMS = 0.01;
 export const VOZ_MINIMA_MS = 200;
+/**
+ * Com o portão aberto, energia acima disso (~-48 dBFS) ainda conta como fala: o fim de uma frase dito baixo
+ * não corta. Abrir continua exigindo LIMIAR_VOZ_RMS, para o ruído de fundo não abrir o portão sozinho.
+ */
+export const LIMIAR_SUSTENTAR_RMS = 0.004;
+/**
+ * Quanto tempo depois da última voz (acima de LIMIAR_VOZ_RMS) a energia baixa ainda sustenta o portão. Sem esse
+ * limite, um ruído constante entre os dois limiares (ventilador, TV a ~-44 dBFS) mantinha o portão aberto até o
+ * fim da sessão. Passado o limite, só voz de verdade conta, e o portão fecha depois da folga.
+ */
+export const SUSTENTAR_MAXIMO_MS = 3000;
+
+export type DetectorDeFala = {
+  /** Classifica um bloco: `voz` acima de LIMIAR_VOZ_RMS; `fala` é o que mantém (ou abre) o portão. */
+  medir(energia: number, duracaoMs: number, portaoAberto: boolean): { voz: boolean; fala: boolean };
+  reiniciar(): void;
+};
+
+/** Voz abre o portão; aberto, energia baixa sustenta a fala por até SUSTENTAR_MAXIMO_MS depois da última voz. */
+export function criarDetectorDeFala(sustentarMaximoMs = SUSTENTAR_MAXIMO_MS): DetectorDeFala {
+  let desdeVoz = Infinity;
+  return {
+    medir(energia, duracaoMs, portaoAberto) {
+      const voz = energia >= LIMIAR_VOZ_RMS;
+      desdeVoz = voz ? 0 : desdeVoz + duracaoMs;
+      const fala = voz || (portaoAberto && energia >= LIMIAR_SUSTENTAR_RMS && desdeVoz <= sustentarMaximoMs);
+      return { voz, fala };
+    },
+    reiniciar() { desdeVoz = Infinity; },
+  };
+}
 
 export function energiaRms(amostras: Float32Array): number {
   if (!amostras.length) return 0;
@@ -114,4 +145,120 @@ export function mensagemDeAudio(amostras: Float32Array, commit = false): string 
   let binario = "";
   for (const byte of bytes) binario += String.fromCharCode(byte);
   return JSON.stringify({ message_type: "input_audio_chunk", audio_base_64: btoa(binario), commit, sample_rate: 16000 });
+}
+
+/** Folga de áudio antes da fala, para não cortar a primeira sílaba. */
+export const PORTAO_ANTES_MS = 300;
+/** Folga depois da fala: maior que o vad_silence_threshold_secs (0,9 s), para o Scribe fechar o trecho. */
+export const PORTAO_DEPOIS_MS = 1200;
+
+export type PortaoDeVoz = {
+  readonly aberto: boolean;
+  /** Recebe um bloco já em 16 kHz e devolve o que deve ir ao Scribe (vazio com o portão fechado). */
+  passar(amostras: Float32Array, voz: boolean): { amostras: Float32Array; abriu: boolean; fechou: boolean };
+  /** Fecha um trecho interrompido: devolve silêncio pelo resto da folga, para o Scribe confirmar o trecho. */
+  encerrar(): Float32Array;
+  reiniciar(): void;
+};
+
+/**
+ * Portão de voz local: o Scribe cobra por tempo de áudio enviado, então só vai áudio em volta de fala.
+ * Com o portão fechado guarda os últimos `antesMs` (abertura leva junto o começo da fala); depois da última
+ * voz continua aberto por `depoisMs`.
+ */
+export function criarPortaoDeVoz(opcoes: { taxa?: number; antesMs?: number; depoisMs?: number } = {}): PortaoDeVoz {
+  const taxa = opcoes.taxa ?? 16000;
+  const antes = Math.round(((opcoes.antesMs ?? PORTAO_ANTES_MS) / 1000) * taxa);
+  const depois = Math.round(((opcoes.depoisMs ?? PORTAO_DEPOIS_MS) / 1000) * taxa);
+  let aberto = false;
+  let restante = 0;
+  let anterior = new Float32Array(0);
+  const vazio = new Float32Array(0);
+  return {
+    get aberto() { return aberto; },
+    passar(amostras, voz) {
+      if (voz) {
+        restante = depois;
+        if (aberto) return { amostras, abriu: false, fechou: false };
+        aberto = true;
+        const saida = new Float32Array(anterior.length + amostras.length);
+        saida.set(anterior);
+        saida.set(amostras, anterior.length);
+        anterior = vazio;
+        return { amostras: saida, abriu: true, fechou: false };
+      }
+      if (aberto) {
+        restante -= amostras.length;
+        if (restante <= 0) aberto = false;
+        return { amostras, abriu: false, fechou: !aberto };
+      }
+      const junto = new Float32Array(anterior.length + amostras.length);
+      junto.set(anterior);
+      junto.set(amostras, anterior.length);
+      anterior = junto.slice(Math.max(0, junto.length - antes));
+      return { amostras: vazio, abriu: false, fechou: false };
+    },
+    encerrar() {
+      const silencio = new Float32Array(aberto ? Math.max(0, restante) : 0);
+      aberto = false;
+      restante = 0;
+      anterior = vazio;
+      return silencio;
+    },
+    reiniciar() {
+      aberto = false;
+      restante = 0;
+      anterior = vazio;
+    },
+  };
+}
+
+/** Fila de amostras em blocos: guardar e tirar copiam só o que entra ou sai, não a fila inteira. */
+export type FilaDeAmostras = {
+  readonly length: number;
+  guardar(amostras: Float32Array): void;
+  /** Tira até `n` amostras do começo da fila. */
+  tirar(n: number): Float32Array;
+  /** Devolve ao começo o que foi tirado e não pôde ser enviado. */
+  devolver(amostras: Float32Array): void;
+  limpar(): void;
+};
+
+export function criarFilaDeAmostras(maximo: number): FilaDeAmostras {
+  let blocos: Float32Array[] = [];
+  let total = 0;
+  return {
+    get length() { return total; },
+    guardar(amostras) {
+      if (!amostras.length) return;
+      blocos.push(amostras.slice());
+      total += amostras.length;
+      // Acima do máximo descarta o mais antigo.
+      while (total > maximo) {
+        const excesso = total - maximo;
+        if (blocos[0].length <= excesso) total -= blocos.shift()!.length;
+        else { blocos[0] = blocos[0].subarray(excesso); total -= excesso; }
+      }
+    },
+    tirar(n) {
+      const saida = new Float32Array(Math.min(n, total));
+      let escrito = 0;
+      while (escrito < saida.length) {
+        const bloco = blocos[0];
+        const parte = Math.min(bloco.length, saida.length - escrito);
+        saida.set(bloco.subarray(0, parte), escrito);
+        escrito += parte;
+        if (parte === bloco.length) blocos.shift();
+        else blocos[0] = bloco.subarray(parte);
+      }
+      total -= saida.length;
+      return saida;
+    },
+    devolver(amostras) {
+      if (!amostras.length) return;
+      blocos.unshift(amostras);
+      total += amostras.length;
+    },
+    limpar() { blocos = []; total = 0; },
+  };
 }

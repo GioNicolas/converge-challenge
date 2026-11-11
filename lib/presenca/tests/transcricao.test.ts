@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  criarDetectorDeFala, criarFilaDeAmostras, criarPortaoDeVoz,
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, pcm16LE, reamostrar, urlDoScribe,
 } from "../transcricao";
@@ -103,4 +104,66 @@ test("URL e mensagem seguem o protocolo e usam somente token temporário", () =>
   assert.deepEqual(JSON.parse(mensagemDeAudio(new Float32Array([0, 1]))), {
     message_type: "input_audio_chunk", audio_base_64: "AAD/fw==", commit: false, sample_rate: 16000,
   });
+});
+
+test("portão de voz guarda 300 ms antes da fala e segue 1,2 s depois", () => {
+  const portao = criarPortaoDeVoz();
+  const bloco = (valor: number) => new Float32Array(1600).fill(valor); // 100 ms a 16 kHz
+  for (let i = 0; i < 10; i++) assert.equal(portao.passar(bloco(0.001), false).amostras.length, 0);
+  const abertura = portao.passar(bloco(0.3), true);
+  assert.equal(abertura.abriu, true);
+  assert.equal(abertura.amostras.length, 4800 + 1600);
+  assert.equal(abertura.amostras[4800], Math.fround(0.3));
+  for (let i = 0; i < 11; i++) {
+    const r = portao.passar(bloco(0), false);
+    assert.equal(r.amostras.length, 1600);
+    assert.equal(r.fechou, false);
+  }
+  const ultimo = portao.passar(bloco(0), false);
+  assert.equal(ultimo.fechou, true);
+  assert.equal(portao.aberto, false);
+  assert.equal(portao.passar(bloco(0), false).amostras.length, 0);
+});
+
+test("portão interrompido devolve silêncio pelo resto da folga", () => {
+  const portao = criarPortaoDeVoz();
+  portao.passar(new Float32Array(1600).fill(0.3), true);
+  portao.passar(new Float32Array(3200), false);
+  const resto = portao.encerrar();
+  assert.equal(resto.length, 19200 - 3200);
+  assert.ok(resto.every((a) => a === 0));
+  assert.equal(portao.aberto, false);
+  assert.equal(portao.encerrar().length, 0);
+});
+
+test("fila de amostras tira na ordem, devolve ao começo e descarta o mais antigo acima do máximo", () => {
+  const fila = criarFilaDeAmostras(10);
+  fila.guardar(Float32Array.from([1, 2, 3]));
+  fila.guardar(Float32Array.from([4, 5, 6, 7]));
+  assert.equal(fila.length, 7);
+  const tirado = fila.tirar(5);
+  assert.deepEqual([...tirado], [1, 2, 3, 4, 5]);
+  fila.devolver(tirado.subarray(3));
+  assert.deepEqual([...fila.tirar(10)], [4, 5, 6, 7]);
+  assert.equal(fila.length, 0);
+  fila.guardar(Float32Array.from([1, 2, 3, 4, 5, 6, 7, 8]));
+  fila.guardar(Float32Array.from([9, 10, 11, 12]));
+  assert.equal(fila.length, 10);
+  assert.deepEqual([...fila.tirar(3)], [3, 4, 5]);
+  fila.limpar();
+  assert.equal(fila.length, 0);
+  assert.equal(fila.tirar(3).length, 0);
+});
+
+test("detector de fala: energia baixa sustenta o portão aberto só por um tempo depois da voz", () => {
+  const detector = criarDetectorDeFala(1000);
+  assert.deepEqual(detector.medir(0.006, 256, false), { voz: false, fala: false }, "energia baixa não abre");
+  assert.deepEqual(detector.medir(0.3, 256, false), { voz: true, fala: true });
+  for (let i = 0; i < 3; i++) assert.equal(detector.medir(0.006, 256, true).fala, true, `bloco ${i}`);
+  assert.equal(detector.medir(0.006, 256, true).fala, false, "passou de 1 s sem voz");
+  assert.equal(detector.medir(0.001, 256, true).fala, false, "silêncio nunca sustenta");
+  assert.equal(detector.medir(0.3, 256, true).fala, true);
+  assert.equal(detector.medir(0.006, 256, true).fala, true, "voz nova reinicia a contagem");
+  detector.reiniciar();
+  assert.equal(detector.medir(0.006, 256, true).fala, false, "reiniciado, sem voz recente");
 });

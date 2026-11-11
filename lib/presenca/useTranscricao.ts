@@ -3,17 +3,40 @@
 import { useEffect, useRef, useState } from "react";
 import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
 import {
-  atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
-  energiaRms, LIMIAR_VOZ_RMS, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
+  atualizarTranscricao, criarDetectorDeFala, criarFilaDeAmostras, criarPortaoDeVoz, esperaParaReconectar, estadoInicialTranscricao,
+  energiaRms, mensagemDeAudio, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
   type EstadoReamostragem, type TrechoTranscrito,
 } from "./transcricao";
 
 export type { TrechoTranscrito } from "./transcricao";
 
-/** Tempo de pausa em que o socket ainda recebe silêncio antes de ser fechado. */
+/** Tempo de pausa (sem poder ouvir) com o socket aberto antes de fechá-lo. */
 const PAUSA_MAXIMA_MS = 30_000;
+/**
+ * O Scribe fecha a conexão depois de ~15 s sem áudio. Reabrir pede token novo (limite de 20 por sessão a cada
+ * 10 min), então, sem nada a enviar, vai um bloco curto de silêncio a cada MANTER_VIVO_MS: ~2% do tempo ocioso.
+ */
+const MANTER_VIVO_MS = 5_000;
+const AMOSTRAS_MANTER_VIVO = 1600;
+/** Áudio guardado enquanto o socket conecta (20 s a 16 kHz); acima disso descarta o mais antigo. */
+const MAXIMO_PENDENTE = 320_000;
+/** Acima disso no buffer do socket, a rede não está escoando: reconecta. */
+const SOCKET_SATURADO = 262_144;
+/**
+ * Uma rajada (o que esperava a conexão) para de enviar acima disso e segue no próximo bloco ou tique: o
+ * bufferedAmount só baixa entre tarefas, então mandar tudo de uma vez passaria de SOCKET_SATURADO sozinho.
+ */
+const LIMITE_RAJADA = 65_536;
+/**
+ * Rede de segurança do portão: se o VAD do Scribe não confirmou o trecho até este tempo depois de o portão
+ * fechar (ruído na folga, por exemplo), confirma à mão. Esperar evita um commit logo depois do commit do VAD,
+ * que a documentação diz degradar o modelo.
+ */
+const COMMIT_DE_SEGURANCA_MS = 1_000;
 
 export type EstadoEscuta = { motor: "elevenlabs" | "navegador" | "nenhum"; escutando: boolean; erro: string | null };
+/** Uso do Scribe por sessão de escuta: o que é cobrado (áudio enviado) contra o tempo de sessão. */
+export type UsoTranscricao = { audioEnviadoS: number; sessaoS: number };
 
 // Tipos locais: a Web Speech API ainda não integra todas as versões de lib.dom.
 type ResultadoNativo = { isFinal: boolean; 0: { transcript: string } };
@@ -40,7 +63,7 @@ export function criarEscutaTranscricao(opcoes: {
   aoEstado: (estado: EstadoEscuta) => void;
   aoTrecho?: (trecho: TrechoTranscrito) => void;
   obterToken?: (sessaoId: string) => Promise<string>;
-}): { ativar(ativo: boolean): void; parar(): void } {
+}): { ativar(ativo: boolean): void; parar(): void; uso(): UsoTranscricao } {
   const trilha = opcoes.stream.getAudioTracks()[0];
   const janela = typeof window === "undefined" ? undefined : window as JanelaDeVoz;
   let inicio: number | null = null;
@@ -64,7 +87,15 @@ export function criarEscutaTranscricao(opcoes: {
   let processador: ScriptProcessorNode | null = null;
   let ganho: GainNode | null = null;
   let reamostragem: EstadoReamostragem = { soma: 0, peso: 0 };
-  let pendentes = new Float32Array(0);
+  const pendentes = criarFilaDeAmostras(MAXIMO_PENDENTE);
+  /** Voz enviada que o Scribe ainda não confirmou com committed_transcript. */
+  let vozSemCommit = false;
+  let commitDeSeguranca: ReturnType<typeof setTimeout> | null = null;
+  const portao = criarPortaoDeVoz();
+  const detector = criarDetectorDeFala();
+  let ultimoEnvio = 0;
+  let amostrasEnviadas = 0;
+  let fimDaSessao: number | null = null;
   let repetir: ReturnType<typeof setTimeout> | null = null;
   let prazo: ReturnType<typeof setTimeout> | null = null;
   let reconhecimento: Reconhecimento | null = null;
@@ -89,7 +120,12 @@ export function criarEscutaTranscricao(opcoes: {
     texto = { ...texto, parcial: null };
     vozNoTrecho = 0;
     reamostragem = { soma: 0, peso: 0 };
-    pendentes = new Float32Array(0);
+  }
+  /** Descarta o áudio que ainda não saiu e o estado do portão: só quando o socket deixa de existir. */
+  function descartarAudio() {
+    pendentes.limpar();
+    portao.reiniciar();
+    detector.reiniciar();
   }
   function receber(valor: string, final: boolean, chave: string) {
     if (encerrado || !podeOuvir()) return;
@@ -103,6 +139,8 @@ export function criarEscutaTranscricao(opcoes: {
   }
   function limparSocket() {
     geracao++;
+    cancelarCommitDeSeguranca();
+    vozSemCommit = false;
     conectando = pronto = false;
     if (prazo !== null) clearTimeout(prazo);
     prazo = null;
@@ -113,6 +151,7 @@ export function criarEscutaTranscricao(opcoes: {
       try { anterior.close(); } catch {}
     }
     limparParcial();
+    descartarAudio();
   }
   function limparAudio() {
     if (processador) processador.onaudioprocess = null;
@@ -135,10 +174,56 @@ export function criarEscutaTranscricao(opcoes: {
     publicar({ motor: "elevenlabs", escutando: false, erro: `reconectando microfone (${tentativas}/5)` });
     if (podeOuvir()) repetir = setTimeout(() => { repetir = null; void conectarScribe(); }, espera);
   }
-  function enviarAudio(amostras: Float32Array, commit = false) {
-    if (!socket || !pronto || socket.readyState !== 1) return;
-    if (socket.bufferedAmount > 262144) { falharScribe(); return; }
-    try { socket.send(mensagemDeAudio(amostras, commit)); } catch { falharScribe(); }
+  /** Devolve se o bloco saiu; com o socket não aberto (ou fechando) nada é enviado. */
+  function enviarAudio(amostras: Float32Array, commit = false): boolean {
+    if (!socket || !pronto || socket.readyState !== 1) return false;
+    if (socket.bufferedAmount > SOCKET_SATURADO) { falharScribe(); return false; }
+    try { socket.send(mensagemDeAudio(amostras, commit)); } catch { falharScribe(); return false; }
+    ultimoEnvio = performance.now();
+    amostrasEnviadas += amostras.length;
+    return true;
+  }
+  function cancelarCommitDeSeguranca() {
+    if (commitDeSeguranca !== null) clearTimeout(commitDeSeguranca);
+    commitDeSeguranca = null;
+  }
+  function agendarCommitDeSeguranca() {
+    cancelarCommitDeSeguranca();
+    if (!vozSemCommit) return;
+    commitDeSeguranca = setTimeout(() => {
+      commitDeSeguranca = null;
+      // Portão aberto: uma fala nova começou, e o fechamento dela agenda o próximo commit.
+      if (!vozSemCommit || portao.aberto) return;
+      // Ainda há áudio do trecho na fila (rajada ou socket conectando): tenta escoar e confere de novo depois.
+      if (pendentes.length) {
+        escoar(true);
+        agendarCommitDeSeguranca();
+        return;
+      }
+      if (enviarAudio(new Float32Array(AMOSTRAS_MANTER_VIVO), true)) vozSemCommit = false;
+      else agendarCommitDeSeguranca();
+    }, COMMIT_DE_SEGURANCA_MS);
+  }
+  /** Envia o que o portão deixou passar em blocos de 200 ms; `tudo` manda também o resto menor que um bloco. */
+  function escoar(tudo: boolean) {
+    if (!pronto || !socket || !pendentes.length) return;
+    if (socket.bufferedAmount > SOCKET_SATURADO) { falharScribe(); return; }
+    while (pronto && socket && socket.bufferedAmount <= LIMITE_RAJADA && pendentes.length
+      && (tudo || pendentes.length >= 3200)) {
+      const bloco = pendentes.tirar(3200);
+      if (!enviarAudio(bloco)) {
+        // Saturado: falharScribe já limpou a fila. Socket não aberto: o bloco volta e espera.
+        if (pronto) pendentes.devolver(bloco);
+        return;
+      }
+    }
+  }
+  /** Parou de poder ouvir no meio de uma fala: completa a folga com silêncio para o Scribe fechar o trecho. */
+  function fecharTrechoAberto() {
+    if (!portao.aberto) return;
+    pendentes.guardar(portao.encerrar());
+    escoar(true);
+    agendarCommitDeSeguranca();
   }
   async function prepararAudio() {
     if (!contexto) {
@@ -151,22 +236,29 @@ export function criarEscutaTranscricao(opcoes: {
       ganho.gain.value = 0;
       processador.onaudioprocess = (evento) => {
         evento.outputBuffer.getChannelData(0).fill(0);
-        if (encerrado || !contexto || !pronto) return;
+        // Enquanto conecta (token e handshake) o áudio também passa pelo portão e espera em `pendentes`.
+        if (encerrado || !contexto || (!socket && !conectando)) return;
+        // Sem poder ouvir (Totti falando, mudo, aba escondida) o microfone não vai ao Scribe: o tempo enviado é
+        // cobrado. Só o bloco curto que mantém a conexão (o Scribe fecha após 15 s sem mensagens) continua.
+        if (!podeOuvir()) {
+          fecharTrechoAberto();
+          return;
+        }
         const canais = Array.from({ length: evento.inputBuffer.numberOfChannels }, (_, i) => evento.inputBuffer.getChannelData(i));
-        const amostras = podeOuvir() ? misturarMono(canais) : new Float32Array(evento.inputBuffer.length);
-        if (energiaRms(amostras) >= LIMIAR_VOZ_RMS) vozNoTrecho += (amostras.length / contexto.sampleRate) * 1000;
+        const amostras = misturarMono(canais);
+        const duracaoMs = (amostras.length / contexto.sampleRate) * 1000;
+        // Aberto, o portão segue com fala mais baixa (fim de frase dito baixo) por um tempo limitado depois da
+        // última voz, para ruído constante não o manter aberto; abrir pede LIMIAR_VOZ_RMS.
+        const { voz, fala } = detector.medir(energiaRms(amostras), duracaoMs, portao.aberto);
+        if (voz) vozNoTrecho += duracaoMs;
         const convertido = reamostrar(amostras, contexto.sampleRate, 16000, reamostragem);
         reamostragem = convertido.estado;
-        const junto = new Float32Array(pendentes.length + convertido.amostras.length);
-        junto.set(pendentes);
-        junto.set(convertido.amostras, pendentes.length);
-        let consumido = 0;
-        while (junto.length - consumido >= 3200) {
-          enviarAudio(junto.subarray(consumido, consumido + 3200));
-          if (!pronto) return;
-          consumido += 3200;
-        }
-        pendentes = junto.slice(consumido);
+        const passou = portao.passar(convertido.amostras, fala);
+        pendentes.guardar(passou.amostras);
+        if (fala) { vozSemCommit = true; cancelarCommitDeSeguranca(); }
+        // Enquanto o socket conecta, o áudio espera em `pendentes` e sai todo no session_started.
+        escoar(passou.fechou);
+        if (passou.fechou) agendarCommitDeSeguranca();
       };
       fonte.connect(processador);
       processador.connect(ganho);
@@ -207,20 +299,28 @@ export function criarEscutaTranscricao(opcoes: {
           prazo = null;
           pronto = true;
           conectando = false;
-          conectadoEm = performance.now();
+          conectadoEm = ultimoEnvio = performance.now();
           publicar({ motor: "elevenlabs", escutando: podeOuvir(), erro: null });
+          escoar(!portao.aberto);
         } else if (m.message_type === "partial_transcript" && typeof m.text === "string") {
           // Sem voz no microfone, o parcial é alucinação: não mostra nem segura o turno do agente.
           if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, false, `${atual}:${segmento}`);
         } else if (m.message_type === "committed_transcript" && typeof m.text === "string") {
-          if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
-          else if (m.text.trim()) {
-            console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
-            if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
-            texto = { ...texto, parcial: null };
+          // Commit vazio (resposta ao commit de segurança, às vezes atrasada) não fecha trecho nenhum. Tratado como
+          // trecho, ele zerava a voz e gastava a chave da frase seguinte, que já estava sendo dita: ela era
+          // descartada como alucinação ou como repetida (visto no Scribe real).
+          if (m.text.trim()) {
+            if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
+            else {
+              console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
+              if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
+              texto = { ...texto, parcial: null };
+            }
+            segmento++;
+            vozNoTrecho = 0;
           }
-          segmento++;
-          vozNoTrecho = 0;
+          vozSemCommit = false;
+          cancelarCommitDeSeguranca();
         } else if (typeof m.error === "string") {
           falharScribe(["quota_exceeded", "unaccepted_terms", "input_error", "invalid_request", "chunk_size_exceeded"].includes(m.message_type ?? ""));
         }
@@ -312,6 +412,11 @@ export function criarEscutaTranscricao(opcoes: {
     if (encerrado) return;
     const ouvir = podeOuvir();
     if (!ouvir && ouvindoAntes) {
+      // A folga de fechamento e o que a rajada não mandou ficam na fila e saem nos próximos tiques: descartá-los
+      // deixaria o trecho sem fechamento no Scribe. O portão volta ao zero para não levar áudio de antes da pausa.
+      fecharTrechoAberto();
+      portao.reiniciar();
+      detector.reiniciar();
       limparParcial();
       cancelarRepeticao();
       if (reconhecimento && (reconhecendo || iniciando)) {
@@ -321,8 +426,12 @@ export function criarEscutaTranscricao(opcoes: {
     }
     ouvindoAntes = ouvir;
     pausadoDesde = ouvir ? null : (pausadoDesde ?? performance.now());
-    // Pausa longa: o silêncio enviado ao Scribe é cobrado, então fecha o socket (retomar pede token novo).
+    // Pausa longa: fecha o socket em vez de mantê-lo vivo (retomar pede token novo).
     if (!ouvir && socket && pausadoDesde !== null && performance.now() - pausadoDesde >= PAUSA_MAXIMA_MS) limparSocket();
+    else if (socket && pronto && pendentes.length) escoar(!portao.aberto);
+    else if (socket && pronto && !portao.aberto && performance.now() - ultimoEnvio >= MANTER_VIVO_MS) {
+      enviarAudio(new Float32Array(AMOSTRAS_MANTER_VIVO));
+    }
     if (estado.motor === "elevenlabs") {
       publicar({ ...estado, escutando: ouvir && pronto });
       if (ouvir && !socket && !conectando && repetir === null) void conectarScribe();
@@ -344,6 +453,7 @@ export function criarEscutaTranscricao(opcoes: {
   function parar() {
     if (encerrado) return;
     encerrado = true;
+    fimDaSessao = performance.now();
     clearInterval(monitor);
     cancelarRepeticao();
     limparSocket();
@@ -355,7 +465,14 @@ export function criarEscutaTranscricao(opcoes: {
     }
     // O stream pertence a useMidiaLocal: suas trilhas nunca são paradas aqui.
   }
-  return { ativar(valor) { if (valor) inicio ??= performance.now(); ativo = valor; sincronizarAtividade(); }, parar };
+  return {
+    ativar(valor) { if (valor) inicio ??= performance.now(); ativo = valor; sincronizarAtividade(); },
+    parar,
+    uso: () => ({
+      audioEnviadoS: amostrasEnviadas / 16000,
+      sessaoS: inicio === null ? 0 : Math.max(0, ((fimDaSessao ?? performance.now()) - inicio) / 1000),
+    }),
+  };
 }
 
 export function useTranscricao(opcoes: {
@@ -391,7 +508,18 @@ export function useTranscricao(opcoes: {
       },
     });
     escuta.current = controle;
-    return () => { escuta.current = null; controle.parar(); };
+    return () => {
+      escuta.current = null;
+      controle.parar();
+      const uso = controle.uso();
+      // Economia do portão de voz nos dados reais: áudio cobrado pelo Scribe contra o tempo de sessão.
+      // >= 1 s: a montagem dupla do StrictMode (e trocas imediatas) não vira registro de uso.
+      if (uso.sessaoS >= 1) {
+        console.info("[transcrição] uso da sessão", {
+          sessaoId, contexto, audioEnviadoS: Math.round(uso.audioEnviadoS), sessaoS: Math.round(uso.sessaoS),
+        });
+      }
+    };
   }, [stream, sessaoId, servidor, contexto]);
   useEffect(() => { escuta.current?.ativar(ativo); }, [ativo, stream, sessaoId, servidor]);
   return estado;
