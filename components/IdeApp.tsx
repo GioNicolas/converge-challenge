@@ -247,7 +247,6 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const saudacaoTerminadaEmRef = useRef(0);
   const dizer = conversa.dizer;
   const duracaoMin = vaga.durationMin;
-  const cargo = vaga.roleTitle;
   const prepararVoz = voz.preparar;
   useEffect(() => {
     if (!session.sessionId || session.ended || saudacaoFeitaRef.current) return;
@@ -258,12 +257,12 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
       if (falaParcialRef.current && agora - desde < APRESENTACAO_ESPERA_MAX_MS) return;
       saudacaoFeitaRef.current = true;
       clearInterval(id);
-      void dizer(comoFuncionaLiveCoding(duracaoMin, cargo)).finally(() => { saudacaoTerminadaEmRef.current = Date.now(); });
+      void dizer(comoFuncionaLiveCoding(duracaoMin)).finally(() => { saudacaoTerminadaEmRef.current = Date.now(); });
       // O "uhum" de quando ele termina de falar fica pronto durante a apresentação, para sair sem espera.
       prepararVoz(RECONHECIMENTOS);
     }, 200);
     return () => clearInterval(id);
-  }, [session.sessionId, session.ended, dizer, duracaoMin, cargo, prepararVoz]);
+  }, [session.sessionId, session.ended, dizer, duracaoMin, prepararVoz]);
 
   useEffect(() => warmUp(), []);
   const pedirMidia = midia.pedir;
