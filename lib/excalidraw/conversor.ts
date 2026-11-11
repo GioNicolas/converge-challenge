@@ -1,6 +1,6 @@
 import type { ExcalidrawElement } from "./tipos";
 import {
-  descreverConexao, entreAspas, nomeDoElemento, normalizarTexto,
+  MARCA_PONTA_PERTO, descreverConexao, entreAspas, nomeDoElemento, normalizarTexto,
   textoCurto, tiposEmPortugues,
   type Componente, type Conexao, type Instantaneo, type Secao,
 } from "./instantaneo";
@@ -111,6 +111,64 @@ function maisProximo(ponto: Ponto, candidatos: readonly ExcalidrawElement[], lim
   return escolhido;
 }
 
+const ALCANCE_MINIMO = 150;
+const ALCANCE_RELATIVO = 1.5;
+const CONE_GRAUS = [0, -10, 10, -20, 20];
+
+/**
+ * Prolonga o último trecho da seta (de `anterior` para `ponta`) e devolve a caixa que ele cruza primeiro,
+ * dentro do alcance e de um cone de ±20°. Quem desenha a seta parando antes da caixa ainda aponta para ela.
+ */
+function caixaNaDirecao(ponta: Ponto, anterior: Ponto, candidatas: readonly Caixa[]): Caixa | undefined {
+  const dx = ponta[0] - anterior[0];
+  const dy = ponta[1] - anterior[1];
+  const comprimento = Math.hypot(dx, dy);
+  if (comprimento === 0) return undefined;
+  const alcance = Math.max(ALCANCE_MINIMO, ALCANCE_RELATIVO * comprimento);
+  const base = Math.atan2(dy, dx);
+  let escolhida: Caixa | undefined;
+  let menor = Infinity;
+  let menorDesvio = Infinity;
+  for (const caixa of candidatas) {
+    const b = limites(caixa);
+    for (const graus of CONE_GRAUS) {
+      const angulo = base + (graus * Math.PI) / 180;
+      const entrada = entradaDoRaio(ponta, [Math.cos(angulo), Math.sin(angulo)], b, alcance);
+      if (entrada === null) continue;
+      const desvio = Math.abs(graus);
+      if (entrada < menor - 1e-9 || (Math.abs(entrada - menor) <= 1e-9 && desvio < menorDesvio)) {
+        escolhida = caixa;
+        menor = entrada;
+        menorDesvio = desvio;
+      }
+      break; // O primeiro ângulo (mais central) que acerta basta para esta caixa.
+    }
+  }
+  return escolhida;
+}
+
+/** Distância até onde o raio entra no retângulo, ou null se não entra dentro do alcance. */
+function entradaDoRaio(origem: Ponto, direcao: Ponto, b: ReturnType<typeof limites>, alcance: number): number | null {
+  let entra = 0;
+  let sai = alcance;
+  const eixos: [number, number, number, number][] = [
+    [origem[0], direcao[0], b.esquerda, b.direita],
+    [origem[1], direcao[1], b.topo, b.base],
+  ];
+  for (const [o, d, min, max] of eixos) {
+    if (Math.abs(d) < 1e-12) {
+      if (o < min || o > max) return null;
+      continue;
+    }
+    const t1 = (min - o) / d;
+    const t2 = (max - o) / d;
+    entra = Math.max(entra, Math.min(t1, t2));
+    sai = Math.min(sai, Math.max(t1, t2));
+    if (entra > sai) return null;
+  }
+  return entra;
+}
+
 function prefixo(elemento: ExcalidrawElement): string {
   switch (elemento.type) {
     case "rectangle": return "r";
@@ -214,6 +272,7 @@ export function criarConversor(): {
       return { id: id(e.id), tipo: e.type, nome: nome(e.id), dentroDe: pai ? id(pai.id) : null };
     });
     const conexoes = linhasVisiveis.map((e): Conexao => {
+      let inferida = false;
       function ponta(binding: typeof e.startBinding, indice: number): string | null {
         // Um vínculo explícito a um elemento ignorado nunca vira vínculo por proximidade.
         if (binding) return ids.get(absorvidos.get(binding.elementId) ?? binding.elementId) ?? null;
@@ -224,7 +283,16 @@ export function criarConversor(): {
         if (proximo) return id(proximo.id);
         // Diagramas só com texto ("Cliente -> API -> Banco"): vale o texto solto mais próximo.
         const textoProximo = maisProximo(alvo, soltos.filter((t) => !absorvidos.has(t.id) && textoDigitado(t)), 60);
-        return textoProximo ? id(textoProximo.id) : null;
+        if (textoProximo) return id(textoProximo.id);
+        // Parou antes da caixa mas aponta para ela: prolonga só o último trecho (no começo, o inverso).
+        const vizinho = e.points[indice === 0 ? 1 : indice - 1];
+        if (!vizinho) return null;
+        const outraPonta = indice === 0 ? e.endBinding : e.startBinding;
+        const candidatas = caixas.filter((c) => c.id !== outraPonta?.elementId);
+        const naDirecao = caixaNaDirecao(alvo, [e.x + vizinho[0], e.y + vizinho[1]], candidatas);
+        if (!naDirecao) return null;
+        inferida = true;
+        return id(naDirecao.id);
       }
       const comeco = ponta(e.startBinding, 0);
       const fim = ponta(e.endBinding, e.points.length - 1);
@@ -238,6 +306,7 @@ export function criarConversor(): {
         de: inverter ? fim : comeco, para: inverter ? comeco : fim,
         seta, rotulo: nome(e.id),
         ...(e.strokeStyle === "dashed" || e.strokeStyle === "dotted" ? { tracejada: true } : {}),
+        ...(inferida ? { inferida: true as const } : {}),
       };
     });
     const anotacoes = soltos.filter((e) => !absorvidos.has(e.id)).map((e) => ({
@@ -267,8 +336,8 @@ export function criarConversor(): {
     for (const c of conexoes) {
       const rotulo = c.rotulo ? ` (${entreAspas(c.rotulo)})` : "";
       const tracejada = c.tracejada ? " (tracejada)" : "";
-      const solta = c.de === null || c.para === null ? ` (${c.tipo === "arrow" ? "seta" : "linha"} solta)` : "";
-      linhas.push(`- [${c.id}] ${descreverConexao(instantaneo, c)}${rotulo}${tracejada}${solta}`);
+      const perto = c.inferida ? ` ${MARCA_PONTA_PERTO}` : "";
+      linhas.push(`- [${c.id}] ${descreverConexao(instantaneo, c)}${rotulo}${tracejada}${perto}`);
     }
     if (anotacoes.length) linhas.push("ANOTAÇÕES SOLTAS", ...anotacoes.map((a) =>
       `- [${a.id}] ${entreAspas(a.texto)}${a.dentroDe ? `  dentro de [${a.dentroDe}] ${nomeDoElemento(instantaneo, a.dentroDe)}` : ""}`));

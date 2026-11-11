@@ -57,14 +57,14 @@ test("usa pontas absolutas e distância até o retângulo para setas sem binding
   assert.deepEqual(resultado.instantaneo.conexoes[0], { id: "s1", tipo: "arrow", de: "r1", para: "l1", seta: "→", rotulo: "" });
   assert.match(resultado.texto, /\[s1\] \[r1\] → Decisão/);
   const longe = alterar(cenaVisual, "solta", { points: [[0, 0], [2000, 0]] } as unknown as Partial<ExcalidrawElement>);
-  assert.match(criarConversor().converter(longe).texto, /→ \? \(seta solta\)/);
+  assert.match(criarConversor().converter(longe).texto, /→ \(sem destino\)\n/);
 });
 
 test("vínculo explícito ignorado não vaza nem é substituído por proximidade", () => {
   const elementos = alterar(cena, "cliente-api-longo", { startBinding: { elementId: "autor-ignorado", focus: 0, gap: 0 } });
   const resultado = criarConversor().converter(elementos);
   assert.equal(resultado.instantaneo.conexoes[0].de, null);
-  assert.match(resultado.texto, /\[s1\] \? → API \(seta solta\)/);
+  assert.match(resultado.texto, /\[s1\] \(sem origem\) → API\n/);
 });
 
 test("linhas usam traço sem ponta", () => {
@@ -221,7 +221,11 @@ test("limiar de proximidade inclui 40 px e exclui distâncias maiores", () => {
   const perto = alterar([caixa, seta], "solta", { x: 160 });
   const longe = alterar([caixa, seta], "solta", { x: 160.1 });
   assert.equal(criarConversor().converter(perto).instantaneo.conexoes[0].de, "r1");
-  assert.equal(criarConversor().converter(longe).instantaneo.conexoes[0].de, null);
+  // Passou dos 40 px: já não "encosta", mas a ponta ainda aponta para a caixa, então vira ligação provável.
+  const resultadoLonge = criarConversor().converter(longe).instantaneo.conexoes[0];
+  assert.equal(resultadoLonge.de, "r1");
+  assert.equal(resultadoLonge.inferida, true);
+  assert.equal(criarConversor().converter(perto).instantaneo.conexoes[0].inferida, undefined);
 });
 
 test("diff usa textos completos mesmo quando a parte alterada ultrapassa o corte visual", () => {
