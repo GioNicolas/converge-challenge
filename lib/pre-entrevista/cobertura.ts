@@ -132,17 +132,25 @@ const EXEMPLOS_QUER: Record<FocusArea, string> = {
   uso_ia: "'IA aplicada', 'construir agentes', 'RAG e tool calling', 'integrar LLM no produto'",
 };
 
+/**
+ * Dispensar é TIRAR a área da avaliação. Pesar menos, não ser tão importante ou pedir equilíbrio não é dispensar:
+ * a área continua, com peso menor (ver `EXEMPLOS_REDUZIR` e o nível "reduzir" em `nivelDaFala`).
+ */
 const EXEMPLOS_DISPENSA: Record<FocusArea, string> = {
   tecnico:
-    "'isso não é tão importante pra gente', 'a parte técnica pode pesar menos'. Pedir um problema mais simples ou um código " +
+    "'pode tirar a parte técnica', 'não precisa avaliar código', 'o código em si não conta'. Pedir um problema mais simples ou um código " +
     "que não precisa ser perfeito ('não precisa ser complicado', 'não precisa estar 100% funcionando'), trocar algoritmo por " +
     "raciocínio lógico e explicação ('não tão focado em algoritmos, mais em raciocínio lógico'), ou trocar algoritmo difícil por " +
     "problema prático ('menos algoritmo complicado e mais problema do dia a dia, tipo modelar uma API') NÃO é dispensar: " +
     "raciocínio, explicação e problema prático são desta área",
-  pressao: "'coloca menos pressão', 'pressão eu tiraria', 'não precisa ser muito rigoroso com prazo'",
-  escala_produto: "'escala não é prioridade agora', 'pode tirar a parte de escalabilidade'",
-  uso_ia: "'pode tirar IA', 'IA aplicada não pesa tanto'",
+  pressao: "'pressão eu tiraria', 'pode tirar a pressão', 'não precisa avaliar pressão'",
+  escala_produto: "'pode tirar a parte de escalabilidade', 'não precisa avaliar escala'",
+  uso_ia: "'pode tirar IA', 'não precisa avaliar IA'",
 };
+
+/** Pesar menos sem tirar: não é dispensa. */
+const EXEMPLOS_REDUZIR =
+  "'não é tão importante', 'pode pesar menos', 'deixa mais equilibrado', 'equilibra com outra coisa', 'coloca menos peso nisso'";
 
 function criterioDaArea(area: FocusArea, modo?: InterviewMode): Topico {
   const nome = nomeAreaFala(area, modo);
@@ -174,11 +182,11 @@ function dispensaDaArea(area: FocusArea): Pergunta {
   const nome = NOME_AREA_FALA[area];
   return {
     id: `dispensa_${area}`,
-    pergunta: `A recrutadora disse que ${nome} não importa para a avaliação, ou que pode tirar ou diminuir essa área?`,
-    sinal_sim: `Sim se ela disse que a área não é prioridade ou que pode tirar ou diminuir. Exemplos: ${EXEMPLOS_DISPENSA[area]}.`,
+    pergunta: `A recrutadora disse que ${nome} pode sair da avaliação, que não precisa ser avaliada?`,
+    sinal_sim: `Sim se ela disse para tirar a área ou que ela não precisa ser avaliada. Exemplos: ${EXEMPLOS_DISPENSA[area]}.`,
     sinal_nao:
-      `Não se ela não disse que ${nome} perde importância. Se ela só falou de outra área (ex.: 'foco em escalabilidade'), ` +
-      "isso não tira as outras do foco.",
+      `Não se ela não pediu para tirar ${nome}. Pedir para pesar menos ou equilibrar NÃO é tirar (ex.: ${EXEMPLOS_REDUZIR}). ` +
+      "Se ela só falou de outra área (ex.: 'foco em escalabilidade', 'pode colocar pressão'), isso não tira as outras do foco: somar não é trocar.",
   };
 }
 
@@ -281,6 +289,25 @@ function sinaisDo(depoisDoContexto = false): Pergunta[] {
         "Sim se ela disse para seguir sem a área, sem avaliar: 'segue sem isso', 'pode seguir sem IA', 'não precisa avaliar isso'.",
       sinal_nao:
         "Não se ela escolheu outro formato ou deixar para a próxima etapa, ou respondeu outra coisa. Deixar para a próxima etapa é outra escolha.",
+    },
+    {
+      id: "pediu_equilibrio",
+      pergunta: "Na última fala, a recrutadora pediu para deixar as áreas da avaliação mais equilibradas, com pesos parecidos?",
+      sinal_sim:
+        "Sim se ela pediu equilíbrio ou divisão igual entre as áreas: 'deixa mais equilibrado', 'meio a meio', 'divide igual', " +
+        "'metade e metade', 'o mesmo peso pras duas', 'não quero tudo numa coisa só'.",
+      sinal_nao:
+        "Não se ela não falou da proporção entre as áreas, pediu uma proporção diferente ('setenta trinta', 'mais técnico que pressão'), " +
+        "ou falou de equilíbrio do candidato ('ver se ele mantém o equilíbrio sob pressão').",
+    },
+    {
+      id: "confirmou_tirar_area",
+      pergunta:
+        "O Totti perguntou se podia tirar uma área da avaliação (por exemplo, se o código em si não conta). Na última fala, a recrutadora confirmou que pode tirar?",
+      sinal_sim: "Sim se ela confirmou que a área sai: 'isso', 'é isso', 'pode tirar', 'exato', 'sim, só a pressão'.",
+      sinal_nao:
+        "Não se ela disse que a área ainda conta ('não, conta sim', 'conta, mas menos', 'não tira'), respondeu outra coisa, " +
+        "ou o Totti não perguntou se podia tirar uma área.",
     },
     {
       id: "resposta_vaga",
@@ -479,12 +506,18 @@ function nivelDaFala(area: FocusArea) {
   return choice(`Na ÚLTIMA fala da recrutadora, o que ela disse sobre ${nome}? ${NAO_E[area]}`, {
     nao_falou: { quando: "a fala não tocou nessa área, nem de passagem." },
     dispensou: {
-      quando: "disse que a área não precisa, que pode tirar, que é sem muita ênfase ou que não é tanto sobre ela.",
-      exemplos: "'não precisa', 'sem muita pressão', 'pode tirar', 'não é tanto sobre algoritmos'",
+      quando: "disse para TIRAR a área: que ela não precisa ser avaliada, que pode tirar, que não conta.",
+      exemplos: "'não precisa', 'sem pressão', 'pode tirar', 'não precisa avaliar isso', 'o código em si não conta'",
+    },
+    reduzir: {
+      quando:
+        "disse que a área deve pesar MENOS, sem tirar: que não é tão importante, que pode pesar menos, ou pediu para equilibrar com outra " +
+        "área. A área continua na avaliação.",
+      exemplos: "'não é tão importante', 'pode pesar menos', 'deixa mais equilibrado', 'equilibra com pressão', 'menos peso nisso'",
     },
     secundaria: {
-      quando: "disse que a área pesa menos, ou que também conta.",
-      exemplos: "'pesa menos', 'um pouco', 'também conta'",
+      quando: "disse que a área também conta, um pouco, ou aceitou somar a área à avaliação.",
+      exemplos: "'um pouco', 'também conta', 'pode colocar isso também', 'soma isso'",
     },
     respondeu: {
       quando: "descreveu o que espera nessa área, inclusive ao responder uma pergunta do Totti sobre ela.",
