@@ -2,7 +2,7 @@
 // Nunca lança por causa do LLM: em erro/timeout devolve `ok` (o quadro descarta análises lentas de
 // qualquer jeito). Só metadados vão para o log (nada de grafo, fala ou chave).
 import { PRAZO_ANALISE_DO_DESENHO_MS } from "../contracts";
-import { eQuaseDuplicada, sobreposicao, LIMIAR_DUPLICADA, trocarIdsPorNomes } from "./guardas";
+import { aplicarGuardas, eQuaseDuplicada, eSoReacao, sobreposicao, LIMIAR_DUPLICADA, trocarIdsPorNomes } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import { montarPromptAvaliador, NOME_SCHEMA_ANALISE } from "./prompts/avaliador";
@@ -177,6 +177,19 @@ export async function analisar(
     if (pergunta !== resposta.pergunta) {
       ajustes.push("ids_na_fala");
       resposta = { ...resposta, pergunta, ...(resposta.nota ? { nota: trocarIdsPorNomes(resposta.nota, pedido.grafo) } : {}) };
+    }
+  }
+
+  // A pergunta da análise também é fala do Totti: passa pelas travas comuns (lib/totti/guardas.ts) de cumprimento
+  // e de validação. Numa entrevista real ela saiu como "Oi, tudo bem? Como você está pensando em abordar esse
+  // problema?", com dois minutos de conversa. Eco, repetição e condução não se aplicam aqui (a repetição já foi
+  // conferida acima, contra as perguntas feitas).
+  if (resposta.status !== "ok" && resposta.pergunta) {
+    const guardada = aplicarGuardas(resposta.pergunta, { barrarConducao: false });
+    if (guardada.travas.length) {
+      ajustes.push(...guardada.travas.map((t) => `trava_${t}`));
+      // Sem pergunta depois da trava (era só o cumprimento ou só a validação), não há o que levantar.
+      resposta = guardada.texto && !eSoReacao(guardada.texto) ? { ...resposta, pergunta: guardada.texto } : { ...resposta, status: "ok" };
     }
   }
 
