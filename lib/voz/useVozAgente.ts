@@ -3,16 +3,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { focoAudio } from "../audio/foco";
 import { useLiberarAudio } from "../presenca/useLiberarAudio";
-import { reproduzirFala, type ProvedorVoz } from "./cliente";
+import { definirSessaoDaVoz, reproduzirFala, type ProvedorVoz } from "./cliente";
 import { criarFilaDeFalas, type EstadoVoz, type FilaDeFalas, type LegendaAgente } from "./filaDeFalas";
 
 export { PAUSA_ENTRE_FALAS_MS } from "./filaDeFalas";
 export type FalaAgente = { id: string; texto: string };
 
-export function useVozAgente({ ultimaFala = null, bloqueada = false }: {
+export function useVozAgente({ ultimaFala = null, bloqueada = false, sessao = null }: {
   ultimaFala?: FalaAgente | null;
   bloqueada?: boolean;
+  sessao?: { sessao_id: string; contexto: "quadro" | "coding" | "pre" } | null;
 } = {}) {
+  const sessaoId = sessao?.sessao_id;
+  const contexto = sessao?.contexto;
+  // Depende do id e do contexto, não do objeto (que quem chama recria a cada render).
+  useEffect(() => {
+    definirSessaoDaVoz(sessaoId && contexto ? { sessao_id: sessaoId, contexto } : null);
+    return () => definirSessaoDaVoz(null);
+  }, [sessaoId, contexto]);
   // Sem o destrave, o play() do áudio do ElevenLabs é bloqueado e a fala espera o próximo toque.
   useLiberarAudio();
   const [estado, setEstado] = useState<EstadoVoz>("inativa");

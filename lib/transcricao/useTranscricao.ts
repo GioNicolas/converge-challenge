@@ -4,14 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { iniciarNavegador, reconhecimentoDisponivel } from "./navegador";
 import { erroMicrofone, type EstadoTranscricao, type EventosTranscricao, type SessaoTranscricao } from "./tipos";
 import { focoAudio } from "../audio/foco";
+import { criarMedidorUsoTranscricao } from "./uso";
 
-type CapturaAtual = { controlador: AbortController; sessao?: SessaoTranscricao; liberar?: () => void };
+type CapturaAtual = { controlador: AbortController; sessao?: SessaoTranscricao; liberar?: () => void; medidor?: ReturnType<typeof criarMedidorUsoTranscricao> };
 
-export function useTranscricao({ aoTexto, bloqueada = false, obterStream, liberarStream }: {
+export function useTranscricao({ aoTexto, bloqueada = false, obterStream, liberarStream, sessaoId }: {
   aoTexto: (texto: string) => void;
   bloqueada?: boolean;
   obterStream?: () => Promise<MediaStream>;
   liberarStream?: () => void;
+  sessaoId?: string | null;
 }) {
   const [estado, setEstado] = useState<EstadoTranscricao>("inativa");
   const [parcial, setParcial] = useState("");
@@ -22,9 +24,12 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
   receber.current = aoTexto;
   const liberar = useRef(liberarStream);
   liberar.current = liberarStream;
+  const sessaoIdRef = useRef(sessaoId);
+  sessaoIdRef.current = sessaoId;
 
   const cancelar = useCallback(() => {
     const atual = referencia.current;
+    atual?.medidor?.finalizar();
     referencia.current = null;
     atual?.controlador.abort();
     atual?.sessao?.cancelar();
@@ -55,6 +60,7 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
       },
       aoEncerrar: () => {
         if (!vigente()) return;
+        atual.medidor?.finalizar();
         referencia.current = null;
         liberar.current?.();
         atual.liberar?.();
@@ -87,6 +93,13 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
         throw new Error("Configuração de transcrição inválida.");
       }
       if (!vigente()) { atual.sessao.cancelar(); return; }
+      // O ditado envia ao Scribe tudo que o microfone captura, então tempo aberto representa áudio enviado.
+      const id = sessaoIdRef.current;
+      if (id) atual.medidor = criarMedidorUsoTranscricao(id, { enviar: (corpo, final) => {
+        // Beacon recusado (fila cheia) cai no fetch, como no quadro.
+        if (final && navigator.sendBeacon?.("/api/uso", new Blob([corpo], { type: "application/json" }))) return;
+        void fetch("/api/uso", { method: "POST", headers: { "Content-Type": "application/json" }, body: corpo, keepalive: final }).catch(() => {});
+      } });
       setEstado("ouvindo");
     } catch (e) {
       if (!vigente()) return;

@@ -18,6 +18,7 @@ test("llm_uso entra na linha do tempo com o relógio da sessão, sem contar como
   const uso = s.events.at(-1);
   assert.equal(uso?.type, "llm_uso");
   assert.equal(uso?.t, 3_000);
+  appendEvent(s, { type: "voz_uso", sessionId: s.sessionId, t: 3_001, contexto: "coding", caracteres: 12 });
   assert.equal(ultimoEvento(s)?.type, "run");
   assert.equal(isCandidateIdle(s, 3_000), true);
 });

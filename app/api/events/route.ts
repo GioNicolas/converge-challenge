@@ -31,7 +31,7 @@ function withProblem(config: InterviewConfig, problemId: string): InterviewConfi
 export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   const parsed = SessionEvent.safeParse(body);
-  if (parsed.success && parsed.data.type === "llm_uso") {
+  if (parsed.success && ["llm_uso", "transcricao_uso", "voz_uso", "voz_descartada"].includes(parsed.data.type)) {
     return NextResponse.json({ error: "Evento reservado ao servidor" }, { status: 400 });
   }
   if (!parsed.success) {
