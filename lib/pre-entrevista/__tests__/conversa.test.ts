@@ -10,8 +10,8 @@ import {
   montarMensagensConversa,
   movimentoDaFala,
   perguntaEmAberto,
-  responder,
   perguntaNoEsclarecimento,
+  responder,
   semRepeticaoDaFalaDela,
 } from "../conversa";
 import { aplicarPasso, type Passo } from "../planejador";
@@ -488,6 +488,13 @@ describe("esclarecer termina em pergunta (issue #113)", () => {
     assert.equal(
       perguntaNoEsclarecimento("É sobre o nível de detalhe. O que eu queria saber é se ele precisa fazer contas.", ABERTA),
       "É sobre o nível de detalhe. Ele precisa fazer contas?",
+    );
+  });
+
+  it("frases depois da pergunta indireta saem, mesmo as que não são só explicação", () => {
+    assert.equal(
+      perguntaNoEsclarecimento("Eu quero saber se ele precisa fazer contas. Isso muda o nível, e também a nota.", ABERTA),
+      "Ele precisa fazer contas?",
     );
   });
 
