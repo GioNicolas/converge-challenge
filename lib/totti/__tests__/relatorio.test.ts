@@ -1,6 +1,30 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ehPedidoDeRepeticao, fatoDeCobertura, REGRAS_DE_JUSTICA_DO_RELATORIO, semTermosInternos } from "../relatorio";
+import { ehPedidoDeRepeticao, fatoDeCobertura, REGRAS_DE_JUSTICA_DO_RELATORIO, semTermosInternos, textoCulpaOCandidatoPorPedido } from "../relatorio";
+
+describe("textoCulpaOCandidatoPorPedido", () => {
+  it("pega a culpa por pedir repetição e o encerramento com adjetivo", () => {
+    for (const t of [
+      "Candidato pediu repetições sucessivas e demonstrou dificuldade em acompanhar os questionamentos",
+      "teve dificuldade constante para acompanhar as perguntas, pediu repetições sucessivas e optou por encerrar a entrevista abruptamente",
+      "Pediu para repetir a pergunta várias vezes.",
+      "Fez pedidos de esclarecimento o tempo todo.",
+      "Não entendeu as perguntas do entrevistador.",
+      "Encerrou a entrevista de forma abrupta.",
+      "Desistiu da entrevista no meio.",
+    ]) assert.equal(textoCulpaOCandidatoPorPedido(t), true, t);
+  });
+
+  it("não confunde com o domínio do problema nem com decisão técnica", () => {
+    for (const t of [
+      "Garantiu idempotência dos pedidos para evitar repetição de cobrança.",
+      "Estados dos pedidos com repetições de mensagens tratadas por chave única.",
+      "Desistiu do cache e usou uma fila para absorver o pico.",
+      "Teve dificuldade para entender o gargalo do banco, mas chegou ao índice certo.",
+      "Pedidos duplicados são descartados pelo id.",
+    ]) assert.equal(textoCulpaOCandidatoPorPedido(t), false, t);
+  });
+});
 
 describe("ehPedidoDeRepeticao", () => {
   it("reconhece pedidos de repetição e esclarecimento", () => {

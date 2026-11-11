@@ -87,13 +87,17 @@ export function ehPedidoDeRepeticao(texto: string): boolean {
   return trechos.every(ehTrechoDePedido);
 }
 
+// Sem palavras de domínio soltas: "pedidos" e "repetição" aparecem em problemas de verdade ("idempotência dos
+// pedidos para evitar repetição"), e "desistiu do cache" é uma decisão técnica. Só casa o padrão sobre a conversa.
 const PADROES_DE_CULPA: RegExp[] = [
-  /\b(?:pediu|pedindo|pedidos?|solicitou)\b.{0,50}\b(?:repeti|esclarec)/,
-  /\brepeticoes\b/,
-  /\bdificuldade\b.{0,40}\b(?:acompanhar|entender|compreender)\b/,
+  /\b(?:pediu|pedindo|pedia|solicitou|precisou)\b.{0,30}\b(?:repetic|repetir|repetisse|esclarec)/,
+  /\b(?:pedidos?|solicitac\w*) (?:de|para) (?:repetic|repetir|esclarec)/,
+  /\brepeticoes (?:sucessivas|constantes|frequentes|seguidas)\b/,
+  /\bdificuldade\b.{0,40}\b(?:acompanhar|entender|compreender)\b.{0,30}\b(?:perguntas?|questionamentos?|entrevistador|conversa)/,
   /\bnao (?:entendeu|compreendeu|conseguiu (?:entender|acompanhar)) (?:a |as |o |os )?(?:perguntas?|questionamentos?)/,
-  /\babrupt/,
-  /\bdesistiu\b/,
+  /\b(?:encerr|termin|interromp)\w* (?:a entrevista |a sessao |a conversa )?(?:de forma )?abrupt/,
+  /\babruptamente\b.{0,30}\b(?:entrevista|sessao|conversa)\b/,
+  /\bdesistiu (?:da|de continuar a|de seguir com a) (?:entrevista|sessao|conversa)\b/,
 ];
 
 /**
