@@ -260,6 +260,7 @@ export type ParametrosGuardas = {
   fontes: FontesDeProva;
   origem: "llm" | "fake";
   agora?: () => Date;
+  aoUsar?: (uso: { modelo?: string; provedor?: string; reservaDisparada?: boolean; ms: number; entrada?: number; saida?: number; cache?: number; custo?: number }) => void;
   /** Quanto durou a entrevista e quanto estava previsto. Ausente: duração desconhecida (conta só a cobertura). */
   duracao?: DuracaoDaSessao | null;
   /** Sinais esperados do problema: dizem o que faltou observar nos critérios sem prova. */
@@ -280,7 +281,8 @@ export const FRACAO_MINIMA_DE_COBERTURA = 2 / 3;
 export function duracaoDaSessao(estado: EstadoSessao, eventos: EventoArmazenado[]): DuracaoDaSessao | null {
   if (!estado.iniciadaEm) return null;
   const fim = Math.max(estado.iniciadaEm,
-    ...eventos.map(e => Date.parse(e.horario)).filter(Number.isFinite),
+    // Uso de modelo (o do relatório chega na hora de gerar) não é a entrevista acontecendo.
+    ...eventos.filter(e => !e.tipo.endsWith("_uso")).map(e => Date.parse(e.horario)).filter(Number.isFinite),
     ...estado.conversa.map(f => f.em));
   const previstoMin = tempoDaEntrevista(estado, fim).totalMin;
   return previstoMin > 0 ? { decorridoMin: (fim - estado.iniciadaEm) / 60_000, previstoMin } : null;
@@ -673,6 +675,7 @@ export type DepsScorecard = {
   problema: Problema;
   modelo?: string;
   agora?: () => Date;
+  aoUsar?: (uso: { modelo?: string; provedor?: string; reservaDisparada?: boolean; ms: number; entrada?: number; saida?: number; cache?: number; custo?: number }) => void;
 };
 
 export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorecard): Promise<Scorecard> {
@@ -698,6 +701,7 @@ export async function gerarScorecard(deps: DepsScorecard, entrada: EntradaScorec
       timeoutMs,
       sinal: controle.signal,
     })]);
+    deps.aoUsar?.({ modelo: r.modelo, provedor: r.provedor, reservaDisparada: r.reservaDisparada, ms: r.ms, entrada: r.uso?.entrada, saida: r.uso?.saida, cache: r.uso?.cache, custo: r.uso?.custo });
     return comAlertaDeInjecao(comAdaptacao(marcarRegrasDaSquad(aplicarGuardas(r.dados, {
       sessaoId: entrada.sessaoId,
       candidatoId: entrada.candidatoId,

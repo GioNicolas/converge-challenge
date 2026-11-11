@@ -8,6 +8,7 @@ import { faseDaEntrevista, linesWrittenBeyondStarter } from "@/lib/agents/fase";
 import type { Blip, RunResult, SessionEvent } from "@/lib/contracts";
 import { interrupcaoAtrasada, motivoDoMomento, motivoDoRitmo, orcamentoDeInterrupcoes, type Momento, type Ritmo } from "@/lib/interrupcao/politica";
 import { latestCode } from "@/lib/session/store";
+import { ultimoEvento } from "@/lib/session/eventos";
 import type { Cola, QueuedQuestion, SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
 
@@ -146,7 +147,7 @@ export function nextHint(session: SessionState): string | undefined {
 
 /** Candidato parado em t (ms de sessão): quem decide o blip (decideBlip) usa isso. */
 export function isCandidateIdle(session: SessionState, t: number): boolean {
-  const last = session.events.at(-1);
+  const last = ultimoEvento(session);
   if (last === undefined) return true;
   return IDLE_EVENT_TYPES.has(last.type) || t - last.t > IDLE_AFTER_MS;
 }

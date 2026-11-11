@@ -128,7 +128,12 @@ async function gerarEGuardar(ctx: Contexto, id: string, sessao: SessaoArmazenada
       const sc =
         ctx.fake || !ctx.llm
           ? gerarScorecardFalso({ kit: alvo.kit, problema: alvo.problema, agora }, entrada)
-          : await gerarScorecard({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema, agora }, entrada);
+          : await gerarScorecard({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema, agora, aoUsar: (u) => {
+              void ctx.repositorio.anexarEventos(id, [{ horario: new Date(ctx.agora()).toISOString(), tipo: "scorecard_uso", dados: {
+                modelo: u.modelo ?? "desconhecido", provedor: u.provedor ?? "desconhecido", reserva_disparada: u.reservaDisparada ?? false, ms: u.ms,
+                tokens_entrada: u.entrada, tokens_saida: u.saida, ...(u.cache !== undefined ? { tokens_cache: u.cache } : {}), custo_usd: u.custo,
+              } }]).catch(() => []);
+            } }, entrada);
       await ctx.repositorio.salvarScorecard(id, sc);
       await noIndice(kv, id, {
         state: "done",

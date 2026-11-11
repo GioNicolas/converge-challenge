@@ -155,7 +155,8 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
           ms: r.durationMs ?? Date.now() - inicio,
           modelo: r.model,
           provedor: r.provider,
-          uso: { entrada: r.promptTokens, saida: r.completionTokens, custo: r.costUsd },
+          uso: { entrada: r.promptTokens, saida: r.completionTokens, ...(r.cachedTokens !== undefined ? { cache: r.cachedTokens } : {}), custo: r.costUsd },
+          reservaDisparada: r.reservaDisparada ?? false,
         };
       } catch (e) {
         if (e instanceof ErroLlm) throw e;

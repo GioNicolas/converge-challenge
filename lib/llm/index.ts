@@ -463,6 +463,7 @@ async function callHedged<T>(
 ): Promise<ChatJsonResult<T>> {
   if (signal?.aborted) throw abortError();
   const [primario, reserva] = ordem(role);
+  const respondeuNaReserva = (provider: LlmProviderName) => provider !== ordem(role)[0];
   const priAbort = filhoDe(signal);
   const resAbort = filhoDe(signal);
   const pri = runSettled(call, primario, priAbort.signal);
@@ -478,7 +479,7 @@ async function callHedged<T>(
   if (early !== "hedge" && early.ok) {
     recordWin(primario);
     notePrimaryWon(role);
-    return early.value;
+    return { ...early.value, reservaDisparada: respondeuNaReserva(primario) };
   }
   console.info(
     early === "hedge"
@@ -501,18 +502,19 @@ async function callHedged<T>(
     priAbort.abort();
     notePrimarySlow(role);
   }
-  return winner.value;
+  return { ...winner.value, reservaDisparada: respondeuNaReserva(winner.value.provider) };
 }
 
 /** Sem hedge (evaluator): primário; em erro, uma tentativa na reserva. */
 async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
   const [primario, reserva] = ordem(role);
+  const respondeuNaReserva = (provider: LlmProviderName) => provider !== ordem(role)[0];
   const primary = await runSettled(call, primario, signal);
   if (signal?.aborted) throw abortError();
   if (primary.ok) {
     recordWin(primario);
     notePrimaryWon(role);
-    return primary.value;
+    return { ...primary.value, reservaDisparada: respondeuNaReserva(primario) };
   }
   notePrimarySlow(role);
   console.info(`[llm] ${role}: ${primary.error.slice(0, 160)}; tentando ${reserva}`);
@@ -520,7 +522,7 @@ async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: Ab
   if (signal?.aborted) throw abortError();
   if (backup.ok) {
     recordWin(reserva);
-    return backup.value;
+    return { ...backup.value, reservaDisparada: respondeuNaReserva(reserva) };
   }
   throw new Error(`${primary.error} | ${backup.error}`);
 }
@@ -528,7 +530,7 @@ async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: Ab
 async function callOnly<T>(call: RoleCall<T>, name: LlmProviderName, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
   const result = await attempt(call.role, PROVIDERS[name], requestFor(call, name, signal));
   recordWin(name);
-  return result;
+  return { ...result, reservaDisparada: name !== ordem(call.role)[0] };
 }
 
 export async function completeJson<T>(opts: {

@@ -36,6 +36,7 @@ export type LlmResultado<T> = {
   modelo?: string;
   /** Provedor que respondeu (o primário ou a reserva), quando o cliente sabe. */
   provedor?: string;
+  reservaDisparada?: boolean;
 };
 
 export interface LlmCliente {
