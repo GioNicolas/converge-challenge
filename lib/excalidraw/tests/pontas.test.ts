@@ -30,9 +30,9 @@ test("a direção segue as pontas desenhadas", () => {
   ]);
 });
 
-test("ponta só no começo de uma seta solta inverte também o '?'", () => {
+test("ponta só no começo de uma seta solta inverte também o 'sem origem'", () => {
   const solta = alterar(so("so-no-comeco"), "so-no-comeco", { endBinding: null, points: [[0, 0], [2000, 0]] } as unknown as Partial<ExcalidrawElement>);
-  assert.match(criarConversor().converter(solta).texto, /\[s1\] \? → API \(seta solta\)/);
+  assert.ok(criarConversor().converter(solta).texto.includes("[s1] (sem origem) → API\n"));
 });
 
 test("diff: trocar a ponta de lado inverte a seta", () => {

@@ -12,6 +12,7 @@ import { runHiddenTests, runServerTests, type HiddenTestsResult } from "@/lib/ag
 import { allPassed } from "@/lib/agents/policy";
 import { buildEvaluatorSystem, buildEvaluatorUser } from "@/lib/agents/prompts/evaluator";
 import { dadoEmLinha, tentativasDeInjecao, type TentativaDeInjecao } from "@/lib/seguranca/injecao";
+import { ehItemGenerico, ehPedidoDeRepeticao, FRACAO_DE_ENCERRAMENTO_ANTECIPADO, fatoDeCobertura, mencionaDuracao, semTermosInternos, textoCulpaOCandidatoPorPedido } from "@/lib/totti/relatorio";
 import { CONCEITOS_EMPECILHO, type Report, type SessionEvent } from "@/lib/contracts";
 import { formatMs } from "@/lib/format";
 import { completeJson } from "@/lib/llm";
@@ -138,9 +139,12 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
 
   const scoredCriteria = config.criteria.map((c) => {
     if (c.id === OBJECTIVE_CRITERION) return { id: c.id, name: c.name, ...correctness(session, hidden, endT) };
-    const judged = byId.get(c.id);
+    const rawJudged = byId.get(c.id);
+    // Pedir para repetir, dizer que não entendeu, corrigir o entrevistador ou pedir para encerrar é neutro: nunca é
+    // prova. Se era a única prova de uma nota baixa, o critério fica sem nota.
+    const judged = rawJudged && descartarProvaDePedido(rawJudged, falasDoCandidatoPorMomento(session));
     if (!judged || !judgedIds.includes(c.id) || judged.score === null) {
-      return { id: c.id, name: c.name, score: null, evidence: [{ t: endT, text: "Não explorado na entrevista." }] };
+      return { id: c.id, name: c.name, score: null, evidence: [{ t: endT, text: judged?.semProva ? "Sem fala de conteúdo do candidato para avaliar." : "Não explorado na entrevista." }] };
     }
     return {
       id: c.id,
@@ -168,6 +172,8 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
   const weighted = scored.reduce((sum, c) => sum + c.score * c.weight, 0) / totalWeight;
   const overall = Math.round(Math.min(4, Math.max(1, weighted)) * 10) / 10;
   const tests = testCounts(session, hidden);
+  // Encerramento antes do tempo é fato de cobertura: dito sem adjetivo e sem peso na nota.
+  const textos = limparTextosDoRelatorio(output, fatoDeEncerramentoAntecipado(endT, config.durationMin, criteria.filter((c) => c.score === null).length, criteria.length));
 
   return {
     sessionId: session.sessionId,
@@ -176,11 +182,11 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
     recommendation: overall >= 3 ? "avancar" : overall >= 2 ? "talvez" : "nao_avancar",
     overallScore: overall,
     criteria,
-    summary: output.summary,
-    strengths: output.strengths,
+    summary: textos.summary,
+    strengths: textos.strengths,
     // Alerta determinístico: não depende de o modelo ter resistido ao texto.
-    concerns: [...output.concerns, ...alertaDeInjecao(injecoes)],
-    nextSteps: output.nextSteps,
+    concerns: [...textos.concerns, ...alertaDeInjecao(injecoes)],
+    nextSteps: textos.nextSteps,
     signals: {
       testsPassed: tests.passed,
       testsTotal: tests.total,
@@ -214,6 +220,61 @@ async function evaluate(session: SessionState, status: ReportStatus): Promise<Re
         }
       : undefined,
   };
+}
+
+/**
+ * "A entrevista durou 8 de 30 minutos; 2 de 5 critérios ficaram sem prova." Só existe quando a sessão acabou antes da hora;
+ * passa os minutos crus para o fato de cobertura.
+ */
+export function fatoDeEncerramentoAntecipado(endMs: number, previstoMin: number, semNota: number, total: number): string | null {
+  if (previstoMin <= 0 || endMs >= FRACAO_DE_ENCERRAMENTO_ANTECIPADO * previstoMin * 60_000) return null;
+  return fatoDeCobertura({ duracaoMin: endMs / 60_000, previstoMin, criteriosSemProva: semNota, totalCriterios: total });
+}
+
+/**
+ * Textos do relatório com as regras de justiça do Totti: sai o que culpa o candidato por pedir repetição, o item
+ * genérico "Aprofundar X." e o termo interno; o fato do encerramento antecipado entra no resumo, sem adjetivo.
+ */
+export function limparTextosDoRelatorio<T extends Pick<EvaluatorOutput, "summary" | "strengths" | "concerns" | "nextSteps">>(
+  output: T,
+  fato: string | null,
+): Pick<EvaluatorOutput, "summary" | "strengths" | "concerns" | "nextSteps"> {
+  const bom = (t: string) => t.trim() !== "" && !textoCulpaOCandidatoPorPedido(t) && !ehItemGenerico(t);
+  const lista = (xs: string[]) => xs.filter(bom).map(semTermosInternos);
+  const resumo = bom(output.summary) ? semTermosInternos(output.summary.trim()) : "";
+  const comFato = fato && !mencionaDuracao(resumo) ? [resumo, fato].filter(Boolean).join(" ") : resumo;
+  return { summary: comFato, strengths: lista(output.strengths), concerns: lista(output.concerns), nextSteps: lista(output.nextSteps) };
+}
+
+/** mm:ss → o que o candidato disse nesse segundo (uma entrada por fala). */
+function falasDoCandidatoPorMomento(session: SessionState): Map<string, string[]> {
+  const porMomento = new Map<string, string[]>();
+  for (const e of session.events) {
+    if (e.type !== "speech" || e.role !== "candidate") continue;
+    const label = formatMs(e.t);
+    porMomento.set(label, [...(porMomento.get(label) ?? []), e.text]);
+  }
+  return porMomento;
+}
+
+/**
+ * Tira da nota a evidência que é só pedido de repetição ou esclarecimento (a fala do candidato naquele momento, ou o
+ * próprio texto da evidência). Se nenhuma evidência sobrou, a nota vira nula (`semProva`), qualquer que seja o
+ * valor: sem prova, sem nota. Se sobrou alguma, a nota fica, só sem a evidência de pedido. Pura: o teste a chama direto.
+ */
+export function descartarProvaDePedido<T extends { score: number | null; evidence: { at: string; text: string }[] }>(
+  judged: T,
+  falasPorMomento: Map<string, string[]>,
+): T & { semProva?: boolean } {
+  if (judged.evidence.length === 0) return judged;
+  const ehPedido = (e: { at: string; text: string }) => {
+    const falas = falasPorMomento.get(e.at.trim()) ?? [];
+    return (falas.length > 0 && falas.every(ehPedidoDeRepeticao)) || ehPedidoDeRepeticao(e.text);
+  };
+  const evidence = judged.evidence.filter((e) => !ehPedido(e));
+  if (evidence.length === judged.evidence.length) return judged;
+  if (evidence.length === 0) return { ...judged, score: null, evidence, semProva: true };
+  return { ...judged, evidence };
 }
 
 /** Evidência com tempo que não existe na sessão é invenção do modelo: sai do relatório. */

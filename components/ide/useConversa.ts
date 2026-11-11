@@ -42,6 +42,7 @@ export interface ConversaDeps {
   getLiveCode?: () => { code: string; language: string };
   /** O candidato pediu, falando, para encerrar a entrevista. */
   onFinishRequest?: () => void;
+  onDespedida?: (texto: string) => void;
   /** Uma pergunta do Totti terminou (o assunto fechou). */
   onFioFechado?: (blip: Blip) => void;
   /** A fala não saiu em voz (desligada ou bloqueada pelo navegador): vai para a legenda. */
@@ -145,8 +146,9 @@ export function useConversa(deps: ConversaDeps) {
    * Fala do Totti, uma por vez. O grifo da fala anterior sai antes; o desta fica enquanto o assunto está aberto
    * e sai quando ele fecha. A linha do tempo só recebe a fala que foi dita (uma descartada antes de tocar não vale).
    */
-  const responder = useCallback(async (res: Pick<ChatResponse, "reply" | "commands" | "end">, lista: Fala[], blip: Blip | undefined) => {
+  const responder = useCallback(async (res: Pick<ChatResponse, "reply" | "commands" | "end" | "fechamento" | "despedida">, lista: Fala[], blip: Blip | undefined) => {
     const d = depsRef.current;
+    if (res.despedida) { d.onDespedida?.(res.reply); return; }
     const fala: Fala = { role: "agent", text: res.reply, at: Date.now() };
     lista.push(fala);
     if (lista === livresRef.current) aparar();
@@ -160,8 +162,8 @@ export function useConversa(deps: ConversaDeps) {
     void d.sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: blip?.id });
     if (!tocou) d.onSemVoz?.(res.reply);
     // Pergunta feita dentro de um assunto: se ele não responder, o assunto fecha sozinho (ver FIO_SEM_RESPOSTA_MS).
-    if (!res.end && blip && fioRef.current?.blip.id === blip.id) semRespostaDesdeRef.current = Date.now();
-    if (!res.end) return;
+    if (res.fechamento || (!res.end && blip && fioRef.current?.blip.id === blip.id)) semRespostaDesdeRef.current = Date.now();
+    if (res.fechamento || !res.end) return;
     if (blip && fioRef.current?.blip.id === blip.id) fecharFio("agent");
     else d.applyCommands([{ type: "clear_highlights" }]);
   }, [fecharFio]);
@@ -201,8 +203,8 @@ export function useConversa(deps: ConversaDeps) {
     repeticoesRef.current = 0;
     if (blip || palavras(texto) >= MIN_PALAVRAS_FALA) void d.sendEvent({ type: "speech", role: "candidate", text: texto, blipId: blip?.id });
     if (lista === livresRef.current) aparar();
-    if (res.finish) {
-      d.onFinishRequest?.();
+    if (res.despedida) {
+      d.onDespedida?.(res.reply);
       return;
     }
     if (res.listening || !res.reply.trim()) return;

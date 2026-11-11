@@ -80,7 +80,7 @@ describe("validarKit", () => {
     tem(erros(k), "vaza números da ficha (18)");
     k.problemas[0].enunciado = "Planeje o prédio com 1200 m2 por andar.";
     tem(erros(k), "vaza números da ficha (1200)");
-    k.problemas[0].enunciado = "Planeje o prédio, sem números.";
+    k.problemas[0].enunciado = "Planeje o desafio do prédio, sem números.";
     assert.equal(validarKit(k).ok, true);
   });
 

@@ -238,7 +238,7 @@ export type Blip = z.infer<typeof Blip>;
  * Resposta de POST /api/events e de GET /api/blip/pending (a IDE consulta a cada ~3 s).
  * `dismissBlipId`: o balão com esse id expirou sem clique — a IDE deve tirá-lo da tela.
  */
-export const EventsResponse = z.object({ blip: Blip.optional(), dismissBlipId: z.string().optional() });
+export const EventsResponse = z.object({ blip: Blip.optional(), dismissBlipId: z.string().optional(), despedida: z.string().optional() });
 export type EventsResponse = z.infer<typeof EventsResponse>;
 
 /** Resposta de GET /api/blip/:id/context — o que a conversa (voz ou texto) recebe ao abrir. */
@@ -288,10 +288,11 @@ export const ChatResponse = z.object({
   end: z.boolean(),
   /** O agente só está ouvindo (o candidato pensa em voz alta ou continua explicando): reply vem "" e nada é falado. */
   listening: z.boolean().optional(),
+  fechamento: z.enum(["anuncio", "perguntas_finais", "ultima_palavra", "despedida", "encerrada"]).optional(),
+  /** reply é a despedida, que a IDE deve falar antes de encerrar. */
+  despedida: z.boolean().optional(),
   /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
   concluded: z.boolean().optional(),
-  /** O candidato pediu para encerrar a entrevista: a IDE se despede e encerra a sessão. */
-  finish: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 

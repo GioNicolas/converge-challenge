@@ -20,10 +20,8 @@ export const DESPEDIDA_LIVE_CODING =
   "Combinado, vamos encerrar por aqui. Obrigado pela conversa! O retorno vem pela equipe que está cuidando do processo.";
 
 /**
- * Live coding: quem é o Totti, a vaga, a duração, onde está cada coisa e como a conversa funciona. É tudo por
- * voz e ele acompanha o código o tempo todo, então o candidato precisa saber que pode (e deve) falar com ele.
+ * Live coding: apresentação curta; o problema e o restante do combinado ficam no painel.
  */
-export function comoFuncionaLiveCoding(duracaoMin: number, cargo?: string): string {
-  const vaga = cargo?.trim() ? ` para a vaga de ${cargo.trim()}` : "";
-  return `Oi, eu sou o Totti e vou conduzir a sua entrevista de programação${vaga}. Ela tem uns ${Math.max(1, Math.round(duracaoMin))} minutos. O problema está no painel à esquerda, você programa no editor e pode rodar os testes quando quiser. Eu vou acompanhar o seu código o tempo todo e, de vez em quando, te perguntar sobre as suas ideias, tudo por voz: pensa em voz alta, me chama quando quiser e, se não souber alguma coisa, é só dizer que a gente segue. Dá uma lida no problema com calma.`;
+export function comoFuncionaLiveCoding(duracaoMin: number): string {
+  return `Oi, eu sou o Totti e vou conduzir sua entrevista de programação, que dura uns ${Math.max(1, Math.round(duracaoMin))} minutos. O problema está à esquerda; pensa em voz alta e me chama quando quiser.`;
 }

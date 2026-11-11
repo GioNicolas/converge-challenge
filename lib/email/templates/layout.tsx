@@ -60,21 +60,38 @@ export function EmailLayout({
   previewText,
   eyebrow,
   children,
+  simples = false,
+  signature = "Time de Recrutamento",
 }: {
-  previewText: string;
-  eyebrow: string;
+  previewText?: string;
+  eyebrow?: string;
+  simples?: boolean;
+  signature?: string;
   children: ReactNode;
 }) {
+  if (simples) {
+    return (
+      <Html lang="pt-BR">
+        <Head />
+        <Body style={{ fontFamily: fontStack, color: palette.ink, margin: 0, padding: "24px 16px" }}>
+          <div style={{ maxWidth: 560, margin: "0 auto" }}>
+            {children}
+            <Text style={styles.signature}>{signature}</Text>
+          </div>
+        </Body>
+      </Html>
+    );
+  }
   const podeResponder = Boolean(process.env.EMAIL_REPLY_TO);
   return (
     <Html lang="pt-BR">
       <Head />
-      <Preview>{previewText}</Preview>
+      <Preview>{previewText ?? ""}</Preview>
       <Body style={styles.body}>
         <Container style={styles.container}>
-          <Text style={styles.eyebrow}>{eyebrow}</Text>
+          <Text style={styles.eyebrow}>{eyebrow ?? ""}</Text>
           {children}
-          <Text style={styles.signature}>Time de Recrutamento</Text>
+          <Text style={styles.signature}>{signature}</Text>
         </Container>
         <Text style={styles.footer}>
           Você recebeu esta mensagem porque se candidatou a uma vaga

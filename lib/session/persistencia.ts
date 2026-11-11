@@ -3,6 +3,7 @@
 // e gravada de volta ao fim da requisição, juntando os eventos que outra instância tenha gravado nesse meio-tempo.
 // Sem Supabase (testes, dev) nada disso faz nada. Falha de rede nunca derruba a entrevista.
 import type { SessionState } from "@/lib/session/types";
+import { ETAPAS_DO_FECHAMENTO } from "@/lib/totti/fechamento";
 import { getSession, substituirSessao } from "@/lib/session/store";
 import { kvRemoto } from "@/lib/storage/kv";
 
@@ -22,15 +23,31 @@ export async function sessaoViva(sessionId: string): Promise<SessionState | unde
       substituirSessao(remota);
       return getSession(sessionId);
     }
+    const sessaoFechamento = sessaoComFechamentoMaisAdiantado(local, remota);
     // Remota mais nova (outra instância tratou eventos que esta não viu): adota, mantendo o objeto local.
     if (remota.events.length > local.events.length || (remota.ended && !local.ended)) {
+      remota.fechamento = sessaoFechamento.fechamento;
+      remota.fechamentoIniciadoEm = sessaoFechamento.fechamentoIniciadoEm;
+      remota.fechamentoCodigoInicial = sessaoFechamento.fechamentoCodigoInicial;
+      remota.fechamentoBlipId = sessaoFechamento.fechamentoBlipId;
       substituirSessao(remota, local);
+    } else {
+      local.fechamento = sessaoFechamento.fechamento;
+      local.fechamentoIniciadoEm = sessaoFechamento.fechamentoIniciadoEm;
+      local.fechamentoCodigoInicial = sessaoFechamento.fechamentoCodigoInicial;
+      local.fechamentoBlipId = sessaoFechamento.fechamentoBlipId;
     }
     return local;
   } catch (err) {
     console.error("[sessao] não restaurou do Supabase:", err instanceof Error ? err.message : "erro");
     return local;
   }
+}
+
+function sessaoComFechamentoMaisAdiantado(local: SessionState, remoto: SessionState): SessionState {
+  if (!local.fechamento) return remoto;
+  if (!remoto.fechamento) return local;
+  return ETAPAS_DO_FECHAMENTO.indexOf(remoto.fechamento.etapa) > ETAPAS_DO_FECHAMENTO.indexOf(local.fechamento.etapa) ? remoto : local;
 }
 
 /**
@@ -89,6 +106,11 @@ export async function guardarSessao(session: SessionState): Promise<void> {
       const codigos = remota.codeHistory.filter((c) => !versoes.has(`${c.version}|${c.t}`));
       if (codigos.length) session.codeHistory = [...session.codeHistory, ...codigos].sort((a, b) => a.t - b.t);
       if (remota.ended) session.ended = true;
+      const escolhida = sessaoComFechamentoMaisAdiantado(session, remota);
+      session.fechamento = escolhida.fechamento;
+      session.fechamentoIniciadoEm = escolhida.fechamentoIniciadoEm;
+      session.fechamentoCodigoInicial = escolhida.fechamentoCodigoInicial;
+      session.fechamentoBlipId = escolhida.fechamentoBlipId;
       if (!session.report && remota.report) session.report = remota.report;
       juntarPerguntas(session, remota);
     }

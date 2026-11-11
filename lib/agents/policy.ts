@@ -91,10 +91,6 @@ function escalado(session: SessionState, ms: number): number {
   return Math.round(ms * Math.min(1, session.config.durationMin / 30));
 }
 
-/** O encerramento entra faltando 3 min, ou 20% da entrevista se ela for curta (10 min: faltando 2 min). */
-function encerramentoAntesDoFimMs(session: SessionState): number {
-  return Math.min(CLOSING_BEFORE_END_MS, session.config.durationMin * 60_000 * 0.2);
-}
 /** Retorno de desafio: depois desse tempo volta mesmo sem o código mudar. */
 const CHECK_IN_MAX_WAIT_MS = 4 * 60_000;
 /** Retorno de desafio: com o código mudado, volta depois desse tempo sem digitar. */
@@ -198,6 +194,10 @@ export function lastBlipDecision(session: SessionState): string | undefined {
  * `dismissBlipId`: o balão anterior expirou nesta chamada e a IDE deve tirá-lo da tela.
  */
 export function decideBlip(session: SessionState, t: number): { blip?: Blip; dismissBlipId?: string } {
+  if (session.fechamento) {
+    decisions.set(session, "fechamento em andamento");
+    return {};
+  }
   const expirado = expireBlip(session, t);
   const { blip, reason, dismissBlipId: cedeu } = pickBlip(session, t);
   decisions.set(session, expirado ? `balão ${expirado.slice(0, 8)} expirou · ${reason}` : reason);
@@ -265,16 +265,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
 
   // Sem a trava "candidato digitando" daqui: o momento da política comum espera uma pausa e, com paciência, aceita
   // uma pausa curta, para quem digita sem parar também receber pergunta.
-  const remaining = session.config.durationMin * 60_000 - t;
-  // Encerramento e mudança no problema também só numa pausa (estão fora do orçamento). O encerramento ganha
-  // paciência como uma pergunta que espera desde a hora dele.
-  const antesDoFim = encerramentoAntesDoFimMs(session);
-  const momentoExtra = motivoDoMomento({ ...momentoDaSessao(session, t), esperandoHaMs: antesDoFim - remaining });
-  // Reta final: oferece uma vez a conversa de encerramento com o que ficou pendente.
-  if (remaining <= antesDoFim && !session.queue.some((q) => q.kind === "encerramento") && momentoExtra === null) {
-    const closing = startClosing(session, t);
-    if (closing) return { blip: closing, reason: `blip ${closing.id} (encerramento, faltam ${Math.ceil(remaining / 60_000)} min)` };
-  }
+  const momentoExtra = motivoDoMomento(momentoDaSessao(session, t));
   // Empecilho: uma mudança no problema, uma vez por sessão, quando chegar a hora (lib/agents/empecilho.ts).
   if (esperaDoEmpecilho(session, t) === undefined && momentoExtra === null) {
     const empecilho = raiseEmpecilho(session, t);
@@ -350,7 +341,6 @@ const CLOSING_MAX_QUESTIONS = 2;
  */
 const CLOSING_MAX_TOPICS = 2;
 /** Faltando esse tempo, o agente oferece o encerramento sozinho (com o que ficou pendente), sem esperar o Finalizar. */
-const CLOSING_BEFORE_END_MS = 3 * 60_000;
 
 /**
  * O candidato pediu para finalizar: junta o que ficou pendente (a pergunta do balão na tela, as melhores da
@@ -414,6 +404,25 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
   };
   session.queue.push(closing);
   return raise(session, closing, t);
+}
+
+/** Cria a conversa real do fechamento quando o núcleo ainda precisa perguntar a última palavra. */
+export function criarBlipEncerramento(session: SessionState, t: number): Blip {
+  const existente = session.fechamentoBlipId && session.blips.find((b) => b.id === session.fechamentoBlipId);
+  if (existente) return existente;
+  const q: QueuedQuestion = {
+    id: `q-${session.queue.length + 1}`,
+    question: session.fechamento?.fila[0]?.pergunta ?? "Antes de encerrar, quer acrescentar alguma coisa?",
+    followUpTopic: "os pontos finais da conversa",
+    topicLabel: "fechamento da conversa",
+    priority: 1,
+    createdAt: t,
+    status: "queued",
+    kind: "encerramento",
+    closingTopics: session.fechamento?.fila.map((item) => item.pergunta) ?? [],
+  };
+  session.queue.push(q);
+  return raise(session, q, t);
 }
 
 /** Põe o empecilho da questão no balão. A primeira fala da conversa é o anúncio (lib/agents/interviewer.ts). */
