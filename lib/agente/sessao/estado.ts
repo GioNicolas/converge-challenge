@@ -99,7 +99,7 @@ export type EstadoSessao = {
   perguntasFeitas: number;
   /** A pergunta única do FECHAMENTO já foi feita? */
   perguntaFinalFeita: boolean;
-  /** O convite único de REQUISITOS (silêncio inicial) já foi feito? Ele não conta na cota de perguntas. */
+  /** Convite de REQUISITOS já feito ou dispensado porque o candidato falou. Não conta na cota. */
   conviteFeito: boolean;
   /** Quando o candidato clicou na última pergunta (o intervalo entre perguntas conta do mais recente entre isto e `ultimaRespostaEm`). */
   ultimaPerguntaEm: number | null;
@@ -375,7 +375,7 @@ export function transicionar(
       if (estado.plin !== "PLIN_PENDENTE" || !pendente) return nada;
       const pergunta: PerguntaFeita = {
         // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
-        numero: estado.perguntasFeitas + (estado.conviteFeito ? 1 : 0) + 1,
+        numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
         status: pendente.status,
         pergunta: pendente.pergunta ?? "",
         nota: pendente.nota,
@@ -410,9 +410,19 @@ export function transicionar(
       const texto = evento.texto.trim();
       const ultimaDoCandidato = estado.conversa.findLast((f) => f.quem === "candidato");
       const repetida = evento.fimDeResposta && (!texto || ultimaDoCandidato?.texto.trim() === texto);
-      const comFala: EstadoSessao = repetida
+      let comFala: EstadoSessao = repetida
         ? estado
         : { ...estado, conversa: [...estado.conversa, { quem: "candidato", texto: evento.texto, em: agora }] };
+      if (estado.fase === "REQUISITOS" && texto) {
+        comFala = { ...comFala, conviteFeito: true };
+        // O convite perdeu o sentido mesmo se a fala chegou entre a análise e o clique.
+        if (estado.plin === "PLIN_PENDENTE") {
+          return {
+            estado: { ...comFala, plin: "LIVRE", perguntaPendente: null },
+            efeitos: [{ tipo: "PLIN_CANCELADO", motivo: "ok" }],
+          };
+        }
+      }
       const ativa = estado.perguntaAtiva;
       // A resposta só termina com a marca de fim vinda do texto do candidato.
       if (estado.plin !== "PERGUNTA_ATIVA" || !ativa || !evento.fimDeResposta) {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S } from "../../../contracts";
 import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "../../../interrupcao/politica";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
@@ -38,6 +39,52 @@ function resposta(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
 
 const GRAFO = "COMPONENTES\n- [r1] Cliente (retângulo)\n- [e1] Postgres (elipse)\nCONEXÕES\n- [s1] Cliente → Postgres";
 const IDS = extrairIdsDoGrafo(GRAFO);
+
+describe("REQUISITOS: silêncio inicial decidido no servidor (#83)", () => {
+  const inicio = AGORA - SILENCIO_INICIAL_S * 1000;
+  const e = () => estadoEm("REQUISITOS", { faseIniciadaEm: inicio });
+
+  it("espera 120 segundos desde a fase, inclusive sem telemetria do navegador", () => {
+    assert.equal(motivoBloqueioPlin(e(), AGORA - 1), "SILENCIO_INICIAL_INSUFICIENTE");
+    assert.equal(motivoBloqueioPlin(e(), AGORA), null);
+    assert.equal(motivoBloqueioPlin({ ...e(), faseIniciadaEm: null }, AGORA), "SILENCIO_INICIAL_INSUFICIENTE");
+  });
+
+  it("fala ou texto durante a fase bloqueia mesmo após longo silêncio e em estado antigo", () => {
+    for (const em of [inicio, inicio + 1, AGORA - 1]) {
+      const estado = { ...e(), conversa: [{ quem: "candidato" as const, texto: "Tá bom", em }] };
+      assert.equal(motivoBloqueioPlin(estado, AGORA), "CANDIDATO_JA_FALOU");
+      assert.equal(motivoBloqueioPlin(estado, AGORA + 600_000), "CANDIDATO_JA_FALOU");
+      assert.equal(podeAnalisar(estado), true, "observações continuam sendo colhidas");
+      assert.equal(estado.conviteFeito, false, "a política é pura");
+    }
+  });
+
+  it("fala anterior à fase, fala do agente e marcador vazio não impedem o convite", () => {
+    const estado = { ...e(), conversa: [
+      { quem: "candidato" as const, texto: "Oi", em: inicio - 1 },
+      { quem: "agente" as const, texto: "Este é o desafio", em: inicio },
+      { quem: "candidato" as const, texto: "  ", em: inicio + 1 },
+    ] };
+    assert.equal(motivoBloqueioPlin(estado, AGORA), null);
+  });
+
+  it("atividade recente informada pelo quadro segura o convite antes de a fala ser persistida", () => {
+    assert.equal(motivoBloqueioPlin(e(), AGORA, undefined, { paradoHaS: SILENCIO_REQUISITOS_S - 0.001 }), "CANDIDATO_EM_ATIVIDADE");
+    assert.equal(motivoBloqueioPlin(e(), AGORA, undefined, { paradoHaS: SILENCIO_REQUISITOS_S }), null);
+  });
+
+  it("qualquer elemento no grafo impede o convite, preservando observações", () => {
+    const observacoes = [{ criterio: "requisitos", sinal: "neutro" as const, espontaneo: true, evidencia: "Começou pelo desenho" }];
+    for (const grafo of [GRAFO, 'ANOTAÇÕES SOLTAS\n- [t1] escala', 'DESENHOS SEM TEXTO\n- [f1] traço livre']) {
+      assert.equal(motivoBloqueioPlin(e(), AGORA, undefined, { temDesenho: true }), "CANDIDATO_JA_DESENHOU");
+      const r = filtrarResposta(e(), resposta({ observacoes }), extrairIdsDoGrafo(grafo), AGORA);
+      assert.equal(r.status, "ok");
+      assert.equal(r.pergunta, null);
+      assert.deepEqual(r.observacoes, observacoes);
+    }
+  });
+});
 
 describe("gestos da análise", () => {
   it("preserva gestos válidos e retira uma comparação com alvo inexistente", () => {

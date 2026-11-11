@@ -3,6 +3,7 @@
 // mudança no problema escrita por cima do desenho.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { analisar } from "../analisar";
 import { aceitaEncerrar, OFERTA_DE_ENCERRAR, perguntaDeConducao, perguntaJaFeita } from "../guardas";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso } from "../llm/cliente";
@@ -33,6 +34,35 @@ function estadoEm(fase: EstadoSessao["fase"], extra: Partial<EstadoSessao> = {})
 }
 const deps = (saida: Record<string, unknown>) => ({
   llm: criarClienteFalso([{ requisito: null, concluiu: false, desfecho: null, ...saida }]), kit: kitDemo, problema, log: () => {}, versao: "v2" as const,
+});
+
+describe("#83: convite durante requisitos na sessão a61b6346", () => {
+  it("repassa 00:54 → 01:41 sem pergunta, mesmo se o modelo repetir o cumprimento", async () => {
+    let estado = transicionar(estadoInicial(), { tipo: "SINCRONIZAR_FASE", fase: "REQUISITOS" }, AGORA + 54_000).estado;
+    estado = transicionar(estado, { tipo: "CANDIDATO_FALOU", texto: "Me fala um pouco do volume, então.", fimDeResposta: false }, AGORA + 68_000).estado;
+    estado = transicionar(estado, { tipo: "AGENTE_FALOU", texto: "São vinte mil mensagens por segundo." }, AGORA + 70_000).estado;
+    const llm = criarClienteFalso([87, 101, 200].map(() => ({
+      status: "duvida", pergunta: "Oi, tudo bem? Como você está pensando em abordar esse problema?",
+      nota: "Como começar?", elementos: [], degrau: null,
+      observacoes: [{ criterio: "requisitos", sinal: "positivo", espontaneo: true, evidencia: "Perguntou o volume de mensagens" }],
+    })));
+    for (const s of [87, 101, 200]) {
+      if (s === 101) estado = transicionar(estado, {
+        tipo: "CANDIDATO_FALOU", texto: "Como é? Cê falou o quê à noite?", fimDeResposta: false,
+      }, AGORA + 90_000).estado;
+      const r = await analisar({ llm, kit: kitDemo, problema, log: () => {} }, estado, {
+        sessao_id: "a61b6346-63fe-46ac-abe2-0661fa2467dd", fase: "REQUISITOS", grafo: "", mudancas: "",
+        conversa_recente: [], perguntas_feitas: 0, imagem_url: null, parado_ha_s: 120,
+      }, AGORA + s * 1000);
+      assert.equal(r.resposta.status, "ok", `aos ${s} segundos`);
+      assert.equal(r.resposta.pergunta, null);
+      assert.equal(r.estado.plin, "LIVRE");
+      assert.equal(r.estado.perguntas.length, 0);
+      estado = r.estado;
+    }
+    assert.equal(llm.chamadas.length, 3);
+    assert.equal(estado.observacoes.length, 1, "evidência continua sendo colhida e deduplicada");
+  });
 });
 
 describe("pergunta repetida", () => {
