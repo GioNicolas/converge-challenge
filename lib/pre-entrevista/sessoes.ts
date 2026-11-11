@@ -45,6 +45,13 @@ export interface Sessao {
   resumo?: {
     preferencias: Preferencias;
     duracaoMin: number;
+    /**
+     * Formato, nível e foco (áreas com o peso arredondado, ver `focoDoResumo`) do momento do resumo: a confirmação da
+     * revisão começa pelo que ela pediu, e não pelo que mudou junto (issue #76). Ausentes em resumos guardados antes.
+     */
+    mode?: Rascunho["mode"];
+    seniority?: Rascunho["seniority"];
+    foco?: Array<{ area: FocusArea; weight: number }>;
     /** O último resumo inteiro, como foi falado, para repetir se ela pedir. Some depois de uma revisão (já não vale). */
     texto?: string;
   };
@@ -285,6 +292,11 @@ export function registrarFala(
   registrarEvento(sessao, evento);
 }
 
+/** A transcrição sem as falas dela que o Totti não entendeu (`naoEntendida`): é o que a extração e a cobertura leem. */
+export function falasParaLer(transcricao: Turno[]): Turno[] {
+  return transcricao.filter((t) => !t.naoEntendida);
+}
+
 /** Tira a última fala da transcrição (usado quando a resposta do Totti falha, para a recrutadora reenviar). */
 export function desfazerUltimaFala(sessao: Sessao): void {
   sessao.transcricao.pop();
@@ -319,8 +331,13 @@ function detalhesDoErro(err: unknown): Record<string, unknown> {
 
 /** Uma rodada: extrai do que foi dito até agora, mede a cobertura e aplica no rascunho. Nunca lança. */
 async function rodarRodada(sessao: Sessao): Promise<void> {
-  const transcricao = sessao.transcricao.slice();
-  const versaoTranscricao = transcricao.length;
+  // Fala dela que o Totti não entendeu (transcrição quebrada) não vai para a extração (ver `falasParaLer`).
+  // Com um turno em curso, a última fala dela ainda não foi respondida e pode virar `naoEntendida`: fica para a
+  // extração que a rota agenda depois do turno.
+  const ultima = sessao.transcricao.at(-1);
+  const versaoTranscricao =
+    store.ocupadas.has(sessao.id) && ultima?.role === "recrutadora" ? sessao.transcricao.length - 1 : sessao.transcricao.length;
+  const transcricao = falasParaLer(sessao.transcricao.slice(0, versaoTranscricao));
   const antes = sessao.rascunho;
   let etapa = "extracao";
   try {
@@ -558,7 +575,7 @@ function normalizarFala(texto: string): string {
  */
 export function soAprovacaoDesdeAExtracao(transcricao: Turno[], versaoExtraida: number): boolean {
   if (versaoExtraida <= 0) return false;
-  return transcricao.slice(versaoExtraida).every((t) => t.role !== "recrutadora" || SO_APROVACAO.test(normalizarFala(t.text)));
+  return transcricao.slice(versaoExtraida).every((t) => t.role !== "recrutadora" || t.naoEntendida || SO_APROVACAO.test(normalizarFala(t.text)));
 }
 
 /** Teto da espera pela extração ao finalizar: passou disso, o plano sai com o rascunho que a conversa já montou. */

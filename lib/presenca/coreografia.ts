@@ -4,7 +4,7 @@
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
 import { alvosDaAcao, escolherAcoesVisuais, criarMemoriaVisual, type AcaoVisual, type MemoriaVisual } from "./acoesVisuais";
-import { comporGestos } from "./gestos";
+import { comporGestos, formaDoElemento } from "./gestos";
 import {
   caixaDosElementos,
   cenaParaTela,
@@ -251,6 +251,15 @@ function areaLivre(v: Vista): Caixa {
   return { x, y: area.y + topo, largura: Math.max(120, largura), altura: Math.max(80, area.altura - topo - base) };
 }
 
+/**
+ * Destaques (contorno, apontar, realce) são marca de quem comenta: mais finos e translúcidos que o desenho do
+ * candidato, e somem sozinhos depois de DESTAQUE_DURA_MS. Ficam num subgrupo (`<grupo>:destaque`), que também sai
+ * quando o grupo da pergunta é apagado. Notas e letras do comparar ficam até lá.
+ */
+export const DESTAQUE_DURA_MS = 9_000;
+export const ESTILO_DO_DESTAQUE = { espessura: 1.5, opacidade: 65 } as const;
+export const grupoDoDestaque = (grupo: string) => `${grupo}:destaque`;
+
 async function coreografar(o: OpcoesApontar) {
   const { quadro, cursor, grupo, sinal } = o;
   const memoria = o.memoria ?? criarMemoriaVisual();
@@ -284,6 +293,7 @@ async function coreografar(o: OpcoesApontar) {
   if (ids.length) quadro.agente.ancorar(grupo, ids);
   cursor?.mostrar();
   let indice = 0;
+  let destaquesDesenhados = false;
   for (const acao of acoes) {
     conferir();
     const caixas = new Map(quadro.api.getSceneElements().filter((e) => !e.isDeleted).flatMap((e) => {
@@ -293,7 +303,9 @@ async function coreografar(o: OpcoesApontar) {
       const pontos = (e.type === "arrow" || e.type === "line") && "points" in e
         ? (e.points as readonly (readonly [number, number])[]).map(([px, py]) => [e.x + px - caixa.x, e.y + py - caixa.y] as const)
         : undefined;
-      return [[e.id, pontos ? { ...caixa, pontos } : caixa] as const];
+      // A forma decide o gesto de marcar (contorno numa elipse, canto num retângulo...).
+      const forma = formaDoElemento(e.type);
+      return [[e.id, pontos ? { ...caixa, pontos, forma } : { ...caixa, forma }] as const];
     }));
     for (const gesto of comporGestos(acao, caixas, areaLivre(vistaDe(quadro)), o.semente + indice)) {
       conferir();
@@ -306,14 +318,28 @@ async function coreografar(o: OpcoesApontar) {
         await quadro.agente.escrever({ id, grupo, texto: gesto.texto, x: gesto.ponto.x, y: gesto.ponto.y,
           tamanho: 20, largura: 26, velocidade: 55, sinal });
       } else {
+        const destaque = gesto.destaque ? grupoDoDestaque(grupo) : null;
+        if (destaque && !destaquesDesenhados) {
+          destaquesDesenhados = true;
+          if (ids.length) quadro.agente.ancorar(destaque, ids);
+        }
         await mover(gesto.traco.origem, o.semente + indice);
         await animar(450, (p) => {
           conferir();
           const parte = parteDoTraco(gesto.traco, suavizar(p));
-          quadro.agente.tracar({ id, grupo, origem: parte.origem, pontos: parte.pontos, semente: o.semente + indice });
+          quadro.agente.tracar({
+            id, grupo: destaque ?? grupo, origem: parte.origem, pontos: parte.pontos, semente: o.semente + indice,
+            ...(destaque ? ESTILO_DO_DESTAQUE : {}),
+          });
           cursor?.mover(naTela(pontaDoTraco(parte)));
         }, sinal);
       }
     }
+  }
+  if (destaquesDesenhados) {
+    // Some sozinho: o quadro do candidato não acumula tinta do Totti. Se a pergunta acabar antes, o grupo dela leva
+    // o destaque junto (apagarGrupo apaga os subgrupos).
+    const destaque = grupoDoDestaque(grupo);
+    setTimeout(() => { void quadro.agente.apagarGrupo(destaque); }, DESTAQUE_DURA_MS);
   }
 }

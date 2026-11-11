@@ -176,7 +176,8 @@ describe("TriagemConvite", () => {
     assert.match(texto, /Python ou C\+\+/);
     assert.match(texto, /30 minutos/);
     assert.match(texto, /Escolher meu horário/);
-    assert.match(texto, /boa notícia, maria/i);
+    assert.match(texto, /oi, maria,/i);
+    assert.match(texto, /https:\/\/exemplo.com\/agendar\/abc/);
     assert.doesNotMatch(texto, /critério|two-sum|foco/i);
   });
 

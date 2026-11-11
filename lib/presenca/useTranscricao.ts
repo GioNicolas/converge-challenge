@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
+import { ErroTokenTranscricao, tokenTranscricao, type CredencialTranscricao } from "./tokenTranscricao";
 import {
   atualizarTranscricao, criarDetectorDeFala, criarFilaDeAmostras, criarPortaoDeVoz, esperaParaReconectar, estadoInicialTranscricao,
-  energiaRms, mensagemDeAudio, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
+  energiaRms, mensagemDeAudio, misturarMono, reamostrar, silencioParaCompletar, trechoPlausivel, urlDoScribe, VOZ_MINIMA_MS,
+  AMOSTRAS_MINIMAS_TRECHO,
   type EstadoReamostragem, type TrechoTranscrito,
 } from "./transcricao";
 
@@ -33,10 +34,15 @@ const LIMITE_RAJADA = 65_536;
  * que a documentação diz degradar o modelo.
  */
 const COMMIT_DE_SEGURANCA_MS = 1_000;
+/**
+ * Trecho curto ("sim", "o que tu acha"): o VAD do Scribe não confirma trecho com menos de ~2 s de áudio, então ele
+ * é completado com silêncio e confirmado à mão mais cedo, para chegar ao Totti em até ~1,5 s depois da fala.
+ */
+const COMMIT_TRECHO_CURTO_MS = 300;
 
 export type EstadoEscuta = { motor: "elevenlabs" | "navegador" | "nenhum"; escutando: boolean; erro: string | null };
 /** Uso do Scribe por sessão de escuta: o que é cobrado (áudio enviado) contra o tempo de sessão. */
-export type UsoTranscricao = { audioEnviadoS: number; sessaoS: number };
+export type UsoTranscricao = { audioEnviadoS: number; sessaoS: number; conexoes: number; reconexoes: number };
 
 // Tipos locais: a Web Speech API ainda não integra todas as versões de lib.dom.
 type ResultadoNativo = { isFinal: boolean; 0: { transcript: string } };
@@ -62,7 +68,8 @@ export function criarEscutaTranscricao(opcoes: {
   servidor: boolean;
   aoEstado: (estado: EstadoEscuta) => void;
   aoTrecho?: (trecho: TrechoTranscrito) => void;
-  obterToken?: (sessaoId: string) => Promise<string>;
+  /** Token do Scribe; o servidor pode mandar junto o vocabulário da sessão (keyterms). */
+  obterToken?: (sessaoId: string) => Promise<string | CredencialTranscricao>;
 }): { ativar(ativo: boolean): void; parar(): void; uso(): UsoTranscricao } {
   const trilha = opcoes.stream.getAudioTracks()[0];
   const janela = typeof window === "undefined" ? undefined : window as JanelaDeVoz;
@@ -77,10 +84,13 @@ export function criarEscutaTranscricao(opcoes: {
   let tentativas = 0;
   let conectadoEm = 0;
   let conectando = false;
+  let conexoes = 0;
   let pronto = false;
   let segmento = 0;
   /** Quanto de voz (ms) o microfone captou desde o último trecho fechado. */
   let vozNoTrecho = 0;
+  /** Amostras (16 kHz) que o portão deixou passar desde que abriu: trecho curto é completado com silêncio. */
+  let amostrasNoTrecho = 0;
   let socket: WebSocket | null = null;
   let contexto: AudioContext | null = null;
   let fonte: MediaStreamAudioSourceNode | null = null;
@@ -124,6 +134,7 @@ export function criarEscutaTranscricao(opcoes: {
   /** Descarta o áudio que ainda não saiu e o estado do portão: só quando o socket deixa de existir. */
   function descartarAudio() {
     pendentes.limpar();
+    amostrasNoTrecho = 0;
     portao.reiniciar();
     detector.reiniciar();
   }
@@ -187,7 +198,7 @@ export function criarEscutaTranscricao(opcoes: {
     if (commitDeSeguranca !== null) clearTimeout(commitDeSeguranca);
     commitDeSeguranca = null;
   }
-  function agendarCommitDeSeguranca() {
+  function agendarCommitDeSeguranca(esperaMs = COMMIT_DE_SEGURANCA_MS) {
     cancelarCommitDeSeguranca();
     if (!vozSemCommit) return;
     commitDeSeguranca = setTimeout(() => {
@@ -202,7 +213,19 @@ export function criarEscutaTranscricao(opcoes: {
       }
       if (enviarAudio(new Float32Array(AMOSTRAS_MANTER_VIVO), true)) vozSemCommit = false;
       else agendarCommitDeSeguranca();
-    }, COMMIT_DE_SEGURANCA_MS);
+    }, esperaMs);
+  }
+  /**
+   * O portão fechou: trecho curto ganha o silêncio que falta para o Scribe processá-lo e um commit mais cedo; os
+   * outros esperam o VAD e, se ele não confirmar, o commit de segurança.
+   */
+  function fecharTrecho() {
+    // Se o VAD já confirmou o trecho na folga, completar só gastaria áudio cobrado.
+    const curto = vozSemCommit && amostrasNoTrecho < AMOSTRAS_MINIMAS_TRECHO;
+    if (curto) pendentes.guardar(silencioParaCompletar(amostrasNoTrecho));
+    amostrasNoTrecho = 0;
+    escoar(true);
+    agendarCommitDeSeguranca(curto ? COMMIT_TRECHO_CURTO_MS : COMMIT_DE_SEGURANCA_MS);
   }
   /** Envia o que o portão deixou passar em blocos de 200 ms; `tudo` manda também o resto menor que um bloco. */
   function escoar(tudo: boolean) {
@@ -221,9 +244,10 @@ export function criarEscutaTranscricao(opcoes: {
   /** Parou de poder ouvir no meio de uma fala: completa a folga com silêncio para o Scribe fechar o trecho. */
   function fecharTrechoAberto() {
     if (!portao.aberto) return;
-    pendentes.guardar(portao.encerrar());
-    escoar(true);
-    agendarCommitDeSeguranca();
+    const folga = portao.encerrar();
+    amostrasNoTrecho += folga.length;
+    pendentes.guardar(folga);
+    fecharTrecho();
   }
   async function prepararAudio() {
     if (!contexto) {
@@ -254,11 +278,12 @@ export function criarEscutaTranscricao(opcoes: {
         const convertido = reamostrar(amostras, contexto.sampleRate, 16000, reamostragem);
         reamostragem = convertido.estado;
         const passou = portao.passar(convertido.amostras, fala);
+        amostrasNoTrecho = (passou.abriu ? 0 : amostrasNoTrecho) + passou.amostras.length;
         pendentes.guardar(passou.amostras);
         if (fala) { vozSemCommit = true; cancelarCommitDeSeguranca(); }
         // Enquanto o socket conecta, o áudio espera em `pendentes` e sai todo no session_started.
-        escoar(passou.fechou);
-        if (passou.fechou) agendarCommitDeSeguranca();
+        if (passou.fechou) fecharTrecho();
+        else escoar(false);
       };
       fonte.connect(processador);
       processador.connect(ganho);
@@ -277,16 +302,18 @@ export function criarEscutaTranscricao(opcoes: {
         return;
       }
       if (encerrado || atual !== geracao) return;
-      let token: string;
+      let credencial: CredencialTranscricao;
       try {
-        token = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
+        const resposta = await (opcoes.obterToken ?? tokenTranscricao)(opcoes.sessaoId);
+        credencial = typeof resposta === "string" ? { token: resposta, termos: [] } : resposta;
       } catch (erro) {
         // Sem chave, sessão inexistente ou encerrada: repetir não resolve, vai direto ao navegador.
         if (!encerrado && atual === geracao) falharScribe(erro instanceof ErroTokenTranscricao && erro.permanente);
         return;
       }
       if (encerrado || atual !== geracao) return;
-      const ws = new WebSocket(urlDoScribe(token));
+      const ws = new WebSocket(urlDoScribe(credencial.token, credencial.termos));
+      conexoes++;
       socket = ws;
       ws.onmessage = (evento) => {
         if (encerrado || atual !== geracao) return;
@@ -310,9 +337,10 @@ export function criarEscutaTranscricao(opcoes: {
           // trecho, ele zerava a voz e gastava a chave da frase seguinte, que já estava sendo dita: ela era
           // descartada como alucinação ou como repetida (visto no Scribe real).
           if (m.text.trim()) {
-            if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
+            // Sem voz no microfone, ou voz curta demais para o tamanho do texto: é frase inventada pelo Scribe.
+            if (trechoPlausivel(m.text, vozNoTrecho)) receber(m.text, true, `${atual}:${segmento}`);
             else {
-              console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
+              console.info("[transcrição] descartada (voz insuficiente para o texto)", { vozMs: Math.round(vozNoTrecho), texto: m.text });
               if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
               texto = { ...texto, parcial: null };
             }
@@ -471,6 +499,8 @@ export function criarEscutaTranscricao(opcoes: {
     uso: () => ({
       audioEnviadoS: amostrasEnviadas / 16000,
       sessaoS: inicio === null ? 0 : Math.max(0, ((fimDaSessao ?? performance.now()) - inicio) / 1000),
+      conexoes,
+      reconexoes: Math.max(0, conexoes - 1),
     }),
   };
 }
@@ -508,16 +538,29 @@ export function useTranscricao(opcoes: {
       },
     });
     escuta.current = controle;
+    const escutaId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const enviarUso = (final: boolean) => {
+      const uso = controle.uso();
+      if (!sessaoId || uso.sessaoS < 1) return;
+      const payload = JSON.stringify({ sessao_id: sessaoId, contexto, tipo: "transcricao_uso", dados: {
+        contexto, escuta_id: escutaId, audioEnviadoS: uso.audioEnviadoS, sessaoS: uso.sessaoS,
+        conexoes: uso.conexoes, reconexoes: uso.reconexoes, final,
+      } });
+      if (final && typeof navigator !== "undefined" && navigator.sendBeacon) {
+        if (navigator.sendBeacon("/api/uso", new Blob([payload], { type: "application/json" }))) return;
+      }
+      void fetch("/api/uso", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: final }).catch(() => {});
+    };
+    const intervaloUso = setInterval(() => enviarUso(false), 60_000);
     return () => {
+      clearInterval(intervaloUso);
       escuta.current = null;
       controle.parar();
       const uso = controle.uso();
       // Economia do portão de voz nos dados reais: áudio cobrado pelo Scribe contra o tempo de sessão.
       // >= 1 s: a montagem dupla do StrictMode (e trocas imediatas) não vira registro de uso.
       if (uso.sessaoS >= 1) {
-        console.info("[transcrição] uso da sessão", {
-          sessaoId, contexto, audioEnviadoS: Math.round(uso.audioEnviadoS), sessaoS: Math.round(uso.sessaoS),
-        });
+        enviarUso(true);
       }
     };
   }, [stream, sessaoId, servidor, contexto]);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { criarEscutaTranscricao, type EstadoEscuta } from "../useTranscricao";
-import { ErroTokenTranscricao } from "../tokenTranscricao";
+import { ErroTokenTranscricao, type CredencialTranscricao } from "../tokenTranscricao";
 import type { TrechoTranscrito } from "../transcricao";
 
 /** Amostras PCM 16 bits de uma mensagem input_audio_chunk. */
@@ -28,7 +28,7 @@ function globalFalso(t: TestContext, nome: string, valor: unknown) {
 
 function montar(t: TestContext, opcoes: {
   servidor?: boolean; navegador?: boolean; prefixado?: boolean; semAudio?: boolean; taxa?: number;
-  obterToken?: (id: string) => Promise<string>;
+  obterToken?: (id: string) => Promise<string | CredencialTranscricao>;
 } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const estados: EstadoEscuta[] = [];
@@ -767,7 +767,8 @@ test("se o VAD não confirma o trecho, o portão confirma à mão depois de fech
   m.sockets[0].iniciar();
   const ws = m.sockets[0];
   const commits = () => ws.enviados.filter((d) => (JSON.parse(d) as { commit: boolean }).commit).length;
-  await audio.blocos(VOZ, 512);
+  // Fala de 1 s: com a folga, o trecho passa dos 2 s que o Scribe precisa e espera o VAD.
+  await audio.blocos(VOZ, 1024);
   await audio.blocos(SILENCIO, 1536); // o portão fecha no último bloco
   assert.equal(commits(), 0, "espera o VAD primeiro");
   await audio.blocos(SILENCIO, 1024);
@@ -840,4 +841,59 @@ test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais d
 test("linha do tempo de 30 min com ruído de fundo constante (~-44 dBFS): a economia continua", async (t) => {
   const { enviadoS, antigoS } = await linhaDoTempo(t, 0.006);
   assert.ok(enviadoS <= 0.6 * antigoS, `enviado ${enviadoS.toFixed(0)} s de ${antigoS.toFixed(0)} s`);
+});
+
+test("fala curta (\"sim\") é completada até 2 s de áudio e confirmada em até 1,5 s depois da fala", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  const commits = () => ws.enviados.filter((d) => (JSON.parse(d) as { commit: boolean }).commit).length;
+  await audio.blocos(VOZ, 256);
+  // Folga do portão (1,2 s) + commit do trecho curto (300 ms).
+  await audio.blocos(SILENCIO, 1536);
+  assert.equal(commits(), 1, "confirmado à mão sem esperar o commit de segurança de 1 s");
+  const enviadas = ws.enviados.flatMap(amostrasDe);
+  assert.ok(enviadas.length >= 32_000, `o trecho chegou a 2 s de áudio (${enviadas.length} amostras)`);
+});
+
+test("fala curta já confirmada pelo VAD na folga não é completada com silêncio", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  await audio.blocos(VOZ, 256);
+  await audio.blocos(SILENCIO, 768);
+  ws.mensagem({ message_type: "committed_transcript", text: "Sim." });
+  await audio.blocos(SILENCIO, 3072);
+  const enviadas = ws.enviados.flatMap(amostrasDe);
+  assert.ok(enviadas.length < 32_000, `nada além do portão e do manter-vivo (${enviadas.length} amostras)`);
+  assert.ok(m.trechos.some((tr) => tr.final && tr.texto === "Sim."));
+});
+
+test("frase longa com pouca voz no microfone é descartada como inventada", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  await audio.blocos(VOZ, 256); // ~0,25 s de voz
+  ws.mensagem({ message_type: "committed_transcript", text: "Eee 20. Tchau. Até mais, Fábio." });
+  assert.ok(!m.trechos.some((tr) => tr.final), "6 palavras com 0,25 s de voz não chegam ao Totti");
+  await audio.blocos(VOZ, 2048);
+  ws.mensagem({ message_type: "committed_transcript", text: "Eu usaria um dicionário de pares aqui." });
+  assert.ok(m.trechos.some((tr) => tr.final && tr.texto.includes("dicionário de pares")));
+});
+
+test("o vocabulário do servidor vai como keyterms na URL do Scribe", async (t) => {
+  const m = montar(t, { taxa: 16000, obterToken: async () => ({ token: "tk", termos: ["dicionário de pares", "two sum"] }) });
+  m.controle.ativar(true);
+  await andar();
+  const url = new URL(m.sockets[0].url);
+  assert.deepEqual(url.searchParams.getAll("keyterms"), ["dicionário de pares", "two sum"]);
 });

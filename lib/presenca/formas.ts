@@ -28,6 +28,33 @@ export function circuloAMao(c: Caixa, semente: number): Traco {
   return { origem, pontos: absolutos.map((p) => [p.x - origem.x, p.y - origem.y]) };
 }
 
+/**
+ * Contorno à mão que acompanha uma elipse (ou o losango inscrito nela), por fora: raio da forma mais `folga`, com a
+ * mesma volta e variação de `circuloAMao`. `circuloAMao` envolve os cantos da caixa (sqrt(2)) e, numa elipse,
+ * ficava largo demais.
+ */
+export function contornoAMao(c: Caixa, semente: number, folga: number): Traco {
+  const caixa = normalizarCaixa(c);
+  const meio = centro(caixa);
+  const aleatorio = aleatorioComSemente(semente);
+  const quantidade = 48 + Math.floor(aleatorio() * 17);
+  const inicio = -3 * Math.PI / 4 + (aleatorio() - 0.5) * Math.PI / 12;
+  const volta = 2 * Math.PI + (15 + 15 * aleatorio()) * Math.PI / 180;
+  const fase1 = aleatorio() * Math.PI * 2;
+  const fase2 = aleatorio() * Math.PI * 2;
+  // A variação de raio é só para fora (1 a 1,04): o traço nunca entra na forma.
+  const rx = caixa.largura / 2 + folga;
+  const ry = caixa.altura / 2 + folga;
+  const absolutos: Ponto[] = [];
+  for (let i = 0; i < quantidade; i++) {
+    const angulo = inicio + volta * i / (quantidade - 1);
+    const raio = 1.02 + 0.012 * Math.sin(3 * angulo + fase1) + 0.008 * Math.sin(7 * angulo + fase2);
+    absolutos.push({ x: meio.x + rx * raio * Math.cos(angulo), y: meio.y + ry * raio * Math.sin(angulo) });
+  }
+  const origem = { ...absolutos[0] };
+  return { origem, pontos: absolutos.map((p) => [p.x - origem.x, p.y - origem.y]) };
+}
+
 /** Haste curva sem ponta; origem e último ponto correspondem exatamente aos extremos. */
 export function setaAMao(de: Ponto, para: Ponto, semente: number): Traco {
   const dx = para.x - de.x;

@@ -5,6 +5,7 @@
 import { esperaDoFimDaFala } from "@/lib/audio/fimDaFala";
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import JanelaChamada from "@/components/quadro/JanelaChamada";
 import Legenda from "@/components/quadro/Legenda";
@@ -112,6 +113,7 @@ const Canvas = dynamic(() => import("@/components/Canvas"), {
 
 /** `configId`: plano de entrevista da vaga; `convite`: id do link do e-mail (liga a sessão ao candidato no painel). */
 export default function SalaEntrevista({ configId, convite }: { configId?: string; convite?: string } = {}) {
+  const router = useRouter();
   const [quadro, setQuadro] = useState<Quadro | null>(null);
   const cursor = useRef<ControleCursor | null>(null);
   const entrevista = useEntrevista(quadro, cursor, { configId, convite });
@@ -121,8 +123,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   const { estado, sessao } = entrevista;
   const liberarMidia = midia.liberar;
   useEffect(() => {
-    if (estado.fase === "ENCERRADA") liberarMidia();
-  }, [estado.fase, liberarMidia]);
+    if (entrevista.despedindo || estado.fase === "ENCERRADA") liberarMidia();
+  }, [estado.fase, entrevista.despedindo, liberarMidia]);
   const demo = useDemoRequisitos();
   // `?debug=1` mostra os botões de demonstração; `?iniciar=1` pula o modal (o lobby já foi feito na pré-entrevista).
   const [debug, setDebug] = useState(false);
@@ -132,6 +134,11 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     setDebug(p.get("debug") === "1");
     setIniciarAuto(p.get("iniciar") === "1");
   }, []);
+  useEffect(() => {
+    if (estado.fase !== "ENCERRADA") return;
+    const busca = debug && sessao && usarServidor() ? `?debug=1&sessao=${encodeURIComponent(sessao.sessao_id)}` : "";
+    router.replace(`/obrigado${busca}`);
+  }, [estado.fase, router, debug, sessao]);
 
   // Cada requisito combinado é escrito pelo agente no próprio quadro, abaixo do enunciado.
   const requisitosEscritos = useRef(0);
@@ -220,8 +227,8 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     { respostaNaoOuvida: () => respostaRef.current.naoOuvida(), descartarResposta: () => respostaRef.current.descartar() },
   );
   useEffect(() => {
-    if (estado.fase === "ENCERRADA") filaVoz.current?.limpar();
-  }, [estado.fase]);
+    if (entrevista.despedindo || estado.fase === "ENCERRADA") filaVoz.current?.limpar();
+  }, [estado.fase, entrevista.despedindo]);
   useEffect(() => () => filaVoz.current?.limpar(), []);
   // Turn-taking: os trechos finais do STT se acumulam e só seguem após o silêncio de `esperaDoFimDaFala`
   // (1,5 s com a frase fechada; até 2,6 s quando ela termina pendurada, "e aí eu colocaria...").
@@ -252,11 +259,11 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   }, [midia.volume, agendarEnvioVoz]);
   useEffect(() => () => { if (timerVoz.current) clearTimeout(timerVoz.current); }, []);
   useEffect(() => {
-    if (estado.fase !== "ENCERRADA") return;
+    if (!entrevista.despedindo && estado.fase !== "ENCERRADA") return;
     if (timerVoz.current) clearTimeout(timerVoz.current);
     timerVoz.current = null;
     bufferVoz.current = "";
-  }, [estado.fase]);
+  }, [estado.fase, entrevista.despedindo]);
 
   const receberParcial = useCallback((texto: string) => {
     setParcialVoz(texto);
@@ -268,7 +275,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
   // candidato (lib/conversa/turnos.ts); o botão "Interromper voz" continua para quem quiser calar de propósito.
   const escuta = useTranscricao({
     stream: midia.stream,
-    ativo: midia.microfoneLigado && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,
+    ativo: midia.microfoneLigado && !entrevista.despedindo && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,
     sessaoId: sessao?.sessao_id ?? null,
     contexto: "quadro",
     servidor: usarServidor(),
@@ -286,15 +293,16 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [iniciarAuto, pronto, estado.fase]);
-  const mostrarCartao = estado.fase === "AGUARDANDO" || estado.fase === "ENCERRADA";
+  const mostrarCartao = estado.fase === "AGUARDANDO";
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-superficie">
-      <Canvas onDesenhoMudou={aoMudarDesenho} onPronto={aoQuadroPronto} />
+    <main data-despedindo={entrevista.despedindo || undefined} className="relative h-dvh w-full overflow-hidden bg-superficie">
+      <Canvas onDesenhoMudou={aoMudarDesenho} onPronto={aoQuadroPronto} bloqueado={entrevista.despedindo || estado.fase === "ENCERRADA"} />
 
       {estado.fase !== "AGUARDANDO" && (
+        <div inert={entrevista.despedindo}>
         <JanelaChamada
-          fase={NOME_DA_FASE[estado.fase]}
+          fase={entrevista.despedindo ? "Despedida" : NOME_DA_FASE[estado.fase]}
           respondendo={estado.plin === "PERGUNTA_ATIVA"}
           encerrada={estado.fase === "ENCERRADA"}
           marcadores={{ fase: estado.fase, plin: estado.plin }}
@@ -305,10 +313,15 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           onTerminarResposta={entrevista.terminarResposta}
           onEncerrar={() => setConfirmandoFim(true)}
         />
+        </div>
       )}
 
-      <Legenda fala={entrevista.falaAtual} />
-      {estado.fase !== "ENCERRADA" && (parcialVoz || escuta.erro || falaPendente || entrevista.aguardandoResposta) && (
+      {entrevista.despedindo ? (
+        <div role="status" className="absolute inset-x-4 bottom-6 z-20 mx-auto max-w-2xl rounded-padrao bg-superficie p-5 text-center shadow-padrao">
+          {entrevista.despedida}
+        </div>
+      ) : <Legenda fala={entrevista.falaAtual} />}
+      {!entrevista.despedindo && estado.fase !== "ENCERRADA" && (parcialVoz || escuta.erro || falaPendente || entrevista.aguardandoResposta) && (
         <div role="status" className="absolute bottom-20 left-4 z-10 max-w-md rounded-padrao bg-superficie p-3 text-sm shadow-padrao">
           {parcialVoz && <p>{parcialVoz}</p>}
           {entrevista.aguardandoResposta && !parcialVoz && <p>O agente está preparando a resposta…</p>}
@@ -323,7 +336,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
       )}
 
       {/* Só para demonstração: dispara a pergunta do agente e encena a conversa dos requisitos. */}
-      {debug && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
+      {debug && !entrevista.despedindo && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && (
         <div className="absolute top-[72px] left-4 z-10 flex gap-2">
           <button
             onClick={entrevista.perguntaDemo}
@@ -354,7 +367,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
         </div>
       )}
 
-      {estado.fase !== "AGUARDANDO" && (
+      {!entrevista.despedindo && estado.fase !== "AGUARDANDO" && (
         <div data-painel-direito className="absolute top-[72px] right-4 z-10 flex items-start gap-2">
           <button type="button" onClick={entrevista.alternarVoz}
             aria-label={entrevista.vozHabilitada ? "Silenciar respostas por voz" : "Ativar respostas por voz"}
@@ -401,19 +414,18 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
               transition={{ duration: 0.36, ease: [0.32, 0.72, 0, 1] }}
               className="flex w-[380px] flex-col gap-4 rounded-padrao bg-superficie p-8 shadow-flutuante"
             >
-              {estado.fase === "AGUARDANDO" ? (
                 <>
                   <p className="text-xs font-medium tracking-wide text-texto-suave uppercase">
                     {sessao ? `Entrevista de ${sessao.area}` : "Entrevista"}
                   </p>
                   <h1 className="text-2xl font-semibold tracking-tight">Pronto para começar?</h1>
                   <p className="leading-relaxed text-texto-suave">
-                    O entrevistador vai apresentar o problema no quadro e acompanhar o seu desenho. Fale com
-                    ele sempre que quiser. Quando terminar uma etapa ou quiser um comentário sobre o desenho,
-                    é só avisar. O agente também pode fazer perguntas nas pausas da conversa.
+                    A entrevista passa por entender o problema, desenhar uma visão geral e aprofundar alguns
+                    pontos. Você pode perguntar, dizer que não sabe ou pular uma parte. O entrevistador acompanha
+                    seu desenho e também pode fazer perguntas.
                   </p>
                   <p className="text-sm leading-relaxed text-texto-suave">
-                    Vamos pedir a câmera e o microfone. A sua câmera aparece só para você: não é gravada nem
+                    Vamos pedir acesso à câmera e ao microfone. A câmera aparece só para você: não é gravada nem
                     analisada.
                   </p>
                   <button
@@ -424,26 +436,6 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
                     {pronto ? "Começar" : "Preparando o desafio…"}
                   </button>
                 </>
-              ) : (
-                <>
-                  <h1 className="text-2xl font-semibold tracking-tight">Entrevista encerrada</h1>
-                  <p className="leading-relaxed text-texto-suave">
-                    Obrigado pelo seu tempo. A equipe de recrutamento recebe o resultado e entra em contato com
-                    você.
-                  </p>
-                  {/* Só para demonstração: em produção, a recrutadora recebe o link pelo painel dela. */}
-                  {debug && sessao && usarServidor() && (
-                    <a
-                      href={`/relatorio/${encodeURIComponent(sessao.sessao_id)}`}
-                      target="_blank"
-                      rel="noopener"
-                      className="mt-1 w-fit rounded-full border border-borda px-3.5 py-1.5 text-xs font-medium text-texto-suave outline-none transition-[color,transform] duration-150 ease-suave hover:text-texto focus-visible:ring-2 focus-visible:ring-marca active:scale-95"
-                    >
-                      Demo: ver o relatório da recrutadora
-                    </a>
-                  )}
-                </>
-              )}
             </motion.div>
           </motion.div>
         )}

@@ -3,12 +3,16 @@
 // e gravada de volta ao fim da requisição, juntando os eventos que outra instância tenha gravado nesse meio-tempo.
 // Sem Supabase (testes, dev) nada disso faz nada. Falha de rede nunca derruba a entrevista.
 import type { SessionState } from "@/lib/session/types";
+import { ETAPAS_DO_FECHAMENTO } from "@/lib/totti/fechamento";
 import { getSession, substituirSessao } from "@/lib/session/store";
 import { kvRemoto } from "@/lib/storage/kv";
 
 const NS = "sessoes-live";
 /** Reivindicação de avaliação: depois disso a avaliação "em andamento" de outra instância é dada como perdida. */
-export const AVALIACAO_PERDIDA_MS = 150_000;
+/** 2 × ~280 s ≈ 9,5 min de espera quando seguidas; decisão de 2026-11-11. */
+export const TENTATIVAS_FEATHERLESS_RELATORIO = 2;
+export const TEMPO_POR_TENTATIVA_RELATORIO_MS = 280_000;
+export const AVALIACAO_PERDIDA_MS = TEMPO_POR_TENTATIVA_RELATORIO_MS + 20_000;
 
 /** A sessão pelo id: da memória, ou restaurada do Supabase quando esta instância não a viu (ou está atrasada). */
 export async function sessaoViva(sessionId: string): Promise<SessionState | undefined> {
@@ -22,15 +26,31 @@ export async function sessaoViva(sessionId: string): Promise<SessionState | unde
       substituirSessao(remota);
       return getSession(sessionId);
     }
+    const sessaoFechamento = sessaoComFechamentoMaisAdiantado(local, remota);
     // Remota mais nova (outra instância tratou eventos que esta não viu): adota, mantendo o objeto local.
     if (remota.events.length > local.events.length || (remota.ended && !local.ended)) {
+      remota.fechamento = sessaoFechamento.fechamento;
+      remota.fechamentoIniciadoEm = sessaoFechamento.fechamentoIniciadoEm;
+      remota.fechamentoCodigoInicial = sessaoFechamento.fechamentoCodigoInicial;
+      remota.fechamentoBlipId = sessaoFechamento.fechamentoBlipId;
       substituirSessao(remota, local);
+    } else {
+      local.fechamento = sessaoFechamento.fechamento;
+      local.fechamentoIniciadoEm = sessaoFechamento.fechamentoIniciadoEm;
+      local.fechamentoCodigoInicial = sessaoFechamento.fechamentoCodigoInicial;
+      local.fechamentoBlipId = sessaoFechamento.fechamentoBlipId;
     }
     return local;
   } catch (err) {
     console.error("[sessao] não restaurou do Supabase:", err instanceof Error ? err.message : "erro");
     return local;
   }
+}
+
+function sessaoComFechamentoMaisAdiantado(local: SessionState, remoto: SessionState): SessionState {
+  if (!local.fechamento) return remoto;
+  if (!remoto.fechamento) return local;
+  return ETAPAS_DO_FECHAMENTO.indexOf(remoto.fechamento.etapa) > ETAPAS_DO_FECHAMENTO.indexOf(local.fechamento.etapa) ? remoto : local;
 }
 
 /**
@@ -89,6 +109,11 @@ export async function guardarSessao(session: SessionState): Promise<void> {
       const codigos = remota.codeHistory.filter((c) => !versoes.has(`${c.version}|${c.t}`));
       if (codigos.length) session.codeHistory = [...session.codeHistory, ...codigos].sort((a, b) => a.t - b.t);
       if (remota.ended) session.ended = true;
+      const escolhida = sessaoComFechamentoMaisAdiantado(session, remota);
+      session.fechamento = escolhida.fechamento;
+      session.fechamentoIniciadoEm = escolhida.fechamentoIniciadoEm;
+      session.fechamentoCodigoInicial = escolhida.fechamentoCodigoInicial;
+      session.fechamentoBlipId = escolhida.fechamentoBlipId;
       if (!session.report && remota.report) session.report = remota.report;
       juntarPerguntas(session, remota);
     }

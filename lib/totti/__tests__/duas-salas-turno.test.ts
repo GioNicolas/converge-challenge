@@ -99,7 +99,7 @@ async function noLiveCoding(falaDoCandidato: string, leituras: Lido[], momento: 
   }
   messages.push({ role: "candidate", text: falaDoCandidato });
   const r = await runInterviewerTurn(session, { blipId, messages });
-  return { responde: r.reply.trim() !== "", conclui: r.concluded === true, encerra: r.finish === true, texto: r.reply };
+  return { responde: r.reply.trim() !== "", conclui: r.concluded === true, encerra: r.despedida === true, texto: r.reply };
 }
 
 /** A mesma fala, a mesma situação e a mesma leitura do modelo nas duas salas. */
@@ -121,7 +121,7 @@ describe("tabela de casos: a mesma decisão nas duas salas", () => {
     { nome: "terminou, e o modelo marcou", fala: "pronto, terminei essa parte", leituras: [{ fala: "Certo.", concluiu: true }], momento: { paradoHaS: 10 }, espera: { responde: true, conclui: true, encerra: false } },
     { nome: "terminou com as mãos paradas, e o modelo não marcou", fala: "Eu acho que é isso, terminei.", leituras: [{ quieto: true }], momento: { paradoHaS: 10 }, espera: { responde: true, conclui: true, encerra: false } },
     { nome: "disse \"terminei\" de uma parte e segue mexendo", fala: "terminei essa parte, agora vou para a outra", leituras: [{ quieto: true }], momento: { paradoHaS: 0 }, espera: { responde: false, conclui: false, encerra: false } },
-    { nome: "pediu para encerrar a entrevista", fala: "acho que é isso, pode encerrar a entrevista", leituras: [{ quieto: true, encerrar: true }], momento: { paradoHaS: 10 }, espera: { responde: false, conclui: false, encerra: true } },
+    { nome: "pediu para encerrar a entrevista", fala: "acho que é isso, pode encerrar a entrevista", leituras: [{ quieto: true, encerrar: true }], momento: { paradoHaS: 10 }, espera: { responde: true, conclui: false, encerra: true } },
   ];
 
   for (const caso of CASOS) {

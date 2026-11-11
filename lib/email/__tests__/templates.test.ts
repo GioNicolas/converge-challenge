@@ -46,6 +46,15 @@ describe("templates seguem a paleta do site", () => {
   for (const [nome, el, temBotao] of templates) {
     it(`${nome}: off-white, tinta preta, sem azul e sem imagem`, async () => {
       const html = (await render(el)).toLowerCase();
+      if (nome === "triagem") {
+        const semComentarios = html.replace(/<!--[\s\S]*?-->/g, "");
+        assert.doesNotMatch(semComentarios, /background-color:#f4f1ea|background-color:#fdfcf9/);
+        assert.doesNotMatch(semComentarios, /próxima etapa|você recebeu esta mensagem|<div[^>]*preview/i);
+        assert.match(semComentarios, /oi,\s*maria,/);
+        assert.ok(semComentarios.indexOf(link) < semComentarios.indexOf("escolher meu horário"));
+        assert.equal(html.match(/<a /g)?.length, 2);
+        return;
+      }
       assert.match(html, /background-color:#f4f1ea/, "fundo off-white");
       assert.match(html, /background-color:#fdfcf9/, "cartão");
       assert.doesNotMatch(html, /#0071e3|#0058b0/, "sem o azul antigo");
@@ -59,7 +68,7 @@ describe("templates seguem a paleta do site", () => {
 
     it(`${nome}: tem versão texto puro com a assinatura do time`, async () => {
       const texto = await render(el, { plainText: true });
-      assert.match(texto, /Time de Recrutamento/);
+      assert.match(texto, nome === "triagem" ? /Totti/ : /Time de Recrutamento/);
       assert.doesNotMatch(texto, /<[a-z]/i);
       if (temBotao) assert.ok(texto.includes(link), "o link aparece no texto puro");
     });
@@ -89,7 +98,6 @@ describe("texto puro enviado", () => {
       if (antes === undefined) delete env.RESEND_API_KEY;
       else env.RESEND_API_KEY = antes;
     }
-    assert.match(texto, /Boa notícia, Maria/);
-    assert.doesNotMatch(texto, /BOA NOTÍCIA/);
+    assert.match(texto, /Oi, Maria,/);
   });
 });

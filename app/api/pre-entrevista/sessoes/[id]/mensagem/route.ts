@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { agendarExtracao, estadoDaSessao, liberar, ocupar, sincronizarSessao } from "@/lib/pre-entrevista/sessoes";
+import { falaDelaNaoEraResposta } from "@/lib/pre-entrevista/conversa";
 import { conduzirTurno } from "@/lib/pre-entrevista/turno";
 
 export const runtime = "nodejs";
@@ -38,8 +39,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         { status: 502 },
       );
     }
-    // Repetição e esclarecimento: a fala dela não trouxe nada novo para extrair.
-    if (movimento !== "repetir" && movimento !== "esclarecer") agendarExtracao(sessao);
+    // Repetição, esclarecimento e fala não entendida: a fala dela não trouxe nada novo para extrair.
+    if (!falaDelaNaoEraResposta(movimento)) agendarExtracao(sessao);
     return NextResponse.json(estadoDaSessao(sessao));
   } finally {
     liberar(id);

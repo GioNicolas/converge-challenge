@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { EsquemaVisualOpcional, type AcaoVisual } from "../presenca/acoesVisuais";
+import { ETAPAS_DO_FECHAMENTO } from "../totti/fechamento";
+import { EsquemaVisualOpcional } from "../presenca/acoesVisuais";
 import { validarResposta, type PedidoAnalise, type RespostaAnalise, type Sessao } from "./cliente";
 import type { Alinhamento } from "../presenca/alinhamento";
+import { obterSessaoDaVoz } from "../voz/cliente";
 
 export type { FalaRecente, Fase, PedidoAnalise, RespostaAnalise, Sessao } from "./cliente";
 export type { Alinhamento } from "../presenca/alinhamento";
@@ -18,7 +20,8 @@ const EsquemaSessao: z.ZodType<Sessao> = z.object({
   despedida: z.string().nullable().optional(),
 });
 
-const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false), seguimento: z.boolean().default(false), encerrar: z.boolean().default(false), visual: EsquemaVisualOpcional });
+const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false), seguimento: z.boolean().default(false), encerrar: z.boolean().default(false), visual: EsquemaVisualOpcional, fechamento: z.enum(ETAPAS_DO_FECHAMENTO).optional() });
+export type RespostaPerguntar = z.infer<typeof EsquemaPergunta>;
 const EsquemaAlinhamento: z.ZodType<Alinhamento> = z.object({
   characters: z.array(z.string()),
   character_start_times_seconds: z.array(z.number().finite().nonnegative()),
@@ -85,7 +88,7 @@ async function lerJson(rota: string, opcoes: RequestInit): Promise<unknown> {
   }
 }
 
-function validar<T>(rota: string, dados: unknown, esquema: z.ZodType<T>): T {
+function validar<T>(rota: string, dados: unknown, esquema: z.ZodType<T, z.ZodTypeDef, unknown>): T {
   const resultado = esquema.safeParse(dados);
   if (!resultado.success) throw erroDeFormato(rota, resultado.error);
   return resultado.data;
@@ -115,10 +118,16 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   }
 }
 
-export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[]; substitui?: boolean; desenho_parado_ha_s?: number } = {}, sinal?: AbortSignal): Promise<{ responder: boolean; texto: string; requisito: string | null; concluiu?: boolean; seguimento?: boolean; encerrar?: boolean; visual?: AcaoVisual[] }> {
+export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[]; substitui?: boolean; desenho_parado_ha_s?: number } = {}, sinal?: AbortSignal): Promise<RespostaPerguntar> {
   const rota = rotaDaSessao(sessaoId, "perguntar");
   const dados = await lerJson(rota, jsonPost({ sessao_id: sessaoId, fase, texto, ...contexto }, sinal));
   return validar(rota, dados, EsquemaPergunta);
+}
+
+/** O relógio pede o fechamento sem inventar uma fala do candidato nem chamar o modelo. */
+export async function pedirFechamento(sessaoId: string, dados: { fase: string; grafo?: string; gatilho: "tempo" | "pediu_encerrar" }): Promise<RespostaPerguntar> {
+  const rota = rotaDaSessao(sessaoId, "fechamento");
+  return validar(rota, await lerJson(rota, jsonPost(dados)), EsquemaPergunta);
 }
 
 const EsquemaEmpecilho = z.object({
@@ -135,7 +144,8 @@ export async function pedirEmpecilho(sessaoId: string, dados: { fase: string; gr
 
 export async function sintetizarFala(texto: string, sinal?: AbortSignal): Promise<{ audio: Blob; alinhamento: Alinhamento }> {
   const rota = "/api/falar";
-  const dados = validar(rota, await lerJson(rota, jsonPost({ texto }, sinal)), EsquemaFala);
+  const meta = obterSessaoDaVoz();
+  const dados = validar(rota, await lerJson(rota, jsonPost({ texto, ...(meta ?? {}) }, sinal)), EsquemaFala);
   let binario: string;
   try {
     binario = atob(dados.audio_base64);
@@ -153,7 +163,7 @@ export async function enviarEventos(sessaoId: string, lote: { horario: string; t
 
 /** Encerra a sessão no servidor e pede o scorecard. O candidato não recebe o scorecard: só o aviso de que saiu. */
 export async function finalizar(sessaoId: string): Promise<void> {
-  await requisitar(rotaDaSessao(sessaoId, "finalizar"), jsonPost({}));
+  await requisitar(rotaDaSessao(sessaoId, "finalizar"), { ...jsonPost({}), keepalive: true });
 }
 
 export async function enviarImagem(sessaoId: string, imagem: Blob, horario: string): Promise<string> {

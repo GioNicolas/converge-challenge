@@ -44,13 +44,17 @@ export default function GerandoRelatorio({ sessaoId, area, problema }: { sessaoI
   const [erro, setErro] = useState<string | null>(null);
   const tentativa = useRef(0);
 
-  const gerar = useCallback(async () => {
+  const gerar = useCallback(async (reiniciarRelogio = true) => {
     const minha = ++tentativa.current;
     setErro(null);
-    setSegundos(0);
+    if (reiniciarRelogio) setSegundos(0);
     try {
       const r = await fetch(`/api/sessoes/${encodeURIComponent(sessaoId)}/finalizar`, { method: "POST" });
       if (minha !== tentativa.current) return;
+      if (r.status === 202) {
+        window.setTimeout(() => { if (minha === tentativa.current) void gerar(false); }, 3000);
+        return;
+      }
       if (!r.ok) {
         const corpo = (await r.json().catch(() => null)) as { erro?: string } | null;
         setErro(corpo?.erro ?? "Não foi possível gerar o relatório agora.");
