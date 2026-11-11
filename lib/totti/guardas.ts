@@ -12,6 +12,12 @@ import { comMaiuscula, frasesDe, frasesSemPergunta, normalizar, sobreposicao, to
 const MATERIAL: Record<Sala, string> = { codigo: "o código", quadro: "o desenho" };
 
 /**
+ * Em que pé a entrevista está, para o convite. No fechamento (lib/totti/fechamento.ts), e depois de ele dizer que
+ * terminou, ninguém manda o candidato seguir com o código ou com o desenho: ali não entra convite nenhum.
+ */
+export type MomentoDoConvite = "trabalho" | "fechamento";
+
+/**
  * Os convites que devolvem a vez, os mesmos nas duas salas (só o material muda). Os três primeiros são os de
  * sempre; os outros existem para o convite não se repetir de uma fala para a outra (o mesmo "Continua daí." várias
  * vezes seguidas soa como gravação).
@@ -31,7 +37,8 @@ export function convitesPara(sala: Sala): string[] {
  * O convite que o Totti ainda não usou nas falas recentes. Sem histórico, ou com todos já usados, vale a escolha
  * de sempre (pelo tamanho do texto); com histórico, anda a partir dela até achar um que não foi dito.
  */
-export function escolherConvite(texto: string, jaDitas: string[], sala: Sala): string {
+export function escolherConvite(texto: string, jaDitas: string[], sala: Sala, momento: MomentoDoConvite = "trabalho"): string {
+  if (momento === "fechamento") return "";
   const convites = convitesPara(sala);
   const ditas = jaDitas.map(normalizar);
   const inicio = texto.length % 3;
@@ -65,10 +72,42 @@ export function devolveAVez(texto: string): boolean {
  * Toda fala termina com a bola com ele. O modelo às vezes para no fato ("Isso, um bilhão por mês.") e o candidato
  * fica sem saber se é a vez dele: aí entra um convite curto no fim.
  */
-export function comVezDevolvida(texto: string, jaDitas: string[], sala: Sala): string {
+export function comVezDevolvida(texto: string, jaDitas: string[], sala: Sala, momento: MomentoDoConvite = "trabalho"): string {
   const t = texto.trim();
   if (!t || devolveAVez(t)) return t;
-  return `${t} ${escolherConvite(t, jaDitas, sala)}`;
+  return [t, escolherConvite(t, jaDitas, sala, momento)].filter(Boolean).join(" ");
+}
+
+const ANTES_DO_CONVITE = "(?:(?:ent[ãa]o|agora|beleza|certo|t[áa]|e|a[íi]),?\\s+)?";
+const CONVITES_DE_SEGUIR = [
+  new RegExp(`^${ANTES_DO_CONVITE}(?:voc[êe]\\s+)?pode(?:mos)?\\s+(?:seguir|continuar|retomar|voltar|prosseguir|ir em frente|come[çc]ar)(?:\\s.*)?$`, "i"),
+  new RegExp(`^${ANTES_DO_CONVITE}(?:segue|siga|continua|continue|retoma|retome|volta|volte)(?:\\s+(?:da[íi]|a[íi]|de onde\\s.*|com\\s.*|no seu ritmo|em frente|(?:para|pra|ao|pro)\\s.*))?$`, "i"),
+  new RegExp(`^${ANTES_DO_CONVITE}(?:vai em frente|fi(?:ca|que) [àa] vontade (?:para|pra) (?:seguir|continuar|retomar|come[çc]ar)(?:\\s.*)?)$`, "i"),
+];
+
+/** A oração manda o candidato seguir com o trabalho ("pode seguir com o desenho", "continua daí"). */
+function eConviteDeSeguir(oracao: string): boolean {
+  const o = oracao.trim().replace(/[.!…]+$/, "");
+  return CONVITES_DE_SEGUIR.some((c) => c.test(o));
+}
+
+/**
+ * A fala sem o convite para seguir com o código ou com o desenho, que o modelo põe no fim por hábito. Serve para o
+ * fechamento: quem ouviu "só preciso fechar uns pontos" não pode ouvir "pode seguir com o desenho" em seguida.
+ * Pergunta nenhuma é tirada aqui.
+ */
+export function semConviteDeSeguir(texto: string): string {
+  const frases = frasesDe(texto.trim()).flatMap((frase) => {
+    const f = frase.trim();
+    if (f.endsWith("?")) return [f];
+    const oracoes = f.split(/,\s+/);
+    const ficam = oracoes.filter((o) => !eConviteDeSeguir(o));
+    if (ficam.length === oracoes.length) return [f];
+    if (!ficam.length) return [];
+    const junto = ficam.join(", ");
+    return [/[.!?…]$/.test(junto) ? junto : `${junto}.`];
+  });
+  return frases.join(" ").trim();
 }
 
 /**
@@ -76,25 +115,26 @@ export function comVezDevolvida(texto: string, jaDitas: string[], sala: Sala): s
  * pergunta de condução ("quer olhar outra parte?") e o candidato, que acabou de soltar o assunto, fica com outra
  * cobrança. Tira a frase com interrogação do fim e põe um convite curto.
  */
-export function semPerguntaNoFim(texto: string, jaDitas: string[], sala: Sala): string {
+export function semPerguntaNoFim(texto: string, jaDitas: string[], sala: Sala, momento: MomentoDoConvite = "trabalho"): string {
   const t = texto.trim();
   if (!t.endsWith("?")) return t;
   const frases = frasesDe(t);
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
-  return [...frases, escolherConvite(t, jaDitas, sala)].join(" ");
+  return [...frases, escolherConvite(t, jaDitas, sala, momento)].filter(Boolean).join(" ");
 }
 
 /**
  * Como `semPerguntaNoFim`, mas sem colar um convite pronto quando ainda sobra fala: "Tranquilo, seguimos." já
  * devolve a vez. O convite fixo só entra se a fala era só a pergunta.
  */
-export function semPerguntaNoFimSeSobrar(texto: string, sala: Sala): string {
+export function semPerguntaNoFimSeSobrar(texto: string, sala: Sala, momento: MomentoDoConvite = "trabalho"): string {
   const t = texto.trim();
   if (!t.endsWith("?")) return t;
   const frases = frasesDe(t);
   while (frases.length && frases[frases.length - 1].endsWith("?")) frases.pop();
+  if (frases.length) return frases.join(" ");
   const convites = convitesPara(sala);
-  return frases.length ? frases.join(" ") : convites[t.length % convites.length];
+  return momento === "fechamento" ? "" : convites[t.length % convites.length];
 }
 
 // ---------------------------------------------------------------------------------------------------------------
