@@ -17,6 +17,7 @@ import { POST as perguntarPost } from "../sessoes/[id]/perguntar/route";
 import { POST as eventosPost } from "../sessoes/[id]/eventos/route";
 import { POST as finalizarPost } from "../sessoes/[id]/finalizar/route";
 import { GET as scorecardGet } from "../sessoes/[id]/scorecard/route";
+import { MAX_TOKENS_SCORECARD } from "@/lib/agente/scorecard";
 import { GET as estadoGet } from "../dev/sessoes/[id]/estado/route";
 
 const TEMAS = [
@@ -311,7 +312,7 @@ describe("finalizar", () => {
     assert.equal(finais.length, 1);
     const ch = finais[0];
     assert.equal(ch.raciocinio, true);
-    assert.equal(ch.maxTokens, 6000);
+    assert.equal(ch.maxTokens, MAX_TOKENS_SCORECARD);
     assert.equal(ch.timeoutMs, 290_000);
     assert.ok(ch.modelo);
     // guardas no caminho real: nota_geral recomputada e fala validada contra a conversa

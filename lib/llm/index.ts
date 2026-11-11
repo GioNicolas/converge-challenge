@@ -68,9 +68,9 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
   },
   evaluator: {
     // Kit da vaga, plano e o que não tem papel próprio: a recrutadora espera na tela. O kit roda em
-    // app/api/avaliacoes (maxDuration 120 s) e gerarKit tenta até 2 vezes. scripts/gerar-kit.ts em 2026-11-10: o
-    // GLM-5.2 na Featherless estourou os 90 s da tentativa; o gemini-3.5-flash-lite gerou o kit em 9–10 s
-    // (validou de primeira, US$ 0,0067). Reserva aos 45 s: duas tentativas (2 × 45 s + 2 × 10 s) cabem nos 120 s.
+    // app/api/avaliacoes e gerarKit tenta até 2 vezes. scripts/gerar-kit.ts em 2026-11-10: o GLM-5.2 na
+    // Featherless estourou os 90 s da tentativa; o gemini-3.5-flash-lite gerou o kit em 9–10 s (validou de
+    // primeira, US$ 0,0067). Reserva aos 45 s: a recrutadora espera ~55 s por tentativa, não os minutos do GLM-5.2.
     // No kit a reserva ainda entra quase sempre, mas a Featherless é plano fixo: o que custa é o modelo da reserva,
     // e o gemini sai ~10× mais barato que o GLM-5.2 na OpenRouter (US$ 6,80 por milhão de tokens de saída).
     featherlessEnv: "EVALUATOR_MODEL",
@@ -95,7 +95,10 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     featherlessDefault: "zai-org/GLM-5.2",
     openrouterEnv: "RELATORIO_FALLBACK_MODEL",
     openrouterDefault: "google/gemini-3.5-flash-lite",
-    maxTokens: 6000,
+    // O GLM-5.2 raciocina antes de responder: com 6000 tokens, 4 de 6 scorecards paravam em `length` e caíam na
+    // reserva paga. Com 12000 (eval-scorecard sem OpenRouter, 2026-11-10), as respostas usaram 6–11,7 mil e
+    // 2 de 6 falharam.
+    maxTokens: 12_000,
     hedgeMs: 270_000,
     tempoPorTentativaMs: 290_000,
   },
