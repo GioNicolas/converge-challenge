@@ -258,6 +258,16 @@ describe("#84: fechamento do quadro na sessão 4e38b42f", () => {
     assert.equal(r.fechamento, "perguntas_finais");
   });
 
+  it("provedor que ignora o timeout não segura a próxima pergunta por quatro segundos", async () => {
+    const inicio = await turno(antesDeTerminar(), "Eu acho que é isso, terminei.", { responder: false, texto: "" }, AGORA);
+    const comeco = performance.now();
+    const r = await perguntar({ ...deps({}), llm: { completarJson: () => new Promise<never>(() => {}) } }, inicio.estado,
+      { fase: "FECHAMENTO", texto: "Eu separaria leitura de escrita.", grafo: DESENHO }, AGORA + 20_000);
+    assert.ok(performance.now() - comeco < 4000, "a leitura tem um teto real mesmo se o cliente ignorar o sinal");
+    assert.equal(r.responder, true);
+    assert.equal(r.fechamento, "perguntas_finais");
+  });
+
   it("fala que substitui a anterior refaz o passo: a pergunta que ele não ouviu não é pulada", async () => {
     const inicio = await turno(antesDeTerminar(), "Eu acho que é isso, terminei.", { responder: false, texto: "" }, AGORA);
     const primeira = await turno(inicio.estado, "Eu colocaria um barramento", { responder: true, texto: "Saquei.", desfecho: "respondeu" }, AGORA + 20_000);
