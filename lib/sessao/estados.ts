@@ -4,6 +4,7 @@
 // Fases:  AGUARDANDO → APRESENTACAO → REQUISITOS → ALTO_NIVEL → APROFUNDAMENTO → FECHAMENTO → ENCERRADA
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu uma pergunta, esperando a vez) → PERGUNTA_ATIVA (o Totti a disse; sem clique) → LIVRE
 import { motivoDoRitmo, RITMO, type Ritmo } from "@/lib/interrupcao/politica";
+import type { EtapaDoFechamento } from "@/lib/totti/fechamento";
 import type { Fase, RespostaAnalise } from "@/lib/sessao/cliente";
 
 export type CicloPlin = "LIVRE" | "PLIN_PENDENTE" | "PERGUNTA_ATIVA";
@@ -36,6 +37,8 @@ export type EstadoEntrevista = {
   duracaoMin?: number;
   /** Quando o candidato disse pela última vez que terminou: um marco, a pergunta seguinte não espera o intervalo. */
   ultimaConclusaoEm?: number | null;
+  fechamento?: EtapaDoFechamento | null;
+  antesDoFechamento?: { fase: Fase; faseIniciadaEm: number | null };
 };
 
 export type EventoEntrevista =
@@ -56,6 +59,7 @@ export type EventoEntrevista =
   | { tipo: "SEGUIMENTO"; pergunta: string }
   /** O candidato disse "pronto"/"terminei": é um marco; no alto nível, segue para o aprofundamento sem esperar. */
   | { tipo: "CANDIDATO_CONCLUIU" }
+  | { tipo: "FECHAMENTO_ATUALIZADO"; etapa: EtapaDoFechamento | null }
   | { tipo: "ENCERRAR" };
 
 /** Duração da entrevista padrão (soma de TEMPOS_PADRAO no servidor), quando o COMECAR não diz. */
@@ -110,6 +114,7 @@ export function podeAnalisar(estado: EstadoEntrevista) {
  * useEntrevista, quando a dúvida já está pendente.
  */
 export function aceitaPlin(estado: EstadoEntrevista, resposta: RespostaAnalise, agora: number) {
+  if (estado.fechamento) return false;
   if (resposta.status === "ok" || !resposta.pergunta) return false;
   if (!PLINS_DA_FASE[estado.fase]?.includes(resposta.status)) return false;
   if (estado.plin === "PERGUNTA_ATIVA") return false;
@@ -154,6 +159,18 @@ export function transicionar(estado: EstadoEntrevista, evento: EventoEntrevista,
   if (estado.fase === "ENCERRADA") return estado;
 
   switch (evento.tipo) {
+    case "FECHAMENTO_ATUALIZADO": {
+      if (!evento.etapa) {
+        if (!estado.fechamento) return estado;
+        return { ...estado, ...estado.antesDoFechamento, fechamento: null, antesDoFechamento: undefined, perguntaFinalFeita: false };
+      }
+      return {
+        ...estado, fase: "FECHAMENTO", faseIniciadaEm: estado.fechamento ? estado.faseIniciadaEm : agora,
+        fechamento: evento.etapa,
+        antesDoFechamento: estado.antesDoFechamento ?? { fase: estado.fase, faseIniciadaEm: estado.faseIniciadaEm },
+        plin: "LIVRE", perguntaPendente: null, perguntaAtiva: null, pendenteDesde: null, perguntaFinalFeita: true,
+      };
+    }
     case "COMECAR":
       return estado.fase === "AGUARDANDO"
         ? { ...mudarFase(estado, "APRESENTACAO", agora), iniciadaEm: agora, duracaoMin: evento.duracaoMin ?? estado.duracaoMin }
