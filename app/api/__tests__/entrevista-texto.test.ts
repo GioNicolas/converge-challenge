@@ -85,7 +85,15 @@ async function eventos(id: string, lista: { tipo: string; dados: unknown }[]) {
   assert.equal(r.status, 200);
 }
 
-async function analisar(id: string, fase: string, grafo: string, mudancas: string, perguntas: number, paradoHaS?: number) {
+async function analisar(
+  id: string,
+  fase: string,
+  grafo: string,
+  mudancas: string,
+  perguntas: number,
+  paradoHaS?: number,
+  falaExtra?: { quem: "candidato" | "agente"; texto: string } | { quem: "candidato" | "agente"; texto: string }[],
+) {
   const r = await ler(
     await analisarPost(
       post(`/api/sessoes/${id}/analisar`, {
@@ -93,7 +101,7 @@ async function analisar(id: string, fase: string, grafo: string, mudancas: strin
         fase,
         grafo,
         mudancas,
-        conversa_recente: [{ quem: "agente", texto: "Projete um serviço." }],
+        conversa_recente: [{ quem: "agente", texto: "Projete um serviço." }, ...(falaExtra ? (Array.isArray(falaExtra) ? falaExtra : [falaExtra]) : [])],
         perguntas_feitas: perguntas,
         imagem_url: null,
         ...(paradoHaS !== undefined ? { parado_ha_s: paradoHaS } : {}),
@@ -122,10 +130,10 @@ describe("pergunta nova logo depois de uma fala solta do agente", () => {
     assert.equal(logo.status, "ok", "com a bola no candidato a pergunta é rebaixada");
     assert.equal((await estado(id)).plinPendente, false);
 
-    // Ele desenhou logo depois da resposta (parado há 1 s): agora a pergunta pode sair.
+    // A análise anterior estava bloqueada; quando o candidato para, a mesma assinatura precisa reanalisar.
     relogio += 3_000;
     const depois = await analisar(id, "ALTO_NIVEL", GRAFO_RUIM, d1.texto, 0, 1);
-    assert.equal(depois.status, "duvida", "depois de uma ação dele a pergunta pode sair");
+    assert.equal(depois.status, "duvida", "a pergunta bloqueada é recuperada quando o candidato para");
   });
 });
 
@@ -201,7 +209,8 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
 
     // APROFUNDAMENTO: a dúvida aparece, pendente.
     await eventos(id, [{ tipo: "fase", dados: { fase: "APROFUNDAMENTO" } }]);
-    const duvida = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(sem mudanças)", 0);
+    const duvida = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(sem mudanças)", 0, undefined,
+      { quem: "candidato", texto: "Quero aprofundar a solução." });
     respostas.push(duvida);
     assert.equal(duvida.status, "duvida");
     assert.deepEqual(duvida.elementos, ["e1"]);
@@ -212,7 +221,8 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
     for (let n = 1; n <= 5; n++) {
       if (n > 1) {
         relogio += 4 * 60_000; // ritmo da política comum: ~1 pergunta a cada 3 min (intervalo e cota)
-        const nova = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(sem mudanças)", n - 1);
+        const nova = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(sem mudanças)", n - 1, undefined,
+          Array.from({ length: n }, (_, i) => ({ quem: "candidato" as const, texto: `Quero aprofundar na rodada ${n}, fala ${i + 1}.` })));
         assert.equal(nova.status, "duvida", `rodada ${n}: plin liberado`);
       }
       await eventos(id, [{ tipo: "pergunta", dados: { pergunta: "x", elementos: ["e1"] } }]);
@@ -228,7 +238,8 @@ describe("entrevista completa por texto (handlers + LLM falso)", () => {
       assert.equal(e.perguntaAtiva, false);
       if (n < 5) {
         // Reanálise forçada logo após a resposta: o respiro da política comum segura o plin.
-        const forcada = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(o candidato terminou de responder)", n);
+        const forcada = await analisar(id, "APROFUNDAMENTO", GRAFO_RUIM, "(o candidato terminou de responder)", n, undefined,
+          { quem: "candidato", texto: `Resposta número ${n}: acho que um Postgres aguenta` });
         assert.equal(forcada.status, "ok");
         assert.equal(e.fase, "APROFUNDAMENTO");
       }

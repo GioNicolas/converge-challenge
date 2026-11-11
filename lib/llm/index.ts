@@ -551,6 +551,8 @@ export async function completeJson<T>(opts: {
   prazoMs?: number;
   /** Imagem que acompanha o pedido (data URL). Só vai ao OpenRouter; sem ela, nada muda. */
   imageDataUrl?: string | null;
+  /** Não usa reserva por lentidão nem rota direta do disjuntor; em falha tenta a reserva. */
+  semReserva?: boolean;
 }): Promise<ChatJsonResult<T>> {
   const cfg = ROLE_CONFIG[opts.role];
   const fala = PAPEIS_DE_FALA.has(opts.role);
@@ -581,7 +583,9 @@ export async function completeJson<T>(opts: {
   // Sem chave da Featherless: só OpenRouter. Sem isso, duas lentidões do OpenRouter abriam o disjuntor e
   // mandavam tudo para a Featherless (que falha na hora) por minutos.
   if (!process.env.FEATHERLESS_API_KEY) return callOnly(call, "openrouter", opts.signal);
-  if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
+  const papelDeFundo = opts.role === "quadro" || opts.role === "codigo";
+  if (breakerIsOpen(opts.role) && !papelDeFundo && !opts.semReserva) return callOnly(call, ordem(opts.role)[1], opts.signal);
+  if (opts.semReserva) return callWithFallback(opts.role, call, opts.signal);
   const hedgeMs = hedgeDoPapel(opts.role, cfg);
   if (hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
   return callHedged(opts.role, call, hedgeMs, opts.signal);

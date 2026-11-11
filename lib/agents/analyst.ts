@@ -9,8 +9,8 @@ import { mudancaParaPrompt } from "@/lib/agents/empecilho";
 import { conversasFeitas, faseDaEntrevista, formatarConversas, regiaoAlterada } from "@/lib/agents/fase";
 import { buildAnalystSystem, buildAnalystUser } from "@/lib/agents/prompts/analyst";
 import { focoPendente } from "@/lib/agents/focoQuota";
-import { allPassed, COLA_MIN_LINES, ritmoDaSessao } from "@/lib/agents/policy";
-import { interrupcaoAtrasada } from "@/lib/interrupcao/politica";
+import { allPassed, COLA_MIN_LINES, isCandidateIdle, ritmoDaSessao } from "@/lib/agents/policy";
+import { interrupcaoAtrasada, orcamentoDeInterrupcoes } from "@/lib/interrupcao/politica";
 import { checkQuestion } from "@/lib/agents/spoilerFilter";
 import { PRIORIDADE_FOCO } from "@/lib/agents/focoQuota";
 import type { FocusArea, LineRange, SessionEvent } from "@/lib/contracts";
@@ -38,6 +38,20 @@ type PauseEvent = Extract<SessionEvent, { type: "pause" }>;
 type RunEvent = Extract<SessionEvent, { type: "run" }>;
 
 const PAUSE_MIN_GAP_MS = 15_000;
+
+// Espelha as travas de decideBlip em lib/agents/policy.ts.
+export function perguntaBloqueadaAgora(session: SessionState, t: number): boolean {
+  const perguntasContadas = session.blips.filter((blip) => {
+    const q = session.queue.find((item) => item.id === blip.id);
+    return !q?.kickoff && q?.kind !== "encerramento" && q?.kind !== "empecilho" && q?.kind !== "cola";
+  }).length;
+  const temRetorno = session.queue.some((q) => q.kind === "retorno" && q.status === "queued");
+  const temCola = session.queue.some((q) => q.kind === "cola" && q.status === "queued");
+  return !isCandidateIdle(session, t) || session.ended ||
+    (session.pendingBlipId !== undefined && !temCola) ||
+    (perguntasContadas >= orcamentoDeInterrupcoes(session.config.durationMin) && !temRetorno) ||
+    session.queue.some((q) => q.kind === "encerramento" && q.status !== "queued");
+}
 
 // Em globalThis, como o store: o Next em dev recarrega o módulo ao compilar outra rota, e um
 // WeakMap local zeraria no meio da sessão (já causou ids de pergunta repetidos).
@@ -183,7 +197,8 @@ async function analyzeOnce(session: SessionState, book: AnalystBookkeeping, trig
     });
 
     // Papel "codigo": gemini-3.7-flash no OpenRouter, com o GLM da Featherless de reserva (ver lib/llm/index.ts).
-    const result = await completeJson({ role: "codigo", system, user, schema: AnalystOutput });
+    const perguntaBloqueada = perguntaBloqueadaAgora(session, trigger.t);
+    const result = await completeJson({ role: "codigo", system, user, schema: AnalystOutput, semReserva: perguntaBloqueada });
     registrarUsoLlm(session, "analise", result);
     const { questions, focusQuestion, ...insights } = result.data;
 
