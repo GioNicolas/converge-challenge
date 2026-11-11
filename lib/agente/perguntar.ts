@@ -2,7 +2,8 @@
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
 import { neutralizar, REGRA_DADOS } from "../seguranca/injecao";
 import { blocoDoBriefing } from "./briefing";
-import { aceitaEncerrar, comVezDevolvida, frasesDe, eSoReacao, limitarFrases, OFERTA_DE_ENCERRAR, perguntaDeConducao, perguntaJaFeita, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimV2 } from "./guardas";
+import { aceitaEncerrar, aplicarGuardas, comVezDevolvida, eSoReacao, limitarFrases, OFERTA_DE_ENCERRAR, semPerguntaNoFim, semPerguntaNoFimV2 } from "./guardas";
+import { reacaoNeutra } from "../totti/guardas";
 import { garantirMarca, mapearAcoesVisuais, pecasCitadas, type AcaoVisual } from "../presenca/acoesVisuais";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
@@ -100,11 +101,6 @@ export type UsoPerguntar = {
 /** Ele disse que terminou: o Totti avisa que vai olhar o desenho, e a pergunta seguinte vem da análise. */
 export const AVISOS_DE_QUE_VAI_OLHAR = ["Tá, deixa eu dar uma olhada no desenho.", "Certo, só um instante que eu olho o que você fez."];
 
-/** A fala sem as frases que terminam em pergunta ("" se era só a pergunta). */
-function frasesSemPergunta(texto: string): string {
-  return frasesDe(texto.trim()).filter((f) => !f.trim().endsWith("?")).join(" ").trim();
-}
-
 const MAX_CARACTERES_REQUISITO = 60;
 /** Quantas falas recentes do agente o convite do fim evita repetir. */
 const MAX_FALAS_PARA_VARIAR_CONVITE = 8;
@@ -199,12 +195,28 @@ async function responderFala(
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho, estado: comConclusao(comFala) });
   // Pedido para encerrar a entrevista: quem fecha é o quadro (com a despedida), nada mais a decidir aqui.
   if (saida.encerrar === true) return { ...mudo(), encerrar: true };
-  // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas. Antes, sai a frase de
-  // abertura que só repete o candidato ("Entendi que…", "Contador com base 62."): o modelo rápido fazia isso em quase toda fala.
-  const curto = limitarFrases(semEcoNoComeco(saida.texto, entrada.texto), MAX_FRASES_FALA);
   // O convite do fim varia: não repete um que o Totti acabou de dizer.
   const jaDitas = estado.conversa.filter((f) => f.quem === "agente").slice(-MAX_FALAS_PARA_VARIAR_CONVITE).map((f) => f.texto);
   const minhaUltima = jaDitas.at(-1);
+  const fasesDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO" || entrada.fase === "FECHAMENTO";
+  // As travas da fala são as do Totti único (lib/totti/guardas.ts), as mesmas do live coding: cumprimento fora da
+  // abertura, validação, eco do que o candidato disse, reação vazia repetida e, no v2, pergunta que ele já ouviu
+  // (do Totti na conversa, da análise do desenho ou da mudança no problema) ou que só devolve a condução.
+  const guardada = aplicarGuardas(saida.texto, {
+    falaDoCandidato: entrada.texto,
+    falasDoTotti: jaDitas,
+    perguntasJaFeitas: v2
+      ? [
+        ...estado.conversa.filter((f) => f.quem === "agente" && f.texto.includes("?")).map((f) => f.texto),
+        ...estado.perguntas.flatMap((p) => [p.pergunta, ...(p.seguimentos ?? [])]),
+      ]
+      : undefined,
+    barrarConducao: v2 && fasesDeDesenho,
+  });
+  if (guardada.travas.length) log("perguntar_travas", { sessao_id: entrada.sessao_id, fase: entrada.fase, travas: guardada.travas });
+  const perguntaBarrada = guardada.travas.includes("pergunta_repetida") || guardada.travas.includes("pergunta_de_conducao");
+  // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
+  const curto = limitarFrases(guardada.texto, MAX_FRASES_FALA);
   let texto: string;
   let seguimento = false;
   if (v2) {
@@ -214,25 +226,13 @@ async function responderFala(
     texto = semAprofundar ? semPerguntaNoFimV2(curto) : curto;
     // Ele já disse duas vezes que terminou e diz de novo: o Totti não devolve a vez com outro convite, oferece fechar.
     // (Na primeira e na segunda, a pergunta seguinte vem da análise do desenho, que roda logo depois.)
-    const fasesDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO" || entrada.fase === "FECHAMENTO";
     if (concluiu && conclusoesAntes >= 2 && fasesDeDesenho && !haPerguntaAtiva) {
       // `concluiu` vai false: a oferta já é a vez dele, e nenhuma pergunta nova deve vir atrás dela.
       const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto: OFERTA_DE_ENCERRAR, perguntou: true }, agora).estado;
       return { responder: true, texto: OFERTA_DE_ENCERRAR, requisito: null, concluiu: false, desfecho, estado: final, perguntou: true };
     }
-    // Pergunta que ele já ouviu (do Totti na conversa, da análise do desenho ou da mudança no problema) não sai de novo.
-    const jaPerguntadas = [
-      ...estado.conversa.filter((f) => f.quem === "agente" && f.texto.includes("?")).map((f) => f.texto),
-      ...estado.perguntas.flatMap((p) => [p.pergunta, ...(p.seguimentos ?? [])]),
-    ];
-    // Nem a pergunta que só devolve a condução ("quer detalhar algo?"), nas fases de desenho.
-    const repetida = texto.trim().endsWith("?") && perguntaJaFeita(texto, jaPerguntadas);
-    if (repetida || (fasesDeDesenho && perguntaDeConducao(texto))) {
-      log(repetida ? "perguntar_pergunta_repetida" : "perguntar_pergunta_de_conducao", { sessao_id: entrada.sessao_id, fase: entrada.fase });
-      const sobrou = frasesSemPergunta(texto);
-      if (!sobrou) return mudoOuConcluiu();
-      texto = sobrou;
-    }
+    // A fala era só a pergunta que a trava barrou (repetida ou de condução): ele fica quieto.
+    if (perguntaBarrada && !texto) return mudoOuConcluiu();
     // Ele disse que terminou: a pergunta seguinte é a da análise do desenho (concreta, com a peça marcada). Um convite
     // vago aqui ("quer detalhar algo?") deixava ele sem saber o que fazer e ainda derrubava a pergunta pronta.
     if (concluiu && !texto.trim().endsWith("?") && fasesDeDesenho && !haPerguntaAtiva) {
@@ -241,12 +241,16 @@ async function responderFala(
       return { responder: true, texto: aviso, requisito: null, concluiu, desfecho,
         estado: transicionar(comConclusao(comFala), { tipo: "AGENTE_FALOU", texto: aviso }, agora).estado };
     }
+    const respondiaMinhaPergunta = haPerguntaAtiva || !!minhaUltima?.trim().endsWith("?");
+    // A fala inteira era eco ou cumprimento e saiu, mas ele acabou de responder a uma pergunta do Totti e espera uma
+    // reação: entra uma curta e neutra no lugar (o convite vem logo abaixo).
+    const soEcoOuCumprimento = guardada.travas.length > 0 && guardada.travas.every((t) => t === "eco" || t === "cumprimento" || t === "validacao");
+    if (saida.responder && !texto && saida.texto.trim() && respondiaMinhaPergunta && soEcoOuCumprimento) texto = reacaoNeutra(jaDitas);
     if (!saida.responder || !texto) return mudoOuConcluiu();
     // "Hm." atrás de "Hm." vira bordão na voz: a segunda reação vazia seguida fica em silêncio (a vez já é dele).
     if (eSoReacao(texto) && eSoReacao(minhaUltima)) return mudoOuConcluiu();
     // Ele acabou de responder a uma pergunta do Totti (ou disse "não sei"): a réplica não pode parar num "Tá." ou
     // "Tudo bem." solto, senão ele fica sem saber o que fazer. Sem pergunta nem próximo passo, entra um convite.
-    const respondiaMinhaPergunta = haPerguntaAtiva || !!minhaUltima?.trim().endsWith("?");
     if (respondiaMinhaPergunta) texto = comVezDevolvida(texto, jaDitas);
   } else {
     // "Não sei" ou "pula": a vez volta com um convite, nunca com outra pergunta. Depois de uma resposta, o modelo
