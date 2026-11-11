@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { acharConvite, linkDaEntrevista, novoEntrevistaId, salvarConvite } from "@/lib/convites/store";
 import { horarioAceito } from "@/lib/convites/horarios";
+import { urlPublica } from "@/lib/convites/url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   }
   const horario = parsed.data.horario;
 
-  const base = process.env.APP_URL || new URL(req.url).origin;
+  let base: string;
+  try {
+    base = urlPublica(req);
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : "URL pública inválida";
+    return NextResponse.json({ erro: mensagem }, { status: 503 });
+  }
   // O link carrega o id da entrevista: é por ele que o painel sabe quem fez cada entrevista.
   const agendado = { ...convite, status: "agendado" as const, agendadoPara: horario, entrevistaId: novoEntrevistaId() };
   const joinUrl = linkDaEntrevista(base, agendado);

@@ -5,6 +5,7 @@ import { sendTriagemConvite } from "@/lib/email";
 import { criarConvite, salvarConvite } from "@/lib/convites/store";
 import { recebeEmail } from "@/lib/convites/teste";
 import { ipDe, reservarEnvioTestador } from "@/lib/convites/testador";
+import { urlPublica, verificarUrlPublica } from "@/lib/convites/url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,10 +57,17 @@ export async function POST(req: NextRequest) {
   const roleTitle = config?.roleTitle ?? body.cargo;
   const languages = config?.languages ?? ["python", "cpp"];
 
-  // Link público: APP_URL quando definido (emails saem com a URL de produção), senão a origem da requisição.
-  const base = (process.env.APP_URL || new URL(req.url).origin).replace(/\/$/, "");
+  let base: string;
+  try {
+    base = urlPublica(req);
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : "URL pública inválida";
+    console.warn(`[convites] ${mensagem}`);
+    return NextResponse.json({ erro: mensagem }, { status: 503 });
+  }
 
   const resultados: { email: string; status: Status; motivo?: string; link?: string }[] = [];
+  let urlVerificada = false;
   for (const candidato of body.candidatos) {
     const email = candidato.email.toLowerCase();
     const testador = candidato.testador === true;
@@ -83,6 +91,16 @@ export async function POST(req: NextRequest) {
       const motivo = testador ? "limite de e-mails de teste atingido; use o link" : "sem envio de e-mail (demonstração)";
       resultados.push({ email, status: "simulado", motivo, link });
       continue;
+    }
+
+    if (!urlVerificada) {
+      const verificacao = await verificarUrlPublica(base, new URL(req.url).origin);
+      urlVerificada = true;
+      if (!verificacao.vivo) {
+        const mensagem = `O endereço público configurado não responde: ${verificacao.host}`;
+        console.warn(`[convites] endereço público sem resposta host=${verificacao.host}`);
+        return NextResponse.json({ erro: mensagem }, { status: 502 });
+      }
     }
 
     try {
