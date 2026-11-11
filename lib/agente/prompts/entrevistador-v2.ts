@@ -102,6 +102,30 @@ export function blocoDoRitmo(conversa: FalaRecente[]): string {
  */
 export const FALAS_NO_PROMPT_V2 = 20;
 
+/** O que o modelo precisa saber do fim da entrevista: o desenho está concluído e, se for o caso, a etapa do fechamento. */
+export type ContextoDoFechamento = {
+  /** Ele disse que terminou o desenho e não voltou a desenhar. */
+  desenhoConcluido: boolean;
+  /** A etapa do fechamento comum em andamento (lib/totti/fechamento.ts); ausente fora dele. */
+  etapa?: "perguntas_finais" | "ultima_palavra";
+};
+
+/**
+ * A linha que diz ao modelo que o desenho acabou e em que etapa do fechamento a conversa está. A sequência (qual
+ * pergunta vem, quando vem a despedida) é do sistema: aqui o modelo só lê o turno e reage. Vale para o v1 e o v2.
+ */
+export function linhaDoFechamento(contexto: ContextoDoFechamento | undefined): string {
+  if (!contexto?.etapa) {
+    return contexto?.desenhoConcluido
+      ? "Desenho concluído: ele já disse que terminou o desenho. Não peça para continuar, seguir ou retomar o desenho.\n"
+      : "";
+  }
+  const etapa = contexto.etapa === "ultima_palavra"
+    ? "você perguntou se ele quer acrescentar algo. Se ele trouxer um assunto, responda em até duas frases, sem pergunta nova"
+    : "ele responde às suas perguntas finais. Reaja em uma frase curta e neutra ao que ele disse, sem pergunta nova (a próxima pergunta é escolhida pelo sistema); só se ele não entendeu a pergunta, explique-a em uma frase";
+  return `Fechamento da entrevista: o desenho está concluído e você já avisou que só falta fechar uns pontos. Nesta etapa, ${etapa}. Não peça para continuar o desenho e não se despeça: a despedida é do sistema. "Não sei" e "pula" são aceitos sem insistir (desfecho). Se ele pedir para encerrar, encerrar = true.\n`;
+}
+
 /** De que parte do prompt dinâmico um trecho é: é o que a medição de custo separa (issue #63). */
 export type NomeDoBloco = "conversa" | "grafo" | "mudancas" | "resto";
 export type BlocoDinamico = { bloco: NomeDoBloco; texto: string };
@@ -123,6 +147,8 @@ export function blocosDoSistemaDinamicoPerguntarV2(
   briefing = "",
   /** Quantas falas da conversa vão inteiras no prompt. */
   falasNoPrompt = FALAS_NO_PROMPT_V2,
+  /** O desenho concluído e a etapa do fechamento, quando for o caso (ver `linhaDoFechamento`). */
+  fechamento?: ContextoDoFechamento,
 ): BlocoDinamico[] {
   // A conversa inteira conta para o ritmo (quantas perguntas ele já fez); só as últimas falas vão por extenso. O que
   // ficou para trás e importa para não repetir são as perguntas, que já vão em bloco próprio (ritmo e perguntas feitas).
@@ -158,7 +184,7 @@ CONVERSA ATÉ AGORA (as últimas falas; a fala nova do candidato vem na mensagem
 
 ${blocoDoRitmo(historico)}
 Fase: ${fase}
-Pergunta que o candidato está respondendo: ${JSON.stringify(perguntaAtiva || estado.perguntaAtiva?.pergunta || null)}
+${linhaDoFechamento(fechamento)}Pergunta que o candidato está respondendo: ${JSON.stringify(perguntaAtiva || estado.perguntaAtiva?.pergunta || null)}
 ` },
     { bloco: "mudancas", texto: mudancas?.trim() ? `O que acabou de mudar no desenho: ${JSON.stringify(mudancas.trim().slice(0, 2000))}\n` : "" },
     { bloco: "resto", texto: `${comImagem ? `${INSTRUCAO_IMAGEM}\n` : ""}Gestos recentes (não repetir sem motivo): ${JSON.stringify(gestosRecentes ?? [])}${minhasFalas.length ? `\nSuas últimas falas (não repita o começo nem o jeito delas): ${JSON.stringify(minhasFalas)}` : ""}` },

@@ -5,7 +5,9 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
-import { pedirEmpecilho, perguntar } from "@/lib/sessao/servidor";
+import { pedirEmpecilho, pedirFechamento, perguntar } from "@/lib/sessao/servidor";
+import { DESPEDIDAS, TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
+import { criarDespedida } from "@/lib/voz/despedida";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
 import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
@@ -63,6 +65,8 @@ const PECAS_DE_UMA_COLAGEM = 6;
 const COLAGEM_VALE_MS = 3 * 60_000;
 
 interface OpcoesDeFala {
+  /** A despedida é exclusiva e sua fala já foi registrada antes de pedir o relatório. */
+  despedida?: boolean;
   /** Quem pediu a fala; define quando ela ainda vale depois de esperar. Padrão: "sempre" (abertura, desafio, despedida). */
   origem?: OrigemDaFala;
   /** Número da pergunta ativa do Analista (origem "pergunta"). */
@@ -165,6 +169,8 @@ export function useEntrevista(
   useEffect(() => { definirSessaoDaVoz(sessao ? { sessao_id: sessao.sessao_id, contexto: "quadro" } : null); return () => definirSessaoDaVoz(null); }, [sessao]);
   const criacaoDaSessao = useRef<Promise<Sessao> | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
+  const [despedida, setDespedida] = useState<string | null>(null);
+  const encerrandoRef = useRef(false);
   const enviar = useCallback(
     (evento: EventoEntrevista) => despachar({ evento, agora: Date.now() }),
     [],
@@ -221,6 +227,7 @@ export function useEntrevista(
     lista.forEach((d) => registrarDescarte(d.item.carga.texto, d.item.origem, d.motivo));
   }, [registrarDescarte]);
   const dizer = useCallback(async (texto: string, marcas?: MarcaDeFala[], opcoes: OpcoesDeFala = {}) => {
+    if (encerrandoRef.current && !opcoes.despedida) return;
     const { origem = "sempre", numeroPergunta = null, aoTocar } = opcoes;
     foiParaAFila.current = false;
     if (vozHabilitadaRef.current) {
@@ -246,7 +253,7 @@ export function useEntrevista(
     setFalaAtual({ quem: "agente", texto, ate: 0 });
     setAgenteFalando(false);
     agenteFalandoRef.current = false;
-    linhaDoTempo.current?.registrar("fala", { quem: "agente", texto, ...(cortou ? { cortouFala: cortou } : {}) });
+    if (!opcoes.despedida) linhaDoTempo.current?.registrar("fala", { quem: "agente", texto, ...(cortou ? { cortouFala: cortou } : {}) });
     if (!vozHabilitadaRef.current) {
       setPreparandoVoz(false);
       preparandoVozRef.current = false;
@@ -262,7 +269,7 @@ export function useEntrevista(
     // Sintetize enquanto a escuta segue ativa; confira o turno só antes de reproduzir.
     const antesDeTocar = async () => {
       const esperandoDesde = Date.now();
-      while (estadoAtual.current.fase !== "APRESENTACAO" && estadoAtual.current.fase !== "ENCERRADA"
+      while (!opcoes.despedida && estadoAtual.current.fase !== "APRESENTACAO" && estadoAtual.current.fase !== "ENCERRADA"
         && deveAguardarParaFalar({ agora: Date.now(), esperandoDesde, ultimaFalaEm: ultimaFalaEm.current, falaParcial: falaParcial.current })) {
         await new Promise<void>((resolver) => setTimeout(resolver, 100));
         if (versao !== versaoDaFala.current) return false;
@@ -405,18 +412,39 @@ export function useEntrevista(
 
   useEffect(() => {
     if (estado.fase !== "AGUARDANDO") registrar("fase", { fase: estado.fase });
-    if (estado.fase !== "ENCERRADA" || !sessao) return;
-    // Primeiro o quadro final (grafo e foto), depois a linha do tempo inteira chega ao servidor; só então ele gera
-    // o scorecard com ela. A foto final tem um prazo: se a exportação travar, o relatório sai com o que já havia.
-    const linha = linhaDoTempo.current;
+  }, [estado.fase, registrar]);
+
+  const finalizacaoEnviada = useRef(false);
+  const finalizarNoServidor = useCallback(() => {
+    if (!sessao || finalizacaoEnviada.current) return;
+    finalizacaoEnviada.current = true;
+    void finalizarSessao(sessao.sessao_id).catch((erro) => console.warn("[fim] não foi possível gerar o relatório:", erro));
+  }, [sessao]);
+  const prepararFinalizacao = useCallback(async () => {
+    // Começa junto da despedida, sem esperar a voz. Preserva a captura final da #89/#102 antes do relatório.
     const final = capturaFinal.current;
-    void (final
-      ? Promise.race([final().catch(() => {}), new Promise<void>((resolver) => setTimeout(resolver, PRAZO_FOTO_FINAL_MS))])
-      : Promise.resolve())
-      .then(() => (linha ? linha.descarregar().catch(() => {}) : undefined))
-      .then(() => finalizarSessao(sessao.sessao_id))
-      .catch((erro) => console.warn("[fim] não foi possível gerar o relatório:", erro));
-  }, [estado.fase, registrar, sessao]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (final) await Promise.race([final().catch(() => {}), new Promise<void>((resolver) => { timer = setTimeout(resolver, PRAZO_FOTO_FINAL_MS); })]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    // O relatório é gerado com a linha do tempo que já chegou ao servidor: o envio final tem o mesmo prazo da foto,
+    // e não o prazo curto usado entre análises (um lote leva mais de um segundo com o banco longe).
+    await descarregarJa(PRAZO_FOTO_FINAL_MS);
+    finalizarNoServidor();
+  }, [descarregarJa, finalizarNoServidor]);
+  useEffect(() => {
+    // Sair no meio da foto/despedida não perde a finalização. O mesmo flag impede um segundo pedido depois.
+    const aoSair = () => { if (encerrandoRef.current) finalizarNoServidor(); };
+    window.addEventListener("pagehide", aoSair);
+    return () => {
+      // A sala desmonta ao abrir /obrigado. Se a preparação ainda não pediu o relatório (foto ou envio lentos), a
+      // proteção continua valendo para quem fechar a janela já na página final.
+      if (encerrandoRef.current && !finalizacaoEnviada.current) return;
+      window.removeEventListener("pagehide", aoSair);
+    };
+  }, [finalizarNoServidor]);
 
   // Gatilho da análise.
   useEffect(() => {
@@ -476,7 +504,7 @@ export function useEntrevista(
       await fotografar(elementos, r.texto, mudancas, new Date().toISOString());
     };
     const g = criarGatilho({
-      podeAnalisar: () => podeAnalisar(estadoAtual.current) && !falaParcial.current
+      podeAnalisar: () => !encerrandoRef.current && podeAnalisar(estadoAtual.current) && !falaParcial.current
         && !agenteFalandoRef.current && !preparandoVozRef.current && pedidosEmAndamento.current === 0,
       montarPedido: (forcar) => {
         falaAoAnalisar = ultimaFalaEm.current;
@@ -528,6 +556,7 @@ export function useEntrevista(
         return analisar(comImagem, sinal);
       },
       aoResultado: (bruta) => {
+        if (encerrandoRef.current) return;
         // IDs que não existem no quadro (o modelo inventou ou o candidato apagou) são ignorados.
         const resposta = { ...bruta, elementos: bruta.elementos.filter((c) => conversor.current.idReal(c)) };
         console.log("[análise] resposta", resposta);
@@ -535,6 +564,9 @@ export function useEntrevista(
         // A pessoa continuou a explicação: uma intervenção calculada antes disso ficou velha.
         if (ultimaFalaEm.current > falaAoAnalisar || revisaoDaConversa.current !== conversaAoAnalisar
           || pedidosEmAndamento.current > 0) return;
+        if (resposta.fechamento || estadoAtual.current.fechamento) {
+          enviar({ tipo: "FECHAMENTO_ATUALIZADO", etapa: resposta.fechamento ?? null });
+        }
         // A análise que sabia da colagem trouxe uma pergunta: a colagem já teve a vez dela.
         if (resposta.status !== "ok") colagem.current = null;
         enviar({ tipo: "ANALISE_RECEBIDA", resposta });
@@ -555,11 +587,12 @@ export function useEntrevista(
 
   // Tempo de cada fase.
   useEffect(() => {
+    if (estado.fechamento || estado.fase === "FECHAMENTO" || encerrandoRef.current) return;
     const segundos = sessao?.tempos[estado.fase];
     if (!segundos) return;
-    const t = setTimeout(() => enviar({ tipo: "TEMPO_DA_FASE_ACABOU" }), segundos * 1000);
+    const t = setTimeout(() => { if (!encerrandoRef.current) enviar({ tipo: "TEMPO_DA_FASE_ACABOU" }); }, segundos * 1000);
     return () => clearTimeout(t);
-  }, [estado.fase, sessao, enviar]);
+  }, [estado.fase, estado.fechamento, sessao, enviar]);
 
   // Apresentação: o agente fala e escreve o enunciado no quadro.
   useEffect(() => {
@@ -700,7 +733,7 @@ export function useEntrevista(
   const pedirMudanca = useCallback(async (forcar: boolean) => {
     if (!sessao || !quadro || empecilhoEmAndamento.current || empecilhoEncerrado.current) return;
     const fase = estadoAtual.current.fase;
-    if (fase === "AGUARDANDO" || fase === "ENCERRADA") return;
+    if (encerrandoRef.current || fase === "AGUARDANDO" || fase === "ENCERRADA" || estadoAtual.current.fechamento) return;
     empecilhoEmAndamento.current = true;
     ultimoPedidoEmpecilho.current = Date.now();
     if (forcar) setForcandoEmpecilho(true);
@@ -713,7 +746,7 @@ export function useEntrevista(
         return;
       }
       empecilhoEncerrado.current = true;
-      if (estadoAtual.current.fase === "ENCERRADA") return;
+      if (encerrandoRef.current || estadoAtual.current.fase === "ENCERRADA" || estadoAtual.current.fechamento) return;
       const { fala, requisito } = r.empecilho;
       empecilhoAnunciadoEm.current = Date.now();
       ultimaAtividade.current = Date.now();
@@ -754,15 +787,6 @@ export function useEntrevista(
     }, 1000);
     return () => clearInterval(id);
   }, [sessao, quadro, pedirMudanca]);
-
-  // Despedida: ao encerrar (botão ou fim do tempo) o agente se despede, uma vez.
-  const despedidaDita = useRef(false);
-  useEffect(() => {
-    if (estado.fase !== "ENCERRADA" || despedidaDita.current || !sessao?.despedida) return;
-    despedidaDita.current = true;
-    conversa.current.push({ quem: "agente", texto: sessao.despedida });
-    void dizer(sessao.despedida);
-  }, [estado.fase, sessao, dizer]);
 
   // Ao entrar no aprofundamento (por prontidão ou pelo tempo), analisa de novo na hora: é aqui que o plin é liberado.
   useEffect(() => {
@@ -816,6 +840,7 @@ export function useEntrevista(
   const salvar = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Chamar quando o desenho do candidato mudar. */
   const desenhoMudou = useCallback(() => {
+    if (encerrandoRef.current) return;
     ultimaAtividade.current = Date.now();
     ultimoDesenhoEm.current = Date.now();
     if (quadro) {
@@ -907,7 +932,7 @@ export function useEntrevista(
   /** A última fala do candidato e a resposta dela, enquanto a resposta não tocou (saem se forem substituídas). */
   const mensagensNaoOuvidas = useRef<string[]>([]);
   const versaoRespostaConversa = useRef(-1);
-  const encerrarRef = useRef<() => void>(() => {});
+  const encerrarRef = useRef<(texto?: string) => void>(() => {});
   /**
    * Fala do candidato por texto. Com uma pergunta (plin) ativa, conta como a resposta a ela;
    * senão vai para o /perguntar e a resposta do agente é mostrada e falada.
@@ -920,7 +945,7 @@ export function useEntrevista(
       const ciclo = cicloDaSala.current;
       const texto = limparTextoDigitado(bruto);
       const atual = estadoAtual.current;
-      if (!texto || !sessao || atual.fase === "AGUARDANDO" || atual.fase === "ENCERRADA") return { requisito: null };
+      if (!texto || !sessao || encerrandoRef.current || atual.fase === "AGUARDANDO" || atual.fase === "ENCERRADA") return { requisito: null };
       // Resposta ao pedido de licença: "pode" faz a pergunta; "espera" (ou "agora não") deixa para depois.
       // "Pode encerrar" não responde à licença: segue para o /perguntar, que fecha a entrevista.
       if (licencaPedidaEm.current !== null && pedeParaEncerrar(texto)) {
@@ -1013,10 +1038,13 @@ export function useEntrevista(
       if (ciclo !== cicloDaSala.current || estadoAtual.current.fase === "ENCERRADA") return { requisito: null };
       const novas = [registrarFalaDoCandidato()];
       mensagensNaoOuvidas.current = [novas[0].id];
+      if (r.fechamento || atual.fechamento) {
+        enviar({ tipo: "FECHAMENTO_ATUALIZADO", etapa: r.fechamento ?? null });
+      }
       // Ele pediu para encerrar a entrevista: o Totti se despede e fecha, como no botão.
       if (r.encerrar) {
         setMensagens((m) => [...m, ...novas]);
-        encerrarRef.current();
+        encerrarRef.current(r.texto);
         return { requisito: null };
       }
       // A devolutiva vem do loop rápido, sem flush + nova análise antes de responder.
@@ -1033,7 +1061,7 @@ export function useEntrevista(
       // uma pergunta concreta sobre o desenho dava lugar a um "quer detalhar algo?".
       if (r.responder && r.texto.trim().endsWith("?")) enviar({ tipo: "AGENTE_RESPONDEU" });
       // Ele disse que terminou e já há uma pergunta pronta sobre o desenho: ela é a resposta, no lugar do aviso.
-      const perguntaPronta = r.concluiu && !r.texto.trim().endsWith("?") && estadoAtual.current.plin === "PLIN_PENDENTE";
+      const perguntaPronta = !r.fechamento && r.concluiu && !r.texto.trim().endsWith("?") && estadoAtual.current.plin === "PLIN_PENDENTE";
       if (perguntaPronta) {
         enviar({ tipo: "CANDIDATO_CONCLUIU" });
         enviar({ tipo: "PLIN_CLICADO" });
@@ -1065,7 +1093,7 @@ export function useEntrevista(
       if (r.responder && r.requisito && !requisitosCombinados.current.includes(r.requisito)) {
         requisitosCombinados.current.push(r.requisito);
       }
-      if (r.concluiu) {
+      if (r.concluiu && !r.fechamento) {
         // "Pronto": no alto nível segue para o aprofundamento (que já reanalisa); nas outras fases só reanalisa.
         enviar({ tipo: "CANDIDATO_CONCLUIU" });
         if (atual.fase === "APROFUNDAMENTO" || atual.fase === "FECHAMENTO") {
@@ -1074,7 +1102,7 @@ export function useEntrevista(
       }
       // Resposta que não devolveu a vez: o Totti analisa o desenho logo depois, para seguir com a socrática.
       // Se ela já devolveu (pergunta ou convite), a bola está com o candidato: a análise espera a pausa dele.
-      if (r.responder && deveAnalisarLogoAposResposta(r.texto, r.concluiu)) {
+      if (!r.fechamento && r.responder && deveAnalisarLogoAposResposta(r.texto, r.concluiu)) {
         setTimeout(() => gatilho.current?.dispararAgora(), 0);
       }
       return { requisito: r.responder ? r.requisito : null };
@@ -1105,22 +1133,78 @@ export function useEntrevista(
     ultimaFalaEm.current = Date.now();
     ultimaAtividade.current = Date.now();
   }, []);
-  const encerrar = useCallback(() => {
-    cicloDaSala.current++;
-    silenciar();
-    enviar({ tipo: "ENCERRAR" });
-    // Entrevista encerrada: o desenho salvo localmente não é mais necessário (a prova fica no servidor).
-    try {
-      if (chaveDoDesenho) localStorage.removeItem(chaveDoDesenho);
-    } catch {}
-  }, [enviar, silenciar, chaveDoDesenho]);
+  const despedir = useRef<ReturnType<typeof criarDespedida> | null>(null);
+  const encerrar = useCallback((texto?: string) => {
+    if (!sessao) return;
+    despedir.current ??= criarDespedida({
+      bloquear: (fala) => {
+        encerrandoRef.current = true;
+        setDespedida(fala);
+        cicloDaSala.current++;
+        silenciar();
+        gatilho.current?.parar();
+        conversa.current.push({ quem: "agente", texto: fala });
+        registrar("fala", { quem: "agente", texto: fala });
+      },
+      finalizar: prepararFinalizacao,
+      falar: async (fala) => { await dizer(fala, undefined, { despedida: true }); },
+      pararVoz: silenciar,
+      concluir: () => {
+        enviar({ tipo: "ENCERRAR" });
+        try { if (chaveDoDesenho) localStorage.removeItem(chaveDoDesenho); } catch {}
+      },
+      aoErro: (erro) => console.warn("[despedida]", erro),
+    });
+    void despedir.current(texto?.trim() || DESPEDIDAS[0]);
+  }, [sessao, enviar, silenciar, chaveDoDesenho, registrar, prepararFinalizacao, dizer]);
   encerrarRef.current = encerrar;
+
+  useEffect(() => {
+    if (!estado.iniciadaEm || !estado.duracaoMin) return;
+    const restante = estado.iniciadaEm + estado.duracaoMin * 60_000 - Date.now();
+    const timer = setTimeout(() => encerrarRef.current(), Math.max(0, restante));
+    return () => clearTimeout(timer);
+  }, [estado.iniciadaEm, estado.duracaoMin]);
+
+  // O tempo restante é da entrevista inteira, não do relógio da fase (que pode ter começado cedo após "terminei").
+  const pedindoFechamento = useRef(false);
+  useEffect(() => {
+    if (!sessao || !iniciadaEm || !usarServidor()) return;
+    const duracaoMs = Object.values(sessao.tempos).reduce<number>((s, t) => s + (t ?? 0), 0) * 1000;
+    let ultimaTentativa = 0;
+    const timer = setInterval(() => {
+      const e = estadoAtual.current;
+      if (encerrandoRef.current || e.fase === "ENCERRADA" || e.fechamento || e.plin !== "LIVRE" || pedindoFechamento.current) return;
+      const agora = Date.now();
+      if (duracaoMs - (agora - iniciadaEm) > TEMPO_PARA_FECHAR_MS || agora - ultimaTentativa < 5000) return;
+      if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current, falaParcial: falaParcial.current,
+        agenteFalando: agenteFalandoRef.current, aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) return;
+      pedindoFechamento.current = true;
+      ultimaTentativa = agora;
+      const revisao = revisaoDaConversa.current;
+      const grafo = quadro ? conversor.current.converter(quadro.api.getSceneElements()).texto.slice(0, 24000) : undefined;
+      void pedirFechamento(sessao.sessao_id, { fase: e.fase, grafo, gatilho: "tempo" }).then((r) => {
+        if (encerrandoRef.current || estadoAtual.current.fase === "ENCERRADA" || revisao !== revisaoDaConversa.current) return;
+        if (r.fechamento) enviar({ tipo: "FECHAMENTO_ATUALIZADO", etapa: r.fechamento });
+        if (r.encerrar) { encerrarRef.current(r.texto); return; }
+        if (r.responder && r.texto) {
+          conversa.current.push({ quem: "agente", texto: r.texto });
+          setMensagens((m) => [...m, { id: `tempo-${++contadorDeMensagens.current}`, quem: "agente", texto: r.texto, horario: Date.now() }]);
+          void dizer(r.texto, undefined, { origem: "resposta" });
+        }
+      }).catch((erro) => console.warn("[fechamento] não foi possível iniciar:", erro))
+        .finally(() => { pedindoFechamento.current = false; });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [sessao, iniciadaEm, quadro, dizer, enviar]);
 
   return {
     sessao,
     estado,
     iniciadaEm,
     falaAtual,
+    despedindo: despedida !== null,
+    despedida,
     agenteFalando,
     aguardandoResposta: aguardandoResposta || preparandoVoz,
     registrarFalaParcial,

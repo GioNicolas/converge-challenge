@@ -23,6 +23,18 @@ const duvida: RespostaAnalise = {
 };
 const ok: RespostaAnalise = { ...duvida, status: "ok", pergunta: null, nota: null, elementos: [] };
 
+test("fechamento comum limpa a pergunta da análise, bloqueia novas e restaura a fase ao suspender", () => {
+  const inicial = noAprofundamento();
+  const fechando = transicionar({ ...inicial, plin: "PLIN_PENDENTE", perguntaPendente: duvida }, { tipo: "FECHAMENTO_ATUALIZADO", etapa: "perguntas_finais" }, 1000);
+  assert.equal(fechando.fase, "FECHAMENTO");
+  assert.equal(fechando.plin, "LIVRE");
+  assert.equal(transicionar(fechando, { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 2000).plin, "LIVRE");
+  const voltou = transicionar(fechando, { tipo: "FECHAMENTO_ATUALIZADO", etapa: null }, 3000);
+  assert.equal(voltou.fase, inicial.fase);
+  assert.equal(voltou.faseIniciadaEm, inicial.faseIniciadaEm);
+  assert.equal(voltou.fechamento, null);
+});
+
 test("nova fala: a intervenção pendente espera a próxima brecha, cai só se ficou velha; a ativa continua", () => {
   const pendente = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: duvida }, 0);
   assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU" }, 1).plin, "PLIN_PENDENTE");

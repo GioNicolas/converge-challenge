@@ -1,12 +1,34 @@
-import { circuloAMao, type Traco } from "./formas";
+import { contornoAMao, setaAMao, type Traco } from "./formas";
 import type { AcaoVisual } from "./acoesVisuais";
 import type { Caixa, Ponto } from "./tipos";
 import { quebrarLinhas } from "../excalidraw/texto";
 
-export type Gesto = { tipo: "traco"; traco: Traco } | { tipo: "apontar"; ponto: Ponto }
+/**
+ * `destaque`: marca temporária (contorno, apontar, realce), que some sozinha; o resto (nota, letras do comparar,
+ * traço livre) fica.
+ */
+export type Gesto = { tipo: "traco"; traco: Traco; destaque?: boolean } | { tipo: "apontar"; ponto: Ponto }
   | { tipo: "texto"; texto: string; ponto: Ponto };
+/** Forma da peça no quadro (o tipo do elemento do Excalidraw): o gesto de marcar depende dela. */
+export type FormaDoAlvo = "retangulo" | "elipse" | "losango" | "seta" | "linha" | "texto" | "outra";
 /** Caixa de um elemento; setas e linhas podem trazer a polilinha (pontos relativos a x,y) em `pontos`. */
-export type CaixaComPontos = Caixa & { pontos?: readonly (readonly [number, number])[] };
+export type CaixaComPontos = Caixa & { pontos?: readonly (readonly [number, number])[]; forma?: FormaDoAlvo };
+
+/** Tipo do elemento do Excalidraw → forma do alvo. */
+export function formaDoElemento(tipo: string): FormaDoAlvo {
+  switch (tipo) {
+    case "rectangle": return "retangulo";
+    case "ellipse": return "elipse";
+    case "diamond": return "losango";
+    case "arrow": return "seta";
+    case "line": return "linha";
+    case "text": return "texto";
+    default: return "outra";
+  }
+}
+
+/** Distância mínima entre a tinta do Totti e a borda da peça: nunca risca por cima do texto dela. */
+export const FOLGA_DA_MARCA = 10;
 
 /** Ponto médio ao longo da polilinha (pelo comprimento). */
 function pontoMedioDaPolilinha(c: CaixaComPontos): Ponto | null {
@@ -32,8 +54,103 @@ function focoDe(c: CaixaComPontos): Caixa {
   const m = pontoMedioDaPolilinha(c);
   return m ? { x: m.x - 40, y: m.y - 26, largura: 80, altura: 52 } : c;
 }
-const traco = (c: Caixa, pontos: [number, number][]): Gesto => ({ tipo: "traco", traco: { origem: { x: c.x, y: c.y }, pontos } });
-const sublinhar = (c: Caixa): Gesto => traco(c, [[0, c.altura + 8], [c.largura * 0.45, c.altura + 10], [c.largura, c.altura + 7]]);
+const traco = (c: Caixa, pontos: [number, number][], destaque = false): Gesto =>
+  ({ tipo: "traco", traco: { origem: { x: c.x, y: c.y }, pontos }, ...(destaque ? { destaque } : {}) });
+/** Sublinhado colado na linha de base: só para texto solto. */
+const sublinharTexto = (c: Caixa): Gesto => traco(c, [[-2, c.altura + 4], [c.largura * 0.45, c.altura + 6], [c.largura + 2, c.altura + 3]], true);
+
+/**
+ * Retângulo (e o que não tem forma própria): contorno parcial, um "L" à mão no canto de baixo à direita, por fora
+ * da peça. Marca sem fechar a caixa nem passar por baixo dela.
+ */
+function cantoAMao(c: Caixa, semente: number): Gesto {
+  const f = FOLGA_DA_MARCA;
+  const tremor = ((semente % 7) - 3) * 0.6;
+  return traco(c, [
+    [c.largura * 0.55, c.altura + f + 1],
+    [c.largura * 0.8, c.altura + f + 2 + tremor * 0.3],
+    [c.largura + f, c.altura + f],
+    [c.largura + f + 2 + tremor * 0.3, c.altura * 0.8],
+    [c.largura + f + 1, c.altura * 0.45],
+  ], true);
+}
+
+/** Seta ou linha: um arco curto ao lado do trecho do meio, sem encostar no traço. */
+function realceDaSeta(c: CaixaComPontos): Gesto {
+  const pts = c.pontos;
+  const m = pontoMedioDaPolilinha(c) ?? meio(c);
+  let dx = 1;
+  let dy = 0;
+  if (pts && pts.length >= 2) {
+    const [a, b] = [pts[0], pts[pts.length - 1]];
+    const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    dx = (b[0] - a[0]) / d;
+    dy = (b[1] - a[1]) / d;
+  }
+  const n = { x: -dy, y: dx };
+  const afastar = FOLGA_DA_MARCA + 6;
+  const pontos: [number, number][] = [-1, -0.5, 0, 0.5, 1].map((t) => {
+    const curva = (1 - t * t) * 5;
+    return [dx * t * 28 + n.x * (afastar + curva), dy * t * 28 + n.y * (afastar + curva)];
+  });
+  return { tipo: "traco", traco: { origem: { x: m.x, y: m.y }, pontos }, destaque: true };
+}
+
+/** Seta ou linha (também quando só a polilinha veio, sem a forma). */
+const ehLinear = (c: CaixaComPontos) => c.forma === "seta" || c.forma === "linha" || (!c.forma && !!c.pontos);
+
+/** Marcar uma peça: a geometria sai da forma dela, não de sorteio. */
+function marcar(c: CaixaComPontos, semente: number): Gesto {
+  if (ehLinear(c)) return realceDaSeta(c);
+  switch (c.forma) {
+    case "elipse":
+    case "losango":
+      return { tipo: "traco", traco: contornoAMao(c, semente, FOLGA_DA_MARCA), destaque: true };
+    case "seta":
+    case "linha":
+      return realceDaSeta(c);
+    case "texto":
+      return sublinharTexto(c);
+    default:
+      return cantoAMao(c, semente);
+  }
+}
+
+/** Ponto na borda da peça na direção `dir` (unitária) a partir do centro, já afastado pela folga. */
+function bordaComFolga(c: CaixaComPontos, dir: Ponto, folga: number): Ponto {
+  const centro = { x: c.x + c.largura / 2, y: c.y + c.altura / 2 };
+  const [a, b] = [c.largura / 2, c.altura / 2];
+  let r: number;
+  if (c.forma === "elipse") r = 1 / Math.sqrt((dir.x / a) ** 2 + (dir.y / b) ** 2);
+  else if (c.forma === "losango") r = 1 / (Math.abs(dir.x) / a + Math.abs(dir.y) / b);
+  else r = Math.min(dir.x ? a / Math.abs(dir.x) : Infinity, dir.y ? b / Math.abs(dir.y) : Infinity);
+  return { x: centro.x + dir.x * (r + folga), y: centro.y + dir.y * (r + folga) };
+}
+
+/**
+ * Apontar que se vê: uma setinha curta à mão vindo de fora (de cima, à esquerda) e parando a alguns pixels da borda,
+ * sem cobrir o texto. Numa seta ou linha, aponta o trecho do meio.
+ */
+function apontar(c: CaixaComPontos, semente: number): Gesto[] {
+  const dir = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+  // A ponta para um pouco mais longe que as outras marcas: a seta chega na diagonal.
+  const folga = FOLGA_DA_MARCA + 4;
+  const para = ehLinear(c)
+    ? (() => { const m = pontoMedioDaPolilinha(c) ?? meio(c); return { x: m.x - dir.x * folga, y: m.y - dir.y * folga }; })()
+    : bordaComFolga(c, { x: -dir.x, y: -dir.y }, folga);
+  const de = { x: para.x - dir.x * 56, y: para.y - dir.y * 56 };
+  // A ponta é um "V" curto à mão, desenhado depois da haste (a seta do Excalidraw não aparecia com a haste curva).
+  const asa = (giro: number): [number, number] => {
+    const cos = Math.cos(Math.PI + giro);
+    const sen = Math.sin(Math.PI + giro);
+    return [(dir.x * cos - dir.y * sen) * 10, (dir.x * sen + dir.y * cos) * 10];
+  };
+  const [a1, a2] = [asa(0.5), asa(-0.5)];
+  return [
+    { tipo: "traco", traco: setaAMao(de, para, semente), destaque: true },
+    { tipo: "traco", traco: { origem: { x: para.x + a1[0], y: para.y + a1[1] }, pontos: [[0, 0], [-a1[0], -a1[1]], [a2[0] - a1[0], a2[1] - a1[1]]] }, destaque: true },
+  ];
+}
 function intersecao(a: Caixa, b: Caixa): number {
   return Math.max(0, Math.min(a.x + a.largura, b.x + b.largura) - Math.max(a.x, b.x))
     * Math.max(0, Math.min(a.y + a.altura, b.y + b.altura) - Math.max(a.y, b.y));
@@ -76,20 +193,22 @@ export function comporGestos(acao: AcaoVisual, caixas: ReadonlyMap<string, Caixa
     if (alvos.some((c) => !c)) return [];
     return alvos.flatMap((c, i): Gesto[] => acao.tipo === "percorrer"
       ? [{ tipo: "apontar", ponto: meio(c!) }]
-      : [sublinhar(focoDe(c!)), { tipo: "texto", texto: String.fromCharCode(65 + i), ponto: { x: c!.x - 22, y: c!.y } }]);
+      : [marcar(c!, semente + i), { tipo: "texto", texto: String.fromCharCode(65 + i), ponto: { x: c!.x - 22, y: c!.y } }]);
   }
   const original = caixas.get(acao.alvo);
   if (!original) return [];
-  const c = focoDe(original);
   switch (acao.tipo) {
-    case "apontar": return [{ tipo: "apontar", ponto: meio(original) }];
-    case "sublinhar": return [sublinhar(c)];
-    case "circular": return [{ tipo: "traco", traco: circuloAMao(c, semente) }];
-    case "enquadrar": return [traco(c, [[-10, -10], [c.largura + 10, -8], [c.largura + 8, c.altura + 10], [-10, c.altura + 8], [-10, -10]])];
-    case "colchetes": return [
-      traco(c, [[4, -10], [-12, -10], [-12, c.altura + 10], [4, c.altura + 10]]),
-      traco(c, [[c.largura - 4, -10], [c.largura + 12, -10], [c.largura + 12, c.altura + 10], [c.largura - 4, c.altura + 10]]),
-    ];
-    case "traco": return [traco(c, acao.pontos.map(([x, y]) => [-10 + x * (c.largura + 20), -10 + y * (c.altura + 20)]))];
+    case "apontar": return apontar(original, semente);
+    // A intenção é marcar; a forma do alvo decide o desenho (os tipos antigos chegam aqui pelo mesmo caminho).
+    case "marcar":
+    case "sublinhar":
+    case "circular":
+    case "enquadrar":
+    case "colchetes":
+      return [marcar(original, semente)];
+    case "traco": {
+      const c = focoDe(original);
+      return [traco(c, acao.pontos.map(([x, y]) => [-10 + x * (c.largura + 20), -10 + y * (c.altura + 20)]))];
+    }
   }
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { criarVoz, dividirFala, MENSAGEM_VOZ_INDISPONIVEL } from "./cliente";
-import { comFolga } from "./folga";
+import { comFolga, esquecerSaidaDeSom, QUADROS_ANTES, QUADROS_ANTES_DEPOIS_DE_PARADA } from "./folga";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
 
@@ -12,6 +12,7 @@ const dadosVoz = {
 const eventos = () => ({ aoIniciar: () => {}, aoProgresso: () => {} });
 
 test("usa o áudio da Sofia e propaga o progresso do player", async () => {
+  esquecerSaidaDeSom();
   const progresso: number[] = [];
   let provedor = "";
   let iniciou = false;
@@ -23,7 +24,8 @@ test("usa o áudio da Sofia e propaga o progresso do player", async () => {
     },
     tocar: async (_audio, alinhamento, opcoes) => {
       assert.equal(iniciou, false);
-      assert.deepEqual(alinhamento, comFolga(new Uint8Array(), dadosVoz.alinhamento).alinhamento);
+      // Primeira fala (a saída nunca tocou): folga maior antes da voz.
+      assert.deepEqual(alinhamento, comFolga(new Uint8Array(), dadosVoz.alinhamento, QUADROS_ANTES_DEPOIS_DE_PARADA).alinhamento);
       opcoes.aoProgresso?.(0);
       assert.equal(iniciou, true);
       opcoes.aoProgresso?.(2);
@@ -304,4 +306,25 @@ test("avisa cancelamento pelo portão e ignora fala curta guardada no cache", as
   await new Promise((resolve) => setTimeout(resolve, 0));
   await falar("Uhum.", new AbortController().signal, eventos(), async () => false);
   assert.equal(envios.length, 1);
+});
+
+test("fala logo depois de outra usa a folga normal; depois de uma parada longa, a maior", async (t) => {
+  esquecerSaidaDeSom();
+  let agora = 0;
+  t.mock.method(performance, "now", () => agora);
+  const inicios: number[] = [];
+  const falar = criarVoz({
+    fetch: async () => Response.json(dadosVoz),
+    tocar: async (_audio, alinhamento, opcoes) => {
+      inicios.push(alinhamento.character_start_times_seconds[0]);
+      opcoes.aoProgresso?.(2);
+    },
+  });
+  const comQuadros = (q: number) => comFolga(new Uint8Array(), dadosVoz.alinhamento, q).alinhamento.character_start_times_seconds[0];
+  await falar("oi", new AbortController().signal, eventos());
+  agora += 2_000;
+  await falar("oi", new AbortController().signal, eventos());
+  agora += 60_000;
+  await falar("oi", new AbortController().signal, eventos());
+  assert.deepEqual(inicios, [comQuadros(QUADROS_ANTES_DEPOIS_DE_PARADA), comQuadros(QUADROS_ANTES), comQuadros(QUADROS_ANTES_DEPOIS_DE_PARADA)]);
 });

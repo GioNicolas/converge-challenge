@@ -14,7 +14,11 @@ import { CATALOGO, criteriosIniciais, modoAtivo, problemaPadrao } from "./catalo
 import { LINGUAGENS_IDE } from "./linguagens";
 
 /** Uma fala da conversa de pré-entrevista. */
-export type Turno = { role: "recrutadora" | "agente"; text: string };
+/**
+ * Uma fala da conversa. `naoEntendida`: fala dela que o Totti não entendeu (transcrição quebrada, sem relação com a
+ * pergunta); fica na tela e no contexto do modelo, mas não vai para a extração nem para a cobertura (issue #76).
+ */
+export type Turno = { role: "recrutadora" | "agente"; text: string; naoEntendida?: true };
 
 /**
  * O que a recrutadora decidiu quando o formato não mede uma área: troca de formato, deixa para a próxima etapa

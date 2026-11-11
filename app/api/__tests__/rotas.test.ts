@@ -217,7 +217,7 @@ describe("POST /api/sessoes/[id]/analisar", () => {
     assert.equal(r.status, 200);
     const c = await r.json();
     assert.deepEqual(Object.keys(c).sort(), ["degrau", "elementos", "nota", "observacoes", "pergunta", "status", "visual"]);
-    assert.deepEqual(c.visual, [{ tipo: "circular", alvo: "e1" }]);
+    assert.deepEqual(c.visual, [{ tipo: "marcar", alvo: "e1" }]);
     assert.equal(c.status, "duvida");
     assert.deepEqual(c.elementos, ["e1"]);
     assert.ok(c.pergunta && c.nota.length <= 40);

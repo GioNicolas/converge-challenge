@@ -5,8 +5,11 @@ export class ErroTokenTranscricao extends Error {
   }
 }
 
+/** Token de uso único e o vocabulário da sessão (keyterms), montado no servidor a partir do kit ou do problema. */
+export type CredencialTranscricao = { token: string; termos: string[] };
+
 /** Pede ao servidor um token temporário do Scribe (a chave do ElevenLabs nunca chega ao navegador). */
-export async function tokenTranscricao(sessaoId: string, contexto: "coding" | "quadro" = "coding"): Promise<string> {
+export async function tokenTranscricao(sessaoId: string, contexto: "coding" | "quadro" = "coding"): Promise<CredencialTranscricao> {
   const parametros = new URLSearchParams({ sessao_id: sessaoId });
   if (contexto !== "coding") parametros.set("contexto", contexto);
   const rota = `/api/stt-token?${parametros}`;
@@ -16,7 +19,7 @@ export async function tokenTranscricao(sessaoId: string, contexto: "coding" | "q
     throw new ErroTokenTranscricao(`Erro HTTP ${resposta.status} em ${rota}`, permanente);
   }
   const dados: unknown = await resposta.json();
-  const token = dados && typeof dados === "object" ? (dados as { token?: unknown }).token : undefined;
+  const { token, termos } = (dados && typeof dados === "object" ? dados : {}) as { token?: unknown; termos?: unknown };
   if (typeof token !== "string" || !token) throw new Error(`Resposta inesperada de ${rota}.`);
-  return token;
+  return { token, termos: Array.isArray(termos) ? termos.filter((t): t is string => typeof t === "string") : [] };
 }
