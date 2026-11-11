@@ -36,7 +36,7 @@ const COMMIT_DE_SEGURANCA_MS = 1_000;
 
 export type EstadoEscuta = { motor: "elevenlabs" | "navegador" | "nenhum"; escutando: boolean; erro: string | null };
 /** Uso do Scribe por sessão de escuta: o que é cobrado (áudio enviado) contra o tempo de sessão. */
-export type UsoTranscricao = { audioEnviadoS: number; sessaoS: number };
+export type UsoTranscricao = { audioEnviadoS: number; sessaoS: number; conexoes: number; reconexoes: number };
 
 // Tipos locais: a Web Speech API ainda não integra todas as versões de lib.dom.
 type ResultadoNativo = { isFinal: boolean; 0: { transcript: string } };
@@ -77,6 +77,7 @@ export function criarEscutaTranscricao(opcoes: {
   let tentativas = 0;
   let conectadoEm = 0;
   let conectando = false;
+  let conexoes = 0;
   let pronto = false;
   let segmento = 0;
   /** Quanto de voz (ms) o microfone captou desde o último trecho fechado. */
@@ -287,6 +288,7 @@ export function criarEscutaTranscricao(opcoes: {
       }
       if (encerrado || atual !== geracao) return;
       const ws = new WebSocket(urlDoScribe(token));
+      conexoes++;
       socket = ws;
       ws.onmessage = (evento) => {
         if (encerrado || atual !== geracao) return;
@@ -471,6 +473,8 @@ export function criarEscutaTranscricao(opcoes: {
     uso: () => ({
       audioEnviadoS: amostrasEnviadas / 16000,
       sessaoS: inicio === null ? 0 : Math.max(0, ((fimDaSessao ?? performance.now()) - inicio) / 1000),
+      conexoes,
+      reconexoes: Math.max(0, conexoes - 1),
     }),
   };
 }
@@ -508,16 +512,29 @@ export function useTranscricao(opcoes: {
       },
     });
     escuta.current = controle;
+    const escutaId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const enviarUso = (final: boolean) => {
+      const uso = controle.uso();
+      if (!sessaoId || uso.sessaoS < 1) return;
+      const payload = JSON.stringify({ sessao_id: sessaoId, contexto, tipo: "transcricao_uso", dados: {
+        contexto, escuta_id: escutaId, audioEnviadoS: uso.audioEnviadoS, sessaoS: uso.sessaoS,
+        conexoes: uso.conexoes, reconexoes: uso.reconexoes, final,
+      } });
+      if (final && typeof navigator !== "undefined" && navigator.sendBeacon) {
+        if (navigator.sendBeacon("/api/uso", new Blob([payload], { type: "application/json" }))) return;
+      }
+      void fetch("/api/uso", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: final }).catch(() => {});
+    };
+    const intervaloUso = setInterval(() => enviarUso(false), 60_000);
     return () => {
+      clearInterval(intervaloUso);
       escuta.current = null;
       controle.parar();
       const uso = controle.uso();
       // Economia do portão de voz nos dados reais: áudio cobrado pelo Scribe contra o tempo de sessão.
       // >= 1 s: a montagem dupla do StrictMode (e trocas imediatas) não vira registro de uso.
       if (uso.sessaoS >= 1) {
-        console.info("[transcrição] uso da sessão", {
-          sessaoId, contexto, audioEnviadoS: Math.round(uso.audioEnviadoS), sessaoS: Math.round(uso.sessaoS),
-        });
+        enviarUso(true);
       }
     };
   }, [stream, sessaoId, servidor, contexto]);

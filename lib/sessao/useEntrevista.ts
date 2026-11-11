@@ -14,6 +14,7 @@ import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
 import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno, respostaTerminouPorSilencio } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
 import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
+import { definirSessaoDaVoz } from "@/lib/voz/cliente";
 import {
   analisar,
   calar,
@@ -159,6 +160,7 @@ export function useEntrevista(
 ) {
   const { configId, convite } = opcoes;
   const [sessao, setSessao] = useState<Sessao | null>(null);
+  useEffect(() => { definirSessaoDaVoz(sessao ? { sessao_id: sessao.sessao_id, contexto: "quadro" } : null); return () => definirSessaoDaVoz(null); }, [sessao]);
   const criacaoDaSessao = useRef<Promise<Sessao> | null>(null);
   const [estado, despachar] = useReducer(redutor, undefined, estadoInicial);
   const enviar = useCallback(

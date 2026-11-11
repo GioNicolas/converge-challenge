@@ -1,6 +1,11 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { RespostaVoz } from "@/lib/voz/contrato";
 import { criarLimitador, ipDe, lerTexto } from "@/lib/agente/rotas/http";
+import { contexto as contextoAgente } from "@/lib/agente/rotas/contexto";
+import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
+import { appendEvent, sessionNow } from "@/lib/session/store";
+import { getSessao as obterPreSessao } from "@/lib/pre-entrevista/sessoes";
+import { registrarEvento } from "@/lib/pre-entrevista/log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,11 +33,21 @@ export async function POST(req: Request) {
   const chave = process.env.ELEVENLABS_API_KEY;
   if (!chave) return erro(501, "voz ainda não configurada");
   let texto = "";
+  let metadados: { sessao_id: string; contexto: "quadro" | "coding" | "pre"; fala_id?: string } | undefined;
   try {
     const lido = await lerTexto(req, 16 * 1024);
     if (!lido.ok) return lido.resposta;
     const corpo: unknown = JSON.parse(lido.dados);
-    if (corpo && typeof corpo === "object" && typeof (corpo as { texto?: unknown }).texto === "string") texto = (corpo as { texto: string }).texto.trim();
+    if (corpo && typeof corpo === "object" && typeof (corpo as { texto?: unknown }).texto === "string") {
+      const objeto = corpo as { texto: string; sessao_id?: unknown; contexto?: unknown; fala_id?: unknown };
+      texto = objeto.texto.trim();
+      if (objeto.sessao_id !== undefined || objeto.contexto !== undefined || objeto.fala_id !== undefined) {
+        if (typeof objeto.sessao_id !== "string" || !objeto.sessao_id.trim() || objeto.sessao_id.length > 80
+          || !["quadro", "coding", "pre"].includes(String(objeto.contexto))
+          || (objeto.fala_id !== undefined && (typeof objeto.fala_id !== "string" || objeto.fala_id.length > 100))) return erro(400, "metadados de sessão inválidos.");
+        metadados = { sessao_id: objeto.sessao_id.trim(), contexto: objeto.contexto as "quadro" | "coding" | "pre", ...(typeof objeto.fala_id === "string" ? { fala_id: objeto.fala_id } : {}) };
+      }
+    }
   } catch {
     return erro(400, "JSON inválido.");
   }
@@ -52,8 +67,25 @@ export async function POST(req: Request) {
     const dados = (await resposta.json()) as { audio_base64?: unknown; alignment?: Record<string, unknown> | null };
     const vozGerada = RespostaVoz.safeParse({ audio_base64: dados.audio_base64, alinhamento: dados.alignment });
     if (!vozGerada.success) return erro(502, "Resposta inesperada do ElevenLabs.");
+    if (metadados) after(() => registrarUsoVoz(metadados, texto).catch((e) => console.warn("[voz] não registrou uso da sessão:", e instanceof Error ? e.message : "erro")));
     return NextResponse.json(vozGerada.data, { headers });
   } catch {
     return erro(502, "ElevenLabs indisponível.");
+  }
+}
+
+export async function registrarUsoVoz(metadados: { sessao_id: string; contexto: "quadro" | "coding" | "pre"; fala_id?: string }, texto: string): Promise<void> {
+  const dadosUso = { contexto: metadados.contexto, caracteres: texto.length, ...(metadados.fala_id ? { fala_id: metadados.fala_id } : {}) };
+  if (metadados.contexto === "quadro") {
+    await contextoAgente().repositorio.anexarEventos(metadados.sessao_id, [{ horario: new Date().toISOString(), tipo: "voz_uso", dados: dadosUso }]);
+  } else if (metadados.contexto === "coding") {
+    const sessao = await sessaoViva(metadados.sessao_id);
+    if (sessao) {
+      appendEvent(sessao, { sessionId: sessao.sessionId, t: sessionNow(sessao), type: "voz_uso", contexto: metadados.contexto, caracteres: texto.length, ...(metadados.fala_id ? { fala_id: metadados.fala_id } : {}) });
+      await guardarSessao(sessao);
+    }
+  } else {
+    const sessao = obterPreSessao(metadados.sessao_id);
+    if (sessao) registrarEvento(sessao, { tipo: "aviso", resumo: "voz_uso", dados: { tipo: "voz_uso", ...dadosUso } });
   }
 }

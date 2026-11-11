@@ -107,7 +107,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const problemaRodado = mudanca ? { ...problem, visibleTests: [...problem.visibleTests, ...mudanca.tests.map(({ name, args, expected }) => ({ name, args, expected }))] } : problem;
   // O microfone mexe a onda da pílula e alimenta a transcrição da fala (useTranscricao, abaixo).
   const midia = useMidiaLocal();
-  const voz = useVozAgente({ bloqueada: session.ended });
+  const voz = useVozAgente({ bloqueada: session.ended, sessao: session.sessionId ? { sessao_id: session.sessionId, contexto: "coding" } : null });
   const [parcial, setParcial] = useState("");
   const vozEstadoRef = useRef(voz.estado);
   vozEstadoRef.current = voz.estado;

@@ -40,6 +40,7 @@ function separar(mensagem: string) {
 }
 
 type Props = {
+  sessaoId?: string;
   transcricao: Turno[];
   pensando: boolean;
   bloqueada?: boolean;
@@ -48,7 +49,7 @@ type Props = {
   onEnviar: (mensagem: string) => void;
 };
 
-export default function ConversaTotti({ transcricao, pensando, bloqueada = false, pausarEntrada = false, erro, onEnviar }: Props) {
+export default function ConversaTotti({ sessaoId, transcricao, pensando, bloqueada = false, pausarEntrada = false, erro, onEnviar }: Props) {
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<Documento[]>([]);
   const [erroAnexo, setErroAnexo] = useState<string | null>(null);
@@ -72,6 +73,7 @@ export default function ConversaTotti({ transcricao, pensando, bloqueada = false
   const voz = useVozAgente({
     ultimaFala: ultima?.role === "agente" ? { id: String(transcricao.length - 1), texto: ultima.text } : null,
     bloqueada: pensando || bloqueada,
+    sessao: sessaoId ? { sessao_id: sessaoId, contexto: "pre" } : null,
   });
 
   const [digitando, setDigitando] = useState(false);
