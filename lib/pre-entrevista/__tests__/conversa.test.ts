@@ -444,6 +444,21 @@ describe("confirmacaoDeterministica (issue #76)", () => {
     assert.equal(confirmacaoDeterministica(sessao), undefined);
   });
 
+  it("ela pediu um formato que não foi aplicado e o nível mudou: não confirma só o nível", () => {
+    const sessao = depoisDoResumo();
+    sessao.transcricao.push(ela("quero system design, sênior"));
+    sessao.rascunho = { ...sessao.rascunho, seniority: "senior" };
+    assert.equal(confirmacaoDeterministica(sessao), undefined);
+  });
+
+  it("formato e foco mudaram: a troca e depois como fica o foco", () => {
+    const sessao = depoisDoResumo();
+    sessao.rascunho = { ...sessao.rascunho, mode: "system_design", focus: [{ area: "tecnico", weight: 0.6 }, { area: "pressao", weight: 0.4 }] };
+    const fala = confirmacaoDeterministica(sessao) ?? "";
+    assert.match(fala, /^Troquei para system design, no quadro\. O foco fica em .+\. Com isso a entrevista/);
+    assert.ok(fala.endsWith("Posso finalizar?"));
+  });
+
   it("resumo guardado antes dos campos novos: só tom, dicas, duração e linguagens contam", () => {
     const sessao = depoisDoResumo();
     sessao.resumo = { preferencias: { ...sessao.preferencias }, duracaoMin: 30 };

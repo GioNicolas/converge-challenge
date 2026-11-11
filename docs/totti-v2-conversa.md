@@ -296,7 +296,7 @@ dois campos são opcionais.
 |---|---|---|
 | `repetir` | ela pediu para repetir e a fala traz a mesma pergunta (ou o mesmo resumo) que estava em aberto | desfaz o que foi lido da fala dela; o passo em curso continua em curso; depois do resumo, sai o último resumo como foi falado |
 | `esclarecer` | ela não entendeu a pergunta e a fala a reformula ou explica o que se quer saber, em palavras de RH | o mesmo de `repetir` |
-| `nao_entendi` | a fala dela não faz sentido como resposta (transcrição quebrada, truncada ou sem relação com a pergunta) e o Totti diz que não entendeu e refaz a pergunta em aberto, mais curta | o mesmo de `repetir`; a fala dela fica marcada (`naoEntendida`) e sai da extração e da cobertura dos turnos seguintes; sem "?", a pergunta em aberto volta no fim; na terceira vez seguida, a fala vira a oferta de digitar (`falaParaDigitar`) |
+| `nao_entendi` | a fala dela não faz sentido como resposta (transcrição quebrada, truncada ou sem relação com a pergunta) e o Totti diz que não entendeu e refaz a pergunta em aberto, mais curta | o mesmo de `repetir`; a fala dela fica marcada (`naoEntendida`) e sai da extração e da cobertura dos turnos seguintes; sem "?", a pergunta em aberto volta no fim; na terceira vez seguida (e de novo a cada três), a fala vira a oferta de digitar (`falaParaDigitar`); com um turno em curso, a extração não lê a última fala dela, ainda sem resposta |
 | `responder` | a fala responde a algo que ELA perguntou ou comentou (dúvida, "tá me ouvindo?", pedido de tempo) | mantém o que foi lido da fala dela; o passo escolhido não conta como feito |
 | `seguir` | todo o resto: executar o passo do planejador | o de sempre: o passo conta como feito |
 

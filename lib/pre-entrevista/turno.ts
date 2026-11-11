@@ -30,6 +30,7 @@ import {
   falaDeReserva,
   fraseNivelPorEstimativa,
   pedeONivel,
+  ultimaFalaDaRecrutadora,
   perguntaEmAberto,
   responder,
   respostaFixa,
@@ -96,11 +97,6 @@ export function semDispensaContrariada(sinais: Record<string, number>, enfase: E
   const contrariadas = AREAS.filter((a) => enfase[a].declarado === "central" || (enfase[a].declarado !== "dispensou" && enfase[a].maximo >= 2));
   if (!contrariadas.some((a) => (sinais[`dispensa_${a}`] ?? 0) > 0)) return sinais;
   return { ...sinais, ...Object.fromEntries(contrariadas.map((a) => [`dispensa_${a}`, 0])) };
-}
-
-/** Última fala dela na transcrição, se houver. */
-function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
-  return transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
 }
 
 /**
@@ -611,17 +607,15 @@ export async function conduzirTurno(
     const anteriores = naoEntendidasSeguidas(sessao.transcricao.slice(0, -1));
     const dela = sessao.transcricao.at(-1);
     if (dela?.role === "recrutadora") dela.naoEntendida = true;
-    if (anteriores >= MAX_NAO_ENTENDI) {
+    // A cada `MAX_NAO_ENTENDI + 1` falas seguidas (3ª, 6ª...): a oferta não vira a única fala de um laço.
+    if ((anteriores + 1) % (MAX_NAO_ENTENDI + 1) === 0) {
       const oferta = falaParaDigitar(perguntaEmAberto(sessao.transcricao));
-      resposta = {
-        ...resposta,
-        texto: oferta,
-        travas: [...resposta.travas, { trava: "oferecer_digitar", antes: resposta.texto, depois: oferta }],
-      };
+      const trava = { trava: "oferecer_digitar", antes: resposta.texto, depois: oferta };
+      resposta = { ...resposta, texto: oferta, travas: [...resposta.travas, trava] };
       registrarEvento(sessao, {
         tipo: "trava",
         resumo: `oferecer_digitar | ${anteriores + 1}ª fala seguida não entendida`,
-        dados: { trava: "oferecer_digitar", antes: resposta.travas.at(-1)?.antes, depois: oferta, movimento },
+        dados: { ...trava, movimento },
       });
     }
   }
