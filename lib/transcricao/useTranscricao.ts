@@ -5,15 +5,27 @@ import { iniciarNavegador, reconhecimentoDisponivel } from "./navegador";
 import { erroMicrofone, type EstadoTranscricao, type EventosTranscricao, type SessaoTranscricao } from "./tipos";
 import { focoAudio } from "../audio/foco";
 import { criarMedidorUsoTranscricao } from "./uso";
+import { iniciarCapturaAntecipada, type CapturaAntecipada } from "./capturaAntecipada";
 
-type CapturaAtual = { controlador: AbortController; sessao?: SessaoTranscricao; liberar?: () => void; medidor?: ReturnType<typeof criarMedidorUsoTranscricao> };
+type CapturaAtual = {
+  controlador: AbortController; sessao?: SessaoTranscricao; antecipada?: CapturaAntecipada; liberar?: () => void;
+  medidor?: ReturnType<typeof criarMedidorUsoTranscricao>;
+};
 
-export function useTranscricao({ aoTexto, bloqueada = false, obterStream, liberarStream, sessaoId }: {
+/**
+ * Último provedor que o servidor indicou. Enquanto não for "navegador", o microfone começa a capturar no clique,
+ * em paralelo ao pedido do token: o reconhecimento do navegador abre o próprio microfone e não usa esse áudio.
+ */
+let ultimoProvedor: "elevenlabs" | "navegador" | null = null;
+
+export function useTranscricao({ aoTexto, bloqueada = false, obterStream, liberarStream, sessaoId, termos }: {
   aoTexto: (texto: string) => void;
   bloqueada?: boolean;
   obterStream?: () => Promise<MediaStream>;
   liberarStream?: () => void;
   sessaoId?: string | null;
+  /** Vocabulário extra para o Scribe (palavras do título da vaga); a lista de recrutamento técnico já vai sempre. */
+  termos?: readonly string[];
 }) {
   const [estado, setEstado] = useState<EstadoTranscricao>("inativa");
   const [parcial, setParcial] = useState("");
@@ -26,12 +38,15 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
   liberar.current = liberarStream;
   const sessaoIdRef = useRef(sessaoId);
   sessaoIdRef.current = sessaoId;
+  const vocabulario = useRef(termos);
+  vocabulario.current = termos;
 
   const cancelar = useCallback(() => {
     const atual = referencia.current;
     atual?.medidor?.finalizar();
     referencia.current = null;
     atual?.controlador.abort();
+    atual?.antecipada?.cancelar();
     atual?.sessao?.cancelar();
     if (atual) liberar.current?.();
     atual?.liberar?.();
@@ -71,6 +86,8 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
     try {
       if (!window.isSecureContext) throw new Error("Abra o projeto por HTTPS ou localhost para usar o microfone.");
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador não oferece acesso ao microfone.");
+      // Começa a ouvir já: o token e o socket levam ~1 s, e era esse o começo da fala que se perdia.
+      if (ultimoProvedor !== "navegador") atual.antecipada = iniciarCapturaAntecipada({ stream: obterStream?.() });
       const resposta = await fetch("/api/transcricao/sessao", {
         method: "POST", signal: atual.controlador.signal, cache: "no-store",
       });
@@ -78,13 +95,19 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
       if (!vigente()) return;
       if (!resposta.ok) throw new Error(dados.erro ?? "Não consegui iniciar a transcrição.");
       if (dados.provedor === "elevenlabs" && dados.token) {
+        ultimoProvedor = "elevenlabs";
         setProvedor("elevenlabs");
         const { iniciarScribe } = await import("./scribe");
         atual.controlador.signal.throwIfAborted();
-        const stream = await obterStream?.();
-        atual.controlador.signal.throwIfAborted();
-        atual.sessao = await iniciarScribe({ token: dados.token, stream, signal: atual.controlador.signal, eventos });
+        atual.antecipada ??= iniciarCapturaAntecipada({ stream: obterStream?.() });
+        atual.sessao = await iniciarScribe({
+          token: dados.token, termos: vocabulario.current, captura: atual.antecipada,
+          signal: atual.controlador.signal, eventos,
+        });
       } else if (dados.provedor === "navegador") {
+        ultimoProvedor = "navegador";
+        atual.antecipada?.cancelar();
+        atual.antecipada = undefined;
         const Construtor = reconhecimentoDisponivel();
         if (!Construtor) throw new Error("Este navegador não oferece reconhecimento de voz. Use Chrome ou configure a transcrição com ElevenLabs.");
         setProvedor("navegador");
@@ -105,6 +128,7 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
       if (!vigente()) return;
       eventos.aoErro(erroMicrofone(e));
       atual.controlador.abort();
+      atual.antecipada?.cancelar();
       atual.sessao?.cancelar();
       eventos.aoEncerrar();
     }
