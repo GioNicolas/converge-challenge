@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { ErroLlm, type LlmCliente } from "../llm/cliente";
-import { montarMensagemRevisao, NOME_SCHEMA_REVISAO, SISTEMA_REVISOR_PROBLEMA } from "../prompts/revisor-problema";
+import { ALVO_FALA_DO_DESAFIO, montarMensagemRevisao, NOME_SCHEMA_REVISAO, SISTEMA_REVISOR_PROBLEMA } from "../prompts/revisor-problema";
 import type { Problema } from "./tipos";
 import { errosDoProblema } from "./validar";
 
@@ -107,9 +107,26 @@ export function aplicarRevisao(original: Problema, r: RevisaoDoProblema): { ok: 
   return { ok: true, problema: novo, mudou: mudou(original, novo) };
 }
 
+/** Frases de um texto falado (corta em . ! ? seguidos de espaço). */
+export function contarFrases(texto: string): number {
+  return texto.split(/(?<=[.!?])\s+/).filter((f) => f.trim()).length;
+}
+
+/** Por que a fala está acima do alvo (2 frases, ~220 caracteres), ou undefined se está dentro. Função pura. */
+export function foraDoAlvoDaFala(fala: string | undefined): string | undefined {
+  if (!fala) return undefined;
+  const frases = contarFrases(fala);
+  const partes = [
+    frases > 2 ? `tem ${frases} frases (o máximo é 2)` : "",
+    fala.length > ALVO_FALA_DO_DESAFIO ? `tem ${fala.length} caracteres (o alvo é no máximo ${ALVO_FALA_DO_DESAFIO})` : "",
+  ].filter(Boolean);
+  return partes.length ? `a fala ${partes.join(" e ")}` : undefined;
+}
+
 /**
  * Revisa o problema com o modelo. Nunca lança: em qualquer falha devolve o original com `descartada` explicando.
  * `llm` é o cliente do cérebro (o `lib/llm` escolhe o modelo do papel: processamento de fundo, Featherless primeiro).
+ * Se a revisão aceita deixa a fala acima do alvo (modelos pequenos ignoram o limite), pede UMA vez de novo.
  */
 export async function revisarProblema(
   original: Problema,
@@ -118,19 +135,41 @@ export async function revisarProblema(
 ): Promise<ResultadoRevisao> {
   const inicio = Date.now();
   const base = { problema: original, aceita: false, mudou: false, problemas: [] as string[] };
-  try {
-    const r = await llm.completarJson({
+  const mensagens: { role: "user" | "assistant"; content: string }[] = [{ role: "user", content: montarMensagemRevisao(original) }];
+  const chamar = () =>
+    llm.completarJson({
       sistema: { estatico: SISTEMA_REVISOR_PROBLEMA },
-      mensagens: [{ role: "user", content: montarMensagemRevisao(original) }],
+      mensagens,
       schema: RevisaoDoProblema,
       nomeSchema: NOME_SCHEMA_REVISAO,
       maxTokens: MAX_TOKENS_REVISAO,
       timeoutMs: opcoes.timeoutMs ?? TIMEOUT_REVISAO_MS,
       sinal: opcoes.sinal,
     });
-    const problemas = r.dados.problemas.map((p) => p.trim()).filter(Boolean).slice(0, 10);
+  try {
+    let r = await chamar();
+    let problemas = r.dados.problemas.map((p) => p.trim()).filter(Boolean).slice(0, 10);
+    let ap = aplicarRevisao(original, r.dados);
+    const excesso = ap.ok ? foraDoAlvoDaFala(ap.problema.falaDoDesafio) : undefined;
+    if (ap.ok && excesso) {
+      mensagens.push(
+        { role: "assistant", content: JSON.stringify(r.dados) },
+        { role: "user", content: `${excesso}. Reescreva SÓ a fala em no máximo 2 frases e ${ALVO_FALA_DO_DESAFIO} caracteres (tema + convite curto) e devolva o JSON completo de novo, com os outros campos como estão.` },
+      );
+      try {
+        const r2 = await chamar();
+        const ap2 = aplicarRevisao(original, r2.dados);
+        // Só vale a segunda se passa nas guardas (senão fica a primeira, que já era aceitável).
+        if (ap2.ok) {
+          r = r2;
+          ap = ap2;
+          problemas = [...new Set([...problemas, ...r2.dados.problemas.map((p) => p.trim()).filter(Boolean)])].slice(0, 10);
+        }
+      } catch {
+        // a primeira revisão continua valendo
+      }
+    }
     const ms = Date.now() - inicio;
-    const ap = aplicarRevisao(original, r.dados);
     if (!ap.ok) return { ...base, problemas, descartada: ap.motivo, modelo: r.modelo, ms };
     return { problema: ap.problema, aceita: true, mudou: ap.mudou, problemas, modelo: r.modelo, ms };
   } catch (e) {

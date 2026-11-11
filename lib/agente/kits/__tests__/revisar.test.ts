@@ -9,7 +9,7 @@ import { casoReal } from "../caso-real-issue-90";
 import { gerarKitDetalhado } from "../gerar";
 import { JOB_POSTINGS } from "../../../hiring/mocks/job-postings";
 import { gerarQuestaoDaVaga } from "../questao-da-vaga";
-import { aplicarRevisao, camposComNumeroAlterado, numerosDoTexto, revisarProblema, type RevisaoDoProblema } from "../revisar";
+import { aplicarRevisao, camposComNumeroAlterado, contarFrases, foraDoAlvoDaFala, numerosDoTexto, revisarProblema, type RevisaoDoProblema } from "../revisar";
 import { criarRepositorioAvaliacoesEmMemoria } from "../repositorio";
 import type { Problema } from "../tipos";
 import { errosDoProblema, MAX_FALA_DO_DESAFIO } from "../validar";
@@ -111,6 +111,47 @@ describe("guardas da revisão (sem modelo)", () => {
     const a = aplicarRevisao(o, revisaoBoa(o));
     assert.ok(a.ok);
     assert.equal(a.ok && a.problema.falaDoDesafio, undefined);
+  });
+});
+
+describe("fala acima do alvo: pede de novo uma vez", () => {
+  const longa = "Hoje o tema é o andamento dos pedidos de um app de logística. Cliente e operação precisam acompanhar cada entrega. Antes de desenhar, pode me perguntar o que precisar.";
+
+  it("contarFrases e foraDoAlvoDaFala", () => {
+    assert.equal(contarFrases("Um. Dois! Três?"), 3);
+    assert.equal(foraDoAlvoDaFala("Curta. Convite."), undefined);
+    assert.match(foraDoAlvoDaFala(longa)!, /3 frases/);
+    assert.match(foraDoAlvoDaFala("a".repeat(230))!, /230 caracteres/);
+  });
+
+  it("a 2ª chamada encurta a fala; os números e o resto seguem guardados", async () => {
+    const o = casoReal();
+    const llm = criarClienteFalso([{ ...revisaoBoa(o), falaDoDesafio: longa }, revisaoBoa(o)]);
+    const r = await revisarProblema(o, llm);
+    assert.equal(llm.chamadas.length, 2);
+    assert.ok(r.aceita);
+    assert.equal(foraDoAlvoDaFala(r.problema.falaDoDesafio), undefined);
+    assert.match(llm.chamadas[1].mensagens.at(-1)!.content, /3 frases/);
+  });
+
+  it("se a 2ª chamada falha ou mexe em número, fica a 1ª (aceitável pelo validador)", async () => {
+    const o = casoReal();
+    const ruim = revisaoBoa(o);
+    ruim.ficha[0] = { ...ruim.ficha[0], resposta: "Cerca de 500 mil usuários." };
+    for (const segunda of [new ErroLlm("timeout", "lento"), ruim]) {
+      const llm = criarClienteFalso([{ ...revisaoBoa(o), falaDoDesafio: longa }, segunda]);
+      const r = await revisarProblema(o, llm);
+      assert.ok(r.aceita);
+      assert.equal(r.problema.falaDoDesafio, longa);
+      assert.deepEqual(camposComNumeroAlterado(o, r.problema), []);
+    }
+  });
+
+  it("fala dentro do alvo: uma chamada só", async () => {
+    const o = casoReal();
+    const llm = criarClienteFalso([revisaoBoa(o)]);
+    await revisarProblema(o, llm);
+    assert.equal(llm.chamadas.length, 1);
   });
 });
 
