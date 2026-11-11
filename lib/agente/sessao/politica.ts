@@ -5,6 +5,7 @@ import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_S } from "../../con
 import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
+import { fechamentoAtivo } from "./fechamento";
 import { FASES, type Fase, type RespostaAnalise, type StatusAnalise } from "./tipos";
 
 /** O ritmo das perguntas (orçamento, cota, intervalo) vem da política comum: lib/interrupcao/politica.ts. */
@@ -114,6 +115,7 @@ export type MotivoBloqueioPlin =
   | "CANDIDATO_JA_DESENHOU"
   | "SILENCIO_INICIAL_INSUFICIENTE"
   | "CANDIDATO_EM_ATIVIDADE"
+  | "FECHAMENTO"
   | "BOLA_COM_O_CANDIDATO";
 
 /**
@@ -163,6 +165,9 @@ export function motivoBloqueioPlin(
 ): MotivoBloqueioPlin | null {
   const base = motivoBloqueio(estado);
   if (base) return base;
+  // Fechamento comum em andamento (lib/totti/fechamento.ts): as perguntas finais saem dele, uma atrás da outra, na
+  // conversa. A análise segue rodando para colher observações, mas não levanta pergunta por cima.
+  if (fechamentoAtivo(estado)) return "FECHAMENTO";
   // O convite de REQUISITOS e a pergunta final do FECHAMENTO ficam fora do orçamento, mas são únicos.
   if (estado.fase === "REQUISITOS" && estado.conviteFeito) return "LIMITE_DE_PERGUNTAS";
   if (estado.fase === "REQUISITOS") {

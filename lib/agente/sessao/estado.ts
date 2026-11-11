@@ -9,6 +9,8 @@
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
 import { sobreposicao } from "../guardas";
 import type { PlanoDaSessao } from "../plano";
+import type { EstadoFechamento } from "../../totti/fechamento";
+import { fechamentoPodeSerSuspenso, pecasDoGrafo, voltouADesenhar, type DesenhoConcluido, type FechamentoDaSessao } from "./fechamento";
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
 import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
 
@@ -122,6 +124,21 @@ export type EstadoSessao = {
   /** Quantas vezes o candidato disse que terminou ("pronto", "acho que é isso") e quando foi a última. */
   conclusoes?: number;
   ultimaConclusaoEm?: number | null;
+  /**
+   * O desenho como estava quando ele disse por último que terminou. Enquanto existir, ninguém manda continuar o
+   * desenho. Some quando ele volta a desenhar de verdade (peças novas). Ausente em estados antigos.
+   */
+  desenhoConcluido?: DesenhoConcluido | null;
+  /**
+   * O fechamento comum em andamento (lib/totti/fechamento.ts, guardado como em ./fechamento.ts): anúncio, perguntas
+   * finais, última palavra e despedida. Ausente/null: a entrevista não está fechando (ou o estado é antigo).
+   */
+  fechamento?: FechamentoDaSessao | null;
+  /**
+   * O fechamento foi suspenso e o quadro ainda não soube: até ele mandar a fase a que a entrevista voltou, um
+   * "FECHAMENTO" vindo dele é a fase velha, não um avanço (sem isto, o pedido seguinte levava a sessão de volta).
+   */
+  quadroAindaNoFechamento?: boolean;
 };
 
 export type EventoSessao =
@@ -144,8 +161,20 @@ export type EventoSessao =
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
   /** `perguntou`: a fala do Conversador terminou numa pergunta (v2); conta no intervalo antes do próximo plin. */
   | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
-  /** O candidato disse que terminou (a etapa ou o desenho todo). É um marco: a próxima pergunta não espera o intervalo. */
-  | { tipo: "CANDIDATO_CONCLUIU" }
+  /**
+   * O candidato disse que terminou (a etapa ou o desenho todo). É um marco: a próxima pergunta não espera o intervalo.
+   * `grafo`: o desenho naquele momento, para saber depois se ele voltou a desenhar.
+   */
+  | { tipo: "CANDIDATO_CONCLUIU"; grafo?: string }
+  /**
+   * O fechamento comum andou um passo (ou começou, com `inicio`). `antes`: o estado da sequência antes deste turno
+   * (null no turno que a começou). Sem `inicio` e sem fechamento no estado (ele foi suspenso no meio do pedido), não vale.
+   */
+  | { tipo: "FECHAMENTO_ATUALIZADO"; inicio: boolean; nucleo: EstadoFechamento; antes: EstadoFechamento | null; grafo?: string }
+  /** A fala que começou o fechamento foi substituída por outra (ele continuou falando): volta a antes dele. */
+  | { tipo: "FECHAMENTO_DESFEITO" }
+  /** O desenho que o quadro mandou (evento, análise ou fala). Com peças novas depois da conclusão, o fechamento é suspenso. */
+  | { tipo: "DESENHO_ATUALIZADO"; grafo: string }
   /** O modelo da conversa leu como o candidato reagiu a uma pergunta do agente (ver `PerguntaFeita.desfecho`). */
   | { tipo: "DESFECHO_DA_PERGUNTA"; numero: number; desfecho: Desfecho; resposta: string }
   /** O Totti emendou uma pergunta de continuação na resposta: o fio segue ativo. */
@@ -162,6 +191,8 @@ export type Efeito =
   | { tipo: "ANALISAR"; motivo: "resposta_terminou" | "plin_expirou" }
   | { tipo: "PERGUNTA_INICIADA"; pergunta: PerguntaFeita }
   | { tipo: "RESPOSTA_ENCERRADA"; numero: number }
+  /** Ele voltou a desenhar durante o fechamento: a entrevista volta à fase em que estava. */
+  | { tipo: "FECHAMENTO_SUSPENSO" }
   | { tipo: "SESSAO_ENCERRADA" };
 
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
@@ -192,6 +223,42 @@ export function tempoDaEntrevista(estado: EstadoSessao, agora: number): { totalM
   const decorridoMin = Math.max(0, Math.floor(decorridoMs / 60_000));
   return { totalMin, decorridoMin, restanteMin: Math.max(0, totalMin - decorridoMin) };
 }
+
+/**
+ * Quanto falta para o fim da entrevista, em milissegundos (o fechamento comum decide por ele quantas perguntas
+ * finais cabem). A mesma conta de `tempoDaEntrevista`, sem arredondar para minutos.
+ */
+export function tempoRestanteMs(estado: EstadoSessao, agora: number): number {
+  const somaS = Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
+  const totalMs = (estado.plano?.duracaoMin !== undefined ? estado.plano.duracaoMin * 60 : somaS) * 1000;
+  let decorridoMs: number;
+  if (estado.iniciadaEm) decorridoMs = agora - estado.iniciadaEm;
+  else {
+    const anteriores = FASES.slice(0, Math.max(0, FASES.indexOf(estado.fase)));
+    const passadasS = anteriores.reduce((s, f) => s + (estado.tempos[f] ?? 0), 0);
+    decorridoMs = passadasS * 1000 + (estado.faseIniciadaEm ? agora - estado.faseIniciadaEm : 0);
+  }
+  return Math.max(0, totalMs - Math.max(0, decorridoMs));
+}
+
+/** Tira o fechamento do estado e devolve a entrevista à fase em que ela estava quando ele começou. */
+function semFechamento(estado: EstadoSessao): EstadoSessao {
+  const f = estado.fechamento;
+  if (!f) return estado;
+  const voltouDeFase = f.faseAnterior !== estado.fase;
+  return {
+    ...estado,
+    fechamento: null,
+    fase: f.faseAnterior,
+    faseIniciadaEm: f.faseAnteriorIniciadaEm,
+    // Antes do FECHAMENTO a pergunta final ainda não tinha sido feita: a análise volta a poder perguntar.
+    perguntaFinalFeita: voltouDeFase ? false : estado.perguntaFinalFeita,
+    ...(voltouDeFase ? { quadroAindaNoFechamento: true } : {}),
+  };
+}
+
+/** Fases em que "terminei" fala do desenho (em REQUISITOS ele só terminou de perguntar). */
+const FASES_DE_DESENHO: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
 
 export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; plano?: PlanoDaSessao | null } = {}): EstadoSessao {
   return {
@@ -319,10 +386,16 @@ export function transicionar(
     case "ENCERRAR":
       return mudarFase(estado, "ENCERRADA", agora);
 
-    case "SINCRONIZAR_FASE":
+    case "SINCRONIZAR_FASE": {
+      if (estado.quadroAindaNoFechamento) {
+        // O fechamento foi suspenso: o FECHAMENTO que o quadro ainda manda é de antes de ele saber.
+        if (evento.fase === "FECHAMENTO") return nada;
+        estado = { ...estado, quadroAindaNoFechamento: false };
+      }
       return FASES.indexOf(evento.fase) > FASES.indexOf(estado.fase)
         ? mudarFase(estado, evento.fase, agora)
-        : nada;
+        : { estado, efeitos: [] };
+    }
 
     case "ANALISE_RECEBIDA": {
       const { resposta } = evento;
@@ -481,7 +554,64 @@ export function transicionar(
       };
 
     case "CANDIDATO_CONCLUIU":
-      return { estado: { ...estado, conclusoes: (estado.conclusoes ?? 0) + 1, ultimaConclusaoEm: agora }, efeitos: [] };
+      return {
+        estado: {
+          ...estado,
+          conclusoes: (estado.conclusoes ?? 0) + 1,
+          ultimaConclusaoEm: agora,
+          ...(FASES_DE_DESENHO.includes(estado.fase) ? { desenhoConcluido: { em: agora, pecas: pecasDoGrafo(evento.grafo) } } : {}),
+        },
+        efeitos: [],
+      };
+
+    case "FECHAMENTO_ATUALIZADO": {
+      const atual = estado.fechamento;
+      // Suspenso (ele voltou a desenhar) enquanto o turno era preparado: o passo deste turno não o traz de volta.
+      if (!atual && !evento.inicio) return nada;
+      const efeitos: Efeito[] = [];
+      let novo: EstadoSessao = {
+        ...estado,
+        // As perguntas finais passam a ser as do fechamento comum: a análise não levanta outra.
+        perguntaFinalFeita: true,
+        fechamento: atual
+          ? { ...atual, nucleo: evento.nucleo, antes: evento.antes }
+          : { nucleo: evento.nucleo, antes: evento.antes, iniciadoEm: agora, faseAnterior: estado.fase, faseAnteriorIniciadaEm: estado.faseIniciadaEm },
+      };
+      if (!atual) {
+        // A base para saber se ele voltou a desenhar: o desenho de quando o fechamento começou.
+        if (!novo.desenhoConcluido?.pecas) novo = { ...novo, desenhoConcluido: { em: agora, pecas: pecasDoGrafo(evento.grafo) } };
+        if (FASES.indexOf(novo.fase) < FASES.indexOf("FECHAMENTO")) {
+          novo = { ...novo, fase: "FECHAMENTO", faseIniciadaEm: agora };
+          efeitos.push({ tipo: "FASE_MUDOU", de: estado.fase, para: "FECHAMENTO" });
+        }
+      }
+      // A dúvida que esperava a vez virou candidata a pergunta final (quem começa o fechamento a entrega ao núcleo).
+      if (novo.perguntaPendente) {
+        novo = { ...novo, plin: novo.plin === "PLIN_PENDENTE" ? "LIVRE" : novo.plin, perguntaPendente: null };
+        efeitos.push({ tipo: "PLIN_CANCELADO", motivo: "fase" });
+      }
+      return { estado: novo, efeitos };
+    }
+
+    case "FECHAMENTO_DESFEITO": {
+      const f = estado.fechamento;
+      if (!f) return nada;
+      // A conclusão que começou o fechamento também foi substituída: não conta duas vezes.
+      const conclusoes = f.nucleo.gatilho === "concluiu" ? Math.max(0, (estado.conclusoes ?? 0) - 1) : estado.conclusoes;
+      return {
+        estado: { ...semFechamento(estado), ...(conclusoes !== undefined ? { conclusoes } : {}) },
+        efeitos: [{ tipo: "FECHAMENTO_SUSPENSO" }],
+      };
+    }
+
+    case "DESENHO_ATUALIZADO": {
+      if (!voltouADesenhar(estado.desenhoConcluido, evento.grafo)) return nada;
+      const f = estado.fechamento;
+      // Na despedida já não há volta: o desenho novo não desfaz o encerramento.
+      if (f && !fechamentoPodeSerSuspenso(f)) return nada;
+      const retomado: EstadoSessao = { ...semFechamento(estado), desenhoConcluido: null };
+      return { estado: retomado, efeitos: f ? [{ tipo: "FECHAMENTO_SUSPENSO" }] : [] };
+    }
 
     case "AGENTE_FALOU":
       return {

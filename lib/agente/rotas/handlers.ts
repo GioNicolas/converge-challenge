@@ -17,8 +17,10 @@ import { apresentacaoReserva, DESPEDIDA_RESERVA, type Abertura, type ContextoAbe
 import { etapasEmTexto } from "../prompts/contexto";
 import { escalarTempos, planoDaConfig } from "../plano";
 import { avaliacaoDaConfig } from "../kits/questao-da-vaga";
-import { perguntar } from "../perguntar";
-import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
+import { perguntar, type PassoNaSessao } from "../perguntar";
+import { gatilhoDoFechamento, iniciarFechamento, proximoPasso, type EtapaDoFechamento } from "../../totti/fechamento";
+import { candidatasDoQuadro, perguntasJaOuvidas } from "../fechamento";
+import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
   EsquemaImagemOpcional,
@@ -214,7 +216,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   }
 
   const t0 = ctx.agora();
-  const estado = sincronizarFase(sessao.estado, pedido.fase, t0);
+  const estado = comDesenho(sincronizarFase(sessao.estado, pedido.fase, t0), pedido.grafo, t0);
   let resposta: RespostaAnalise = respostaSilencio();
   let origem = "sem_llm";
 
@@ -238,7 +240,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   // Relê o estado: eventos podem ter chegado durante a análise (p. ex. uma fala do agente no /perguntar).
   // Refiltra a resposta com o estado fresco, para a regra "a bola está com o candidato" valer também aqui.
   const atual = await ctx.repositorio.obter(id);
-  let novo = sincronizarFase(atual?.estado ?? estado, pedido.fase, t0);
+  let novo = comDesenho(sincronizarFase(atual?.estado ?? estado, pedido.fase, t0), pedido.grafo, t0);
   if (origem === "llm") {
     const fim = ctx.agora();
     resposta = refiltrarComEstadoAtual(novo, resposta, pedido, t0, fim);
@@ -255,7 +257,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   console.warn("[agente] rota_analisar", { sessao_id: id, fase: pedido.fase, origem, status: resposta.status });
 
   // Formato exato do contrato (sem diagnóstico).
-  return json({
+  const noContrato = {
     status: resposta.status,
     pergunta: resposta.pergunta,
     nota: resposta.nota,
@@ -265,7 +267,10 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     degrau: resposta.degrau,
     observacoes: resposta.observacoes,
     ...(resposta.avancar_fase ? { avancar_fase: true } : {}),
-  } satisfies RespostaAnalise);
+  } satisfies RespostaAnalise;
+  // Mais a etapa do fechamento comum, quando ele está em andamento: sem ela, o quadro sabe que ele foi suspenso.
+  const fechamento = etapaDoFechamento(novo);
+  return json(fechamento ? { ...noContrato, fechamento } : noContrato);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -299,6 +304,51 @@ const EsquemaPerguntar = z.object({
 /** Corpo do /perguntar: a foto do quadro não cabe no limite padrão. */
 const MAX_CORPO_PERGUNTAR = 700_000;
 
+/** O desenho que veio no pedido: com peças novas depois de ele ter dito que terminou, o fechamento é suspenso. */
+function comDesenho(estado: EstadoSessao, grafo: string | undefined, agora: number): EstadoSessao {
+  return grafo === undefined ? estado : transicionar(estado, { tipo: "DESENHO_ATUALIZADO", grafo }, agora).estado;
+}
+
+/** A etapa do fechamento comum em andamento (lib/totti/fechamento.ts), para o quadro; null fora dele. */
+function etapaDoFechamento(estado: EstadoSessao): EtapaDoFechamento | null {
+  return estado.fechamento?.nucleo.etapa ?? null;
+}
+
+/** Relógio e botão de encerrar entram no mesmo núcleo, sem simular uma fala do candidato. */
+export async function fechamentoHandler(req: Request, { params }: ParamsId): Promise<Response> {
+  const { id } = await params;
+  const corpo = await lerJsonValidado(req, z.object({
+    fase: EsquemaFase, grafo: z.string().max(24000).optional(), gatilho: z.enum(["tempo", "pediu_encerrar"]),
+  }), 32_000);
+  if (!corpo.ok) return corpo.resposta;
+  if (!eIdPlausivel(id)) return notFound();
+  const ctx = contexto();
+  const sessao = await ctx.repositorio.obter(id);
+  if (!sessao) return notFound();
+  const alvo = await resolverAvaliacao(sessao.avaliacaoId);
+  if (!alvo) return erro(500, "avaliação da sessão indisponível");
+  const agora = ctx.agora();
+  let estado = comDesenho(sincronizarFase(sessao.estado, corpo.dados.fase, agora), corpo.dados.grafo, agora);
+  const nucleo = estado.fechamento?.nucleo;
+  const silencio = { responder: false, texto: "", requisito: null, concluiu: false };
+  if (estado.fase === "ENCERRADA") return json({ ...silencio, encerrar: true });
+  if (nucleo && corpo.dados.gatilho === "tempo") {
+    // Repetir o pedido não consome pergunta nem recomeça a sequência. A última fala permite repetir uma resposta perdida.
+    const texto = nucleo.ditas.at(-1) ?? "";
+    return json({ ...silencio, responder: !!texto, texto, fechamento: nucleo.etapa, encerrar: nucleo.etapa === "encerrada" });
+  }
+  const restante = tempoRestanteMs(estado, agora);
+  const gatilho = gatilhoDoFechamento({ pediuEncerrar: corpo.dados.gatilho === "pediu_encerrar", tempoRestanteMs: restante });
+  if (!gatilho || estado.fase === "AGUARDANDO" || estado.fase === "APRESENTACAO") return json(silencio);
+  const inicial = iniciarFechamento({ sala: "quadro", gatilho, tempoRestanteMs: restante,
+    candidatas: candidatasDoQuadro(alvo.kit, alvo.problema, estado, agora), perguntasJaFeitas: perguntasJaOuvidas(estado) });
+  const passo = proximoPasso(inicial);
+  estado = transicionar(estado, { tipo: "FECHAMENTO_ATUALIZADO", inicio: true, nucleo: passo.estado, antes: nucleo ?? null, grafo: corpo.dados.grafo }, agora).estado;
+  estado = transicionar(estado, { tipo: "AGENTE_FALOU", texto: passo.fala, perguntou: passo.fala.endsWith("?") }, agora).estado;
+  await ctx.repositorio.salvarEstado(id, estado);
+  return json({ ...silencio, responder: !!passo.fala, texto: passo.fala, fechamento: passo.etapa, encerrar: passo.encerrar });
+}
+
 /** A pergunta do agente que esta fala responde: a ativa, ou a última com o texto que o quadro mandou. */
 function perguntaRespondida(estado: EstadoSessao, perguntaAtiva: string | undefined): number | null {
   if (estado.perguntaAtiva) return estado.perguntaAtiva.numero;
@@ -324,6 +374,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const { fase, texto } = corpo.dados;
   let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual" | "perguntou"> = { responder: false, texto: "", requisito: null, concluiu: false };
   let desfecho: Desfecho | null = null;
+  let passoDoFechamento: PassoNaSessao | undefined;
   let gravandoUso: Promise<unknown> | undefined;
   // A fala substitui a anterior (ele continuou antes de ouvir a resposta): a anterior e a resposta não ouvida saem.
   const semSubstituida = (e: EstadoSessao): EstadoSessao =>
@@ -337,7 +388,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
         estado,
         { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes,
           imagemBase64: corpo.dados.imagem_base64, mudancas: corpo.dados.mudancas, conversaDoQuadro: corpo.dados.conversa_do_quadro,
-          desenhoParadoHaS: corpo.dados.desenho_parado_ha_s },
+          desenhoParadoHaS: corpo.dados.desenho_parado_ha_s, substitui: corpo.dados.substitui },
         agora,
         AbortSignal.timeout(PRAZO_ANALISE_MS),
       ).catch(() => null),
@@ -354,13 +405,23 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),
       ...(r.visual !== undefined ? { visual: r.visual } : {}), ...(r.perguntou ? { perguntou: true } : {}) };
     desfecho = r.desfecho;
+    passoDoFechamento = r.passoDoFechamento;
   }
 
   // Reaplica as falas sobre o estado mais recente (eventos podem ter mexido nele no meio do caminho).
   const atual = (await ctx.repositorio.obter(id))?.estado ?? sessao.estado;
-  let novo = semSubstituida(sincronizarFase(atual, fase, agora));
+  let novo = comDesenho(semSubstituida(sincronizarFase(atual, fase, agora)), corpo.dados.grafo, agora);
+  // O que o turno fez com o fechamento comum, na mesma ordem em que o `perguntar` fez: desfaz o início substituído,
+  // registra a fala e a conclusão, e só então o passo (ou o início) do fechamento.
+  if (passoDoFechamento?.desfeito) novo = transicionar(novo, { tipo: "FECHAMENTO_DESFEITO" }, agora).estado;
   novo = transicionar(novo, { tipo: "CANDIDATO_FALOU", texto, fimDeResposta: false }, agora).estado;
-  if (resposta.concluiu) novo = transicionar(novo, { tipo: "CANDIDATO_CONCLUIU" }, agora).estado;
+  if (resposta.concluiu) novo = transicionar(novo, { tipo: "CANDIDATO_CONCLUIU", grafo: corpo.dados.grafo }, agora).estado;
+  if (passoDoFechamento?.atualizado) {
+    novo = transicionar(novo, { tipo: "FECHAMENTO_ATUALIZADO", ...passoDoFechamento.atualizado, grafo: corpo.dados.grafo }, agora).estado;
+    // Ele voltou a desenhar enquanto o turno era preparado (o evento do desenho chegou no meio): o fechamento foi
+    // suspenso, e a fala dele (a pergunta final seguinte, a despedida) já não vale. O quadro fica quieto.
+    if (!novo.fechamento) resposta = { responder: false, texto: "", requisito: null, concluiu: resposta.concluiu };
+  }
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto, ...(resposta.perguntou ? { perguntou: true } : {}) }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
   const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
@@ -371,11 +432,15 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
     novo = transicionar(novo, { tipo: "SEGUIMENTO_FEITO", numero: numeroDaPergunta, pergunta: resposta.texto }, agora).estado;
   }
   await ctx.repositorio.salvarEstado(id, novo);
+  const fechamento = etapaDoFechamento(novo);
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder,
-    seguimento: !!resposta.seguimento, encerrar: !!resposta.encerrar, substitui: !!corpo.dados.substitui });
+    seguimento: !!resposta.seguimento, encerrar: !!resposta.encerrar, substitui: !!corpo.dados.substitui,
+    ...(fechamento ? { fechamento } : {}) });
 
   await gravandoUso;
-  return json(resposta);
+  // `fechamento`: a etapa do fechamento comum depois deste turno. Ausente: a entrevista não está fechando (se o
+  // quadro achava que estava, é porque ele foi suspenso).
+  return json(fechamento ? { ...resposta, fechamento } : resposta);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -514,6 +579,8 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       const estruturado = typeof d.grafo !== "string" || pecasDoDesenho(d.grafo) >= MIN_PECAS_PARA_SAIR_DOS_REQUISITOS;
       const eventos: EventoSessao[] = estruturado ? [{ tipo: "CANDIDATO_DESENHOU" }] : [];
       if (ids.length) eventos.push({ tipo: "ELEMENTOS_ALTERADOS", ids });
+      // O desenho inteiro: com peças novas depois de ele ter dito que terminou, o fechamento é suspenso.
+      if (typeof d.grafo === "string") eventos.push({ tipo: "DESENHO_ATUALIZADO", grafo: d.grafo });
       return eventos;
     }
     default:
