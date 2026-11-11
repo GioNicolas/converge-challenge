@@ -429,14 +429,21 @@ export function useEntrevista(
     } finally {
       if (timer) clearTimeout(timer);
     }
-    await descarregarJa();
+    // O relatório é gerado com a linha do tempo que já chegou ao servidor: o envio final tem o mesmo prazo da foto,
+    // e não o prazo curto usado entre análises (um lote leva mais de um segundo com o banco longe).
+    await descarregarJa(PRAZO_FOTO_FINAL_MS);
     finalizarNoServidor();
   }, [descarregarJa, finalizarNoServidor]);
   useEffect(() => {
     // Sair no meio da foto/despedida não perde a finalização. O mesmo flag impede um segundo pedido depois.
     const aoSair = () => { if (encerrandoRef.current) finalizarNoServidor(); };
     window.addEventListener("pagehide", aoSair);
-    return () => window.removeEventListener("pagehide", aoSair);
+    return () => {
+      // A sala desmonta ao abrir /obrigado. Se a preparação ainda não pediu o relatório (foto ou envio lentos), a
+      // proteção continua valendo para quem fechar a janela já na página final.
+      if (encerrandoRef.current && !finalizacaoEnviada.current) return;
+      window.removeEventListener("pagehide", aoSair);
+    };
   }, [finalizarNoServidor]);
 
   // Gatilho da análise.

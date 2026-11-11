@@ -158,3 +158,46 @@ test("tempo total: encerra com despedida mesmo sem nova fala do candidato", asyn
   expect(pedidos.finalizar).toBe(1);
   expect(erros).toEqual([]);
 });
+
+type LoteDeEventos = { eventos: { tipo: string; dados?: { texto?: string } | null }[] };
+const temDespedida = (lote: LoteDeEventos) => lote.eventos.some((e) => e.tipo === "fala" && e.dados?.texto === DESPEDIDA);
+
+test("envio lento: o relatório só é pedido depois que a despedida chegou à linha do tempo", async ({ page }) => {
+  const { erros } = await preparar(page);
+  let despedidaEntregue = false;
+  let entregueAoFinalizar: boolean | null = null;
+  await page.route("**/api/sessoes/*/eventos", async (r) => {
+    const comDespedida = temDespedida(r.request().postDataJSON() as LoteDeEventos);
+    // Mais que o prazo curto usado entre análises (1,5 s) e menos que os quatro segundos do texto da despedida.
+    if (comDespedida) await new Promise((resolver) => setTimeout(resolver, 2500));
+    await r.fulfill({ json: { ok: true } });
+    if (comDespedida) despedidaEntregue = true;
+  });
+  await page.route("**/api/sessoes/*/finalizar", (r) => { entregueAoFinalizar ??= despedidaEntregue; return r.fulfill({ json: { ok: true } }); });
+  await page.getByRole("button", { name: "Silenciar respostas por voz" }).click();
+  await botaoEncerrar(page);
+  await expect(page).toHaveURL(/\/obrigado$/);
+  await expect.poll(() => entregueAoFinalizar).toBe(true);
+  expect(erros).toEqual([]);
+});
+
+test("janela fechada na página final com o envio ainda pendente: o relatório é pedido uma vez", async ({ page }) => {
+  const { pedidos, erros } = await preparar(page);
+  let liberar!: () => void;
+  const retido = new Promise<void>((resolver) => { liberar = resolver; });
+  await page.route("**/api/sessoes/*/eventos", async (r) => {
+    if (temDespedida(r.request().postDataJSON() as LoteDeEventos)) await retido;
+    await r.fulfill({ json: { ok: true } });
+  });
+  await page.getByRole("button", { name: "Silenciar respostas por voz" }).click();
+  await botaoEncerrar(page);
+  // A despedida em texto acaba antes do envio: a página final abre com o pedido do relatório ainda por sair.
+  await expect(page).toHaveURL(/\/obrigado$/);
+  expect(pedidos.finalizar).toBe(0);
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await expect.poll(() => pedidos.finalizar).toBe(1);
+  liberar();
+  await page.waitForTimeout(1000);
+  expect(pedidos.finalizar).toBe(1);
+  expect(erros).toEqual([]);
+});
