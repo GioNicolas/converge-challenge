@@ -1,7 +1,7 @@
 // Questão pedida pela recrutadora pelo nome (#78): leitura da fala, extrator, config e o que o Totti diz.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { aplicarPedidoDeProblema, lerPedidoDeProblema, linhasDoPedido } from "../problema-pedido";
+import { aplicarPedidoDeProblema, lerPedidoDeProblema, linhasDoPedido, problemaTemEvidencia } from "../problema-pedido";
 import { aplicarPatch } from "../extrator";
 import { paraInterviewConfig, type Rascunho } from "../rascunho";
 import { conduzirTurno } from "../turno";
@@ -131,5 +131,40 @@ describe("conversa: o Totti responde com o que é verdade", () => {
     const enviado = falso.chamadas[0].map((m) => m.content).join("\n");
     assert.match(enviado, /que NÃO está no banco/);
     assert.equal(linhasDoPedido(sessao.rascunho, false)[0], "- questão: a que ela pediu ('n rainhas') não está no banco; segue o sorteio pelo nível e pelo foco.");
+  });
+});
+
+describe("revisão do PR 120", () => {
+  it("recusa e pedido na mesma fala: vale o pedido", () => {
+    const l = lerPedidoDeProblema("não quero o two sum, prefiro busca binária");
+    assert.equal(l?.tipo === "problema" && l.problema.id, "binary-search");
+  });
+
+  it("recusar a questão fixada volta ao sorteio", () => {
+    const fixado = aplicarPedidoDeProblema(rascunhoDe(), "Quero o two sum", 3);
+    assert.equal(fixado.problemId, "two-sum");
+    const r = aplicarPedidoDeProblema(fixado, "na verdade não quero o two sum, é muito batido", 5);
+    assert.equal(r.problemId, undefined);
+    assert.equal(r.pedidoProblema, undefined);
+  });
+
+  it("palavra solta de apelido genérico não fixa questão", () => {
+    assert.equal(lerPedidoDeProblema("quero alguém que suba rápido na escada de carreira"), undefined);
+    assert.equal(lerPedidoDeProblema("quero alguém com parênteses de sobra no código"), undefined);
+  });
+
+  it("'um desafio de lógica' é tema, não nome de questão", () => {
+    assert.equal(lerPedidoDeProblema("quero um desafio de lógica"), undefined);
+  });
+
+  it("sorteio no quadro não apaga o problemId do catálogo", () => {
+    const base = { ...rascunhoDe("system_design"), problemId: "catalogo-x", pedidoProblema: { texto: "x", resultado: "system_design" as const, turno: 1, origem: "fala" as const } };
+    assert.equal(aplicarPedidoDeProblema(base, "pode sortear", 3).problemId, "catalogo-x");
+  });
+
+  it("problemId do extrator sem citação da recrutadora não tem evidência", () => {
+    const t = [{ role: "recrutadora" as const, text: "Vaga de backend pleno." }];
+    assert.equal(problemaTemEvidencia("two-sum", t), false);
+    assert.equal(problemaTemEvidencia("two-sum", [{ role: "recrutadora", text: "usa o two sum" }]), true);
   });
 });

@@ -12,7 +12,7 @@ import type { InterviewMode } from "@/lib/contracts";
 import { problems, type PublicProblem } from "@/lib/problems";
 import { alternativasDoNivel, normalizarPedido, resolverProblemaPedido } from "@/lib/problems/selecao";
 import { limitarPalavras } from "./frases";
-import type { Rascunho } from "./rascunho";
+import type { Rascunho, Turno } from "./rascunho";
 
 /** O que a fala dela diz sobre a questão. */
 export type LeituraDoPedido =
@@ -23,6 +23,9 @@ export type LeituraDoPedido =
   /** Prefere que a questão seja sorteada ("pode sortear", "deixa o sorteio"). */
   | { tipo: "sorteio"; texto: string };
 
+/** `turno` do pedido que veio do extrator: chega depois da resposta do Totti, então nunca é "desta fala". */
+const TURNO_DO_EXTRATOR = 0;
+
 export type ResultadoDoPedido = NonNullable<Rascunho["pedidoProblema"]>["resultado"];
 
 /** Verbo ou expressão de pedido. "de" e "da" ficam de fora: são preposições na maioria das falas. */
@@ -31,19 +34,19 @@ const RE_PEDIDO =
 /** Palavra que diz que a fala é sobre a questão da entrevista. */
 const RE_QUESTAO = /\b(?:problema|questao|exercicio|desafio|algoritmo)\b/;
 /** Recusa logo antes do pedido: "não quero o two sum", "não usa". */
-const RE_NEGACAO = /\bnao (?:quero|queria|use|usa|usar|usem|coloca|coloque|passa|passe|precisa|e)\b/;
+const RE_NEGACAO = /\bnao (?:quero|queria|use|usa|usar|usem|coloca|coloque|passa|passe|precisa)\b/;
 /** "Quero o problema das N rainhas": pedido de uma questão pelo nome, conhecida ou não. O nome é o grupo 1. */
 const RE_PEDIDO_PELO_NOME =
-  /\b(?:quero|queria|gostaria|prefiro|use|usa|usar|usem|coloca|coloque|passa|passe|aplica|aplique|manda|dar|vamos de)\s+(?:que (?:seja|use|usem|caia) )?(?:o|a|um|uma)\s+(?:problema|questao|exercicio|desafio)\s+(?:d[oa]s?|de|chamad[oa]|sobre)\s+(.+)$/;
+  /\b(?:quero|queria|gostaria|prefiro|use|usa|usar|usem|coloca|coloque|passa|passe|aplica|aplique|manda|dar|vamos de)\s+(?:que (?:seja|use|usem|caia) )?(?:o|a|um|uma)\s+(?:problema|questao|exercicio|desafio)\s+(?:d[oa]s?|chamad[oa])\s+(.+)$/;
 /** Palavras que encerram o nome pedido ("das n rainhas na entrevista" → "n rainhas"). */
 const FIM_DO_NOME = new Set(["na", "no", "nas", "nos", "pra", "para", "porque", "que", "e", "com", "em", "ai", "por", "pro"]);
 const RE_SORTEIO =
   /\b(?:pode sortear|sorteia|sorteie|deixa (?:o )?sorteio|deixar (?:o )?sorteio|prefiro (?:o )?sorteio|fica (?:com )?o sorteio|qualquer (?:questao|problema|uma))\b/;
 
-/** Frases da fala, já normalizadas. */
+/** Frases da fala, já normalizadas. Vírgula e "mas" também separam: "não quero o two sum, prefiro busca binária" são dois pedidos. */
 function frases(texto: string): string[] {
   return texto
-    .split(/[.!?;\n]+/)
+    .split(/[.!?;,\n]+|\s+mas\s+/i)
     .map(normalizarPedido)
     .filter(Boolean);
 }
@@ -81,6 +84,17 @@ export function lerPedidoDeProblema(texto: string): LeituraDoPedido | undefined 
   return undefined;
 }
 
+/** A questão do banco que a fala recusa ("não quero o two sum"), ou undefined. */
+function lerRecusaDeProblema(texto: string): PublicProblem | undefined {
+  for (const frase of frases(texto)) {
+    if (RE_NEGACAO.test(frase)) {
+      const problema = resolverProblemaPedido(frase);
+      if (problema) return problema;
+    }
+  }
+  return undefined;
+}
+
 /** O resultado de um pedido no formato atual: no quadro não há banco, a questão é gerada para a vaga. */
 function resultadoNoFormato(leitura: LeituraDoPedido, mode: InterviewMode): ResultadoDoPedido {
   if (leitura.tipo === "sorteio") return "sorteio";
@@ -102,35 +116,57 @@ export function aplicarPedidoDeProblema(r: Rascunho, fala: string, turno: number
     return { ...r, pedidoProblema: { ...pedido, tema: limitarPalavras(fala, 20) } };
   }
   const leitura = lerPedidoDeProblema(fala);
-  if (!leitura) return r;
+  if (!leitura) {
+    // Recusa da questão que estava fixada: volta ao sorteio.
+    const recusada = lerRecusaDeProblema(fala);
+    return recusada && r.pedidoProblema?.resultado === "reconhecido" && r.problemId === recusada.id
+      ? { ...r, problemId: undefined, pedidoProblema: undefined }
+      : r;
+  }
   // "Pode sortear" sem pedido anterior não muda nada: o sorteio já é o padrão.
   if (leitura.tipo === "sorteio" && !r.pedidoProblema) return r;
   const resultado = resultadoNoFormato(leitura, r.mode);
   const texto = leitura.tipo === "problema" ? leitura.problema.title : limitarPalavras(leitura.texto, 8);
   const pedidoProblema = { texto, resultado, turno, origem: "fala" as const };
   if (resultado === "reconhecido" && leitura.tipo === "problema") return { ...r, problemId: leitura.problema.id, pedidoProblema };
-  if (resultado === "system_design") return { ...r, pedidoProblema };
+  // No quadro o problemId é do catálogo da pré-entrevista: só o pedido é registrado, a escolha fica.
+  if (r.mode !== "live_coding") return { ...r, pedidoProblema };
   return { ...r, problemId: undefined, pedidoProblema };
 }
 
 /**
  * O `problemId` que o extrator devolveu, aplicado ao rascunho. Só vale quando a fala dela não trouxe um pedido
  * (a leitura da fala vence: tem a transcrição do turno). Sem correspondência no banco, o campo fica vazio e o aviso sobe.
- * O pedido do extrator chega depois da resposta do Totti, então fica com `turno` 0: nunca é "desta fala" (ver
- * `linhasDoPedido`). Função pura quanto ao rascunho.
+ * Pedido do extrator fica com `TURNO_DO_EXTRATOR` (ver `linhasDoPedido`). Função pura quanto ao rascunho.
  */
 export function aplicarProblemaDoExtrator(r: Rascunho, valor: string | undefined, avisos: string[]): Rascunho {
-  const turno = 0;
   if (valor === undefined || r.pedidoProblema?.origem === "fala") return r;
   const problema = problems[valor] ?? resolverProblemaPedido(valor);
+  const pedido = (texto: string, resultado: ResultadoDoPedido) => ({ texto, resultado, turno: TURNO_DO_EXTRATOR, origem: "extrator" as const });
   if (r.mode !== "live_coding") {
-    return { ...r, problemId: undefined, pedidoProblema: { texto: problema?.title ?? limitarPalavras(valor, 8), resultado: "system_design", turno, origem: "extrator" } };
+    return { ...r, problemId: undefined, pedidoProblema: pedido(problema?.title ?? limitarPalavras(valor, 8), "system_design") };
   }
   if (!problema) {
     avisos.push(`problemId "${valor}" descartado: nenhuma questão do banco com esse nome`);
-    return { ...r, problemId: undefined, pedidoProblema: { texto: limitarPalavras(valor, 8), resultado: "nao_existe", turno, origem: "extrator" } };
+    return { ...r, problemId: undefined, pedidoProblema: pedido(limitarPalavras(valor, 8), "nao_existe") };
   }
-  return { ...r, problemId: problema.id, pedidoProblema: { texto: problema.title, resultado: "reconhecido", turno, origem: "extrator" } };
+  return { ...r, problemId: problema.id, pedidoProblema: pedido(problema.title, "reconhecido") };
+}
+
+/**
+ * O `problemId` do extrator só vale se alguma fala da recrutadora cita a questão (pelo id, título, apelido ou, para
+ * uma que não existe, pelo nome que o modelo devolveu). Sem isso é palpite do modelo e não fixa nada. Função pura.
+ */
+export function problemaTemEvidencia(valor: string | undefined, transcricao: Turno[]): boolean {
+  if (!valor) return false;
+  const alvo = problems[valor] ?? resolverProblemaPedido(valor);
+  const nome = normalizarPedido(valor);
+  return transcricao
+    .filter((t) => t.role === "recrutadora")
+    .some((t) => {
+      const fala = normalizarPedido(t.text);
+      return alvo ? resolverProblemaPedido(fala)?.id === alvo.id : !!nome && ` ${fala} `.includes(` ${nome} `);
+    });
 }
 
 /** A questão fixada a pedido dela, ou undefined (sorteio pelo nível e pelo foco). */

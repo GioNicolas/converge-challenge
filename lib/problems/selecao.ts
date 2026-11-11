@@ -79,15 +79,15 @@ export function sortearProblema(c: Omit<CriterioSelecao, "semente">, aleatorio: 
  * jeito como se fala em português. Escritos sem acento e em minúsculas, como `normalizarPedido` deixa o texto.
  */
 export const APELIDOS: Record<string, string[]> = {
-  "two-sum": ["two sum", "twosum", "2 sum", "soma de dois", "soma de dois numeros", "soma dois", "dois numeros que somam"],
+  "two-sum": ["two sum", "twosum", "2 sum", "soma de dois", "soma de dois numeros", "dois numeros que somam"],
   "best-time-stock": ["best time to buy and sell stock", "best time to buy and sell", "comprar e vender acoes", "compra e venda de acoes", "melhor momento para comprar e vender"],
-  "valid-parentheses": ["valid parentheses", "parenteses validos", "parenteses", "parenteses balanceados", "balanceamento de parenteses"],
+  "valid-parentheses": ["valid parentheses", "parenteses validos", "parenteses balanceados", "balanceamento de parenteses"],
   "binary-search": ["binary search", "busca binaria", "pesquisa binaria"],
-  "climbing-stairs": ["climbing stairs", "subindo escadas", "subir escadas", "escada", "escadas"],
-  "top-k-frequent": ["top k frequent", "top k frequent elements", "top k", "k mais frequentes", "k elementos mais frequentes", "elementos mais frequentes"],
-  "maximum-subarray": ["maximum subarray", "max subarray", "subarray de soma maxima", "soma maxima", "kadane"],
+  "climbing-stairs": ["climbing stairs", "subindo escadas", "subir escadas"],
+  "top-k-frequent": ["top k frequent", "top k frequent elements", "k mais frequentes", "k elementos mais frequentes", "elementos mais frequentes"],
+  "maximum-subarray": ["maximum subarray", "max subarray", "subarray de soma maxima", "kadane"],
   "daily-temperatures": ["daily temperatures", "temperaturas diarias", "temperatura diaria"],
-  "longest-substring-no-repeat": ["longest substring without repeating characters", "longest substring", "maior substring sem repeticao", "substring sem repeticao", "maior substring"],
+  "longest-substring-no-repeat": ["longest substring without repeating characters", "maior substring sem repeticao", "substring sem repeticao"],
   "search-rotated": ["search in rotated sorted array", "rotated sorted array", "busca em array rotacionado", "array rotacionado", "vetor rotacionado"],
 };
 
@@ -104,8 +104,14 @@ export function normalizarPedido(texto: string): string {
 }
 
 /** Os nomes de uma questão (id, título e apelidos), já normalizados, do mais longo ao mais curto. */
+const nomesPorQuestao = new WeakMap<PublicProblem, string[]>();
 function nomesDa(p: PublicProblem): string[] {
-  return [...new Set([p.id, p.title, ...(APELIDOS[p.id] ?? [])].map(normalizarPedido))].sort((a, b) => b.length - a.length);
+  let nomes = nomesPorQuestao.get(p);
+  if (!nomes) {
+    nomes = [...new Set([p.id, p.title, ...(APELIDOS[p.id] ?? [])].map(normalizarPedido))].sort((a, b) => b.length - a.length);
+    nomesPorQuestao.set(p, nomes);
+  }
+  return nomes;
 }
 
 /** Onde um nome aparece no texto, como palavra inteira, ou -1. */

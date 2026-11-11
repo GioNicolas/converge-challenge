@@ -15,7 +15,7 @@ import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa }
 import { acharEvidencia } from "./pesos";
 import { fraseComTrecho, normalizarTexto, RE_CONTEXTO, RE_LOGISTICA, RE_REQUISITO } from "./frases";
 import { alinharPesos, mudarModo, Origem, Rascunho, type Turno } from "./rascunho";
-import { aplicarProblemaDoExtrator } from "./problema-pedido";
+import { aplicarProblemaDoExtrator, problemaTemEvidencia } from "./problema-pedido";
 import { titulosDoBanco } from "@/lib/problems/selecao";
 
 const TEMPERATURA = 0.2;
@@ -448,6 +448,11 @@ export async function extrair(r: Rascunho, transcricao: Turno[], contexto: Conte
     tentativasJson.push({ resposta: resposta.content });
     const checado = checarDuracao(patch, transcricao, avisos);
     const aceito = validarEvidencias(checado, transcricao, checado.mode ?? r.mode, avisos);
+    // O modelo só fixa questão que a recrutadora citou; sem a citação é palpite.
+    if (aceito.problemId !== undefined && !problemaTemEvidencia(aceito.problemId, transcricao)) {
+      avisar(avisos, `problemId "${aceito.problemId}" descartado: a recrutadora não citou essa questão`);
+      aceito.problemId = undefined;
+    }
     const aplicado = aplicarPatch(r, aceito, avisos);
     return {
       rascunho: modoEscolhido ? mudarModo(aplicado, modoEscolhido) : aplicado,
