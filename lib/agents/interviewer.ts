@@ -269,11 +269,6 @@ async function turno(
       if (passo.encerrar) return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa, despedida: true };
       return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
     }
-    // Pediu para encerrar a entrevista: quem se despede e fecha é a IDE (como no botão Finalizar).
-    if (!opening && output.finish === true) {
-      registrarEvidencia(session, output);
-      return { reply: "", commands: [], end: true, finish: true };
-    }
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
     if (!opening && perguntou && calou(output) && output.finish !== true && sobra() >= MIN_PARA_REGERAR_MS) {

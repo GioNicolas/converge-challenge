@@ -32,6 +32,8 @@ export async function POST(request: Request) {
       session.fechamentoBlipId = blip?.id;
     }
   }
+  // Pedido para encerrar (ou o tempo acabou) no meio do fechamento: direto para a despedida.
+  if (parsed.data.gatilho === "pediu_encerrar" && session.fechamento.etapa !== "encerrada") session.fechamento = { ...session.fechamento, etapa: "despedida" };
   let response: EventsResponse;
   if (session.fechamento.etapa === "despedida") {
     const passo = proximoPasso(session.fechamento);

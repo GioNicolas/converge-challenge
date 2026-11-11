@@ -288,9 +288,6 @@ export const ChatResponse = z.object({
   despedida: z.boolean().optional(),
   /** O candidato concluiu uma etapa: o agente avança (a próxima pergunta já é sobre o que vem depois). */
   concluded: z.boolean().optional(),
-  /** O candidato pediu para encerrar a entrevista: a IDE se despede e encerra a sessão. */
-  /** @deprecated A IDE ainda lê este campo durante a migração do contrato. */
-  finish: z.boolean().optional(),
 });
 export type ChatResponse = z.infer<typeof ChatResponse>;
 
