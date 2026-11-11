@@ -18,4 +18,8 @@ describe("soAprovacaoDesdeAExtracao", () => {
     assert.equal(soAprovacaoDesdeAExtracao([...base, r("Comunicação pesa mais")], 3), false);
     assert.equal(soAprovacaoDesdeAExtracao([...base, r("Pode")], 0), false);
   });
+  it("fala que o Totti não entendeu não pede extração (ela não vai para a extração)", () => {
+    const quebrada: Turno = { role: "recrutadora", text: "Ele diz expresso.", naoEntendida: true };
+    assert.equal(soAprovacaoDesdeAExtracao([...base, quebrada, a("Não peguei essa. Posso finalizar?"), r("Pode")], 3), true);
+  });
 });
