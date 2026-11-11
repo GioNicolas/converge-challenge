@@ -10,6 +10,7 @@ import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
 import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/seguranca/injecao";
 import { blocoDaPersona } from "@/lib/totti/persona";
+import { candidatoPerguntou as perguntouNaFala } from "@/lib/totti/turno";
 
 export function buildInterviewerSystem(config: InterviewConfig, problem: Problem): string {
   const pub = problem.public;
@@ -198,18 +199,12 @@ export interface InterviewerTurnInput {
 }
 
 /**
- * A última fala do candidato tem uma pergunta para o Totti. A transcrição quase nunca põe o "?", e o modelo
- * rápido ignorava "o que que tu achou" no fim de uma explicação para fazer a própria pergunta.
+ * A última fala do candidato tem uma pergunta para o Totti. A leitura da fala é a do Totti único
+ * (lib/totti/turno.ts), a mesma do quadro.
  */
 export function candidatoPerguntou(messages: ChatMessage[]): boolean {
   const ultima = messages.at(-1);
-  if (ultima?.role !== "candidate") return false;
-  const texto = ultima.text.toLowerCase();
-  return (
-    texto.includes("?") ||
-    /\b(o que (que )?(tu|voc[êe]) (acha|achou|pensa|diz)|tu acha|voc[êe] acha|t[áa] certo|est[áa] certo|t[áa] bom assim|faz sentido|pode ser assim|posso (usar|fazer|come[çc]ar|seguir|pesquisar)|(voc[êe] |tu )?(pode|podia|poderia) me (explicar|ajudar|dizer|falar)|me explica|n[ãa]o entendi|qual (é|e) (a|o)|[ée] de (abertura|fechamento)|quanto tempo|vou ser (penalizado|prejudicado|avaliado)|como (vai|vou) ser avaliado|tenho que|preciso (usar|tratar|considerar)|qual (é|e) a|devo)\b/.test(texto) ||
-    /\b(n[ée]|certo|beleza|ok)\s*$/.test(texto.trim())
-  );
+  return ultima?.role === "candidate" && perguntouNaFala(ultima.text);
 }
 
 /** Texto quando não há dica para oferecer: o motivo depende da política da recrutadora. */
