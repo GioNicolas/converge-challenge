@@ -30,7 +30,8 @@ export function timeoutScorecardMs(): number {
   const valor = Number(process.env.AGENTE_TIMEOUT_SCORECARD_MS);
   return Number.isInteger(valor) && valor > 0 && valor <= TIMEOUT_SCORECARD_MAX_MS ? valor : TIMEOUT_SCORECARD_MS;
 }
-export const MAX_TOKENS_SCORECARD = 6000;
+/** O GLM-5.2 da Featherless usa 6–11,7 mil tokens com o raciocínio; com 6000 a resposta saía cortada (ver lib/llm, papel relatorio). */
+export const MAX_TOKENS_SCORECARD = 12_000;
 export const SEM_EVIDENCIA = "Sem evidência suficiente para atribuir nota a este critério.";
 
 // ---------------------------------------------------------------------------------------------
