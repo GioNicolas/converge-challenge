@@ -4,6 +4,17 @@ import { criarEscutaTranscricao, type EstadoEscuta } from "../useTranscricao";
 import { ErroTokenTranscricao } from "../tokenTranscricao";
 import type { TrechoTranscrito } from "../transcricao";
 
+/** Amostras PCM 16 bits de uma mensagem input_audio_chunk. */
+function amostrasDe(dados: string): number[] {
+  const binario = atob((JSON.parse(dados) as { audio_base_64: string }).audio_base_64);
+  const saida: number[] = [];
+  for (let i = 0; i < binario.length; i += 2) {
+    const valor = binario.charCodeAt(i) | (binario.charCodeAt(i + 1) << 8);
+    saida.push(valor >= 32768 ? valor - 65536 : valor);
+  }
+  return saida;
+}
+
 const andar = () => new Promise<void>((resolver) => setImmediate(resolver));
 
 function globalFalso(t: TestContext, nome: string, valor: unknown) {
@@ -16,7 +27,7 @@ function globalFalso(t: TestContext, nome: string, valor: unknown) {
 }
 
 function montar(t: TestContext, opcoes: {
-  servidor?: boolean; navegador?: boolean; prefixado?: boolean; semAudio?: boolean;
+  servidor?: boolean; navegador?: boolean; prefixado?: boolean; semAudio?: boolean; taxa?: number;
   obterToken?: (id: string) => Promise<string>;
 } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
@@ -45,7 +56,7 @@ function montar(t: TestContext, opcoes: {
     onaudioprocess: ((evento: AudioProcessingEvent) => void) | null = null;
   }
   class ContextoFalso {
-    sampleRate = 48000;
+    sampleRate = opcoes.taxa ?? 48000;
     state = "running";
     fechamentos = 0;
     destination = {};
@@ -161,7 +172,7 @@ test("ocultar a aba suspende envio de voz e retomar não duplica finais", async 
   assert.equal(m.trechos.at(-1)?.texto, "retomou");
 });
 
-test("pausa mantém socket e contexto, envia silêncio e ignora transcrições atrasadas", async (t) => {
+test("pausa mantém socket e contexto, fecha o trecho com silêncio, não envia nada e ignora transcrições atrasadas", async (t) => {
   const m = montar(t);
   m.controle.ativar(true);
   await andar();
@@ -171,9 +182,13 @@ test("pausa mantém socket e contexto, envia silêncio e ignora transcrições a
   ws.mensagem({ message_type: "partial_transcript", text: "escala" });
   m.controle.ativar(false);
   assert.equal(m.estado()?.escutando, false);
-  m.processar(1);
-  const audio = JSON.parse(ws.enviados.at(-1)!) as { audio_base_64: string };
-  assert.ok([...atob(audio.audio_base_64)].every((c) => c.charCodeAt(0) === 0));
+  // A fala aberta é fechada com silêncio (a folga de 1,2 s) para o Scribe confirmar o trecho.
+  const fechamento = ws.enviados.slice(1).flatMap((dados) => amostrasDe(dados));
+  assert.ok(fechamento.length >= 1.2 * 16000);
+  assert.ok(fechamento.slice(-1.2 * 16000).every((amostra) => amostra === 0));
+  const enviadosNaPausa = ws.enviados.length;
+  m.processar(1, 30);
+  assert.equal(ws.enviados.length, enviadosNaPausa);
   const antes = m.trechos.length;
   ws.mensagem({ message_type: "committed_transcript", text: "não deve sair" });
   assert.equal(m.trechos.length, antes);
@@ -512,4 +527,130 @@ test("frases que o Scribe inventa no silêncio são descartadas; fala de verdade
   // A voz conta por trecho: o próximo começa do zero.
   ws.mensagem({ message_type: "committed_transcript", text: "Obrigado." });
   assert.equal(m.trechos.at(-1)?.texto, "Quantos acessos por dia?");
+});
+
+/** Roda blocos de 256 ms (4096 amostras a 16 kHz) com relógio e timers andando junto. */
+function relogioDeAudio(t: TestContext, m: ReturnType<typeof montar>) {
+  let relogio = 0;
+  t.mock.method(performance, "now", () => relogio);
+  return {
+    async blocos(valor: number, ms: number) {
+      for (let i = 0; i < Math.round(ms / 256); i++) {
+        m.processar(valor, 1);
+        relogio += 256;
+        t.mock.timers.tick(256);
+        await andar();
+        const ultimo = m.sockets.at(-1);
+        if (ultimo && ultimo.readyState === 0) ultimo.iniciar();
+      }
+    },
+  };
+}
+
+const VOZ = 0.25;
+const SILENCIO = 0.001;
+const AMOSTRA_VOZ = Math.round(VOZ * 32767);
+
+test("portão de voz: nada vai no silêncio; fala vai inteira com 300 ms antes e 1,2 s depois", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  await audio.blocos(SILENCIO, 4096);
+  const ws = m.sockets[0];
+  const keepalive = ws.enviados.length;
+  assert.ok(keepalive <= 1, "no silêncio só sai o bloco curto que mantém a conexão");
+  await audio.blocos(VOZ, 2048);
+  await audio.blocos(SILENCIO, 4096);
+  const enviadas = ws.enviados.slice(keepalive).flatMap(amostrasDe);
+  const primeiraVoz = enviadas.indexOf(AMOSTRA_VOZ);
+  assert.ok(primeiraVoz >= 4096 && primeiraVoz <= 4800 + 4096, `folga antes: ${primeiraVoz} amostras`);
+  assert.equal(enviadas.filter((a) => a === AMOSTRA_VOZ).length, 8 * 4096, "toda a fala foi enviada");
+  const depois = enviadas.length - enviadas.lastIndexOf(AMOSTRA_VOZ) - 1;
+  assert.ok(depois >= 1.2 * 16000 && depois <= 1.2 * 16000 + 4096, `folga depois: ${depois} amostras`);
+  ws.mensagem({ message_type: "committed_transcript", text: "Quantos acessos por dia?" });
+  assert.equal(m.trechos.at(-1)?.texto, "Quantos acessos por dia?");
+  assert.ok(m.controle.uso().audioEnviadoS < 4);
+});
+
+test("fala que começa logo depois de o Totti parar não perde o começo", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  m.controle.ativar(false);
+  await audio.blocos(VOZ, 5120); // o microfone ouve o Totti
+  const ws = m.sockets[0];
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a !== 0).length, 0, "a voz do Totti não vai ao Scribe");
+  m.controle.ativar(true);
+  const antes = ws.enviados.length;
+  await audio.blocos(VOZ, 512);
+  await audio.blocos(SILENCIO, 1536);
+  assert.equal(ws.enviados.slice(antes).flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 2 * 4096);
+});
+
+test("um \"sim\" isolado vai inteiro e confirma o trecho", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  await audio.blocos(SILENCIO, 2048);
+  await audio.blocos(VOZ, 256);
+  await audio.blocos(SILENCIO, 2048);
+  const enviadas = m.sockets[0].enviados.flatMap(amostrasDe);
+  assert.equal(enviadas.filter((a) => a === AMOSTRA_VOZ).length, 4096);
+  m.sockets[0].mensagem({ message_type: "committed_transcript", text: "Sim." });
+  assert.equal(m.trechos.at(-1)?.texto, "Sim.");
+});
+
+test("fala durante a conexão espera o session_started e sai inteira", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  m.controle.ativar(true);
+  await andar();
+  m.processar(VOZ, 3);
+  const ws = m.sockets[0];
+  assert.equal(ws.enviados.length, 0);
+  ws.iniciar();
+  assert.ok(ws.enviados.length >= 3, "o que esperava sai assim que a sessão começa");
+  m.processar(SILENCIO, 6); // a folga depois da fala fecha o portão e manda o resto
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 3 * 4096);
+});
+
+test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais da metade", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  let falado = 0;
+  let ouvindo = 0;
+  const falar = async (ms: number) => { falado += Math.round(ms / 256) * 4096; ouvindo += ms; await audio.blocos(VOZ, ms); };
+  const calar = async (ms: number) => { ouvindo += ms; await audio.blocos(SILENCIO, ms); };
+  // Ciclo de 1 min: Totti pergunta, candidato responde com uma pausa curta, digita, diz "sim", comenta.
+  for (let ciclo = 0; ciclo < 30; ciclo++) {
+    m.controle.ativar(false);
+    await audio.blocos(VOZ, 12_000);
+    m.controle.ativar(true);
+    await falar(6000);
+    await calar(512);
+    await falar(8000);
+    await calar(15_000);
+    await falar(512);
+    await calar(8000);
+    await falar(3500);
+    await calar(6500);
+  }
+  const ws = m.sockets[0];
+  assert.equal(m.sockets.length, 1, "pausas curtas e silêncio não derrubam a conexão");
+  const enviadas = ws.enviados.flatMap(amostrasDe);
+  assert.equal(enviadas.filter((a) => a === AMOSTRA_VOZ).length, falado, "nenhum trecho de fala perdido");
+  m.controle.parar();
+  const uso = m.controle.uso();
+  const antigo = ouvindo / 1000 + 30 * 12; // caminho antigo: a sessão inteira, silêncio no lugar do Totti
+  assert.ok(Math.abs(uso.sessaoS - antigo) < 5, `sessão: ${uso.sessaoS} s`);
+  assert.ok(uso.audioEnviadoS <= 0.5 * antigo, `enviado ${uso.audioEnviadoS.toFixed(0)} s de ${antigo.toFixed(0)} s`);
+  console.info(`[linha do tempo] enviado ${uso.audioEnviadoS.toFixed(0)} s de ${uso.sessaoS.toFixed(0)} s de sessão`);
 });

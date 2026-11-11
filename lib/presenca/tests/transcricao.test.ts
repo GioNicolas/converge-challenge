@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  criarPortaoDeVoz,
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, pcm16LE, reamostrar, urlDoScribe,
 } from "../transcricao";
@@ -103,4 +104,34 @@ test("URL e mensagem seguem o protocolo e usam somente token temporário", () =>
   assert.deepEqual(JSON.parse(mensagemDeAudio(new Float32Array([0, 1]))), {
     message_type: "input_audio_chunk", audio_base_64: "AAD/fw==", commit: false, sample_rate: 16000,
   });
+});
+
+test("portão de voz guarda 300 ms antes da fala e segue 1,2 s depois", () => {
+  const portao = criarPortaoDeVoz();
+  const bloco = (valor: number) => new Float32Array(1600).fill(valor); // 100 ms a 16 kHz
+  for (let i = 0; i < 10; i++) assert.equal(portao.passar(bloco(0.001), false).amostras.length, 0);
+  const abertura = portao.passar(bloco(0.3), true);
+  assert.equal(abertura.abriu, true);
+  assert.equal(abertura.amostras.length, 4800 + 1600);
+  assert.equal(abertura.amostras[4800], Math.fround(0.3));
+  for (let i = 0; i < 11; i++) {
+    const r = portao.passar(bloco(0), false);
+    assert.equal(r.amostras.length, 1600);
+    assert.equal(r.fechou, false);
+  }
+  const ultimo = portao.passar(bloco(0), false);
+  assert.equal(ultimo.fechou, true);
+  assert.equal(portao.aberto, false);
+  assert.equal(portao.passar(bloco(0), false).amostras.length, 0);
+});
+
+test("portão interrompido devolve silêncio pelo resto da folga", () => {
+  const portao = criarPortaoDeVoz();
+  portao.passar(new Float32Array(1600).fill(0.3), true);
+  portao.passar(new Float32Array(3200), false);
+  const resto = portao.encerrar();
+  assert.equal(resto.length, 19200 - 3200);
+  assert.ok(resto.every((a) => a === 0));
+  assert.equal(portao.aberto, false);
+  assert.equal(portao.encerrar().length, 0);
 });

@@ -115,3 +115,69 @@ export function mensagemDeAudio(amostras: Float32Array, commit = false): string 
   for (const byte of bytes) binario += String.fromCharCode(byte);
   return JSON.stringify({ message_type: "input_audio_chunk", audio_base_64: btoa(binario), commit, sample_rate: 16000 });
 }
+
+/** Folga de áudio antes da fala, para não cortar a primeira sílaba. */
+export const PORTAO_ANTES_MS = 300;
+/** Folga depois da fala: maior que o vad_silence_threshold_secs (0,9 s), para o Scribe fechar o trecho. */
+export const PORTAO_DEPOIS_MS = 1200;
+
+export type PortaoDeVoz = {
+  readonly aberto: boolean;
+  /** Recebe um bloco já em 16 kHz e devolve o que deve ir ao Scribe (vazio com o portão fechado). */
+  passar(amostras: Float32Array, voz: boolean): { amostras: Float32Array; abriu: boolean; fechou: boolean };
+  /** Fecha um trecho interrompido: devolve silêncio pelo resto da folga, para o Scribe confirmar o trecho. */
+  encerrar(): Float32Array;
+  reiniciar(): void;
+};
+
+/**
+ * Portão de voz local: o Scribe cobra por tempo de áudio enviado, então só vai áudio em volta de fala.
+ * Com o portão fechado guarda os últimos `antesMs` (abertura leva junto o começo da fala); depois da última
+ * voz continua aberto por `depoisMs`.
+ */
+export function criarPortaoDeVoz(opcoes: { taxa?: number; antesMs?: number; depoisMs?: number } = {}): PortaoDeVoz {
+  const taxa = opcoes.taxa ?? 16000;
+  const antes = Math.round(((opcoes.antesMs ?? PORTAO_ANTES_MS) / 1000) * taxa);
+  const depois = Math.round(((opcoes.depoisMs ?? PORTAO_DEPOIS_MS) / 1000) * taxa);
+  let aberto = false;
+  let restante = 0;
+  let anterior = new Float32Array(0);
+  const vazio = new Float32Array(0);
+  return {
+    get aberto() { return aberto; },
+    passar(amostras, voz) {
+      if (voz) {
+        restante = depois;
+        if (aberto) return { amostras, abriu: false, fechou: false };
+        aberto = true;
+        const saida = new Float32Array(anterior.length + amostras.length);
+        saida.set(anterior);
+        saida.set(amostras, anterior.length);
+        anterior = vazio;
+        return { amostras: saida, abriu: true, fechou: false };
+      }
+      if (aberto) {
+        restante -= amostras.length;
+        if (restante <= 0) aberto = false;
+        return { amostras, abriu: false, fechou: !aberto };
+      }
+      const junto = new Float32Array(anterior.length + amostras.length);
+      junto.set(anterior);
+      junto.set(amostras, anterior.length);
+      anterior = junto.slice(Math.max(0, junto.length - antes));
+      return { amostras: vazio, abriu: false, fechou: false };
+    },
+    encerrar() {
+      const silencio = new Float32Array(aberto ? Math.max(0, restante) : 0);
+      aberto = false;
+      restante = 0;
+      anterior = vazio;
+      return silencio;
+    },
+    reiniciar() {
+      aberto = false;
+      restante = 0;
+      anterior = vazio;
+    },
+  };
+}
