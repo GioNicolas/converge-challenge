@@ -88,8 +88,8 @@ describe("peça citada é marcada", () => {
   });
 
   it("pergunta com elementos e sem gesto ganha uma marca; o gesto do modelo fica como está", () => {
-    assert.deepEqual(garantirMarca([], ["r3"]), [{ tipo: "circular", alvo: "r3" }]);
-    assert.deepEqual(garantirMarca([{ tipo: "anotar", texto: "Por quê?" }], ["r3"], 1), [{ tipo: "sublinhar", alvo: "r3" }, { tipo: "anotar", texto: "Por quê?" }]);
+    assert.deepEqual(garantirMarca([], ["r3"]), [{ tipo: "marcar", alvo: "r3" }]);
+    assert.deepEqual(garantirMarca([{ tipo: "anotar", texto: "Por quê?" }], ["r3"], 1), [{ tipo: "marcar", alvo: "r3" }, { tipo: "anotar", texto: "Por quê?" }]);
     const doModelo = [{ tipo: "enquadrar" as const, alvo: "r4" }];
     assert.deepEqual(garantirMarca(doModelo, ["r3"]), doModelo);
     assert.equal(garantirMarca(undefined, []), undefined);
@@ -99,7 +99,7 @@ describe("peça citada é marcada", () => {
     const r = filtrarResposta(estadoEm("ALTO_NIVEL"), {
       status: "duvida", pergunta: "Por que os contatos ficam nesse banco?", nota: "Contatos no banco?", elementos: ["r3"], visual: [], degrau: null, observacoes: [],
     }, extrairIdsDoGrafo(GRAFO), AGORA);
-    assert.deepEqual(r.visual, [{ tipo: "circular", alvo: "r3" }]);
+    assert.deepEqual(r.visual, [{ tipo: "marcar", alvo: "r3" }]);
   });
 
   it("a pergunta da conversa que cita uma peça também marca", async () => {

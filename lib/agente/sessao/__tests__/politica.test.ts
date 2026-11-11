@@ -144,7 +144,7 @@ describe("filtrarResposta", () => {
   it("deixa passar uma resposta válida", () => {
     const r = filtrarResposta(e, resposta(), IDS, AGORA);
     // A pergunta cita uma peça e o modelo não pediu gesto: a peça é marcada mesmo assim.
-    assert.deepEqual(r, { ...resposta(), visual: [{ tipo: "circular", alvo: "e1" }], avancar_fase: false });
+    assert.deepEqual(r, { ...resposta(), visual: [{ tipo: "marcar", alvo: "e1" }], avancar_fase: false });
   });
 
   it("avancar_fase só vale em ALTO_NIVEL, mesmo quando o plin é rebaixado", () => {
