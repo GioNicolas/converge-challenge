@@ -1,7 +1,7 @@
 import type { Alinhamento } from "../presenca/alinhamento";
 import { tocarComAlinhamento } from "../presenca/vozSincronizada";
 import { RespostaVoz } from "./contrato";
-import { comFolga } from "./folga";
+import { comFolga, marcarSaidaDeSom, quadrosAntesDaFala } from "./folga";
 type DadosVoz = import("zod").infer<typeof RespostaVoz>;
 export type ProvedorVoz = "elevenlabs";
 type MetaSessaoVoz = { sessao_id: string; contexto: "quadro" | "coding" | "pre" };
@@ -100,13 +100,14 @@ export function criarVoz(dependencias: {
           const dados = await audioDe(parte.texto, sinal);
           audioObtido = true;
           sinal.throwIfAborted();
-          // Silêncio nas duas pontas: sem ele, a saída de som engolia a primeira sílaba e às vezes o finalzinho.
-          const { bytes, alinhamento } = comFolga(Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0)), dados.alinhamento as Alinhamento);
           if (!(await aguardarVez())) {
             const meta = metadadosAtuais();
             if (sintetizadaNestaFala && meta) avisarDescartada({ contexto: meta.contexto, caracteres: parte.texto.length, motivo: "cancelada" });
             return;
           }
+          // Silêncio nas duas pontas: sem ele, a saída de som engolia a primeira sílaba e às vezes o finalzinho. A
+          // folga de antes é decidida na hora de tocar: maior se a saída ficou parada (pode ter dormido).
+          const { bytes, alinhamento } = comFolga(Uint8Array.from(atob(dados.audio_base64), (c) => c.charCodeAt(0)), dados.alinhamento as Alinhamento, quadrosAntesDaFala());
           await tocar(new Blob([bytes as BlobPart], { type: "audio/mpeg" }), alinhamento, {
             sinal,
             aoAguardarGesto: eventos.aoAguardarGesto,
@@ -116,10 +117,12 @@ export function criarVoz(dependencias: {
               progresso(n);
             },
           });
+          marcarSaidaDeSom();
           sinal.throwIfAborted();
           progresso(parte.texto.length);
           break;
         } catch (erro) {
+          if (iniciou) marcarSaidaDeSom();
           if (sinal.aborted) {
             const meta = metadadosAtuais();
             if (audioObtido && !iniciou && sintetizadaNestaFala && meta) avisarDescartada({ contexto: meta.contexto, caracteres: parte.texto.length, motivo: "substituida" });

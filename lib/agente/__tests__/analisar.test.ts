@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analisar, assinaturaDaAnalise, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
+import { analisar, assinaturaDaAnalise, CONVITES_SILENCIO_INICIAL, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
@@ -110,7 +110,8 @@ describe("analisar", () => {
   });
 
   it("REQUISITOS: o convite (duvida) vira plin e não gasta a cota de perguntas", async () => {
-    const r = await analisar(deps(criarClienteFalso([duvida({ elementos: [] })])), estadoEm("REQUISITOS"), pedido("REQUISITOS"), AGORA);
+    const r = await analisar(deps(criarClienteFalso([duvida({ elementos: [] })])),
+      estadoEm("REQUISITOS", { faseIniciadaEm: AGORA - 120_000 }), { ...pedido("REQUISITOS"), grafo: "" }, AGORA);
     assert.equal(r.resposta.status, "duvida");
     assert.equal(r.estado.plin, "PLIN_PENDENTE");
     const clicado = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, AGORA + 1).estado;
@@ -178,6 +179,61 @@ describe("analisar", () => {
     const texto = JSON.stringify(logs);
     assert.ok(!texto.includes("Postgres"), "log não pode ter o grafo");
     assert.ok(!texto.includes("boom"), "log não pode ter a mensagem do erro");
+  });
+});
+
+describe("convite fixo de REQUISITOS (#83)", () => {
+  const vazio = { ...pedido("REQUISITOS"), grafo: "", mudancas: "", parado_ha_s: 120 };
+  const estado = () => estadoEm("REQUISITOS", { faseIniciadaEm: AGORA - 120_000 });
+
+  it("o servidor escolhe o convite mesmo se o modelo sugerir cumprimento ou silêncio", async () => {
+    for (const bruta of [duvida({ pergunta: "Oi, tudo bem? Como você está pensando em abordar esse problema?" }), duvida({ status: "ok" })]) {
+      const llm = criarClienteFalso([bruta]);
+      const r = await analisar(deps(llm), estado(), vazio, AGORA);
+      assert.ok(CONVITES_SILENCIO_INICIAL.some((c) => c === r.resposta.pergunta));
+      assert.deepEqual(r.resposta.elementos, []);
+      assert.deepEqual(r.resposta.visual, []);
+      assert.equal(r.resposta.degrau, null);
+      assert.equal(r.estado.observacoes.length, 1);
+      assert.equal(llm.chamadas.length, 1, "nenhuma geração extra para o convite");
+      assert.match(llm.chamadas[0].sistema.estatico, /nunca cumprimente o candidato de novo/);
+      const clicado = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, AGORA + 1).estado;
+      const respondeu = transicionar(clicado, { tipo: "CANDIDATO_FALOU", texto: "Vou pensar", fimDeResposta: true }, AGORA + 2).estado;
+      const outra = await analisar(deps(criarClienteFalso([bruta])), respondeu, vazio, AGORA + 120_000);
+      assert.equal(outra.resposta.status, "ok");
+      assert.equal(outra.estado.perguntas.length, 1);
+    }
+  });
+
+  it("não deixa o modelo antecipar o convite nem convidar com desenho presente", async () => {
+    for (const [e, p] of [
+      [estadoEm("REQUISITOS", { faseIniciadaEm: AGORA - 119_999 }), vazio],
+      [estado(), pedido("REQUISITOS")],
+      [estado(), { ...vazio, parado_ha_s: 0 }],
+    ] as const) {
+      const r = await analisar(deps(criarClienteFalso([duvida()])), e, p, AGORA);
+      assert.equal(r.resposta.status, "ok");
+      assert.equal(r.estado.plin, "LIVRE");
+      assert.equal(r.estado.observacoes.length, 1);
+    }
+  });
+
+  it("substitui convite antigo pendente sem restaurar o cumprimento pela deduplicação", async () => {
+    const antiga = duvida({ pergunta: "Oi, tudo bem? Quando quiser, me conta como está pensando em começar. Pode tirar dúvidas comigo." });
+    const e: EstadoSessao = { ...estado(), plin: "PLIN_PENDENTE", perguntaPendente: { ...antiga, criadoEm: AGORA - 1 } };
+    const r = await analisar(deps(criarClienteFalso([antiga])), e, vazio, AGORA);
+    assert.ok(CONVITES_SILENCIO_INICIAL.some((c) => c === r.resposta.pergunta));
+    assert.equal(r.estado.perguntaPendente?.pergunta, r.resposta.pergunta);
+    assert.deepEqual(r.resposta.elementos, []);
+  });
+
+  it("fala registrada enquanto o modelo respondia derruba o convite na refiltragem", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado(), vazio, AGORA);
+    const atual = transicionar(estado(), { tipo: "CANDIDATO_FALOU", texto: "Me fala o volume", fimDeResposta: false }, AGORA + 1).estado;
+    const filtrada = refiltrarComEstadoAtual(atual, r.resposta, vazio, AGORA, AGORA + 2000);
+    assert.equal(filtrada.status, "ok");
+    assert.equal(filtrada.pergunta, null);
+    assert.equal(filtrada.observacoes.length, 1);
   });
 });
 

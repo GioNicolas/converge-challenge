@@ -5,6 +5,7 @@ import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_S } from "../../con
 import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
+import { fechamentoAtivo } from "./fechamento";
 import { FASES, type Fase, type RespostaAnalise, type StatusAnalise } from "./tipos";
 
 /** O ritmo das perguntas (orçamento, cota, intervalo) vem da política comum: lib/interrupcao/politica.ts. */
@@ -110,6 +111,11 @@ export type MotivoBloqueioPlin =
   | "LIMITE_DE_PERGUNTAS"
   | "COTA_DO_TEMPO"
   | "INTERVALO_ENTRE_PERGUNTAS"
+  | "CANDIDATO_JA_FALOU"
+  | "CANDIDATO_JA_DESENHOU"
+  | "SILENCIO_INICIAL_INSUFICIENTE"
+  | "CANDIDATO_EM_ATIVIDADE"
+  | "FECHAMENTO"
   | "BOLA_COM_O_CANDIDATO";
 
 /**
@@ -119,6 +125,8 @@ export type MotivoBloqueioPlin =
 export type ContextoDoCandidato = {
   /** Há quantos segundos ele não mexe no desenho nem fala (vem no pedido de análise). */
   paradoHaS?: number;
+  /** O grafo recebido contém elementos do candidato (inclusive texto e traços). */
+  temDesenho?: boolean;
 };
 
 /**
@@ -157,8 +165,21 @@ export function motivoBloqueioPlin(
 ): MotivoBloqueioPlin | null {
   const base = motivoBloqueio(estado);
   if (base) return base;
+  // Fechamento comum em andamento (lib/totti/fechamento.ts): as perguntas finais saem dele, uma atrás da outra, na
+  // conversa. A análise segue rodando para colher observações, mas não levanta pergunta por cima.
+  if (fechamentoAtivo(estado)) return "FECHAMENTO";
   // O convite de REQUISITOS e a pergunta final do FECHAMENTO ficam fora do orçamento, mas são únicos.
   if (estado.fase === "REQUISITOS" && estado.conviteFeito) return "LIMITE_DE_PERGUNTAS";
+  if (estado.fase === "REQUISITOS") {
+    const inicio = estado.faseIniciadaEm;
+    if (estado.conversa.some((f) => f.quem === "candidato" && f.texto.trim() && (inicio === null || f.em >= inicio))) {
+      return "CANDIDATO_JA_FALOU";
+    }
+    if (candidato.temDesenho) return "CANDIDATO_JA_DESENHOU";
+    if (inicio === null || agora - inicio < SILENCIO_INICIAL_S * 1000) return "SILENCIO_INICIAL_INSUFICIENTE";
+    // A voz/desenho pode ter chegado ao navegador antes de o servidor registrar a fala.
+    if (candidato.paradoHaS !== undefined && candidato.paradoHaS < SILENCIO_REQUISITOS_S) return "CANDIDATO_EM_ATIVIDADE";
+  }
   if (estado.fase === "FECHAMENTO" && estado.perguntaFinalFeita) return "LIMITE_DE_PERGUNTAS";
   // Ritmo da política comum (lib/interrupcao/politica.ts): orçamento escalado pela duração, cota proporcional ao
   // tempo, intervalo e respiro. Igual no quadro (lib/sessao/estados.ts) e no live coding.
@@ -221,7 +242,9 @@ export function filtrarResposta(
   regras: Regras = REGRAS_PADRAO,
   candidato: ContextoDoCandidato = {},
 ): RespostaAnalise {
-  const filtrada = filtrarPlin(estado, resposta, idsDoGrafo, agora, regras, candidato);
+  const filtrada = filtrarPlin(estado, resposta, idsDoGrafo, agora, regras, {
+    ...candidato, temDesenho: candidato.temDesenho || idsDoGrafo.size > 0,
+  });
   // O sinal de prontidão independe do plin, mas só vale em ALTO_NIVEL.
   return { ...filtrada, avancar_fase: resposta.avancar_fase === true && estado.fase === "ALTO_NIVEL" };
 }

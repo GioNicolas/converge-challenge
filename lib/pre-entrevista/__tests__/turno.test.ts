@@ -3,7 +3,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Classificacao } from "../classificador";
-import { conduzirTurno, desfazerValor } from "../turno";
+import { conduzirTurno, desfazerValor, naoEntendidasSeguidas } from "../turno";
+import { falasParaLer } from "../sessoes";
 import { ErroChat } from "../llm";
 import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, type LeituraFalsa } from "./apoio";
 
@@ -392,5 +393,105 @@ describe("desfazerValor: desfaz a leitura sem pisar no que outro caminho gravou"
 
   it("escalar mudado por outro caminho fica", () => {
     assert.equal(desfazerValor("extraido", "antes", "lido"), "extraido");
+  });
+});
+
+describe("conduzirTurno: fala que não faz sentido como resposta (issue #76)", () => {
+  const ESCOLHA = "Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?";
+  const NAO_PEGUEI = `Não peguei essa. ${ESCOLHA}`;
+  /** O Totti faz uma pergunta de escolha (o aprofundamento). */
+  const ATE_A_ESCOLHA = [{ ela: "isso, pode seguir", jev: { cobertura: { confirmou_inicio: 1 } }, totti: saida(ESCOLHA) }];
+  /** O Jev lê a frase quebrada como se fosse resposta: cobre o critério, marca sinais e ênfase. */
+  const QUEBRADA = { ela: "Ele diz expresso.", jev: { cobertura: { criterio_tecnico: 1 }, sinais: { quer_pressao: 1 }, niveis: { pressao: "central" as const } } };
+
+  it("'Ele diz expresso.' depois de uma pergunta de escolha: não repete a frase, refaz a pergunta e nada é lido dela", async () => {
+    const antes = await conversar(ATE_A_ESCOLHA);
+    const { sessao, resultados } = await conversar([...ATE_A_ESCOLHA, { ...QUEBRADA, totti: saida(`Ele diz expresso. ${NAO_PEGUEI}`, "nao_entendi") }]);
+    assert.equal(resultados[1].movimento, "nao_entendi");
+    assert.equal(resultados[1].fala, NAO_PEGUEI);
+    // A leitura da fala é desfeita, como em repetir e esclarecer: plano, cobertura e ênfase ficam como estavam.
+    assert.deepEqual(sessao.plano, antes.sessao.plano);
+    assert.deepEqual(sessao.rascunho.cobertura, antes.sessao.rascunho.cobertura);
+    assert.deepEqual(sessao.enfaseEstado, antes.sessao.enfaseEstado);
+    assert.equal(sessao.plano.ultimoPasso?.tipo, "aprofundar");
+    // A fala fica na tela, marcada, e sai do que a extração e a cobertura leem.
+    const dela = sessao.transcricao.filter((t) => t.role === "recrutadora").at(-1);
+    assert.equal(dela?.text, "Ele diz expresso.");
+    assert.equal(dela?.naoEntendida, true);
+    assert.ok(!falasParaLer(sessao.transcricao).some((t) => t.text === "Ele diz expresso."));
+  });
+
+  it("a cobertura dos turnos seguintes não lê a fala não entendida", async () => {
+    const transcricoesLidas: string[][] = [];
+    const sessao = sessaoAberta();
+    const falso = chatFalso(saida(ESCOLHA), saida(NAO_PEGUEI, "nao_entendi"), saida(RESUMO));
+    const jev = jevFalso({ cobertura: { confirmou_inicio: 1 } }, {}, { cobertura: { criterio_tecnico: 1, eliminatorios: 1 } });
+    const deps = {
+      chat: falso.chat,
+      avaliarEnfaseDaFala: jev.avaliarEnfaseDaFala,
+      avaliarCobertura: (async (r, transcricao, opcoes) => {
+        transcricoesLidas.push(transcricao.map((t) => t.text));
+        return jev.avaliarCobertura!(r, transcricao, opcoes);
+      }) as NonNullable<typeof jev.avaliarCobertura>,
+    };
+    for (const fala of ["isso, pode seguir", "Ele diz expresso.", "pode ir direto pra solução"]) await conduzirTurno(sessao, fala, deps);
+    assert.ok(!transcricoesLidas[2].includes("Ele diz expresso."));
+    assert.ok(transcricoesLidas[2].includes("pode ir direto pra solução"));
+  });
+
+  it("na terceira vez seguida, o Totti oferece que ela digite; uma resposta de verdade zera a contagem", async () => {
+    const quebradas = [1, 2, 3].map(() => ({ ela: "expresso diz ele", totti: saida(NAO_PEGUEI, "nao_entendi") }));
+    const { sessao, resultados } = await conversar([...ATE_A_ESCOLHA, ...quebradas]);
+    assert.equal(resultados[1].fala, NAO_PEGUEI);
+    assert.equal(resultados[2].fala, NAO_PEGUEI);
+    assert.match(resultados[3].fala, /digite a resposta aqui no chat/);
+    assert.ok(resultados[3].fala.endsWith(ESCOLHA));
+    assert.equal(resultados[3].movimento, "nao_entendi");
+    assert.equal(naoEntendidasSeguidas(sessao.transcricao), 3);
+    assert.equal(sessao.plano.ultimoPasso?.tipo, "aprofundar");
+    assert.equal(naoEntendidasSeguidas([...sessao.transcricao, { role: "recrutadora", text: "direto pra solução" }]), 0);
+  });
+
+  it("depois da oferta, a contagem recomeça: a 4ª e a 5ª vêm do modelo, a 6ª oferece de novo", async () => {
+    const quebradas = [1, 2, 3, 4, 5, 6].map(() => ({ ela: "expresso diz ele", totti: saida(NAO_PEGUEI, "nao_entendi") }));
+    const { resultados } = await conversar([...ATE_A_ESCOLHA, ...quebradas]);
+    assert.match(resultados[3].fala, /digite a resposta/);
+    assert.equal(resultados[4].fala, NAO_PEGUEI);
+    assert.equal(resultados[5].fala, NAO_PEGUEI);
+    assert.match(resultados[6].fala, /digite a resposta/);
+  });
+});
+
+describe("conduzirTurno: a confirmação da revisão diz o que foi pedido (issue #76)", () => {
+  it("'quero system design' no resumo: a confirmação fala do formato primeiro e da duração como consequência", async () => {
+    const { sessao, resultados, falso } = await conversar([
+      ...ATE_O_RESUMO,
+      { ela: "quero system design", jev: { sinais: { pediu_mudanca: 1 } }, totti: saida("não devia ser usada") },
+    ]);
+    assert.equal(sessao.rascunho.mode, "system_design");
+    assert.equal(resultados[2].fala, "Troquei para system design, no quadro. Com isso a entrevista fica com quarenta e cinco minutos. Posso finalizar?");
+    assert.equal(falso.chamadas.length, 2);
+    // O resumo guarda formato, nível e foco para a próxima revisão.
+    assert.equal(sessao.resumo?.mode, "system_design");
+    assert.equal(sessao.resumo?.seniority, "pleno");
+    assert.deepEqual(sessao.resumo?.foco, [{ area: "tecnico", weight: 1 }]);
+  });
+
+  it("o resumo guarda formato, nível e foco do momento", async () => {
+    const { sessao } = await conversar(ATE_O_RESUMO);
+    assert.equal(sessao.resumo?.mode, "live_coding");
+    assert.equal(sessao.resumo?.seniority, "pleno");
+    assert.deepEqual(sessao.resumo?.foco, [{ area: "tecnico", weight: 1 }]);
+  });
+
+  it("pedido que não virou mudança vai ao modelo, que diz o que entendeu sem confirmar nada", async () => {
+    const resposta = "Você quer mudar o formato da entrevista, é isso?";
+    const { resultados, falso } = await conversar([
+      ...ATE_O_RESUMO,
+      { ela: "eu quero de sistema de design a entrevista", jev: { sinais: { pediu_mudanca: 1 } }, totti: saida(resposta) },
+    ]);
+    assert.equal(resultados[2].fala, resposta);
+    assert.equal(falso.chamadas.length, 3);
+    assert.match(falso.chamadas[2][1].content, /não mudaram\..*não diga que ajustou nada/);
   });
 });

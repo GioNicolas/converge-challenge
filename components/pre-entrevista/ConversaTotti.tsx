@@ -5,7 +5,7 @@
 // o texto vai para o Totti; na tela aparece só o cartão do documento.
 // Depois de a pessoa enviar, o Totti "lê" por um instante e só então aparecem os três pontinhos de quem
 // está digitando (ver ATRASO_DIGITANDO), como numa conversa de verdade.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUp, FileText, Paperclip } from "lucide-react";
 import Perola, { BarrasDeVoz, type EstadoPerola } from "@/components/totti/Perola";
@@ -15,9 +15,12 @@ import { curvaSaida } from "@/lib/design/motion";
 import ListaDocumentos from "./ListaDocumentos";
 import { useTranscricao } from "@/lib/transcricao/useTranscricao";
 import { acrescentarFala } from "@/lib/transcricao/tipos";
+import { termosDoTitulo } from "@/lib/transcricao/vocabulario";
 import { DICA_DITADO_ENTER, useEnterDoDitado } from "@/lib/transcricao/enterDoDitado";
 import { BotaoDitado, EstadoDitado } from "@/components/transcricao/ControleDitado";
 import { useVozAgente } from "@/lib/voz/useVozAgente";
+import { criarDetectorDeInterrupcao, type DetectorDeInterrupcao } from "@/lib/voz/detectorDeInterrupcao";
+import type { CapturaAntecipada } from "@/lib/transcricao/capturaAntecipada";
 import ControleVoz from "@/components/voz/ControleVoz";
 
 /** Marca que separa a fala dos documentos anexados (ver `montarMensagem`). */
@@ -47,9 +50,11 @@ type Props = {
   pausarEntrada?: boolean;
   erro: string | null;
   onEnviar: (mensagem: string) => void;
+  /** Cargo da vaga: as palavras dele entram no vocabulário da transcrição (keyterms). */
+  cargo?: string;
 };
 
-export default function ConversaTotti({ sessaoId, transcricao, pensando, bloqueada = false, pausarEntrada = false, erro, onEnviar }: Props) {
+export default function ConversaTotti({ sessaoId, transcricao, pensando, bloqueada = false, pausarEntrada = false, erro, onEnviar, cargo }: Props) {
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<Documento[]>([]);
   const [erroAnexo, setErroAnexo] = useState<string | null>(null);
@@ -58,7 +63,9 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
   // do render ainda não tem o último trecho transcrito.
   const textoRef = useRef("");
   const mudarTexto = (valor: string) => { textoRef.current = valor; setTexto(valor); };
+  const termos = useMemo(() => termosDoTitulo(cargo), [cargo]);
   const ditado = useTranscricao({
+    termos,
     bloqueada: pensando || lendo || bloqueada || pausarEntrada,
     aoTexto: (fala) => {
       mudarTexto(acrescentarFala(textoRef.current, fala));
@@ -168,10 +175,52 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
     void iniciarDitado();
   }, [emModoVoz, respostaChegou, pensando, bloqueada, pausarEntrada, lendo, ditado.ativa, voz.ativa, voz.habilitada, voz.estado, iniciarDitado]);
 
+  // Interromper o Totti: corta a fala e abre o microfone na hora (entra no modo voz). `captura` vem do detector de
+  // interrupção, com o áudio de antes do disparo, para a primeira palavra da pessoa não se perder.
+  function interromper(captura?: CapturaAntecipada) {
+    voz.parar();
+    clearTimeout(timerPausa.current);
+    setTurnosNoEnvio(null);
+    mudarModoVoz(true);
+    void iniciarDitado(captura);
+  }
+  const interromperRef = useRef(interromper);
+  interromperRef.current = interromper;
+
+  // Interrupção pela voz, só no modo voz (o microfone já foi liberado pela pessoa): enquanto o Totti fala, o
+  // detector mede o microfone sem mandar nada à transcrição e dispara quando a pessoa fala por cima.
+  const detector = useRef<DetectorDeInterrupcao | null>(null);
+  const tottiFalando = voz.estado === "falando";
+  const podeInterromperPelaVoz = emModoVoz && tottiFalando && !ditado.ativa && !pensando && !bloqueada && !pausarEntrada && !lendo;
+  useEffect(() => {
+    if (!podeInterromperPelaVoz) return;
+    detector.current ??= criarDetectorDeInterrupcao({ aoInterromper: (captura) => interromperRef.current(captura) });
+    const atual = detector.current;
+    atual.iniciar();
+    return () => atual.parar();
+  }, [podeInterromperPelaVoz]);
+
+  // Interrupção manual, sempre disponível enquanto o Totti fala: Esc, ou Espaço fora de um campo de texto.
+  useEffect(() => {
+    if (!voz.ativa || pensando || bloqueada || pausarEntrada || lendo) return;
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const alvo = e.target as HTMLElement | null;
+      const digitando = !!alvo && (alvo.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(alvo.tagName));
+      if (e.key === "Escape" || (e.key === " " && !digitando)) {
+        e.preventDefault();
+        interromperRef.current();
+      }
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [voz.ativa, pensando, bloqueada, pausarEntrada, lendo]);
+
   // O botão do mic e o Enter passam por aqui para ligar e desligar o modo voz.
   const ditadoComModoVoz: typeof ditado = {
     ...ditado,
-    iniciar: () => { mudarModoVoz(true); return ditado.iniciar(); },
+    // Com o Totti falando, o botão do mic é uma interrupção: corta a fala e já ouve.
+    iniciar: () => { if (voz.ativa) { interromper(); return Promise.resolve(); } mudarModoVoz(true); return ditado.iniciar(); },
     parar: () => {
       clearTimeout(timerPausa.current);
       mudarModoVoz(false);
@@ -187,7 +236,8 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
   const estadoPerola: EstadoPerola =
     digitando || voz.estado === "preparando" ? "pensando" : voz.estado === "falando" ? "falando" : ditado.ativa ? "ouvindo" : "ocioso";
   const legendaEstado =
-    estadoPerola === "pensando" ? "Pensando…" : estadoPerola === "falando" ? "Totti está falando" : estadoPerola === "ouvindo" ? "Ouvindo você…" : "Conversa por voz ou texto";
+    estadoPerola === "pensando" ? "Pensando…" : estadoPerola === "falando" ? "Totti está falando · clique para interromper" : estadoPerola === "ouvindo" ? "Ouvindo você…" : "Conversa por voz ou texto";
+  const podeInterromper = voz.ativa && !pensando && !bloqueada && !pausarEntrada && !lendo;
 
   return (
     <section className="tema-noite flex min-h-0 flex-col overflow-hidden rounded-[28px] bg-fundo text-texto">
@@ -196,7 +246,19 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
       </header>
 
       <div className="flex shrink-0 flex-col items-center gap-2 px-6 pt-4 pb-2">
-        <Perola estado={estadoPerola} tamanho={120} brilho />
+        {podeInterromper ? (
+          <button
+            type="button"
+            onClick={() => interromper()}
+            aria-label="Interromper o Totti e falar"
+            title="Interromper o Totti (Esc ou Espaço)"
+            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-texto/40"
+          >
+            <Perola estado={estadoPerola} tamanho={120} brilho />
+          </button>
+        ) : (
+          <Perola estado={estadoPerola} tamanho={120} brilho />
+        )}
         <BarrasDeVoz ativo={estadoPerola === "falando" || estadoPerola === "ouvindo"} n={7} altura={18} largura={3} className="mt-4" />
         <span role="status" className="text-[13px] text-texto-suave">
           {legendaEstado}

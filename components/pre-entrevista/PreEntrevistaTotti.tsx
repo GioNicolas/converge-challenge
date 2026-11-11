@@ -297,7 +297,7 @@ export default function PreEntrevistaTotti({
                     fechada && larga ? "pointer-events-none opacity-55" : ""
                   }`}
                 >
-                  <ConversaTotti sessaoId={estado.id} transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
+                  <ConversaTotti sessaoId={estado.id} cargo={estado.vaga?.roleTitle} transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
                   <AnimatePresence>
                     {fechada && !larga && (
                       <ConversaConcluida

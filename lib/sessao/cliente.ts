@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ETAPAS_DO_FECHAMENTO, type EtapaDoFechamento } from "../totti/fechamento";
 import { EsquemaVisualOpcional, type AcaoVisual } from "../presenca/acoesVisuais";
 import type { MarcaDeFala } from "../presenca/vozSincronizada";
 import { escolherVozPt } from "../voz/escolherVoz";
@@ -78,6 +79,8 @@ export type RespostaAnalise = {
   observacoes: Observacao[];
   /** O cérebro acha que o candidato já mostrou o suficiente do alto nível: segue para o aprofundamento. */
   avancar_fase?: boolean;
+  /** Sequência comum em andamento; ausente quando suspensa ou ainda não iniciada. */
+  fechamento?: EtapaDoFechamento;
 };
 
 /** Valida a resposta do /analisar. Fora do formato → a análise é descartada (o gatilho tenta de novo depois). */
@@ -99,6 +102,7 @@ const EsquemaResposta = z.object({
     )
     .default([]),
   avancar_fase: z.boolean().default(false),
+  fechamento: z.enum(ETAPAS_DO_FECHAMENTO).optional(),
 });
 
 export function validarResposta(dados: unknown): RespostaAnalise {

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { criarLimitador, ipDe } from "@/lib/agente/rotas/http";
 import { sessaoViva } from "@/lib/session/persistencia";
 import { contexto as contextoAgente } from "@/lib/agente/rotas/contexto";
+import { resolverAvaliacao } from "@/lib/agente/kits";
+import { problems } from "@/lib/problems";
+import { normalizarTermos, termosDoLiveCoding } from "@/lib/transcricao/vocabulario";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +21,23 @@ const limitadorPorIp = criarLimitador(30, 60_000);
 const limitadorPorSessao = criarLimitador(20, 600_000);
 const limitadorPorSessaoNaHora = criarLimitador(60, 3_600_000);
 const limitadorGlobal = criarLimitador(300, 600_000);
+
+/**
+ * Vocabulário da sessão (keyterms do Scribe): no quadro, `termosTranscricao` do kit da avaliação; no live coding,
+ * termos do problema e da linguagem. Falhar aqui não impede a transcrição: sem termos ela segue como antes.
+ */
+async function termosDaSessao(sessao: NonNullable<Awaited<ReturnType<typeof sessaoViva>>> | { avaliacaoId: string }): Promise<string[]> {
+  try {
+    if ("avaliacaoId" in sessao) {
+      const avaliacao = await resolverAvaliacao(sessao.avaliacaoId);
+      return avaliacao ? normalizarTermos(avaliacao.kit.termosTranscricao) : [];
+    }
+    const problemaId = sessao.config.problemId;
+    return termosDoLiveCoding({ problemaId, titulo: problems[problemaId]?.title, linguagem: sessao.language });
+  } catch {
+    return [];
+  }
+}
 
 const erro = (status: number, mensagem: string) => NextResponse.json({ erro: mensagem }, { status, headers: { "Cache-Control": "no-store" } });
 
@@ -55,7 +75,7 @@ export async function GET(req: NextRequest) {
     const dados: unknown = await resposta.json();
     const token = dados && typeof dados === "object" ? (dados as { token?: unknown }).token : undefined;
     if (typeof token !== "string" || !token) return erro(502, "Resposta inesperada do ElevenLabs.");
-    return NextResponse.json({ token }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ token, termos: await termosDaSessao(sessao) }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return erro(502, "ElevenLabs indisponível.");
   }

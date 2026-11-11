@@ -9,9 +9,10 @@
  *      Se o Totti tinha pedido uma decisão (troca de formato, nível, aprovação do resumo) e a resposta dela não é escolha
  *      nem recusa, o código não decide por ela: a fala vai ao modelo com a decisão pendente, e ele devolve a escolha no
  *      campo `decisao`, ou adia. Com a escolha feita, o planejador escolhe o passo seguinte e o Totti o escreve;
- *   6. o turno obedece ao movimento: com `seguir`, o passo conta como feito; com `repetir`, `esclarecer` ou `responder`,
- *      o passo em curso continua em curso; e com `repetir` ou `esclarecer`, o que foi lido da fala dela em 2 e 3 é desfeito
- *      (a fala não era uma resposta).
+ *   6. o turno obedece ao movimento: com `seguir`, o passo conta como feito; com `repetir`, `esclarecer`, `nao_entendi`
+ *      ou `responder`, o passo em curso continua em curso; e com `repetir`, `esclarecer` ou `nao_entendi`, o que foi lido
+ *      da fala dela em 2 e 3 é desfeito (a fala não era uma resposta). Com `nao_entendi`, a fala dela ainda fica marcada
+ *      (`naoEntendida`) e sai da extração e da cobertura; na terceira vez seguida, o Totti oferece que ela digite.
  *
  * A extração lenta (GLM) não entra aqui: quem chama agenda `agendarExtracao` (ou `extrairAgora`).
  */
@@ -21,10 +22,15 @@ import { AREAS, areasEmJogo, avaliarCobertura, avaliarEnfaseDaFala, LIMIAR, ulti
 import { acumularEnfase, declararCentral, type EstadoEnfase } from "./enfase";
 import {
   aberturaDoAgente,
+  falaDelaNaoEraResposta,
   falaDeEncerramento,
+  falaParaDigitar,
+  focoDoResumo,
+  MAX_NAO_ENTENDI,
   falaDeReserva,
   fraseNivelPorEstimativa,
   pedeONivel,
+  ultimaFalaDaRecrutadora,
   perguntaEmAberto,
   responder,
   respostaFixa,
@@ -60,7 +66,7 @@ import { aplicarPedidoDeProblema } from "./problema-pedido";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
 import { aplicarDecisoesTradeoff, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
-import { aplicarPesosNaSessao, desfazerUltimaFala, registrarFala, type Sessao } from "./sessoes";
+import { aplicarPesosNaSessao, desfazerUltimaFala, falasParaLer, registrarFala, type Sessao } from "./sessoes";
 
 /**
  * Estado que o planejador enxerga: o plano da sessão mais o foco, a cobertura e o formato do rascunho.
@@ -94,11 +100,6 @@ export function semDispensaContrariada(sinais: Record<string, number>, enfase: E
   return { ...sinais, ...Object.fromEntries(contrariadas.map((a) => [`dispensa_${a}`, 0])) };
 }
 
-/** Última fala dela na transcrição, se houver. */
-function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
-  return transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
-}
-
 /**
  * Mede a cobertura, a ênfase e os sinais da transcrição atual e aplica no rascunho. Se o Jev falhar, registra
  * o erro e segue com o estado anterior: o planejador ainda tem o que decidir, e a conversa não trava.
@@ -106,7 +107,8 @@ function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
  */
 async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno, aoReceberJev?: () => void): Promise<void> {
   try {
-    const cob = await (deps.avaliarCobertura ?? avaliarCobertura)(sessao.rascunho, sessao.transcricao.slice(), {
+    // Fala dela que o Totti não entendeu, num turno anterior, não conta (ver `falasParaLer`).
+    const cob = await (deps.avaliarCobertura ?? avaliarCobertura)(sessao.rascunho, falasParaLer(sessao.transcricao), {
       ultimaFalaAgente: ultimaFalaDoAgente(sessao.transcricao),
     });
     // A ênfase é por fala: classifica só a última fala dela, e o acumulado é feito no código (ver `enfase.ts`).
@@ -350,6 +352,21 @@ function desfazerLeitura(sessao: Sessao, antes: EstadoLido, depois: EstadoLido):
   for (const campo of CAMPOS_LIDOS) alvo[campo] = desfazerValor(alvo[campo], antes[campo], depois[campo]);
 }
 
+/**
+ * Quantas falas dela seguidas, do fim para trás, o Totti não entendeu (ver `naoEntendida`). Lido da transcrição, para
+ * valer também numa sessão reconstruída da cópia da tela. Função pura.
+ */
+export function naoEntendidasSeguidas(transcricao: Turno[]): number {
+  let n = 0;
+  for (let i = transcricao.length - 1; i >= 0; i--) {
+    const turno = transcricao[i];
+    if (turno.role !== "recrutadora") continue;
+    if (!turno.naoEntendida) break;
+    n += 1;
+  }
+  return n;
+}
+
 /** O passo em curso de cada decisão pendente: é ele que o modelo recebe, com a decisão no lugar da instrução. */
 function passoDaDecisao(pendente: DecisaoPendente): Passo {
   if (pendente.tipo === "troca") return pendente.oferta;
@@ -543,7 +560,7 @@ export async function conduzirTurno(
   texto: string,
   deps: DepsDoTurno = {},
 ): Promise<{ passo: Passo; fala: string; movimento: Movimento }> {
-  // Guardado antes de ler a fala dela (ver `lerFalaDela`): se o Totti repetir ou esclarecer, a fala não era resposta.
+  // Guardado antes de ler a fala dela (ver `lerFalaDela`): se o Totti repetir, esclarecer ou não entender, a fala não era resposta.
   const nivelPerguntado = pedeONivel(perguntaEmAberto(sessao.transcricao));
   const antesDaFala = await lerFalaDela(sessao, texto, deps);
   const { passo, pendente } = planejar(sessao, "turno", nivelPerguntado);
@@ -589,7 +606,25 @@ export async function conduzirTurno(
   const decisaoDevolvida = resposta.decisao;
 
   let movimento = resposta.movimento;
-  if (movimento === "repetir" || movimento === "esclarecer") {
+  if (movimento === "nao_entendi") {
+    // A fala dela fica na tela, mas sai da extração e da cobertura (ver `falasParaLer`). Depois de `MAX_NAO_ENTENDI`
+    // vezes seguidas, insistir na voz não ajuda: o Totti oferece que ela digite e refaz a pergunta.
+    const anteriores = naoEntendidasSeguidas(sessao.transcricao.slice(0, -1));
+    const dela = sessao.transcricao.at(-1);
+    if (dela?.role === "recrutadora") dela.naoEntendida = true;
+    // A cada `MAX_NAO_ENTENDI + 1` falas seguidas (3ª, 6ª...): a oferta não vira a única fala de um laço.
+    if ((anteriores + 1) % (MAX_NAO_ENTENDI + 1) === 0) {
+      const oferta = falaParaDigitar(perguntaEmAberto(sessao.transcricao));
+      const trava = { trava: "oferecer_digitar", antes: resposta.texto, depois: oferta };
+      resposta = { ...resposta, texto: oferta, travas: [...resposta.travas, trava] };
+      registrarEvento(sessao, {
+        tipo: "trava",
+        resumo: `oferecer_digitar | ${anteriores + 1}ª fala seguida não entendida`,
+        dados: { ...trava, movimento },
+      });
+    }
+  }
+  if (falaDelaNaoEraResposta(movimento)) {
     // A fala dela não era uma resposta. Duração, formato, ênfase, sinais e escolha de troca lidos dela são desfeitos,
     // e o plano volta a ser o de antes.
     desfazerLeitura(sessao, antesDaFala, depoisDaLeitura);
@@ -676,7 +711,7 @@ export async function conduzirTurno(
         movimento,
         passoMantido: emCurso,
         passoNaoExecutado: passoDaFala,
-        estadoRestaurado: movimento !== "responder",
+        estadoRestaurado: falaDelaNaoEraResposta(movimento),
         perguntasPorTopico: sessao.plano.perguntasPorTopico,
         resumos: sessao.plano.resumos,
       },
@@ -690,6 +725,9 @@ export async function conduzirTurno(
     sessao.resumo = {
       preferencias: { ...sessao.preferencias },
       duracaoMin: duracaoDoRascunho(sessao.rascunho, sessao.preferencias),
+      mode: sessao.rascunho.mode,
+      seniority: sessao.rascunho.seniority,
+      foco: focoDoResumo(sessao.rascunho),
       ...(passoDaFala.revisao ? {} : { texto: resposta.texto }),
     };
   }
