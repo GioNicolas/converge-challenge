@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { falaNaoRepetida, runInterviewerTurn } from "../interviewer";
 import { buildInterviewerSystem } from "../prompts/interviewer";
+import { SISTEMA_DO_FILTRO } from "../spoilerFilter";
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import { getOrCreateSession } from "@/lib/session/store";
 import { getProblem } from "@/problems";
@@ -25,8 +26,8 @@ beforeEach(() => {
   delete process.env.OPENROUTER_API_KEY;
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const corpo = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
-    // O filtro de fala responde com {"safe", "reason"}: aqui, sempre seguro.
-    if (corpo.messages[0]?.content.includes('{"safe": boolean')) return completion({ safe: true, reason: "ok" });
+    // O filtro de fala responde com {"reason", "safe"}: aqui, sempre seguro.
+    if (corpo.messages[0]?.content.startsWith(SISTEMA_DO_FILTRO)) return completion({ reason: "ok", safe: true });
     chamadasAoEntrevistador++;
     const saida = saidas.shift();
     if (saida === undefined) throw new Error("sem saída simulada");

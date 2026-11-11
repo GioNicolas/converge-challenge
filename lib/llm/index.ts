@@ -127,6 +127,12 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
   filtro: {
     // Confere a fala do live coding antes de ela sair (spoiler, validação): fica no caminho de cada resposta.
     // O gemma na Featherless passava de 1,8 s e o filtro era pulado; no OpenRouter fica abaixo de 1 s.
+    // scripts/bench-filtro.ts em 2026-11-10 (46 casos de ajuste + 40 fora do ajuste): o gemini-3.5-flash-lite com o
+    // prompt único em cache custa ~US$ 0,00016 por conferência (antes US$ 0,00035) e não deixa passar nenhum
+    // inseguro que o prompt antigo barrava. Mais baratos deixaram passar spoiler: gemini-2.5-flash-lite (US$ 0,00006,
+    // 7 inseguros aprovados de 23), gemini-3.1-flash-lite (US$ 0,00012, 2 regressões fora do ajuste; não foi remedido
+    // depois da última correção do prompt);
+    // claude-haiku-5.5 acertou tudo, mas com p95 de 3,2 s.
     primario: "openrouter",
     openrouterEnv: "FILTRO_MODEL",
     openrouterDefault: "google/gemini-3.5-flash-lite",
