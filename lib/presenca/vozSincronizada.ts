@@ -29,6 +29,7 @@ export const GESTOS_DE_ATIVACAO = ["pointerdown", "keydown", "touchstart", "poin
  * sem ativação (Safari) não pode tirar a vez do click que vem logo depois.
  */
 export function liberarAudio(): void {
+  acordarSaida();
   if (elementoLiberado || typeof Audio === "undefined") return;
   try {
     const elemento = new Audio(WAV_SILENCIO);
@@ -41,6 +42,59 @@ export function liberarAudio(): void {
     );
   } catch {}
 }
+
+/**
+ * Saída de som acordada (#73). Entre o destrave e a primeira fala, e entre uma fala e outra, a saída fica parada, e
+ * a saída (fone Bluetooth, placa que dorme, Chrome no macOS) leva mais de meio segundo para acordar: o começo da
+ * fala sumia ("...otti, vou montar"). Enquanto uma tela que fala está montada, um AudioContext toca um tom de 20 Hz
+ * a -80 dB (inaudível) para a saída não dormir. Contado por uso: a última tela que desmonta fecha o contexto.
+ */
+const GANHO_ACORDADO = 0.0001;
+const acordador: { usuarios: number; contexto: AudioContext | null } = { usuarios: 0, contexto: null };
+
+type JanelaComAudio = { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+
+/** Liga (ou retoma) o tom inaudível se alguma tela que fala está montada. Retomar pede gesto ou ativação anterior. */
+function acordarSaida(): void {
+  if (!acordador.usuarios || typeof window === "undefined") return;
+  if (acordador.contexto) {
+    if (acordador.contexto.state === "suspended") void acordador.contexto.resume().catch(() => {});
+    return;
+  }
+  const janela = window as unknown as JanelaComAudio;
+  const Construtor = janela.AudioContext ?? janela.webkitAudioContext;
+  if (!Construtor) return;
+  try {
+    const contexto = new Construtor();
+    const tom = contexto.createOscillator();
+    const ganho = contexto.createGain();
+    tom.frequency.value = 20;
+    ganho.gain.value = GANHO_ACORDADO;
+    tom.connect(ganho).connect(contexto.destination);
+    tom.start();
+    acordador.contexto = contexto;
+    if (contexto.state === "suspended") void contexto.resume().catch(() => {});
+  } catch {}
+}
+
+/** Mantém a saída de som acordada enquanto a tela que fala estiver montada; devolve a liberação. */
+export function manterSaidaAcordada(): () => void {
+  acordador.usuarios++;
+  acordarSaida();
+  let liberado = false;
+  return () => {
+    if (liberado) return;
+    liberado = true;
+    acordador.usuarios = Math.max(0, acordador.usuarios - 1);
+    if (acordador.usuarios || !acordador.contexto) return;
+    void acordador.contexto.close().catch(() => {});
+    acordador.contexto = null;
+  };
+}
+
+/** Quanto esperar o áudio carregar o bastante para tocar sem engasgo antes de chamar play(). */
+const ESPERA_CARREGAR_MS = 1_500;
+const HAVE_ENOUGH_DATA = 4;
 
 export function tocarComAlinhamento(
   audio: Blob,
@@ -73,6 +127,7 @@ export function tocarComAlinhamento(
       if (midia) {
         midia.onended = null;
         midia.onerror = null;
+        midia.onplaying = null;
         try {
           midia.pause();
           midia.removeAttribute("src");
@@ -100,6 +155,7 @@ export function tocarComAlinhamento(
     }
 
     function animar() {
+      quadro = null;
       if (terminou || !midia) return;
       try {
         atualizar(midia.currentTime);
@@ -107,6 +163,23 @@ export function tocarComAlinhamento(
       } catch (erro) {
         terminar(erro);
       }
+    }
+
+    /** Espera dados suficientes para tocar sem engasgo (canplaythrough), com prazo: nunca segura a fala de vez. */
+    function carregado(elemento: HTMLAudioElement): Promise<void> {
+      if (typeof elemento.readyState !== "number" || elemento.readyState >= HAVE_ENOUGH_DATA) return Promise.resolve();
+      return new Promise((pronto) => {
+        const limpar = () => {
+          clearTimeout(prazo);
+          elemento.removeEventListener?.("canplaythrough", fim);
+          opcoes.sinal?.removeEventListener("abort", fim);
+          pronto();
+        };
+        const fim = () => limpar();
+        const prazo = setTimeout(fim, ESPERA_CARREGAR_MS);
+        elemento.addEventListener?.("canplaythrough", fim, { once: true });
+        opcoes.sinal?.addEventListener("abort", fim, { once: true });
+      });
     }
 
     // Bloqueio de autoplay: em vez de trocar de voz, espera o próximo gesto e toca o mesmo áudio dentro dele.
@@ -118,7 +191,7 @@ export function tocarComAlinhamento(
           if (terminou) return;
           pararDeEsperarGesto?.();
           elementoLiberado ??= elemento;
-          animar();
+          if (quadro === null) animar();
         }, () => {});
       };
       GESTOS_DE_ATIVACAO.forEach((e) => window.addEventListener(e, tentar, { capture: true }));
@@ -149,11 +222,22 @@ export function tocarComAlinhamento(
         }
       };
       midia.onerror = () => terminar(new Error("Não foi possível reproduzir o áudio da fala."));
+      // O relógio da legenda (e da mão) só começa quando o som sai de fato ("playing"), não quando o play() foi
+      // aceito. Depois de um engasgo (waiting → playing) ele continua de onde a mídia está.
+      const comecarRelogio = () => { if (!terminou && quadro === null) animar(); };
+      midia.onplaying = comecarRelogio;
       opcoes.sinal?.addEventListener("abort", cancelar, { once: true });
-      Promise.resolve(midia.play()).then(animar, (erro: unknown) => {
+      const elemento = midia;
+      void carregado(elemento).then(() => {
         if (terminou) return;
-        if (erro instanceof DOMException && erro.name === "NotAllowedError") esperarGesto();
-        else terminar(new Error("Reprodução de áudio indisponível."));
+        Promise.resolve(elemento.play()).then(() => {
+          // Sem o evento (navegador antigo, testes): o play() aceito vale como começo.
+          if (!terminou && !elemento.paused) comecarRelogio();
+        }, (erro: unknown) => {
+          if (terminou) return;
+          if (erro instanceof DOMException && erro.name === "NotAllowedError") esperarGesto();
+          else terminar(new Error("Reprodução de áudio indisponível."));
+        });
       });
     } catch {
       terminar(new Error("Não foi possível iniciar a reprodução do áudio."));

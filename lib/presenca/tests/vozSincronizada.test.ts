@@ -431,3 +431,70 @@ test("voz não implementada (501) não é pedida de novo até a próxima sessão
   await falar("De novo");
   assert.deepEqual(rotas, ["/api/falar", "/api/sessoes", "/api/falar"]);
 });
+
+test("relógio da legenda só começa quando o som sai (playing), depois de carregar (canplaythrough)", async (t) => {
+  const audio = audioFalso(t);
+  const progresso: number[] = [];
+  const ouvintes = new Map<string, () => void>();
+  let tocou = false;
+  class MidiaCarregando {
+    currentTime = 0;
+    readyState = 1;
+    paused = true;
+    onended: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onplaying: (() => void) | null = null;
+    constructor(public src: string) { audio.instancias.push(this as never); }
+    addEventListener(nome: string, f: () => void) { ouvintes.set(nome, f); }
+    removeEventListener(nome: string) { ouvintes.delete(nome); }
+    play() { tocou = true; return Promise.resolve(); }
+    pause() {}
+    removeAttribute() {}
+  }
+  definirGlobal(t, "Audio", MidiaCarregando);
+  const fala = tocarComAlinhamento(new Blob(["x"]), alinhamento, { aoProgresso: (n) => progresso.push(n) });
+  await andar();
+  assert.equal(tocou, false, "espera o áudio carregar antes do play()");
+  ouvintes.get("canplaythrough")?.();
+  await andar();
+  assert.equal(tocou, true);
+  assert.equal(audio.quadros.size, 0, "play() aceito com a mídia ainda parada não inicia o relógio");
+  const midia = audio.instancias.at(-1) as unknown as MidiaCarregando;
+  midia.paused = false;
+  midia.onplaying?.();
+  audio.avancar(0.25);
+  assert.ok(progresso.length > 0, "com o som saindo, a legenda anda");
+  midia.onended?.();
+  await fala;
+});
+
+test("saída acordada: um tom inaudível enquanto alguma tela que fala está montada", async (t) => {
+  const { manterSaidaAcordada } = await import("../vozSincronizada");
+  const contextos: { fechado: boolean; ganho: number; frequencia: number }[] = [];
+  class ContextoFalso {
+    state = "running";
+    destination = {};
+    registro = { fechado: false, ganho: 1, frequencia: 0 };
+    constructor() { contextos.push(this.registro); }
+    createOscillator() {
+      const registro = this.registro;
+      return { frequency: { set value(v: number) { registro.frequencia = v; } }, connect: (n: unknown) => n, start() {} };
+    }
+    createGain() {
+      const registro = this.registro;
+      return { gain: { set value(v: number) { registro.ganho = v; } }, connect: (n: unknown) => n };
+    }
+    resume() { return Promise.resolve(); }
+    close() { this.registro.fechado = true; return Promise.resolve(); }
+  }
+  definirGlobal(t, "window", { AudioContext: ContextoFalso });
+  const soltarA = manterSaidaAcordada();
+  const soltarB = manterSaidaAcordada();
+  assert.equal(contextos.length, 1, "um contexto só para todas as telas");
+  assert.ok(contextos[0].ganho > 0 && contextos[0].ganho <= 0.001, "inaudível, mas não zero");
+  soltarA();
+  soltarA();
+  assert.equal(contextos[0].fechado, false, "ainda há uma tela montada");
+  soltarB();
+  assert.equal(contextos[0].fechado, true);
+});
