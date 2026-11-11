@@ -153,9 +153,11 @@ describe("cliente padrão (Resend via fetch)", () => {
       fromDisplayName: "Ana, do time de recrutamento",
     });
     await sendEmail(args);
-    const [corpo, corpoSemNome] = chamadas.map(({ init }) => JSON.parse(String(init.body)));
-    assert.equal(corpo.from, "Ana, do time de recrutamento <entrevistas@totti.ia.br>");
+    await sendEmail({ ...args, fromDisplayName: 'Ana "Nina" Lima, do time de recrutamento' });
+    const [corpo, corpoSemNome, corpoComAspas] = chamadas.map(({ init }) => JSON.parse(String(init.body)));
+    assert.equal(corpo.from, '"Ana, do time de recrutamento" <entrevistas@totti.ia.br>');
     assert.equal(corpoSemNome.from, "Entrevistas <entrevistas@totti.ia.br>");
+    assert.equal(corpoComAspas.from, '"Ana \\"Nina\\" Lima, do time de recrutamento" <entrevistas@totti.ia.br>');
     assert.equal(corpo.reply_to, "responder@totti.ia.br");
     assert.ok(!("headers" in corpo) || !("List-Unsubscribe" in corpo.headers));
     assert.doesNotMatch(JSON.stringify(corpo), /List-Unsubscribe|X-Campaign/i);
