@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { NextRequest } from "next/server";
-import { POST, registrarUsoVoz } from "../route";
+import { POST } from "../route";
+import { registrarUsoVoz } from "@/lib/voz/uso";
 import { getOrCreateSession } from "@/lib/session/store";
 
 const fetchOriginal = globalThis.fetch;

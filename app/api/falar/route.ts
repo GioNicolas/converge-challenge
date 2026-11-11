@@ -1,11 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { RespostaVoz } from "@/lib/voz/contrato";
 import { criarLimitador, ipDe, lerTexto } from "@/lib/agente/rotas/http";
-import { contexto as contextoAgente } from "@/lib/agente/rotas/contexto";
-import { guardarSessao, sessaoViva } from "@/lib/session/persistencia";
-import { appendEvent, sessionNow } from "@/lib/session/store";
-import { getSessao as obterPreSessao } from "@/lib/pre-entrevista/sessoes";
-import { registrarEvento } from "@/lib/pre-entrevista/log";
+import { registrarUsoVoz } from "@/lib/voz/uso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,21 +67,5 @@ export async function POST(req: Request) {
     return NextResponse.json(vozGerada.data, { headers });
   } catch {
     return erro(502, "ElevenLabs indisponível.");
-  }
-}
-
-export async function registrarUsoVoz(metadados: { sessao_id: string; contexto: "quadro" | "coding" | "pre"; fala_id?: string }, texto: string): Promise<void> {
-  const dadosUso = { contexto: metadados.contexto, caracteres: texto.length, ...(metadados.fala_id ? { fala_id: metadados.fala_id } : {}) };
-  if (metadados.contexto === "quadro") {
-    await contextoAgente().repositorio.anexarEventos(metadados.sessao_id, [{ horario: new Date().toISOString(), tipo: "voz_uso", dados: dadosUso }]);
-  } else if (metadados.contexto === "coding") {
-    const sessao = await sessaoViva(metadados.sessao_id);
-    if (sessao) {
-      appendEvent(sessao, { sessionId: sessao.sessionId, t: sessionNow(sessao), type: "voz_uso", contexto: metadados.contexto, caracteres: texto.length, ...(metadados.fala_id ? { fala_id: metadados.fala_id } : {}) });
-      await guardarSessao(sessao);
-    }
-  } else {
-    const sessao = obterPreSessao(metadados.sessao_id);
-    if (sessao) registrarEvento(sessao, { tipo: "aviso", resumo: "voz_uso", dados: { tipo: "voz_uso", ...dadosUso } });
   }
 }
