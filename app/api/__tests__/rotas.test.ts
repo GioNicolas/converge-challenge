@@ -245,6 +245,23 @@ describe("POST /api/sessoes/[id]/perguntar", () => {
     assert.deepEqual((await r.json()).visual, [{ tipo: "colchetes", alvo: "e1" }]);
     assert.match(llm.chamadas[0].sistema.dinamico ?? "", /circular/);
   });
+  it("grava o uso de cada turno (tokens, custo e blocos do prompt) na linha do tempo da sessão", async () => {
+    const { sessao_id } = await novaSessao();
+    const falso = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null }]);
+    const llm = { ...falso, async completarJson<T>(args: Parameters<typeof falso.completarJson<T>>[0]) {
+      return { ...(await falso.completarJson(args)), modelo: "google/gemini-3.5-flash-lite", provedor: "openrouter", uso: { entrada: 4000, saida: 60, custo: 0.0009 } };
+    } };
+    definirContextoParaTestes({ repositorio: repo, llm, agora: () => relogio });
+    const r = await perguntarPost(post("/x", { sessao_id, fase: "ALTO_NIVEL", texto: "Vou pôr um cache.", grafo: GRAFO }), params(sessao_id));
+    assert.equal(r.status, 200);
+    assert.equal(JSON.stringify(await r.json()).includes("tokens_entrada"), false, "o uso não vai para o quadro");
+    const usos = (await repo.listarEventos(sessao_id)).filter((e) => e.tipo === "perguntar_uso");
+    assert.equal(usos.length, 1);
+    const dados = usos[0].dados as { tokens_entrada: number; custo_usd: number; blocos: { grafo: number } };
+    assert.equal(dados.tokens_entrada, 4000);
+    assert.equal(dados.custo_usd, 0.0009);
+    assert.ok(dados.blocos.grafo > 0);
+  });
   it("repassa o contexto do quadro para a devolutiva rápida", async () => {
     const { sessao_id } = await novaSessao();
     const llm = criarClienteFalso([{ responder: true, texto: "Você ligou a API ao banco.", requisito: null }]);

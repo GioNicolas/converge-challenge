@@ -322,6 +322,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const { fase, texto } = corpo.dados;
   let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual" | "perguntou"> = { responder: false, texto: "", requisito: null, concluiu: false };
   let desfecho: Desfecho | null = null;
+  let gravandoUso: Promise<unknown> | undefined;
   // A fala substitui a anterior (ele continuou antes de ouvir a resposta): a anterior e a resposta não ouvida saem.
   const semSubstituida = (e: EstadoSessao): EstadoSessao =>
     corpo.dados.substitui ? { ...e, conversa: semFalaSubstituida(e.conversa, texto) } : e;
@@ -340,6 +341,11 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       PRAZO_ANALISE_MS,
       null,
     );
+    // Custo e tamanho do prompt de cada turno ficam na linha do tempo da sessão (issue #63). Grava em paralelo com o
+    // resto da rota (espera só antes de responder) e uma falha aqui não derruba a fala.
+    if (r?.uso) {
+      gravandoUso = ctx.repositorio.anexarEventos(id, [{ horario: new Date(agora).toISOString(), tipo: "perguntar_uso", dados: r.uso }]).catch(() => []);
+    }
     if (!r || r.falhou) return erro(503, "Não foi possível preparar a resposta. Tente enviar sua fala novamente.");
     resposta = { responder: r.responder, texto: r.texto, requisito: r.requisito, concluiu: r.concluiu,
       ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),
@@ -365,6 +371,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   console.warn("[agente] rota_perguntar", { sessao_id: id, fase, responder: resposta.responder,
     seguimento: !!resposta.seguimento, encerrar: !!resposta.encerrar, substitui: !!corpo.dados.substitui });
 
+  await gravandoUso;
   return json(resposta);
 }
 
