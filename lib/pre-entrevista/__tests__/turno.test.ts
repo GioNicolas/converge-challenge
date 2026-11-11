@@ -408,6 +408,8 @@ describe("conduzirTurno: sinal de contexto incompleto só depois da pergunta de 
     // Depois da pergunta de contexto: o sinal entra.
     await conduzirTurno(sessao, "Tem", { ...espiao, chat: chatFalso(saida(RESUMO)).chat });
     assert.deepEqual(lidos, [false, true]);
+  });
+});
 
 describe("conduzirTurno: fala que não faz sentido como resposta (issue #76)", () => {
   const ESCOLHA = "Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?";

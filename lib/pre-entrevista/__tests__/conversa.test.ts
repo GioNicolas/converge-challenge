@@ -394,6 +394,8 @@ describe("pedir o que faltou (issue #72)", () => {
   it("resposta vaga: repetir a pergunta do aprofundamento conta como repetir", () => {
     const pergunta = "Nesse sistema, o que é pior: perder ou duplicar um dado, ou o sistema ficar fora do ar por um tempo?";
     assert.equal(movimentoDaFala("seguir", pergunta, depoisDaVaga(pergunta), FALTOU_CRITERIO), "repetir");
+  });
+});
 
 describe("movimento nao_entendi (issue #76)", () => {
   const ESCOLHA = "Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?";
