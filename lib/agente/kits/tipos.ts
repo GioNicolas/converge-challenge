@@ -11,7 +11,12 @@ export const Criterio = z.object({
   /** Descrição de cada nota; dá consistência ao agente e explica a nota ao recrutador. */
   niveis: z.object({ 1: z.string(), 2: z.string(), 3: z.string(), 4: z.string() }),
 });
-export type Criterio = z.infer<typeof Criterio>;
+/**
+ * `provaSoPorFala` fica fora do schema Zod de propósito (como o empecilho do problema): o gerador de kits roda
+ * em modo estrito e não deve ser forçado a preenchê-lo. Quando true, o critério só se prova com fala do
+ * candidato (desenho não vale) e não tem pergunta própria: aparece nas respostas aos outros critérios.
+ */
+export type Criterio = z.infer<typeof Criterio> & { provaSoPorFala?: boolean };
 
 /** Pergunta provável do candidato e a resposta oficial (a "ficha de requisitos ocultos"). */
 export const ItemFicha = z.object({ pergunta: z.string(), resposta: z.string() });
@@ -68,4 +73,20 @@ export const Kit = z.object({
   termosTranscricao: z.array(z.string()),
   problemas: z.array(Problema).min(1),
 });
-export type Kit = Omit<z.infer<typeof Kit>, "problemas"> & { problemas: Problema[] };
+export type Kit = Omit<z.infer<typeof Kit>, "problemas" | "criterios"> & { problemas: Problema[]; criterios: Criterio[] };
+
+/**
+ * O critério só se prova por fala? Vale o campo do critério. Kits já salvos (vagas) não têm o campo e guardam o
+ * nome antigo (com o termo interno entre parênteses): o texto do nome antigo continua sendo reconhecido para
+ * eles não mudarem de comportamento. O id do critério não muda.
+ */
+export function criterioSoPorFala(c: Pick<Criterio, "id"> & Partial<Pick<Criterio, "nome" | "provaSoPorFala">>): boolean {
+  if (c.provaSoPorFala !== undefined) return c.provaSoPorFala;
+  const nome = (c.nome ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return /\b(oral|verbal|plins)\b|comunicacao.*\brespostas\b/.test(nome);
+}
+
+/** Critério sem pergunta própria: fica fora da cobertura e nunca vira alvo (o id "comunicacao" sempre foi assim). */
+export function criterioIndireto(c: Pick<Criterio, "id"> & Partial<Pick<Criterio, "nome" | "provaSoPorFala">>): boolean {
+  return c.provaSoPorFala ?? (c.id === "comunicacao" || criterioSoPorFala(c));
+}
