@@ -13,6 +13,8 @@ export type CapturaAntecipada = {
   readonly pronta: Promise<Captura>;
   /** Entrega o que foi guardado, em ordem, e passa a mandar o áudio novo direto para `destino`. */
   ligar(destino: (base64: string) => void): void;
+  /** Muda quanto áudio fica guardado enquanto ninguém está ligado (o detector de interrupção guarda pouco). */
+  limitar(maximoBytes: number): void;
   /** Fecha a captura esperando o último bloco do microfone. */
   parar(): Promise<void>;
   cancelar(): void;
@@ -22,13 +24,14 @@ export type CapturaAntecipada = {
  * Começa a ouvir na hora do clique (ou da reabertura do microfone no modo voz), antes de existir token ou socket.
  * Sem isso, quem respondia logo depois do Totti perdia o primeiro segundo da frase ("Ele diz expresso.").
  */
-export function iniciarCapturaAntecipada({ stream, capturar = capturarAudio, maximoBytes = MAXIMO_BYTES_ANTECIPADOS }: {
+export function iniciarCapturaAntecipada({ stream, capturar = capturarAudio, maximoBytes: maximoInicial = MAXIMO_BYTES_ANTECIPADOS }: {
   /** Stream do chamador (nunca encerrado aqui) ou a promessa dele; sem stream, a captura abre o próprio. */
   stream?: MediaStream | null | Promise<MediaStream | null | undefined>;
   capturar?: Capturar;
   maximoBytes?: number;
 }): CapturaAntecipada {
   const controlador = new AbortController();
+  let maximoBytes = maximoInicial;
   const guardados: string[] = [];
   let bytes = 0;
   let destino: ((base64: string) => void) | null = null;
@@ -56,6 +59,7 @@ export function iniciarCapturaAntecipada({ stream, capturar = capturarAudio, max
   pronta.catch(() => {});
   return {
     pronta,
+    limitar(novo) { maximoBytes = novo; },
     ligar(novo) {
       if (cancelada) return;
       destino = novo;
