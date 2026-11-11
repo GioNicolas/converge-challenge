@@ -142,6 +142,11 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // gemma-4-26B-A4B (Featherless) p50 3,3 s, ~US$ 0,0003 por análise, 0 spoiler; gemini-3.7-flash @low
     // (OpenRouter) 10/10, p50 4,5 s, p95 5,6 s, ~US$ 0,004; GLM-5.3-Flash p50 15,6 s, p95 38 s (a pergunta do
     // momento chegava velha). A Featherless vai primeiro (créditos); o gemini entra se ela passar de 15 s.
+    // Reserva mais barata medida em 2026-11-10 (scripts/bench-analista.ts; nenhuma passou, o modelo não trocou):
+    // gemini-2.5-flash-lite 9/15 em 3 rodadas, 0 spoiler, p95 5,5 s, ~US$ 0,001 por análise, sem pergunta no
+    // cenário do bug em 2 rodadas; gemini-3.5-flash-lite 9/15 em 3 rodadas, p95 3,8–11,3 s, ~US$ 0,0014, sem
+    // pergunta nos cenários do plano e do bug em todas; gpt-oss-120b @low 3/5 em 1 rodada, ~US$ 0,0023 (só 1,7×
+    // mais barato). O gemma, no mesmo dia, 7/20 (sem pergunta no cenário do plano).
     featherlessEnv: "ANALISE_CODIGO_FEATHERLESS_MODEL",
     featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "ANALISE_CODIGO_MODEL",
@@ -160,6 +165,10 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // scripts/bench-quadro.ts em 2026-11-09: gemma-4-26B-A4B (Featherless) 7/8 simulações, p50 3–4 s,
     // ~US$ 0,0005 por análise; gemini-3.7-flash 8/8, ~US$ 0,0055; GLM-5.3-Flash 2/3 com p50 5,3 s;
     // Mistral-Small-3.2, Qwen3.6-35B e gemma-4-31B estouravam o prazo. O gemini entra se a Featherless passar de 6 s.
+    // Reserva mais barata medida em 2026-11-10 (scripts/bench-quadro.ts; nenhuma passou, o modelo não trocou):
+    // gemini-3.5-flash-lite 0/4 (sempre insiste na pergunta depois do "não sei"), p90 2,9–3,1 s, ~US$ 0,0006 por
+    // análise; gemini-2.5-flash-lite 0/1 (só 1 pergunta em 6 análises), ~US$ 0,0003; gpt-oss-120b @low 1/4, p90
+    // 1,2–1,7 s, ~US$ 0,002. O gemma, no mesmo dia, 2/3 com p90 2,6 s e 0 de 18 chamadas acima de 6 s.
     featherlessEnv: "ANALISE_QUADRO_FEATHERLESS_MODEL",
     featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "ANALISE_QUADRO_MODEL",
