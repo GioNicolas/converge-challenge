@@ -292,6 +292,8 @@ const EsquemaPerguntar = z.object({
   /** O que acabou de mudar no desenho. */
   // Texto longo é cortado, não recusado: perder a fala do candidato por causa do contexto seria pior.
   mudancas: z.string().transform((v) => v.slice(0, 8000)).optional(),
+  /** Segundos desde a última mexida dele no desenho. Ausente = desconhecido. */
+  desenho_parado_ha_s: z.number().min(0).max(86_400).optional(),
   /** A fala junta a anterior, que ele continuou antes de ouvir a resposta: a anterior sai do histórico. */
   substitui: z.boolean().optional(),
   /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
@@ -341,7 +343,8 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
         { llm: ctx.llm, kit: alvo.kit, problema: alvo.problema },
         estado,
         { fase, texto, sessao_id: id, grafo: corpo.dados.grafo, perguntaAtiva: corpo.dados.pergunta_ativa ?? estado.perguntaAtiva?.pergunta, requisitosAtuais: corpo.dados.requisitos, gestosRecentes: corpo.dados.gestos_recentes,
-          imagemBase64: corpo.dados.imagem_base64, mudancas: corpo.dados.mudancas, conversaDoQuadro: corpo.dados.conversa_do_quadro },
+          imagemBase64: corpo.dados.imagem_base64, mudancas: corpo.dados.mudancas, conversaDoQuadro: corpo.dados.conversa_do_quadro,
+          desenhoParadoHaS: corpo.dados.desenho_parado_ha_s },
         agora,
         AbortSignal.timeout(PRAZO_ANALISE_MS),
       ).catch(() => null),
