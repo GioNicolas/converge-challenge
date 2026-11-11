@@ -18,6 +18,8 @@ export interface ChatJsonResult<T> {
   costUsd: number;
   promptTokens: number;
   completionTokens: number;
+  cachedTokens?: number;
+  reservaDisparada?: boolean;
 }
 
 export interface ChatRequest<T> {
@@ -148,6 +150,7 @@ interface Totals {
   cost: number;
   prompt: number;
   completion: number;
+  cached: number;
 }
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -302,6 +305,7 @@ function addUsage(totals: Totals, payload: unknown): void {
   totals.cost += num(payload.usage.cost);
   totals.prompt += num(payload.usage.prompt_tokens);
   totals.completion += num(payload.usage.completion_tokens);
+  totals.cached += num(isRecord(payload.usage.prompt_tokens_details) ? payload.usage.prompt_tokens_details.cached_tokens : undefined);
 }
 
 /** Provedor que de fato atendeu (OpenRouter informa; Featherless não). */
@@ -453,7 +457,7 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
   };
 
   const started = Date.now();
-  const totals: Totals = { cost: 0, prompt: 0, completion: 0 };
+  const totals: Totals = { cost: 0, prompt: 0, completion: 0, cached: 0 };
   const soTexto: ChatMessage[] = [
     mensagemDeSistema(provider.name, req.system, req.systemDinamico),
     { role: "user", content: req.user },
@@ -521,6 +525,7 @@ export async function chatJsonVia<T>(provider: ProviderConfig, req: ChatRequest<
       costUsd: totals.cost,
       promptTokens: totals.prompt,
       completionTokens: totals.completion,
+      cachedTokens: totals.cached,
     };
   } catch (err) {
     if (req.signal?.aborted) throw abortError();

@@ -15,6 +15,7 @@ import { gerarScorecard, gerarScorecardFalso, type Scorecard } from "../scorecar
 import { criteriosSemEvidencia, transicionar } from "../sessao/estado";
 import { contexto, type Contexto } from "./contexto";
 import { erro, json, type ParamsId } from "./http";
+import { TENTATIVAS_FEATHERLESS_RELATORIO, TEMPO_POR_TENTATIVA_RELATORIO_MS } from "@/lib/session/persistencia";
 
 export function devHabilitado(): boolean {
   return process.env.NODE_ENV !== "production" || process.env.AGENTE_DEV === "1";
@@ -40,10 +41,7 @@ const emAndamento = new Map<string, Promise<Scorecard | Falha>>();
 type Avaliacao = NonNullable<Awaited<ReturnType<typeof resolverAvaliacao>>>;
 
 /** Se outra instância já gera o scorecard, espera por ele em vez de pagar o modelo de novo; passado isso, assume a geração. */
-const PRAZO_DA_GERACAO_ALHEIA_MS = 5 * 60_000;
-const INTERVALO_DE_ESPERA_MS = 2_000;
-
-const dormir = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const NS_JANELA_SCORECARD = "scorecard-report-window";
 
 /** O índice do painel é auxiliar: falhar nele nunca derruba a geração do scorecard. */
 async function noIndice(kv: Kv, id: string, mudanca: Parameters<typeof atualizarNoIndice>[2]): Promise<void> {
@@ -73,7 +71,7 @@ export async function finalizarHandler(req: Request, { params }: ParamsId): Prom
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
 
   const r = await garantirScorecard(ctx, id, sessao, alvo);
-  if ("falha" in r) return erro(r.status, r.falha);
+  if ("falha" in r) return r.status === 202 ? json({ gerando: true }, 202) : erro(r.status, r.falha);
   return resposta(r);
 }
 
@@ -97,16 +95,7 @@ async function gerarEGuardar(ctx: Contexto, id: string, sessao: SessaoArmazenada
   const reivindicou = await kv.setIfAbsent("scorecard-job", id, { em: ctx.agora() });
   if (!reivindicou) {
     const job = await kv.get<{ em: number }>("scorecard-job", id);
-    if (job && ctx.agora() - job.em < PRAZO_DA_GERACAO_ALHEIA_MS) {
-      // Outra instância está gerando: espera o scorecard aparecer.
-      const limite = Date.now() + (PRAZO_DA_GERACAO_ALHEIA_MS - (ctx.agora() - job.em));
-      while (Date.now() < limite) {
-        const feito = await ctx.repositorio.obterScorecard(id);
-        if (feito) return feito;
-        await dormir(INTERVALO_DE_ESPERA_MS);
-      }
-    }
-    // Quem reivindicou sumiu (ou passou do prazo): esta chamada assume.
+    if (job && ctx.agora() - job.em < TEMPO_POR_TENTATIVA_RELATORIO_MS + 20_000) return { falha: "relatório ainda sendo gerado", status: 202 };
     await kv.set("scorecard-job", id, { em: ctx.agora() });
   }
 
@@ -123,12 +112,22 @@ async function gerarEGuardar(ctx: Contexto, id: string, sessao: SessaoArmazenada
       eventos: await ctx.repositorio.listarEventos(id),
       imagens: await ctx.repositorio.listarImagens(id),
     };
+    const tentativaAnterior = await kv.get<{ attempt: number }>(NS_JANELA_SCORECARD, id);
+    const attempt = (tentativaAnterior?.attempt ?? 0) + 1;
+    await kv.set(NS_JANELA_SCORECARD, id, { attempt });
+    const rota = attempt <= TENTATIVAS_FEATHERLESS_RELATORIO ? "primario" : "reserva";
+    await noIndice(kv, id, { reportAttempt: attempt, reportReservaTentada: rota === "reserva", state: "running" });
     const agora = () => new Date(ctx.agora());
     try {
       const sc =
         ctx.fake || !ctx.llm
           ? gerarScorecardFalso({ kit: alvo.kit, problema: alvo.problema, agora }, entrada)
-          : await gerarScorecard({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema, agora }, entrada);
+          : await gerarScorecard({ llm: ctx.llm, kit: alvo.kit, problema: alvo.problema, agora, rota, aoUsar: (u) => {
+              void ctx.repositorio.anexarEventos(id, [{ horario: new Date(ctx.agora()).toISOString(), tipo: "scorecard_uso", dados: {
+                modelo: u.modelo ?? "desconhecido", provedor: u.provedor ?? "desconhecido", reserva_disparada: u.reservaDisparada ?? false, ms: u.ms,
+                tokens_entrada: u.entrada, tokens_saida: u.saida, ...(u.cache !== undefined ? { tokens_cache: u.cache } : {}), custo_usd: u.custo,
+              } }]).catch(() => []);
+            } }, entrada);
       await ctx.repositorio.salvarScorecard(id, sc);
       await noIndice(kv, id, {
         state: "done",
@@ -140,13 +139,13 @@ async function gerarEGuardar(ctx: Contexto, id: string, sessao: SessaoArmazenada
     } catch (e) {
       // Só o nome do erro vai ao log: nada de prompt, conversa ou chave.
       console.warn("[agente] scorecard_falhou", { sessao_id: id, erro: e instanceof Error ? e.name : "desconhecido" });
-      await noIndice(kv, id, { state: "error" });
+      await noIndice(kv, id, { state: attempt <= TENTATIVAS_FEATHERLESS_RELATORIO ? "running" : "error" });
       return {
         falha:
           e instanceof ErroLlm && e.codigo === "timeout"
             ? "O scorecard excedeu o prazo de geração. Nenhum relatório foi salvo; tente finalizar novamente."
-            : "Não foi possível gerar o scorecard agora. Tente de novo em instantes.",
-        status: 502,
+          : "Não foi possível gerar o scorecard agora. Tente de novo em instantes.",
+        status: attempt <= TENTATIVAS_FEATHERLESS_RELATORIO ? 202 : 502,
       };
     }
   } finally {

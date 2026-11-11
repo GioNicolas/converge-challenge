@@ -3,12 +3,13 @@
  * Só servidor. Sai da sessão em memória e fica salva em disco com o relatório (lib/session/reports.ts).
  */
 import type { Gravacao } from "@/lib/contracts";
+import { ultimoEvento } from "@/lib/session/eventos";
 import type { SessionState } from "@/lib/session/types";
 
 /** Fim da sessão: o session_ended, ou o último evento. */
 function fimDaSessao(session: SessionState): number {
   const ended = session.events.find((e) => e.type === "session_ended");
-  return ended?.t ?? session.events.at(-1)?.t ?? 0;
+  return ended?.t ?? ultimoEvento(session)?.t ?? 0;
 }
 
 export function gravacaoDaSessao(session: SessionState): Gravacao {

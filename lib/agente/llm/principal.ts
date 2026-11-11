@@ -144,6 +144,8 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
             maxTokens: args.maxTokens !== undefined && args.maxTokens >= MIN_TOKENS_RESPEITADOS ? args.maxTokens : undefined,
             signal: cancelar.signal,
             prazoMs,
+            ...(args.semReserva ? { semReserva: true } : {}),
+            ...(args.rota ? { rota: args.rota } : {}),
             ...(args.imagem ? { imageDataUrl: args.imagem } : {}),
           }),
           prazoMs,
@@ -155,7 +157,8 @@ export function criarClientePrincipal(opcoes: OpcoesPrincipal = {}): LlmCliente 
           ms: r.durationMs ?? Date.now() - inicio,
           modelo: r.model,
           provedor: r.provider,
-          uso: { entrada: r.promptTokens, saida: r.completionTokens, custo: r.costUsd },
+          uso: { entrada: r.promptTokens, saida: r.completionTokens, ...(r.cachedTokens !== undefined ? { cache: r.cachedTokens } : {}), custo: r.costUsd },
+          reservaDisparada: r.reservaDisparada ?? false,
         };
       } catch (e) {
         if (e instanceof ErroLlm) throw e;

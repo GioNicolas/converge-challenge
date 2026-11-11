@@ -17,6 +17,7 @@ import {
   podeAnalisar,
   podeLevantarPlin,
   REGRAS_PADRAO,
+  motivoBloqueioPlin,
   type Regras,
 } from "./sessao/politica";
 import { EsquemaRespostaAnalise, type PedidoAnalise, type RespostaAnalise } from "./sessao/tipos";
@@ -42,7 +43,7 @@ export type ResultadoAnalise = {
     /** Por que a resposta do LLM foi rebaixada/alterada pelas guardas. */
     ajustes: string[];
     ms?: number;
-    uso?: { entrada: number; saida: number; cache?: number; custo?: number };
+    uso?: { entrada: number; saida: number; cache?: number; custo?: number; modelo?: string; provedor?: string; reservaDisparada?: boolean };
   };
 };
 
@@ -55,6 +56,26 @@ export const CONVITES_SILENCIO_INICIAL = [
 
 export function respostaSilencio(): RespostaAnalise {
   return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+}
+
+/** Hash estável do grafo e quantidade de falas; conteúdo da conversa não é persistido nesta assinatura. */
+export function assinaturaDaAnalise(pedido: PedidoAnalise, totalFalas: number): string {
+  const entrada = `${pedido.grafo}\0${totalFalas}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < entrada.length; i += 1) {
+    hash ^= entrada.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${(hash >>> 0).toString(16)}:${totalFalas}`;
+}
+
+export function perguntaBloqueadaNaAnalise(
+  estado: EstadoSessao,
+  pedido: PedidoAnalise,
+  agora: number,
+  regras: Regras = REGRAS_PADRAO,
+): boolean {
+  return motivoBloqueioPlin(estado, agora, regras, { paradoHaS: pedido.parado_ha_s }) !== null;
 }
 
 /**
@@ -81,6 +102,7 @@ export async function analisar(
   pedido: PedidoAnalise,
   agora: number,
   sinal?: AbortSignal,
+  bloqueadaAgora = perguntaBloqueadaNaAnalise(estado, pedido, agora, deps.regras ?? REGRAS_PADRAO),
 ): Promise<ResultadoAnalise> {
   const regras = deps.regras ?? REGRAS_PADRAO;
   const log = deps.log ?? logPadrao;
@@ -109,10 +131,12 @@ export async function analisar(
       timeoutMs: PRAZO_ANALISE_DO_DESENHO_MS,
       sinal,
       imagem: pedido.imagem_base64 ?? null,
+      semReserva: bloqueadaAgora,
     });
     bruta = EsquemaRespostaAnalise.parse(r.dados);
     ms = r.ms;
     uso = r.uso;
+    if (uso) uso = { ...uso, modelo: r.modelo, provedor: r.provedor, reservaDisparada: r.reservaDisparada };
   } catch (e) {
     // Só metadados: o tipo do erro, nunca mensagem com conteúdo, grafo ou chave.
     const codigo = (e as { codigo?: string }).codigo ?? "desconhecido";

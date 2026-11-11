@@ -11,6 +11,8 @@
  */
 import { z } from "zod";
 import { completeJson } from "@/lib/llm";
+import { registrarUsoLlm } from "./uso";
+import type { SessionState } from "@/lib/session/types";
 
 const FilterVerdict = z.object({ reason: z.string(), safe: z.boolean() });
 
@@ -129,6 +131,7 @@ export async function checkQuestion(
   followUpTopic: string,
   kind: "explicar" | "sondar" | "desafio" = "explicar",
   context: { code: string; candidateSaid: string[] } = { code: "", candidateSaid: [] },
+  session?: SessionState,
 ): Promise<VereditoDoFiltro> {
   try {
     // Papel "filtro" (o mesmo da fala ao vivo): no OpenRouter fica abaixo de 1 s. O gemma da Featherless
@@ -139,6 +142,7 @@ export async function checkQuestion(
       user: pedidoDaPergunta(question, followUpTopic, kind, context),
       schema: FilterVerdict,
     });
+    if (session) registrarUsoLlm(session, "filtro", result);
     return veredito(result);
   } catch (err) {
     console.warn("[spoilerFilter] indisponível, deixando a pergunta passar:", errorMessage(err));
@@ -154,6 +158,7 @@ export async function checkReply(
   code?: string,
   /** Prazo do filtro: passou, a fala passa (como quando o filtro está fora do ar). */
   prazoMs?: number,
+  session?: SessionState,
 ): Promise<VereditoDoFiltro> {
   try {
     const result = await completeJson({
@@ -163,6 +168,7 @@ export async function checkReply(
       user: pedidoDaFala(reply, candidateLines, officialHint, code),
       schema: FilterVerdict,
     });
+    if (session) registrarUsoLlm(session, "filtro", result);
     return veredito(result);
   } catch (err) {
     console.warn("[spoilerFilter] filtro de fala indisponível, deixando passar:", errorMessage(err));

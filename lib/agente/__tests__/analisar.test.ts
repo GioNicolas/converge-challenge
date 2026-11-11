@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analisar, CONVITES_SILENCIO_INICIAL, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
+import { analisar, assinaturaDaAnalise, CONVITES_SILENCIO_INICIAL, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
@@ -47,6 +47,21 @@ function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
 }
 
 describe("analisar", () => {
+  it("assinatura muda com o grafo ou com uma fala nova", () => {
+    const p = pedido();
+    const assinatura = assinaturaDaAnalise(p, 2);
+    assert.equal(assinaturaDaAnalise(p, 2), assinatura);
+    assert.notEqual(assinaturaDaAnalise({ ...p, grafo: `${p.grafo}\n- [e2] Cache` }, 2), assinatura);
+    assert.notEqual(assinaturaDaAnalise(p, 3), assinatura);
+  });
+
+  it("usa semReserva quando a política bloqueia pergunta", async () => {
+    const llm = criarClienteFalso([duvida()]);
+    const estado = estadoEm("APROFUNDAMENTO", { perguntasFeitas: 5, ultimaPerguntaEm: AGORA - 1000 });
+    await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas[0].semReserva, true);
+  });
+
   it("dúvida válida vira PLIN_PENDENTE e registra observações", async () => {
     const r = await analisar(deps(criarClienteFalso([duvida()])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
     assert.equal(r.resposta.status, "duvida");

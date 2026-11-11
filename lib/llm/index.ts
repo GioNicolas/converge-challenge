@@ -81,11 +81,9 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     hedgeMs: 45_000,
   },
   relatorio: {
-    // Relatório final da entrevista (live coding e quadro). Ninguém espera por ele na hora: vale qualidade e custo.
-    // O GLM-5.2 na Featherless leva ~3 min (scripts/run-evaluator.ts sem OpenRouter: 177 s, US$ 0,014 em créditos);
-    // com a reserva em 30 s o OpenRouter corria junto e era pago em toda entrevista (US$ 0,014–0,045, o maior custo
-    // dela). Agora a Featherless tem 4,5 min sozinha, numa tentativa só, e o OpenRouter só entra se ela não entregar.
-    // Com função mais longa (Pro): LLM_HEDGE_RELATORIO em ms.
+    // Relatório final da entrevista (live coding e quadro). Decisão de 2026-11-11: duas tentativas de ~280 s
+    // no GLM-5.2 da Featherless; a terceira usa gemini-3.5-flash-lite como reserva paga. Depois disso só
+    // uma ação explícita pode tentar novamente a reserva.
     // Reserva medida em 2026-11-10 (scripts/eval-scorecard.ts, 6 cenários /base, e scripts/run-evaluator.ts
     // fixtures/forca-bruta.json, 2 rodadas cada): gemini-3.5-flash-lite 12/12 scorecards sem falha e sem reparo de
     // JSON, 4–6 s, ~US$ 0,0045 por scorecard e ~US$ 0,002 por relatório do live coding (o GLM-5.2 na OpenRouter
@@ -99,8 +97,7 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // reserva paga. Com 12000 (eval-scorecard sem OpenRouter, 2026-11-10), as respostas usaram 6–11,7 mil e
     // 2 de 6 falharam.
     maxTokens: 12_000,
-    hedgeMs: 270_000,
-    tempoPorTentativaMs: 290_000,
+    tempoPorTentativaMs: 280_000,
   },
   conversa: {
     // Responde à fala do candidato ao vivo (quadro e live coding). Medido com scripts/bench-conversa.ts:
@@ -160,6 +157,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     // gemma-4-26B-A4B (Featherless) p50 3,3 s, ~US$ 0,0003 por análise, 0 spoiler; gemini-3.7-flash @low
     // (OpenRouter) 10/10, p50 4,5 s, p95 5,6 s, ~US$ 0,004; GLM-5.3-Flash p50 15,6 s, p95 38 s (a pergunta do
     // momento chegava velha). A Featherless vai primeiro (créditos); o gemini entra se ela passar de 15 s.
+    // scripts/bench-analista.ts, 2026-11-11, 5 cenários × 2 rodadas: gemini-3.5-flash-lite 6/10 (sem pergunta no cenário
+    // do bug nas 2 rodadas), p50 1,8 s, ~US$ 0,0011; gemini-3.7-flash @low 7/10, p50 4,1 s, ~US$ 0,0020.
     // Reserva mais barata medida em 2026-11-10 (scripts/bench-analista.ts; nenhuma passou, o modelo não trocou):
     // gemini-2.5-flash-lite 9/15 em 3 rodadas, 0 spoiler, p95 5,5 s, ~US$ 0,001 por análise, sem pergunta no
     // cenário do bug em 2 rodadas; gemini-3.5-flash-lite 9/15 em 3 rodadas, p95 3,8–11,3 s, ~US$ 0,0014, sem
@@ -180,9 +179,12 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
   },
   quadro: {
     // Análise do desenho no quadro (decide se e o que perguntar), com prazo de 8 s, só com o grafo em texto.
-    // scripts/bench-quadro.ts em 2026-11-09: gemma-4-26B-A4B (Featherless) 7/8 simulações, p50 3–4 s,
-    // ~US$ 0,0005 por análise; gemini-3.7-flash 8/8, ~US$ 0,0055; GLM-5.3-Flash 2/3 com p50 5,3 s;
-    // Mistral-Small-3.2, Qwen3.6-35B e gemma-4-31B estouravam o prazo. O gemini entra se a Featherless passar de 6 s.
+    // scripts/bench-quadro.ts em 2026-11-11, prompt atual ~5,9 mil tokens: gemma-4-26B-A4B (Featherless, primário)
+    // 0/3, p50 2,3 s, p90 5,5 s, p95 9,3 s, 1 de 17 chamadas acima de 6 s (o hedge de 6 s fica: reserva não entra
+    // por rotina); gemini-3.5-flash-lite 0/2, p50 1,7 s, p90 2,1 s, ~US$ 0,0006 por análise; gemini-3.7-flash @low
+    // 0/2, p50 2,6 s, p90 2,9 s, ~US$ 0,0007 com cache (~US$ 0,006 sem cache), nenhuma pergunta em 6 análises.
+    // Os três reprovam na simulação; o flash-lite erra igual ao primário (insiste depois do não sei) e sai ~10×
+    // mais barato quando entra sem cache, caso comum depois dos itens 1–3.
     // Reserva mais barata medida em 2026-11-10 (scripts/bench-quadro.ts; nenhuma passou, o modelo não trocou):
     // gemini-3.5-flash-lite 0/4 (sempre insiste na pergunta depois do "não sei"), p90 2,9–3,1 s, ~US$ 0,0006 por
     // análise; gemini-2.5-flash-lite 0/1 (só 1 pergunta em 6 análises), ~US$ 0,0003; gpt-oss-120b @low 1/4, p90
@@ -190,10 +192,8 @@ const ROLE_CONFIG: Record<LlmRole, RoleConfig> = {
     featherlessEnv: "ANALISE_QUADRO_FEATHERLESS_MODEL",
     featherlessDefault: "google/gemma-4-26B-A4B-it",
     openrouterEnv: "ANALISE_QUADRO_MODEL",
-    openrouterDefault: "google/gemini-3.7-flash",
+    openrouterDefault: "google/gemini-3.5-flash-lite",
     maxTokens: 4000,
-    reasoningEffort: "low",
-    raciocinioSo: "openrouter",
     hedgeMs: 6_000,
     temperatura: 0.4,
   },
@@ -463,6 +463,7 @@ async function callHedged<T>(
 ): Promise<ChatJsonResult<T>> {
   if (signal?.aborted) throw abortError();
   const [primario, reserva] = ordem(role);
+  const respondeuNaReserva = (provider: LlmProviderName) => provider !== ordem(role)[0];
   const priAbort = filhoDe(signal);
   const resAbort = filhoDe(signal);
   const pri = runSettled(call, primario, priAbort.signal);
@@ -478,7 +479,7 @@ async function callHedged<T>(
   if (early !== "hedge" && early.ok) {
     recordWin(primario);
     notePrimaryWon(role);
-    return early.value;
+    return { ...early.value, reservaDisparada: respondeuNaReserva(primario) };
   }
   console.info(
     early === "hedge"
@@ -501,18 +502,19 @@ async function callHedged<T>(
     priAbort.abort();
     notePrimarySlow(role);
   }
-  return winner.value;
+  return { ...winner.value, reservaDisparada: respondeuNaReserva(winner.value.provider) };
 }
 
 /** Sem hedge (evaluator): primário; em erro, uma tentativa na reserva. */
 async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
   const [primario, reserva] = ordem(role);
+  const respondeuNaReserva = (provider: LlmProviderName) => provider !== ordem(role)[0];
   const primary = await runSettled(call, primario, signal);
   if (signal?.aborted) throw abortError();
   if (primary.ok) {
     recordWin(primario);
     notePrimaryWon(role);
-    return primary.value;
+    return { ...primary.value, reservaDisparada: respondeuNaReserva(primario) };
   }
   notePrimarySlow(role);
   console.info(`[llm] ${role}: ${primary.error.slice(0, 160)}; tentando ${reserva}`);
@@ -520,7 +522,7 @@ async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: Ab
   if (signal?.aborted) throw abortError();
   if (backup.ok) {
     recordWin(reserva);
-    return backup.value;
+    return { ...backup.value, reservaDisparada: respondeuNaReserva(reserva) };
   }
   throw new Error(`${primary.error} | ${backup.error}`);
 }
@@ -528,7 +530,7 @@ async function callWithFallback<T>(role: LlmRole, call: RoleCall<T>, signal?: Ab
 async function callOnly<T>(call: RoleCall<T>, name: LlmProviderName, signal?: AbortSignal): Promise<ChatJsonResult<T>> {
   const result = await attempt(call.role, PROVIDERS[name], requestFor(call, name, signal));
   recordWin(name);
-  return result;
+  return { ...result, reservaDisparada: name !== ordem(call.role)[0] };
 }
 
 export async function completeJson<T>(opts: {
@@ -549,6 +551,10 @@ export async function completeJson<T>(opts: {
   prazoMs?: number;
   /** Imagem que acompanha o pedido (data URL). Só vai ao OpenRouter; sem ela, nada muda. */
   imageDataUrl?: string | null;
+  /** Não usa reserva por lentidão nem rota direta do disjuntor; em falha tenta a reserva. */
+  semReserva?: boolean;
+  /** Força um único provedor, sem hedge nem fallback; usado nas tentativas encadeadas do relatório. */
+  rota?: "primario" | "reserva";
 }): Promise<ChatJsonResult<T>> {
   const cfg = ROLE_CONFIG[opts.role];
   const fala = PAPEIS_DE_FALA.has(opts.role);
@@ -574,12 +580,15 @@ export async function completeJson<T>(opts: {
     reasoning: raciocinio(opts.role, cfg),
   };
 
+  if (opts.rota) return callOnly(call, opts.rota === "primario" ? ordem(opts.role)[0] : ordem(opts.role)[1], opts.signal);
   // Sem chave do OpenRouter: comportamento de antes, só Featherless.
   if (!process.env.OPENROUTER_API_KEY) return callOnly(call, "featherless", opts.signal);
   // Sem chave da Featherless: só OpenRouter. Sem isso, duas lentidões do OpenRouter abriam o disjuntor e
   // mandavam tudo para a Featherless (que falha na hora) por minutos.
   if (!process.env.FEATHERLESS_API_KEY) return callOnly(call, "openrouter", opts.signal);
-  if (breakerIsOpen(opts.role)) return callOnly(call, ordem(opts.role)[1], opts.signal);
+  const papelDeFundo = opts.role === "quadro" || opts.role === "codigo";
+  if (breakerIsOpen(opts.role) && !papelDeFundo && !opts.semReserva) return callOnly(call, ordem(opts.role)[1], opts.signal);
+  if (opts.semReserva) return callWithFallback(opts.role, call, opts.signal);
   const hedgeMs = hedgeDoPapel(opts.role, cfg);
   if (hedgeMs === undefined) return callWithFallback(opts.role, call, opts.signal);
   return callHedged(opts.role, call, hedgeMs, opts.signal);

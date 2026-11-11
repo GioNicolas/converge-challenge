@@ -99,7 +99,7 @@ async function noLiveCoding(falaDoCandidato: string, leituras: Lido[], momento: 
   }
   messages.push({ role: "candidate", text: falaDoCandidato });
   const r = await runInterviewerTurn(session, { blipId, messages });
-  return { responde: r.reply.trim() !== "", conclui: r.concluded === true, encerra: r.finish === true, texto: r.reply };
+  return { responde: r.reply.trim() !== "", conclui: r.concluded === true, encerra: r.despedida === true, texto: r.reply };
 }
 
 /** A mesma fala, a mesma situação e a mesma leitura do modelo nas duas salas. */
@@ -109,8 +109,7 @@ async function nasDuas(falaDoCandidato: string, leituras: Lido[], momento: Momen
 const decisao = (d: Decisao) => ({ responde: d.responde, conclui: d.conclui, encerra: d.encerra });
 
 describe("tabela de casos: a mesma decisão nas duas salas", () => {
-  // `esperaQuadro`: só enquanto o live coding não liga o fechamento comum (#87); depois as duas salas respondem igual.
-  const CASOS: { nome: string; fala: string; leituras: Lido[]; momento?: Momento; espera: Omit<Decisao, "texto">; esperaQuadro?: Omit<Decisao, "texto"> }[] = [
+  const CASOS: { nome: string; fala: string; leituras: Lido[]; momento?: Momento; espera: Omit<Decisao, "texto"> }[] = [
     { nome: "pergunta clara, e o modelo responde", fala: "posso assumir que sempre existe uma resposta?", leituras: [{ fala: "Pode, sempre existe uma." }], espera: { responde: true, conclui: false, encerra: false } },
     { nome: "\"o que tu acha\" sem \"?\", e o modelo fica quieto duas vezes", fala: "aí eu guardo o que já vi, o que tu acha", leituras: [{ quieto: true }], espera: { responde: true, conclui: false, encerra: false } },
     { nome: "\"o que tu acha\" sem \"?\", e o modelo responde na segunda", fala: "aí eu guardo o que já vi, o que tu acha", leituras: [{ quieto: true }, { fala: "Depende do que você quer mostrar. Pode seguir com essa ideia." }], espera: { responde: true, conclui: false, encerra: false } },
@@ -122,15 +121,13 @@ describe("tabela de casos: a mesma decisão nas duas salas", () => {
     { nome: "terminou, e o modelo marcou", fala: "pronto, terminei essa parte", leituras: [{ fala: "Certo.", concluiu: true }], momento: { paradoHaS: 10 }, espera: { responde: true, conclui: true, encerra: false } },
     { nome: "terminou com as mãos paradas, e o modelo não marcou", fala: "Eu acho que é isso, terminei.", leituras: [{ quieto: true }], momento: { paradoHaS: 10 }, espera: { responde: true, conclui: true, encerra: false } },
     { nome: "disse \"terminei\" de uma parte e segue mexendo", fala: "terminei essa parte, agora vou para a outra", leituras: [{ quieto: true }], momento: { paradoHaS: 0 }, espera: { responde: false, conclui: false, encerra: false } },
-    { nome: "pediu para encerrar a entrevista", fala: "acho que é isso, pode encerrar a entrevista", leituras: [{ quieto: true, encerrar: true }], momento: { paradoHaS: 10 }, espera: { responde: false, conclui: false, encerra: true },
-      // No quadro o pedido já sai com a despedida do fechamento comum (#84).
-      esperaQuadro: { responde: true, conclui: false, encerra: true } },
+    { nome: "pediu para encerrar a entrevista", fala: "acho que é isso, pode encerrar a entrevista", leituras: [{ quieto: true, encerrar: true }], momento: { paradoHaS: 10 }, espera: { responde: true, conclui: false, encerra: true } },
   ];
 
   for (const caso of CASOS) {
     it(caso.nome, async () => {
       const r = await nasDuas(caso.fala, caso.leituras, caso.momento);
-      assert.deepEqual(decisao(r.quadro), caso.esperaQuadro ?? caso.espera, `quadro: ${JSON.stringify(r.quadro)}`);
+      assert.deepEqual(decisao(r.quadro), caso.espera, `quadro: ${JSON.stringify(r.quadro)}`);
       assert.deepEqual(decisao(r.codigo), caso.espera, `live coding: ${JSON.stringify(r.codigo)}`);
     });
   }
