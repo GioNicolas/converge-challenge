@@ -74,6 +74,12 @@ describe("custo do prompt da fala no quadro (sem API)", () => {
     assert.equal(conversa.split("\n").length, Math.min(40, FALAS_NO_PROMPT_V2));
   });
 
+  it("o ritmo conta as perguntas da conversa inteira, não só das falas que vão por extenso", () => {
+    // 40 falas com 10 perguntas do Totti, 5 delas fora da janela: com a conta só da janela ele perguntaria demais.
+    const blocos = blocosDoSistemaDinamicoPerguntarV2(estadoCom40Falas(), kit, "APROFUNDAMENTO", [], "", undefined, [], AGORA);
+    assert.match(blocos.map((b) => b.texto).join(""), /Perguntas suas até agora: 10 /);
+  });
+
   it("grafo grande (24 mil caracteres): mede a queda", () => {
     const queda = tabela("grafo grande", medir(antes(grafoGrande())), medir(agora(grafoGrande())));
     assert.ok(queda > 0, "a entrada dinâmica não caiu");

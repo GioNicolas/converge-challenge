@@ -9,7 +9,7 @@ import type { Kit, Problema } from "../kits/tipos";
 import { blocoDoPlano } from "../plano";
 import { criteriosSemEvidencia, type EstadoSessao } from "../sessao/estado";
 import type { FalaRecente, Fase } from "../sessao/tipos";
-import { blocoDaEntrevista, conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, MAX_FALAS_NO_PROMPT, perguntasFeitasEmTexto } from "./contexto";
+import { blocoDaEntrevista, conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 
 /** Nome próprio para o v2 ir ao papel "conversa_quadro" (modelo escolhido à parte do resto do produto). */
 export const NOME_SCHEMA_PERGUNTAR_V2 = "resposta_entrevistador_v2";
@@ -106,8 +106,11 @@ export function blocoDoRitmo(conversa: FalaRecente[]): string {
   return linhas.join("\n");
 }
 
-/** Quantas falas da conversa vão inteiras no prompt do v2. */
-export const FALAS_NO_PROMPT_V2 = MAX_FALAS_NO_PROMPT;
+/**
+ * Quantas falas da conversa vão inteiras no prompt do v2. Eram 40 (`MAX_FALAS_NO_PROMPT`, que o v1 segue usando); o
+ * que fica para trás e importa para não repetir são as perguntas, que vão em bloco próprio (issue #63).
+ */
+export const FALAS_NO_PROMPT_V2 = 20;
 
 /** De que parte do prompt dinâmico um trecho é: é o que a medição de custo separa (issue #63). */
 export type NomeDoBloco = "conversa" | "grafo" | "mudancas" | "resto";
@@ -131,7 +134,10 @@ export function blocosDoSistemaDinamicoPerguntarV2(
   /** Quantas falas da conversa vão inteiras no prompt. */
   falasNoPrompt = FALAS_NO_PROMPT_V2,
 ): BlocoDinamico[] {
-  const conversa = historicoDaConversa(estado.conversa, conversaDoQuadro, falasNoPrompt);
+  // A conversa inteira conta para o ritmo (quantas perguntas ele já fez); só as últimas falas vão por extenso. O que
+  // ficou para trás e importa para não repetir são as perguntas, que já vão em bloco próprio (ritmo e perguntas feitas).
+  const historico = historicoDaConversa(estado.conversa, conversaDoQuadro, Infinity);
+  const conversa = historico.slice(-falasNoPrompt);
   const plano = blocoDoPlano(estado.plano);
   const nomes = new Map(kit.criterios.map((c) => [c.id, c.nome]));
   const semSinal = criteriosSemEvidencia(estado).map((id) => nomes.get(id) ?? id);
@@ -139,7 +145,7 @@ export function blocosDoSistemaDinamicoPerguntarV2(
   return [
     { bloco: "resto", texto: `${plano ? `${plano}\n\n` : ""}${blocoDaEntrevista({ ...estado, fase }, agora)}
 
-${blocoDoRitmo(conversa)}
+${blocoDoRitmo(historico)}
 ${briefing ? `
 ${briefing}
 (Use o briefing só para não perguntar o que as evidências dele já mostram; nunca para puxar um assunto que ele não trouxe.)
