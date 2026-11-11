@@ -1,7 +1,18 @@
 // A fala do Totti: o que o modelo recebe (pergunta em aberto, movimentos de conversa) e como a saída dele é lida.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { lerSaidaDoModelo, montarMensagensConversa, movimentoDaFala, perguntaEmAberto, responder } from "../conversa";
+import {
+  confirmacaoDeterministica,
+  falaDelaNaoEraResposta,
+  falaParaDigitar,
+  focoDoResumo,
+  lerSaidaDoModelo,
+  montarMensagensConversa,
+  movimentoDaFala,
+  perguntaEmAberto,
+  responder,
+  semRepeticaoDaFalaDela,
+} from "../conversa";
 import { aplicarPasso, type Passo } from "../planejador";
 import { chatFalso, ela, saida, sessaoAberta, totti } from "./apoio";
 
@@ -312,5 +323,133 @@ describe("movimentoDaFala: reserva para quando o modelo não declara o movimento
     const duvida: Passo = { tipo: "responder_duvida", retomar: APROFUNDAR, seguidas: 1 };
     assert.equal(movimentoDaFala("seguir", PERGUNTA, sessao, duvida), "seguir");
     assert.equal(movimentoDaFala("seguir", PERGUNTA, sessao, { tipo: "perguntar_nivel" }), "seguir");
+  });
+});
+
+describe("movimento nao_entendi (issue #76)", () => {
+  const ESCOLHA = "Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?";
+  const APROFUNDAR: Passo = { tipo: "aprofundar", area: "tecnico", motivo: "inicial" };
+
+  it("lerSaidaDoModelo lê o movimento novo, e o prompt o descreve", () => {
+    assert.equal(lerSaidaDoModelo(saida("Não peguei essa.", "nao_entendi")).movimento, "nao_entendi");
+    const [sistema] = montarMensagensConversa(sessaoAberta(), APROFUNDAR);
+    assert.match(sistema.content, /Movimento "nao_entendi"/);
+    assert.match(sistema.content, /Ele diz\s+expresso/);
+  });
+
+  it("a fala dela repetida no começo sai, e a pergunta fica", async () => {
+    const sessao = sessaoAberta([totti(ESCOLHA), ela("Ele diz expresso.")]);
+    const r = await responder(sessao, APROFUNDAR, { chat: chatFalso(saida(`Ele diz expresso. Não peguei essa. ${ESCOLHA}`, "nao_entendi")).chat });
+    assert.equal(r.texto, `Não peguei essa. ${ESCOLHA}`);
+    assert.equal(r.movimento, "nao_entendi");
+    assert.ok(r.travas.some((t) => t.trava === "repeticao_da_fala_dela"));
+  });
+
+  it("sem pergunta na fala, a pergunta em aberto volta no fim", async () => {
+    const sessao = sessaoAberta([totti(ESCOLHA), ela("Ele diz expresso.")]);
+    const r = await responder(sessao, APROFUNDAR, { chat: chatFalso(saida("Não peguei essa.", "nao_entendi")).chat });
+    assert.equal(r.texto, `Não peguei essa. ${ESCOLHA}`);
+  });
+
+  it("falaDelaNaoEraResposta: repetir, esclarecer e nao_entendi; responder e seguir não", () => {
+    assert.deepEqual(
+      ["repetir", "esclarecer", "nao_entendi", "responder", "seguir"].map((m) => falaDelaNaoEraResposta(m)),
+      [true, true, true, false, false],
+    );
+  });
+
+  it("falaParaDigitar oferece digitar e refaz a pergunta", () => {
+    assert.equal(falaParaDigitar(ESCOLHA), `Não estou conseguindo te entender pela voz. Se preferir, digite a resposta aqui no chat. ${ESCOLHA}`);
+  });
+});
+
+describe("semRepeticaoDaFalaDela", () => {
+  it("tira a fala dela inteira do começo, sem ligar para caixa, acento e pontuação", () => {
+    assert.equal(semRepeticaoDaFalaDela("Ele diz expresso. Não peguei essa?", "ele diz expresso"), "Não peguei essa?");
+    assert.equal(semRepeticaoDaFalaDela("Só código, sem pressa, certo? Qual pesa mais?", "so codigo sem pressa"), "Certo? Qual pesa mais?");
+  });
+
+  it("fala dela curta, que não está inteira no começo ou que é a fala toda: nada muda", () => {
+    assert.equal(semRepeticaoDaFalaDela("Pode ser. Qual pesa mais?", "pode ser"), "Pode ser. Qual pesa mais?");
+    assert.equal(semRepeticaoDaFalaDela("Ele diz que prefere o plano. Certo?", "ele diz expresso"), "Ele diz que prefere o plano. Certo?");
+    assert.equal(semRepeticaoDaFalaDela("Ele diz expresso.", "ele diz expresso"), "Ele diz expresso.");
+    assert.equal(semRepeticaoDaFalaDela("Qual pesa mais?", undefined), "Qual pesa mais?");
+  });
+});
+
+describe("confirmacaoDeterministica (issue #76)", () => {
+  /** Sessão logo depois de um resumo de live coding pleno, 30 min, com o foco do rascunho. */
+  function depoisDoResumo() {
+    const sessao = sessaoAberta();
+    sessao.resumo = {
+      preferencias: { ...sessao.preferencias },
+      duracaoMin: 30,
+      mode: "live_coding",
+      seniority: "pleno",
+      foco: focoDoResumo(sessao.rascunho),
+    };
+    return sessao;
+  }
+
+  it("só a duração mudou: a frase de sempre", () => {
+    const sessao = depoisDoResumo();
+    sessao.preferencias = { ...sessao.preferencias, duracaoMin: 45 };
+    assert.equal(confirmacaoDeterministica(sessao), "Ajustei quarenta e cinco minutos. Posso finalizar?");
+  });
+
+  it("formato mudou: a troca vem primeiro, a duração do formato como consequência", () => {
+    const sessao = depoisDoResumo();
+    sessao.rascunho = { ...sessao.rascunho, mode: "system_design" };
+    assert.equal(
+      confirmacaoDeterministica(sessao),
+      "Troquei para system design, no quadro. Com isso a entrevista fica com quarenta e cinco minutos. Posso finalizar?",
+    );
+  });
+
+  it("formato e dicas mudaram: troca primeiro, depois o outro ajuste", () => {
+    const sessao = depoisDoResumo();
+    sessao.rascunho = { ...sessao.rascunho, mode: "system_design" };
+    sessao.preferencias = { ...sessao.preferencias, dicas: "nenhuma" };
+    assert.equal(
+      confirmacaoDeterministica(sessao),
+      "Troquei para system design, no quadro. Com isso a entrevista fica com quarenta e cinco minutos. Também ajustei sem dicas. Posso finalizar?",
+    );
+  });
+
+  it("formato mudou com duração dita por ela: a duração não é consequência", () => {
+    const sessao = depoisDoResumo();
+    sessao.rascunho = { ...sessao.rascunho, mode: "system_design" };
+    sessao.preferencias = { ...sessao.preferencias, duracaoMin: 60 };
+    assert.equal(confirmacaoDeterministica(sessao), "Troquei para system design, no quadro. Também ajustei sessenta minutos. Posso finalizar?");
+  });
+
+  it("nível mudou: começa pelo nível", () => {
+    const sessao = depoisDoResumo();
+    sessao.rascunho = { ...sessao.rascunho, seniority: "senior" };
+    assert.equal(confirmacaoDeterministica(sessao), "Mudei o nível para sênior. Posso finalizar?");
+  });
+
+  it("foco mudou sem troca de formato, ou nada mudou: vai ao modelo", () => {
+    const foco = depoisDoResumo();
+    foco.rascunho = { ...foco.rascunho, focus: [{ area: "tecnico", weight: 0.6 }, { area: "pressao", weight: 0.4 }] };
+    foco.preferencias = { ...foco.preferencias, duracaoMin: 45 };
+    assert.equal(confirmacaoDeterministica(foco), undefined);
+    assert.equal(confirmacaoDeterministica(depoisDoResumo()), undefined);
+  });
+
+  it("ela pediu um formato que não foi aplicado: não confirma o efeito colateral", () => {
+    const sessao = depoisDoResumo();
+    sessao.transcricao.push(ela("quero system design"));
+    sessao.preferencias = { ...sessao.preferencias, tom: "desafiador" };
+    assert.equal(confirmacaoDeterministica(sessao), undefined);
+  });
+
+  it("resumo guardado antes dos campos novos: só tom, dicas, duração e linguagens contam", () => {
+    const sessao = depoisDoResumo();
+    sessao.resumo = { preferencias: { ...sessao.preferencias }, duracaoMin: 30 };
+    sessao.rascunho = { ...sessao.rascunho, seniority: "senior" };
+    assert.equal(confirmacaoDeterministica(sessao), undefined);
+    sessao.preferencias = { ...sessao.preferencias, duracaoMin: 45 };
+    assert.equal(confirmacaoDeterministica(sessao), "Ajustei quarenta e cinco minutos. Posso finalizar?");
   });
 });

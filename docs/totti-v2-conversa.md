@@ -296,16 +296,18 @@ dois campos são opcionais.
 |---|---|---|
 | `repetir` | ela pediu para repetir e a fala traz a mesma pergunta (ou o mesmo resumo) que estava em aberto | desfaz o que foi lido da fala dela; o passo em curso continua em curso; depois do resumo, sai o último resumo como foi falado |
 | `esclarecer` | ela não entendeu a pergunta e a fala a reformula ou explica o que se quer saber, em palavras de RH | o mesmo de `repetir` |
+| `nao_entendi` | a fala dela não faz sentido como resposta (transcrição quebrada, truncada ou sem relação com a pergunta) e o Totti diz que não entendeu e refaz a pergunta em aberto, mais curta | o mesmo de `repetir`; a fala dela fica marcada (`naoEntendida`) e sai da extração e da cobertura dos turnos seguintes; sem "?", a pergunta em aberto volta no fim; na terceira vez seguida, a fala vira a oferta de digitar (`falaParaDigitar`) |
 | `responder` | a fala responde a algo que ELA perguntou ou comentou (dúvida, "tá me ouvindo?", pedido de tempo) | mantém o que foi lido da fala dela; o passo escolhido não conta como feito |
 | `seguir` | todo o resto: executar o passo do planejador | o de sempre: o passo conta como feito |
 
 Duas regras valem para tudo:
 
-- **nenhuma trava reescreve uma fala cujo `movimento` é `repetir`, `esclarecer` ou `responder`**. As exceções são formato
-  de voz, não conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, e "uma pergunta só" vale para `repetir` e
-  `esclarecer`;
-- **uma fala com `repetir` ou `esclarecer` não fecha o passo em curso nem muda o plano**: a pergunta continua em aberto,
-  nenhuma contagem anda, e a rota não agenda a extração.
+- **nenhuma trava reescreve uma fala cujo `movimento` é `repetir`, `esclarecer`, `nao_entendi` ou `responder`**. As
+  exceções são formato de voz, não conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, "uma pergunta só" vale
+  para `repetir`, `esclarecer` e `nao_entendi`, e a fala dela repetida inteira no começo da fala do Totti sai
+  (`repeticao_da_fala_dela`, fala dela com 3 palavras ou mais);
+- **uma fala com `repetir`, `esclarecer` ou `nao_entendi` não fecha o passo em curso nem muda o plano**
+  (`falaDelaNaoEraResposta`): a pergunta continua em aberto, nenhuma contagem anda, e a rota não agenda a extração.
 
 Reserva para o modelo rápido, que às vezes não declara o campo: fala que traz quase a mesma pergunta em aberto, quando
 o planejador tinha escolhido outra pergunta, conta como `repetir` (`movimentoDaFala` em `conversa.ts`).
