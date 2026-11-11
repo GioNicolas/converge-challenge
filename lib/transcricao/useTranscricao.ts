@@ -96,8 +96,9 @@ export function useTranscricao({ aoTexto, bloqueada = false, obterStream, libera
       // O ditado envia ao Scribe tudo que o microfone captura, então tempo aberto representa áudio enviado.
       const id = sessaoIdRef.current;
       if (id) atual.medidor = criarMedidorUsoTranscricao(id, { enviar: (corpo, final) => {
-        if (final && navigator.sendBeacon) navigator.sendBeacon("/api/uso", new Blob([corpo], { type: "application/json" }));
-        else void fetch("/api/uso", { method: "POST", headers: { "Content-Type": "application/json" }, body: corpo, keepalive: final }).catch(() => {});
+        // Beacon recusado (fila cheia) cai no fetch, como no quadro.
+        if (final && navigator.sendBeacon?.("/api/uso", new Blob([corpo], { type: "application/json" }))) return;
+        void fetch("/api/uso", { method: "POST", headers: { "Content-Type": "application/json" }, body: corpo, keepalive: final }).catch(() => {});
       } });
       setEstado("ouvindo");
     } catch (e) {

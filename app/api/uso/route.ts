@@ -19,6 +19,8 @@ const Corpo = z.discriminatedUnion("tipo", [
 const porIp = criarLimitador(65, 60_000);
 
 export async function POST(req: Request) {
+  // Content-Length declarado acima do teto nem é lido; sem ele, o tamanho é conferido depois da leitura.
+  if (Number(req.headers.get("content-length")) > 12_000) return NextResponse.json({ erro: "corpo muito grande" }, { status: 400 });
   let texto: string;
   try {
     texto = await req.text();
