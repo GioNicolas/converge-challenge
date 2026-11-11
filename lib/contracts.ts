@@ -168,6 +168,9 @@ const base = { sessionId: z.string(), t: z.number().nonnegative() };
 export const SessionEvent = z.discriminatedUnion("type", [
   /** Gravado pelo servidor para contabilizar o uso de LLM. */
   z.object({ ...base, type: z.literal("llm_uso"), papel: z.enum(["fala", "filtro", "analise", "relatorio"]), modelo: z.string(), provedor: z.string(), reserva_disparada: z.boolean(), ms: z.number(), tokens_entrada: z.number(), tokens_saida: z.number(), tokens_cache: z.number().optional(), custo_usd: z.number() }),
+  z.object({ ...base, type: z.literal("transcricao_uso"), contexto: z.enum(["quadro", "coding", "pre"]), escuta_id: z.string(), audioEnviadoS: z.number(), sessaoS: z.number(), conexoes: z.number().int(), reconexoes: z.number().int(), final: z.boolean() }),
+  z.object({ ...base, type: z.literal("voz_uso"), contexto: z.enum(["quadro", "coding", "pre"]), caracteres: z.number().int(), fala_id: z.string().optional() }),
+  z.object({ ...base, type: z.literal("voz_descartada"), contexto: z.enum(["quadro", "coding", "pre"]), caracteres: z.number().int(), fala_id: z.string().optional(), motivo: z.enum(["substituida", "cancelada"]) }),
   z.object({ ...base, type: z.literal("session_started"), configId: z.string(), problemId: z.string(), language: z.string() }),
   /** Código inteiro. Mandar ~1,5 s depois de parar de digitar, ou no máximo a cada 5 s. */
   z.object({ ...base, type: z.literal("snapshot"), code: z.string(), version: z.number().int(), language: z.string() }),

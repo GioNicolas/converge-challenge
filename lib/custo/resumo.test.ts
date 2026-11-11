@@ -14,18 +14,21 @@ test("agrega eventos de uso do quadro e live coding", () => {
     { tipo: "transcricao_uso", dados: { escuta_id: "e1", audioEnviadoS: 40, sessaoS: 60 } },
     { tipo: "transcricao_uso", dados: { escuta_id: "e1", audioEnviadoS: 45, sessaoS: 60 } },
     { tipo: "transcricao_uso", dados: { escuta_id: "e2", audioEnviadoS: 10, sessaoS: 30 } },
+    { type: "voz_uso", contexto: "coding", caracteres: 9 },
+    { type: "voz_descartada", contexto: "coding", caracteres: 3, motivo: "cancelada" },
+    { type: "transcricao_uso", contexto: "coding", escuta_id: "e3", audioEnviadoS: 6, sessaoS: 12, conexoes: 1, reconexoes: 0, final: true },
   ]);
   assert.equal(r.papeis["perguntar/fala"].chamadas, 1);
   assert.equal(r.papeis["perguntar/fala"].reserva, 1);
   assert.equal(r.papeis.filtro.custo_usd, .004);
   assert.equal(r.reservas, 1);
   assert.equal(r.taxaCache, .25);
-  assert.equal(r.caracteresVoz, 120);
-  assert.equal(r.percentualDescartado, 20/120);
+  assert.equal(r.caracteresVoz, 129);
+  assert.equal(r.percentualDescartado, 23/129);
   assert.equal(r.papeis["perguntar/fala"].reserva, 1);
-  assert.equal(r.audioEnviadoS, 55);
-  assert.equal(r.sessaoS, 90);
-  assert.equal(r.proporcaoAudio, 55/90);
+  assert.equal(r.audioEnviadoS, 61);
+  assert.equal(r.sessaoS, 102);
+  assert.equal(r.proporcaoAudio, 61/102);
 });
 
 test("papel ausente não cria chamada e cache sem entrada é nulo", () => {

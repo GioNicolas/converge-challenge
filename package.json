@@ -31,7 +31,7 @@
     "test:pre-entrevista": "tsx --test lib/pre-entrevista/__tests__/*.test.ts scripts/pre-entrevista/__tests__/*.test.ts",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:agente": "tsx --test lib/agente/__tests__/*.test.ts lib/agente/**/__tests__/*.test.ts",
-    "test:rotas": "tsx --test app/api/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",
+    "test:rotas": "tsx --test app/api/__tests__/*.test.ts app/api/uso/__tests__/*.test.ts lib/agente/armazenamento/__tests__/*.test.ts",
     "test:entrevista-texto": "tsx --test lib/dev/entrevista-texto/__tests__/*.test.ts lib/agente/__tests__/scorecard.test.ts app/api/__tests__/entrevista-texto.test.ts",
     "test:scorecard": "tsx --test lib/agente/__tests__/scorecard*.test.ts",
     "eval:scorecard": "node --env-file-if-exists=.env.local --import tsx scripts/eval-scorecard.ts",
