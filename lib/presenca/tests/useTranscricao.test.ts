@@ -745,6 +745,20 @@ test("pausa no meio de uma rajada não descarta a fala nem a folga de fechamento
   assert.equal(ws.fechamentos, 0);
 });
 
+test("commit vazio atrasado no meio da frase seguinte não faz ela ser descartada", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  await audio.blocos(VOZ, 1024); // a frase seguinte já começou
+  ws.mensagem({ message_type: "committed_transcript", text: "" }); // resposta atrasada ao commit de segurança
+  await audio.blocos(SILENCIO, 256);
+  ws.mensagem({ message_type: "committed_transcript", text: "E qual é a proporção?" });
+  assert.ok(m.trechos.some((tr) => tr.final && tr.texto.includes("proporção")));
+});
+
 test("se o VAD não confirma o trecho, o portão confirma à mão depois de fechar", async (t) => {
   const m = montar(t, { taxa: 16000 });
   const audio = relogioDeAudio(t, m);

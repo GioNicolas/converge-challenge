@@ -306,14 +306,19 @@ export function criarEscutaTranscricao(opcoes: {
           // Sem voz no microfone, o parcial é alucinação: não mostra nem segura o turno do agente.
           if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, false, `${atual}:${segmento}`);
         } else if (m.message_type === "committed_transcript" && typeof m.text === "string") {
-          if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
-          else if (m.text.trim()) {
-            console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
-            if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
-            texto = { ...texto, parcial: null };
+          // Commit vazio (resposta ao commit de segurança, às vezes atrasada) não fecha trecho nenhum. Tratado como
+          // trecho, ele zerava a voz e gastava a chave da frase seguinte, que já estava sendo dita: ela era
+          // descartada como alucinação ou como repetida (visto no Scribe real).
+          if (m.text.trim()) {
+            if (vozNoTrecho >= VOZ_MINIMA_MS) receber(m.text, true, `${atual}:${segmento}`);
+            else {
+              console.debug("[transcrição] descartada (sem voz no microfone):", m.text);
+              if (texto.parcial) opcoes.aoTrecho?.({ texto: "", final: false, inicio: agora() });
+              texto = { ...texto, parcial: null };
+            }
+            segmento++;
+            vozNoTrecho = 0;
           }
-          segmento++;
-          vozNoTrecho = 0;
           vozSemCommit = false;
           cancelarCommitDeSeguranca();
         } else if (typeof m.error === "string") {
