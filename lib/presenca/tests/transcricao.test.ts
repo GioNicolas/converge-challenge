@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  criarPortaoDeVoz,
+  criarFilaDeAmostras, criarPortaoDeVoz,
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, pcm16LE, reamostrar, urlDoScribe,
 } from "../transcricao";
@@ -134,4 +134,23 @@ test("portão interrompido devolve silêncio pelo resto da folga", () => {
   assert.ok(resto.every((a) => a === 0));
   assert.equal(portao.aberto, false);
   assert.equal(portao.encerrar().length, 0);
+});
+
+test("fila de amostras tira na ordem, devolve ao começo e descarta o mais antigo acima do máximo", () => {
+  const fila = criarFilaDeAmostras(10);
+  fila.guardar(Float32Array.from([1, 2, 3]));
+  fila.guardar(Float32Array.from([4, 5, 6, 7]));
+  assert.equal(fila.length, 7);
+  const tirado = fila.tirar(5);
+  assert.deepEqual([...tirado], [1, 2, 3, 4, 5]);
+  fila.devolver(tirado.subarray(3));
+  assert.deepEqual([...fila.tirar(10)], [4, 5, 6, 7]);
+  assert.equal(fila.length, 0);
+  fila.guardar(Float32Array.from([1, 2, 3, 4, 5, 6, 7, 8]));
+  fila.guardar(Float32Array.from([9, 10, 11, 12]));
+  assert.equal(fila.length, 10);
+  assert.deepEqual([...fila.tirar(3)], [3, 4, 5]);
+  fila.limpar();
+  assert.equal(fila.length, 0);
+  assert.equal(fila.tirar(3).length, 0);
 });

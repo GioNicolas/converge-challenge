@@ -40,6 +40,11 @@ export function esperaParaReconectar(tentativa: number): number | null {
  */
 export const LIMIAR_VOZ_RMS = 0.01;
 export const VOZ_MINIMA_MS = 200;
+/**
+ * Com o portão aberto, energia acima disso (~-48 dBFS) ainda conta como fala: o fim de uma frase dito baixo
+ * não corta. Abrir continua exigindo LIMIAR_VOZ_RMS, para o ruído de fundo não abrir o portão sozinho.
+ */
+export const LIMIAR_SUSTENTAR_RMS = 0.004;
 
 export function energiaRms(amostras: Float32Array): number {
   if (!amostras.length) return 0;
@@ -179,5 +184,55 @@ export function criarPortaoDeVoz(opcoes: { taxa?: number; antesMs?: number; depo
       restante = 0;
       anterior = vazio;
     },
+  };
+}
+
+/** Fila de amostras em blocos: guardar e tirar copiam só o que entra ou sai, não a fila inteira. */
+export type FilaDeAmostras = {
+  readonly length: number;
+  guardar(amostras: Float32Array): void;
+  /** Tira até `n` amostras do começo da fila. */
+  tirar(n: number): Float32Array;
+  /** Devolve ao começo o que foi tirado e não pôde ser enviado. */
+  devolver(amostras: Float32Array): void;
+  limpar(): void;
+};
+
+export function criarFilaDeAmostras(maximo: number): FilaDeAmostras {
+  let blocos: Float32Array[] = [];
+  let total = 0;
+  return {
+    get length() { return total; },
+    guardar(amostras) {
+      if (!amostras.length) return;
+      blocos.push(amostras.slice());
+      total += amostras.length;
+      // Acima do máximo descarta o mais antigo.
+      while (total > maximo) {
+        const excesso = total - maximo;
+        if (blocos[0].length <= excesso) total -= blocos.shift()!.length;
+        else { blocos[0] = blocos[0].subarray(excesso); total -= excesso; }
+      }
+    },
+    tirar(n) {
+      const saida = new Float32Array(Math.min(n, total));
+      let escrito = 0;
+      while (escrito < saida.length) {
+        const bloco = blocos[0];
+        const parte = Math.min(bloco.length, saida.length - escrito);
+        saida.set(bloco.subarray(0, parte), escrito);
+        escrito += parte;
+        if (parte === bloco.length) blocos.shift();
+        else blocos[0] = bloco.subarray(parte);
+      }
+      total -= saida.length;
+      return saida;
+    },
+    devolver(amostras) {
+      if (!amostras.length) return;
+      blocos.unshift(amostras);
+      total += amostras.length;
+    },
+    limpar() { blocos = []; total = 0; },
   };
 }

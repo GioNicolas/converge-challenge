@@ -657,6 +657,62 @@ test("o que esperava a conexão sai em rajadas que não saturam o socket", async
   assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 30 * 4096);
 });
 
+test("fim de frase dito baixo segue com o portão aberto; ruído baixo sozinho não abre", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  const BAIXO = 0.006;
+  const AMOSTRA_BAIXA = Math.round(BAIXO * 32767);
+  await audio.blocos(BAIXO, 2048); // abaixo de LIMIAR_VOZ_RMS: não abre
+  const ws = m.sockets[0];
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_BAIXA).length, 0);
+  await audio.blocos(VOZ, 512);
+  await audio.blocos(BAIXO, 2048); // mais longo que a folga de 1,2 s
+  await audio.blocos(SILENCIO, 2048);
+  const enviadas = ws.enviados.flatMap(amostrasDe);
+  const baixasDepois = enviadas.slice(enviadas.lastIndexOf(AMOSTRA_VOZ)).filter((a) => a === AMOSTRA_BAIXA).length;
+  assert.equal(baixasDepois, 8 * 4096, "toda a fala baixa depois da voz foi enviada");
+});
+
+test("se o VAD não confirma o trecho, o portão confirma à mão depois de fechar", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  const ws = m.sockets[0];
+  const commits = () => ws.enviados.filter((d) => (JSON.parse(d) as { commit: boolean }).commit).length;
+  await audio.blocos(VOZ, 512);
+  await audio.blocos(SILENCIO, 1536); // o portão fecha no último bloco
+  assert.equal(commits(), 0, "espera o VAD primeiro");
+  await audio.blocos(SILENCIO, 1024);
+  assert.equal(commits(), 1);
+  await audio.blocos(SILENCIO, 3072);
+  assert.equal(commits(), 1, "um commit por trecho");
+  // Com o VAD confirmando, nenhum commit à mão.
+  await audio.blocos(VOZ, 512);
+  await audio.blocos(SILENCIO, 1024);
+  ws.mensagem({ message_type: "committed_transcript", text: "Ok." });
+  await audio.blocos(SILENCIO, 3072);
+  assert.equal(commits(), 1);
+});
+
+test("socket fechando não descarta o que estava para sair", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  m.controle.ativar(true);
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  ws.readyState = 2;
+  m.processar(VOZ, 3);
+  assert.equal(ws.enviados.length, 0);
+  ws.readyState = 1;
+  m.processar(SILENCIO, 6);
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 3 * 4096);
+});
+
 test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais da metade", async (t) => {
   const m = montar(t, { taxa: 16000 });
   const audio = relogioDeAudio(t, m);
