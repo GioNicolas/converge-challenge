@@ -90,6 +90,8 @@ const FALAS_DE_REPETICAO = [
 ];
 /** Entre um pedido de mudança recusado pelo servidor e o próximo. */
 const INTERVALO_PEDIDO_EMPECILHO_MS = 15_000;
+/** Quanto o encerramento espera pela foto final do quadro antes de gerar o relatório sem ela. */
+const PRAZO_FOTO_FINAL_MS = 8_000;
 /** Respostas do servidor que encerram as tentativas nesta sessão. */
 const MOTIVOS_DEFINITIVOS_EMPECILHO = ["problema sem mudança prevista", "já anunciado"];
 
@@ -350,6 +352,8 @@ export function useEntrevista(
   /** Requisitos já combinados (vão ao /analisar para a análise não inventar contexto). */
   const requisitosCombinados = useRef<string[]>([]);
   const gatilho = useRef<Gatilho | null>(null);
+  /** Grava o quadro como está no encerramento (grafo e foto), se mudou desde a última análise. */
+  const capturaFinal = useRef<(() => Promise<void>) | null>(null);
   const linhaDoTempo = useRef<ReturnType<typeof criarLinhaDoTempo> | null>(null);
   const registrar = useCallback(
     (...args: Parameters<ReturnType<typeof criarLinhaDoTempo>["registrar"]>) =>
@@ -400,9 +404,14 @@ export function useEntrevista(
   useEffect(() => {
     if (estado.fase !== "AGUARDANDO") registrar("fase", { fase: estado.fase });
     if (estado.fase !== "ENCERRADA" || !sessao) return;
-    // Primeiro a linha do tempo inteira chega ao servidor; só depois ele gera o scorecard com ela.
+    // Primeiro o quadro final (grafo e foto), depois a linha do tempo inteira chega ao servidor; só então ele gera
+    // o scorecard com ela. A foto final tem um prazo: se a exportação travar, o relatório sai com o que já havia.
     const linha = linhaDoTempo.current;
-    void (linha ? linha.descarregar().catch(() => {}) : Promise.resolve())
+    const final = capturaFinal.current;
+    void (final
+      ? Promise.race([final().catch(() => {}), new Promise<void>((resolver) => setTimeout(resolver, PRAZO_FOTO_FINAL_MS))])
+      : Promise.resolve())
+      .then(() => (linha ? linha.descarregar().catch(() => {}) : undefined))
       .then(() => finalizarSessao(sessao.sessao_id))
       .catch((erro) => console.warn("[fim] não foi possível gerar o relatório:", erro));
   }, [estado.fase, registrar, sessao]);
@@ -415,6 +424,55 @@ export function useEntrevista(
     const miniaturas = new WeakMap<PedidoAnalise, Promise<string | null>>();
     let falaAoAnalisar = 0;
     let conversaAoAnalisar = 0;
+    /**
+     * Foto do quadro (estes elementos) que vai ao servidor e entra na linha do tempo como "desenho" com
+     * `imagem_url`. É a foto que o relatório usa como prova e como desenho final.
+     */
+    const fotografar = (elementos: ReturnType<typeof quadro.api.getSceneElements>, grafo: string, mudancas: string, horario: string) => {
+      const linha = linhaDoTempo.current;
+      return (async () => {
+        const estadoDaCaptura = quadro.api.getAppState();
+        const arquivosDaCaptura = quadro.api.getFiles();
+        const apiDaCaptura = {
+          ...quadro.api,
+          getSceneElements: () => elementos,
+          getAppState: () => estadoDaCaptura,
+          getFiles: () => arquivosDaCaptura,
+        };
+        const { imagemDoCandidato } = await import("@/lib/excalidraw/imagem");
+        const png = await imagemDoCandidato(apiDaCaptura);
+        if (!png) return null;
+        if (!usarServidor()) {
+          console.log("[desenho] PNG do candidato:", png.size, "bytes");
+          return null;
+        }
+        const { enviarImagem } = await import("@/lib/sessao/servidor");
+        const url = await enviarImagem(sessao.sessao_id, png, horario);
+        const dados = { grafo, mudancas, imagem_url: url, horario };
+        if (ativo && linha) {
+          linha.registrar("desenho", dados);
+          if (estadoAtual.current.fase === "ENCERRADA") void linha.descarregar().catch(() => {});
+        } else {
+          await enviarEventos(sessao.sessao_id, [{ horario, tipo: "desenho", dados }]);
+        }
+        return url;
+      })().catch((erro) => {
+        console.warn("[desenho] imagem indisponível:", erro);
+        return null;
+      });
+    };
+    // Fim da entrevista: o que ele desenhou depois da última análise (que só roda em pausa, com o Totti calado e
+    // sem pergunta aberta) ficava sem foto e sem grafo, e o relatório mostrava um desenho velho. Aqui o quadro
+    // como está no encerramento vira o último "desenho", com foto, independente das regras da análise.
+    capturaFinal.current = async () => {
+      const elementos = quadro.api.getSceneElements();
+      const r = conversor.current.converter(elementos);
+      const mudancas = descreverMudancas(ultimoInstantaneo.current, r.instantaneo);
+      if (!mudancas && !houveMudancaRelevante(ultimoInstantaneo.current, r.instantaneo)) return;
+      ultimoInstantaneo.current = r.instantaneo;
+      registrar("desenho", { grafo: r.texto, mudancas });
+      await fotografar(elementos, r.texto, mudancas, new Date().toISOString());
+    };
     const g = criarGatilho({
       podeAnalisar: () => podeAnalisar(estadoAtual.current) && !falaParcial.current
         && !agenteFalandoRef.current && !preparandoVozRef.current && pedidosEmAndamento.current === 0,
@@ -446,38 +504,7 @@ export function useEntrevista(
         console.log("[análise] pedido", pedido);
         if (mudancas) {
           registrar("desenho", { grafo: r.texto, mudancas });
-          const horario = new Date().toISOString();
-          const linha = linhaDoTempo.current;
-          const imagem = (async () => {
-            const estadoDaCaptura = quadro.api.getAppState();
-            const arquivosDaCaptura = quadro.api.getFiles();
-            const apiDaCaptura = {
-              ...quadro.api,
-              getSceneElements: () => elementos,
-              getAppState: () => estadoDaCaptura,
-              getFiles: () => arquivosDaCaptura,
-            };
-            const { imagemDoCandidato } = await import("@/lib/excalidraw/imagem");
-            const png = await imagemDoCandidato(apiDaCaptura);
-            if (!png) return null;
-            if (!usarServidor()) {
-              console.log("[desenho] PNG do candidato:", png.size, "bytes");
-              return null;
-            }
-            const { enviarImagem } = await import("@/lib/sessao/servidor");
-            const url = await enviarImagem(sessao.sessao_id, png, horario);
-            const dados = { grafo: r.texto, mudancas, imagem_url: url, horario };
-            if (ativo && linha) {
-              linha.registrar("desenho", dados);
-              if (estadoAtual.current.fase === "ENCERRADA") void linha.descarregar().catch(() => {});
-            } else {
-              await enviarEventos(sessao.sessao_id, [{ horario, tipo: "desenho", dados }]);
-            }
-            return url;
-          })().catch((erro) => {
-            console.warn("[desenho] imagem indisponível:", erro);
-            return null;
-          });
+          const imagem = fotografar(elementos, r.texto, mudancas, new Date().toISOString());
           imagens.set(pedido, imagem);
           if (usarServidor()) {
             miniaturas.set(pedido, (async () => {
@@ -519,6 +546,7 @@ export function useEntrevista(
     gatilho.current = g;
     return () => {
       ativo = false;
+      capturaFinal.current = null;
       g.parar();
     };
   }, [quadro, sessao, enviar, registrar]);
