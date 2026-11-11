@@ -44,6 +44,13 @@ describe("caso real da issue #89 (encerrada aos 8:43 de 15 min)", () => {
     assert.equal(Math.floor(d.decorridoMin), 8);
   });
 
+  it("o uso do relatório gerado depois não alonga a entrevista", () => {
+    const { entrada } = montarCasoEncerradoPeloCandidato();
+    const depois = new Date(Date.parse(entrada.eventos.at(-1)!.horario) + 60 * 60_000).toISOString();
+    const eventos = [...entrada.eventos, { horario: depois, recebidoEm: Date.parse(depois), tipo: "scorecard_uso", dados: { modelo: "m", ms: 1 } }];
+    assert.equal(Math.floor(duracaoDaSessao(entrada.estado, eventos)!.decorridoMin), 8);
+  });
+
   it("comunicação não recebe nota baixa com prova de pedido de repetição", async () => {
     const { sc } = await gerarDoCaso();
     const com = sc.criterios.find(c => c.criterio === "comunicacao")!;

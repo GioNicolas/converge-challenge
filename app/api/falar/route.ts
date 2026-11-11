@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { RespostaVoz } from "@/lib/voz/contrato";
 import { criarLimitador, ipDe, lerTexto } from "@/lib/agente/rotas/http";
+import { registrarUsoVoz } from "@/lib/voz/uso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,11 +29,21 @@ export async function POST(req: Request) {
   const chave = process.env.ELEVENLABS_API_KEY;
   if (!chave) return erro(501, "voz ainda não configurada");
   let texto = "";
+  let metadados: { sessao_id: string; contexto: "quadro" | "coding" | "pre"; fala_id?: string } | undefined;
   try {
     const lido = await lerTexto(req, 16 * 1024);
     if (!lido.ok) return lido.resposta;
     const corpo: unknown = JSON.parse(lido.dados);
-    if (corpo && typeof corpo === "object" && typeof (corpo as { texto?: unknown }).texto === "string") texto = (corpo as { texto: string }).texto.trim();
+    if (corpo && typeof corpo === "object" && typeof (corpo as { texto?: unknown }).texto === "string") {
+      const objeto = corpo as { texto: string; sessao_id?: unknown; contexto?: unknown; fala_id?: unknown };
+      texto = objeto.texto.trim();
+      if (objeto.sessao_id !== undefined || objeto.contexto !== undefined || objeto.fala_id !== undefined) {
+        if (typeof objeto.sessao_id !== "string" || !objeto.sessao_id.trim() || objeto.sessao_id.length > 80
+          || !["quadro", "coding", "pre"].includes(String(objeto.contexto))
+          || (objeto.fala_id !== undefined && (typeof objeto.fala_id !== "string" || objeto.fala_id.length > 100))) return erro(400, "metadados de sessão inválidos.");
+        metadados = { sessao_id: objeto.sessao_id.trim(), contexto: objeto.contexto as "quadro" | "coding" | "pre", ...(typeof objeto.fala_id === "string" ? { fala_id: objeto.fala_id } : {}) };
+      }
+    }
   } catch {
     return erro(400, "JSON inválido.");
   }
@@ -52,6 +63,7 @@ export async function POST(req: Request) {
     const dados = (await resposta.json()) as { audio_base64?: unknown; alignment?: Record<string, unknown> | null };
     const vozGerada = RespostaVoz.safeParse({ audio_base64: dados.audio_base64, alinhamento: dados.alignment });
     if (!vozGerada.success) return erro(502, "Resposta inesperada do ElevenLabs.");
+    if (metadados) after(() => registrarUsoVoz(metadados, texto).catch((e) => console.warn("[voz] não registrou uso da sessão:", e instanceof Error ? e.message : "erro")));
     return NextResponse.json(vozGerada.data, { headers });
   } catch {
     return erro(502, "ElevenLabs indisponível.");

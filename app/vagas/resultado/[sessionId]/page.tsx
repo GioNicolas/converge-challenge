@@ -15,12 +15,20 @@ export default function PaginaDoResultado() {
 
   useEffect(() => {
     let vivo = true;
-    fetch("/api/report", { cache: "no-store" })
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const carregar = () => fetch("/api/report", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<EntrevistaReal[]>) : []))
       .catch(() => [] as EntrevistaReal[])
-      .then((lista) => vivo && setItem(lista.find((e) => e.sessionId === sessionId) ?? null));
+      .then((lista) => {
+        if (!vivo) return;
+        const proximo = lista.find((e) => e.sessionId === sessionId) ?? null;
+        setItem(proximo);
+        if (proximo && !proximo.cartao && proximo.state !== "error") timer = setTimeout(carregar, 5000);
+      });
+    carregar();
     return () => {
       vivo = false;
+      clearTimeout(timer);
     };
   }, [sessionId]);
 

@@ -3,6 +3,7 @@ import { ETAPAS_DO_FECHAMENTO } from "../totti/fechamento";
 import { EsquemaVisualOpcional } from "../presenca/acoesVisuais";
 import { validarResposta, type PedidoAnalise, type RespostaAnalise, type Sessao } from "./cliente";
 import type { Alinhamento } from "../presenca/alinhamento";
+import { obterSessaoDaVoz } from "../voz/cliente";
 
 export type { FalaRecente, Fase, PedidoAnalise, RespostaAnalise, Sessao } from "./cliente";
 export type { Alinhamento } from "../presenca/alinhamento";
@@ -143,7 +144,8 @@ export async function pedirEmpecilho(sessaoId: string, dados: { fase: string; gr
 
 export async function sintetizarFala(texto: string, sinal?: AbortSignal): Promise<{ audio: Blob; alinhamento: Alinhamento }> {
   const rota = "/api/falar";
-  const dados = validar(rota, await lerJson(rota, jsonPost({ texto }, sinal)), EsquemaFala);
+  const meta = obterSessaoDaVoz();
+  const dados = validar(rota, await lerJson(rota, jsonPost({ texto, ...(meta ?? {}) }, sinal)), EsquemaFala);
   let binario: string;
   try {
     binario = atob(dados.audio_base64);

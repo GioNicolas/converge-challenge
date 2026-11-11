@@ -84,6 +84,8 @@ export type EmpecilhoAnunciado = {
 };
 
 export type EstadoSessao = {
+  /** Assinatura e bloqueio da última análise concluída; ausente em sessões anteriores. */
+  ultimaAnalise?: { assinatura: string; bloqueada: boolean };
   fase: Fase;
   faseIniciadaEm: number | null;
   /** Quando a entrevista começou (COMECAR). Estados antigos não têm: o tempo decorrido é estimado pelas fases. */

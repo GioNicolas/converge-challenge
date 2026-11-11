@@ -4,6 +4,7 @@
 import { DEFAULT_CONFIG } from "@/lib/config/default";
 import type { InterviewConfig, SessionEvent } from "@/lib/contracts";
 import { getLlmStats } from "@/lib/llm";
+import { ultimoEvento } from "@/lib/session/eventos";
 import type { SessionState, SessionStateView } from "@/lib/session/types";
 
 const globalForSessions = globalThis as typeof globalThis & {
@@ -126,7 +127,7 @@ export function latestCode(session: SessionState): string {
 
 export function toView(session: SessionState): SessionStateView {
   const lastCodeVersion = session.codeHistory.at(-1);
-  const lastEvent = session.events.at(-1);
+  const lastEvent = ultimoEvento(session);
   return {
     sessionId: session.sessionId,
     configId: session.config.id,
