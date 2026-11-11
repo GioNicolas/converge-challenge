@@ -71,13 +71,23 @@ describe("custo do prompt da fala no quadro (sem API)", () => {
   it("a conversa vai com no máximo FALAS_NO_PROMPT_V2 falas", () => {
     const blocos = blocosDoSistemaDinamicoPerguntarV2(estadoCom40Falas(), kit, "APROFUNDAMENTO", [], "", undefined, [], AGORA);
     const conversa = blocos.find((b) => b.bloco === "conversa")!.texto;
-    assert.equal(conversa.split("\n").length, Math.min(40, FALAS_NO_PROMPT_V2));
+    assert.equal(conversa.trim().split("\n").length, Math.min(40, FALAS_NO_PROMPT_V2));
   });
 
   it("o ritmo conta as perguntas da conversa inteira, não só das falas que vão por extenso", () => {
     // 40 falas com 10 perguntas do Totti, 5 delas fora da janela: com a conta só da janela ele perguntaria demais.
     const blocos = blocosDoSistemaDinamicoPerguntarV2(estadoCom40Falas(), kit, "APROFUNDAMENTO", [], "", undefined, [], AGORA);
     assert.match(blocos.map((b) => b.texto).join(""), /Perguntas suas até agora: 10 /);
+  });
+
+  it("o que muda a toda fala (minutos, ritmo) vem depois do desenho e da conversa, para o começo do prompt se repetir", () => {
+    const montar = (instante: number) => blocosDoSistemaDinamicoPerguntarV2(estadoCom40Falas(), kit, "APROFUNDAMENTO", [], grafoGrande(6_000), undefined, [], instante).map((b) => b.texto).join("");
+    const a = montar(AGORA);
+    const b = montar(AGORA + 3 * MIN);
+    assert.notEqual(a, b, "os minutos decorridos mudaram");
+    const fimDaConversa = a.indexOf("SOBRE A ENTREVISTA");
+    assert.ok(fimDaConversa > a.indexOf("Desenho atual") && fimDaConversa > a.indexOf("CONVERSA ATÉ AGORA"));
+    assert.equal(b.slice(0, fimDaConversa), a.slice(0, fimDaConversa), "o começo (desenho e conversa) deveria ser igual");
   });
 
   it("grafo grande (24 mil caracteres): mede a queda", () => {
