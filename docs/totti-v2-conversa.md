@@ -305,7 +305,9 @@ Duas regras valem para tudo:
 - **nenhuma trava reescreve uma fala cujo `movimento` é `repetir`, `esclarecer`, `nao_entendi` ou `responder`**. As
   exceções são formato de voz, não conteúdo: a limpeza de markdown, aspas e prefixo vale sempre, "uma pergunta só" vale
   para `repetir`, `esclarecer` e `nao_entendi`, e a fala dela repetida inteira no começo da fala do Totti sai
-  (`repeticao_da_fala_dela`, fala dela com 3 palavras ou mais);
+  (`repeticao_da_fala_dela`, fala dela com 3 palavras ou mais). Uma fala `esclarecer` sem "?" também é formato de voz
+  (sem o "?" ela não sabe que a vez é dela): a pergunta indireta ("Eu quero saber se X ou Y.") vira direta ("X ou Y?"),
+  ou, sem ela, a pergunta em aberto volta no fim (`pergunta_no_esclarecer`, issue #113);
 - **uma fala com `repetir`, `esclarecer` ou `nao_entendi` não fecha o passo em curso nem muda o plano**
   (`falaDelaNaoEraResposta`): a pergunta continua em aberto, nenhuma contagem anda, e a rota não agenda a extração.
 
