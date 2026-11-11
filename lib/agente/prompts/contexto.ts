@@ -23,6 +23,8 @@ export function historicoDaConversa(servidor: FalaRecente[], doQuadro: FalaRecen
   const base = conversaSemRepeticao(servidor.map(({ quem, texto }) => ({ quem, texto })));
   const quadro = conversaSemRepeticao(doQuadro.filter((f) => f.texto.trim()).map(({ quem, texto }) => ({ quem, texto })));
   // Servidor vazio (estado antigo ou teste): vale a ordem do quadro.
+  // slice(-0) devolveria tudo: sem falas pedidas, nenhuma.
+  if (max <= 0) return [];
   if (!base.length) return quadro.slice(-max);
   return mesclarEmOrdem(base, quadro).slice(-max);
 }
