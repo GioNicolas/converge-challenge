@@ -20,6 +20,13 @@ const MANTER_VIVO_MS = 5_000;
 const AMOSTRAS_MANTER_VIVO = 1600;
 /** Áudio guardado enquanto o socket conecta (20 s a 16 kHz); acima disso descarta o mais antigo. */
 const MAXIMO_PENDENTE = 320_000;
+/** Acima disso no buffer do socket, a rede não está escoando: reconecta. */
+const SOCKET_SATURADO = 262_144;
+/**
+ * Uma rajada (o que esperava a conexão) para de enviar acima disso e segue no próximo bloco ou tique: o
+ * bufferedAmount só baixa entre tarefas, então mandar tudo de uma vez passaria de SOCKET_SATURADO sozinho.
+ */
+const LIMITE_RAJADA = 65_536;
 
 export type EstadoEscuta = { motor: "elevenlabs" | "navegador" | "nenhum"; escutando: boolean; erro: string | null };
 /** Uso do Scribe por sessão de escuta: o que é cobrado (áudio enviado) contra o tempo de sessão. */
@@ -152,19 +159,22 @@ export function criarEscutaTranscricao(opcoes: {
   }
   function enviarAudio(amostras: Float32Array, commit = false) {
     if (!socket || !pronto || socket.readyState !== 1) return;
-    if (socket.bufferedAmount > 262144) { falharScribe(); return; }
+    if (socket.bufferedAmount > SOCKET_SATURADO) { falharScribe(); return; }
     try { socket.send(mensagemDeAudio(amostras, commit)); } catch { falharScribe(); return; }
     ultimoEnvio = performance.now();
     amostrasEnviadas += amostras.length;
   }
   /** Envia o que o portão deixou passar em blocos de 200 ms; `tudo` manda também o resto menor que um bloco. */
   function escoar(tudo: boolean) {
+    if (!pronto || !socket || !pendentes.length) return;
+    if (socket.bufferedAmount > SOCKET_SATURADO) { falharScribe(); return; }
+    const livre = () => pronto && !!socket && socket.bufferedAmount <= LIMITE_RAJADA;
     let consumido = 0;
-    while (pronto && pendentes.length - consumido >= 3200) {
+    while (livre() && pendentes.length - consumido >= 3200) {
       enviarAudio(pendentes.subarray(consumido, consumido + 3200));
       consumido += 3200;
     }
-    if (pronto && tudo && pendentes.length > consumido) {
+    if (livre() && tudo && pendentes.length > consumido) {
       enviarAudio(pendentes.subarray(consumido));
       consumido = pendentes.length;
     }
@@ -195,7 +205,8 @@ export function criarEscutaTranscricao(opcoes: {
       ganho.gain.value = 0;
       processador.onaudioprocess = (evento) => {
         evento.outputBuffer.getChannelData(0).fill(0);
-        if (encerrado || !contexto || !socket) return;
+        // Enquanto conecta (token e handshake) o áudio também passa pelo portão e espera em `pendentes`.
+        if (encerrado || !contexto || (!socket && !conectando)) return;
         // Sem poder ouvir (Totti falando, mudo, aba escondida) nada vai ao Scribe: o tempo enviado é cobrado.
         if (!podeOuvir()) {
           fecharTrechoAberto();
@@ -369,6 +380,7 @@ export function criarEscutaTranscricao(opcoes: {
     pausadoDesde = ouvir ? null : (pausadoDesde ?? performance.now());
     // Pausa longa: fecha o socket em vez de mantê-lo vivo (retomar pede token novo).
     if (!ouvir && socket && pausadoDesde !== null && performance.now() - pausadoDesde >= PAUSA_MAXIMA_MS) limparSocket();
+    else if (socket && pronto && pendentes.length) escoar(!portao.aberto);
     else if (socket && pronto && !portao.aberto && performance.now() - ultimoEnvio >= MANTER_VIVO_MS) {
       enviarAudio(new Float32Array(AMOSTRAS_MANTER_VIVO));
     }

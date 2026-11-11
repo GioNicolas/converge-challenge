@@ -619,6 +619,44 @@ test("fala durante a conexão espera o session_started e sai inteira", async (t)
   assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 3 * 4096);
 });
 
+test("fala enquanto o token é buscado também espera e sai inteira", async (t) => {
+  let resolver!: (token: string) => void;
+  const m = montar(t, { taxa: 16000, obterToken: () => new Promise((resolve) => { resolver = resolve; }) });
+  m.controle.ativar(true);
+  await andar();
+  m.processar(VOZ, 3); // o socket ainda nem existe
+  resolver("token");
+  await andar();
+  const ws = m.sockets[0];
+  ws.iniciar();
+  m.processar(SILENCIO, 6);
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 3 * 4096);
+});
+
+test("o que esperava a conexão sai em rajadas que não saturam o socket", async (t) => {
+  let resolver!: (token: string) => void;
+  const m = montar(t, { taxa: 16000, obterToken: () => new Promise((resolve) => { resolver = resolve; }) });
+  m.controle.ativar(true);
+  await andar();
+  m.processar(VOZ, 30); // ~7,7 s de fala: mandar tudo de uma vez passaria de 256 KB no buffer
+  resolver("token");
+  await andar();
+  const ws = m.sockets[0];
+  const enviar = ws.send.bind(ws);
+  ws.send = (dados: string) => { ws.bufferedAmount += dados.length; enviar(dados); };
+  ws.iniciar();
+  assert.equal(ws.fechamentos, 0);
+  assert.ok(ws.bufferedAmount < 262144, `buffer: ${ws.bufferedAmount}`);
+  assert.ok(ws.enviados.length < 30 * 4096 / 3200, "parte fica para depois");
+  for (let i = 0; i < 20; i++) {
+    ws.bufferedAmount = 0; // a rede escoou
+    t.mock.timers.tick(200);
+  }
+  m.processar(SILENCIO, 6);
+  assert.equal(ws.fechamentos, 0);
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 30 * 4096);
+});
+
 test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais da metade", async (t) => {
   const m = montar(t, { taxa: 16000 });
   const audio = relogioDeAudio(t, m);
