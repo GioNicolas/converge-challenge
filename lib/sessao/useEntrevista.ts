@@ -103,6 +103,14 @@ function elementosSignificativos(elementos: readonly { type: string; isDeleted?:
     && (e.width > 8 || e.height > 8)).length;
 }
 
+/**
+ * Assinatura do desenho do candidato (as marcas do Totti não contam): muda quando qualquer peça entra, sai ou muda.
+ * O /perguntar só manda foto e bloco de mudanças quando ela muda desde a última foto enviada (issue #63).
+ */
+function assinaturaDoDesenho(elementos: readonly { id: string; version: number; isDeleted?: boolean; customData?: Record<string, unknown> }[]): string {
+  return elementos.filter((e) => !e.isDeleted && e.customData?.autor !== "agente").map((e) => `${e.id}:${e.version}`).join("|");
+}
+
 /** Aguarda a prova por até 1,8 s (e a miniatura em data URL por até 600 ms); a tarefa original continua para registrar a URL tardia.
  * Com miniatura, o Totti já enxerga o quadro por ela: a URL (só para o registro) espera no máximo 300 ms. */
 export async function pedidoComImagem(
@@ -322,6 +330,8 @@ export function useEntrevista(
 
   const conversor = useRef(criarConversor());
   const ultimoInstantaneo = useRef<Instantaneo | null>(null);
+  /** O desenho como estava na última foto que o /perguntar levou (ver `assinaturaDoDesenho`). */
+  const desenhoDaUltimaFoto = useRef<string | null>(null);
   const conversa = useRef<FalaRecente[]>([]);
   /** Última vez que o candidato mexeu no desenho ou falou (vai ao /analisar como `parado_ha_s`). */
   const ultimaAtividade = useRef(Date.now());
@@ -927,11 +937,16 @@ export function useEntrevista(
       pedidosEmAndamento.current++;
       setAguardandoResposta(true);
       try {
-        const convertido = quadro ? conversor.current.converter(quadro.api.getSceneElements()) : undefined;
+        const elementos = quadro?.api.getSceneElements();
+        const convertido = elementos ? conversor.current.converter(elementos) : undefined;
         const grafo = convertido?.texto.slice(0, 24000);
-        const mudancas = convertido ? descreverMudancas(ultimoInstantaneo.current, convertido.instantaneo) : undefined;
+        // Desenho parado desde a última foto: o grafo em texto já descreve o quadro. Foto e "o que mudou" (que só se
+        // atualiza na análise e repetia o mesmo bloco a cada fala) ficam de fora; é a maior parte das falas.
+        const desenho = elementos ? assinaturaDoDesenho(elementos) : null;
+        const desenhoMudou = desenho !== desenhoDaUltimaFoto.current;
+        const mudancas = convertido && desenhoMudou ? descreverMudancas(ultimoInstantaneo.current, convertido.instantaneo) : undefined;
         let imagem_base64: string | undefined;
-        if (quadro && usarServidor()) {
+        if (quadro && usarServidor() && desenhoMudou) {
           try {
             const { quadroDataUrl } = await import("@/lib/excalidraw/imagem");
             imagem_base64 = (await Promise.race([
@@ -951,6 +966,8 @@ export function useEntrevista(
           ...(substitui ? { substitui: true } : {}),
         }, sinal);
         if (sinal?.aborted) throw new DOMException("Substituída por uma fala nova.", "AbortError");
+        // Só conta como enviada a foto que chegou ao Totti: sem ela (exportação lenta), a próxima fala tenta de novo.
+        if (imagem_base64) desenhoDaUltimaFoto.current = desenho;
       } catch (erro) {
         // Não foi enviada: sai da conversa para o texto poder ser reenviado sem duplicar.
         const i = conversa.current.indexOf(falaDoCandidato);
