@@ -29,13 +29,14 @@ function grafoGrande(caracteres = 24_000): string {
   return linhas.join("\n").slice(0, caracteres);
 }
 
-/** 40 falas: o candidato pensa em voz alta, o Totti reage curto ou pergunta. */
-function estadoCom40Falas(): EstadoSessao {
-  const conversa = Array.from({ length: 40 }, (_, i) => i % 2 === 0
-    ? { quem: "candidato" as const, texto: `Aqui eu coloco o serviço ${i} na frente da fila, porque se o banco ficar lento a gente não perde o pedido e consegue reprocessar depois com calma.`, em: AGORA - (40 - i) * 30_000 }
-    : { quem: "agente" as const, texto: i % 4 === 1 ? `E o que acontece com o pedido ${i} se a fila cair no meio?` : "Faz sentido, pode seguir.", em: AGORA - (40 - i) * 30_000 });
+/** `n` falas (40 por padrão): o candidato pensa em voz alta, o Totti reage curto ou pergunta (1 a cada 4 falas). */
+function estadoComFalas(n = 40): EstadoSessao {
+  const conversa = Array.from({ length: n }, (_, i) => i % 2 === 0
+    ? { quem: "candidato" as const, texto: `Aqui eu coloco o serviço ${i} na frente da fila, porque se o banco ficar lento a gente não perde o pedido e consegue reprocessar depois com calma.`, em: AGORA - (n - i) * 30_000 }
+    : { quem: "agente" as const, texto: i % 4 === 1 ? `E o que acontece com o pedido ${i} se a fila cair no meio?` : "Faz sentido, pode seguir.", em: AGORA - (n - i) * 30_000 });
   return { ...estadoInicial({ criterios: kit.criterios.map((c) => c.id) }), fase: "APROFUNDAMENTO", faseIniciadaEm: AGORA - 12 * MIN, conversa };
 }
+const estadoCom40Falas = () => estadoComFalas(40);
 
 const MUDANCAS = Array.from({ length: 10 }, (_, i) => `+ [r${i + 1}] Serviço ${i + 1} de processamento de pedidos (retângulo)`).join("\n");
 
@@ -78,6 +79,19 @@ describe("custo do prompt da fala no quadro (sem API)", () => {
     // 40 falas com 10 perguntas do Totti, 5 delas fora da janela: com a conta só da janela ele perguntaria demais.
     const blocos = blocosDoSistemaDinamicoPerguntarV2(estadoCom40Falas(), kit, "APROFUNDAMENTO", [], "", undefined, [], AGORA);
     assert.match(blocos.map((b) => b.texto).join(""), /Perguntas suas até agora: 10 /);
+  });
+
+  it("o ritmo conta as perguntas de antes das 40 últimas falas (antes da #63, a conta parava nelas)", () => {
+    // 60 falas com 15 perguntas do Totti: 5 delas ficam antes das 40 últimas falas.
+    const blocos = blocosDoSistemaDinamicoPerguntarV2(estadoComFalas(60), kit, "APROFUNDAMENTO", [], "", undefined, [], AGORA);
+    assert.match(blocos.map((b) => b.texto).join(""), /Perguntas suas até agora: 15 /);
+  });
+
+  it("janela de 12 contra 20 falas: mede o que sobraria", () => {
+    const n12 = medir({ falas: 12, foto: false, grafo: grafoGrande(6_000) });
+    const n20 = medir({ falas: 20, foto: false, grafo: grafoGrande(6_000) });
+    console.log(`janela 20 -> 12 falas (grafo médio, desenho parado): ${n20.tokens} -> ${n12.tokens} tokens (${((1 - n12.tokens / n20.tokens) * 100).toFixed(0)}% a menos)`);
+    assert.ok(n12.tokens < n20.tokens);
   });
 
   it("o que muda a toda fala (minutos, ritmo) vem depois do desenho e da conversa, para o começo do prompt se repetir", () => {
