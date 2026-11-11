@@ -2,8 +2,18 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { acrescentarFala, erroMicrofone, type EventosTranscricao } from "./tipos";
 import { iniciarNavegador, type ConstrutorReconhecimento } from "./navegador";
-import { iniciarScribe } from "./scribe";
+import { energiaPcm16, iniciarScribe } from "./scribe";
+import { iniciarCapturaAntecipada } from "./capturaAntecipada";
 import { RealtimeEvents, type RealtimeConnection } from "@elevenlabs/client";
+
+const VOZ_BASE64 = (() => {
+  let binario = "";
+  for (let i = 0; i < 8000; i++) {
+    const valor = (i % 2 ? 8000 : -8000) & 0xffff;
+    binario += String.fromCharCode(valor & 0xff, valor >> 8);
+  }
+  return btoa(binario);
+})();
 
 function coletar() {
   const textos: string[] = [];
@@ -91,7 +101,9 @@ test("permissão negada encerra a captura e permite uma nova tentativa", () => {
   assert.match(erroMicrofone(new DOMException("denied", "NotAllowedError")).message, /Permita/);
 });
 
-function scribeFalso() {
+function scribeFalso({ sessaoManual = false } = {}) {
+  let opcoesConexao: { keyterms?: string[] } | undefined;
+  const enviados: string[] = [];
   const listeners = new Map<string, ((data: unknown) => void)[]>();
   let fechado = false;
   let capturaCancelada = false;
@@ -104,12 +116,13 @@ function scribeFalso() {
   const conexao = {
     on: (evento: string, cb: (data: unknown) => void) => listeners.set(evento, [...(listeners.get(evento) ?? []), cb]),
     close: () => { fechado = true; emit(RealtimeEvents.CLOSE); },
-    send: ({ audioBase64 }: { audioBase64: string }) => { bytesEnviados += atob(audioBase64).length; },
+    send: ({ audioBase64 }: { audioBase64: string }) => { enviados.push(audioBase64); bytesEnviados += atob(audioBase64).length; },
     commit: () => { commits++; },
   } as unknown as RealtimeConnection;
   const dependencias: Parameters<typeof iniciarScribe>[1] = {
-    conectar: () => {
-      queueMicrotask(() => emit(RealtimeEvents.SESSION_STARTED, {}));
+    conectar: (opcoes) => {
+      opcoesConexao = opcoes as { keyterms?: string[] };
+      if (!sessaoManual) queueMicrotask(() => emit(RealtimeEvents.SESSION_STARTED, {}));
       return conexao;
     },
     capturar: async ({ aoAudio, signal }) => {
@@ -123,13 +136,17 @@ function scribeFalso() {
   };
   return {
     dependencias, emit,
-    audio: () => enviarAudio?.("AAAA"),
+    /** 0,5 s de voz (PCM 16 bits, amplitude ~0,25): passa pelo portão de voz da pré-entrevista. */
+    audio: () => enviarAudio?.(VOZ_BASE64),
+    silencio: () => enviarAudio?.("AAAA"),
     get fechado() { return fechado; },
     get capturaCancelada() { return capturaCancelada; },
     get capturaParada() { return capturaParada; },
     get signalCaptura() { return signalCaptura; },
     get commits() { return commits; },
     get bytesEnviados() { return bytesEnviados; },
+    get enviados() { return enviados; },
+    get opcoesConexao() { return opcoesConexao; },
   };
 }
 
@@ -191,4 +208,76 @@ test("Scribe informa queda de conexão e solta o microfone", async () => {
   assert.equal(c.erros.length, 1);
   assert.equal(falso.capturaCancelada, true);
   assert.equal(c.encerramentos, 1);
+});
+
+test("o áudio de antes da sessão abrir é guardado e enviado em ordem: a primeira palavra não se perde", async () => {
+  const c = coletar();
+  const falso = scribeFalso({ sessaoManual: true });
+  const inicio = iniciarScribe({ token: "teste", signal: new AbortController().signal, eventos: c.eventos }, falso.dependencias);
+  await new Promise((r) => setImmediate(r));
+  // A captura já está aberta enquanto o socket conecta: a pessoa começa a responder.
+  falso.audio();
+  falso.silencio();
+  assert.equal(falso.enviados.length, 0, "nada sai antes do SESSION_STARTED");
+  falso.emit(RealtimeEvents.SESSION_STARTED, {});
+  const sessao = await inicio;
+  assert.deepEqual(falso.enviados, [VOZ_BASE64, "AAAA"]);
+  falso.audio();
+  assert.equal(falso.enviados.length, 3, "depois de ligar, o áudio vai direto");
+  sessao.cancelar();
+});
+
+test("captura antecipada pelo chamador é a mesma usada pela sessão", async () => {
+  const c = coletar();
+  const falso = scribeFalso();
+  const captura = iniciarCapturaAntecipada({ capturar: falso.dependencias.capturar });
+  await new Promise((r) => setImmediate(r));
+  falso.audio(); // falou antes de o token chegar
+  const sessao = await iniciarScribe({ token: "teste", captura, signal: new AbortController().signal, eventos: c.eventos }, falso.dependencias);
+  assert.deepEqual(falso.enviados, [VOZ_BASE64]);
+  sessao.cancelar();
+  assert.equal(falso.capturaCancelada, true);
+});
+
+test("buffer antecipado guarda no máximo o limite e descarta o mais antigo", async () => {
+  let aoAudio: ((b: string) => void) | undefined;
+  const captura = iniciarCapturaAntecipada({
+    maximoBytes: 6,
+    capturar: async (o) => { aoAudio = o.aoAudio; return { cancelar() {}, parar: async () => {} }; },
+  });
+  await captura.pronta;
+  for (const b of ["AAAA", "AQEB", "AgIC"]) aoAudio?.(b); // 3 bytes cada
+  const recebidos: string[] = [];
+  captura.ligar((b) => recebidos.push(b));
+  assert.deepEqual(recebidos, ["AQEB", "AgIC"]);
+});
+
+test("pré-entrevista: frase sem voz no microfone (ruído) não vira texto", async () => {
+  const c = coletar();
+  const falso = scribeFalso();
+  const sessao = await iniciarScribe({ token: "teste", signal: new AbortController().signal, eventos: c.eventos }, falso.dependencias);
+  falso.silencio();
+  falso.emit(RealtimeEvents.COMMITTED_TRANSCRIPT, { text: "Tchau. Até mais, Fábio." });
+  assert.deepEqual(c.textos, []);
+  falso.audio();
+  falso.emit(RealtimeEvents.COMMITTED_TRANSCRIPT, { text: "Pode ir direto pra solução." });
+  assert.deepEqual(c.textos, ["Pode ir direto pra solução."]);
+  sessao.cancelar();
+});
+
+test("pré-entrevista manda o vocabulário de recrutamento e o do título como keyterms", async () => {
+  const c = coletar();
+  const falso = scribeFalso();
+  const sessao = await iniciarScribe({ token: "teste", termos: ["Pagamentos"], signal: new AbortController().signal, eventos: c.eventos }, falso.dependencias);
+  const termos = falso.opcoesConexao?.keyterms ?? [];
+  assert.ok(termos.includes("live coding") && termos.includes("system design") && termos.includes("Pagamentos"));
+  assert.ok(termos.length <= 50 && termos.every((t) => t.length <= 20));
+  sessao.cancelar();
+});
+
+test("energiaPcm16 mede a voz do bloco e a duração em 16 kHz", () => {
+  const { energia, duracaoMs } = energiaPcm16(VOZ_BASE64);
+  assert.ok(Math.abs(energia - 8000 / 32768) < 1e-6);
+  assert.equal(duracaoMs, 500);
+  assert.equal(energiaPcm16("AAAA").energia, 0);
 });

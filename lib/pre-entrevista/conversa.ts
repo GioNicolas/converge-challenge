@@ -2,7 +2,7 @@
  * Agente de conversa (Totti): conduz a configuração da entrevista falando com a recrutadora.
  *
  * O planejador (`planejador.ts`) escolhe o passo; aqui o modelo escreve a fala e diz que movimento de conversa ela é
- * (`movimento`: seguir o passo, repetir, esclarecer ou responder a algo que a recrutadora disse).
+ * (`movimento`: seguir o passo, repetir, esclarecer, dizer que não entendeu ou responder a algo que a recrutadora disse).
  * Quando o Totti pediu uma decisão e a resposta dela não decidiu, o modelo recebe a decisão pendente no lugar do passo
  * e devolve a escolha no campo `decisao`. Depois que a fala é escrita, as travas de `responder` conferem o que é
  * inegociável (formato de voz, uma pergunta por fala, resumo montado do estado) e obedecem ao movimento: nenhuma
@@ -18,9 +18,10 @@ import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVAL
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { registrarEvento } from "./log";
 import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type OferecerTradeoffPasso, type Passo } from "./planejador";
-import { PERGUNTA_CONTEXTO, perguntaObvia, perguntasDaArea } from "./perguntas";
+import { PERGUNTA_CONTEXTO, PERGUNTA_EXEMPLO, PERGUNTA_O_QUE_REPROVA, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
 import { fraseDaQuestao, linhasDoPedido } from "./problema-pedido";
+import { lerFormato } from "./formato";
 import { LIMIAR_DUPLICADA, sobreposicao } from "@/lib/agente/guardas";
 import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
@@ -63,7 +64,7 @@ Como falar:
 - Nunca comece com palavra de concordância ou reconhecimento: "Boa", "Fechado", "Certo", "Perfeito", "Ótimo", "Show", "Beleza",
   "Legal", "Combinado", "Entendi", "Entendido" ou "Faz sentido". Comece direto pelo conteúdo ou pela pergunta.
   A exceção é uma fala curta de movimento "responder" (ela pediu um tempo ou fez um comentário): ali um "Claro" ou "Certo" é a resposta natural.
-- Não repita a resposta dela palavra por palavra.
+- Não repita a resposta dela palavra por palavra, nem comece a fala com o que ela disse.
 - Nunca ofereça como opção algo que ela já disse. Se ela falou de escalabilidade, não a ofereça de novo como escolha.
 - Fale com as palavras dela e da vaga. Nunca use nomes internos (tecnico, pressao, escala_produto, uso_ia, criterio, passo)
   nem as expressões "domínio técnico", "escala e produto" e "pressão e adaptação". Para a área de IA, diga "IA aplicada".
@@ -109,6 +110,12 @@ do PASSO desta fala; o PASSO fica para a fala seguinte.
   SE SABE", ou diga com franqueza que não sabe; "vou anotar" não é resposta. Pergunta ignorada quebra a confiança dela no resto da conversa. Depois volte à pergunta em aberto, na mesma fala.
   Movimento "responder".
 - Ela fez um comentário de conversa ("tá me ouvindo?", "desculpa, me distraí"): responda como gente, curto. Movimento "responder".
+- A fala dela não faz sentido como resposta: está truncada, não forma uma frase com sentido, ou não tem relação nenhuma com a
+  sua pergunta em aberto (ex.: você perguntou se ele pode ir direto pra solução ou explicar o plano antes, e veio "Ele diz
+  expresso."). A fala vem da transcrição da voz e às vezes chega errada. Não repita a frase dela, não tente adivinhar o que
+  ela quis dizer e não siga o PASSO: diga em poucas palavras que não entendeu e refaça a pergunta em aberto, mais curta
+  (ex.: "Não peguei essa. Ele pode ir direto pra solução, ou você quer que ele explique o plano antes?"). A fala termina na
+  pergunta, com "?". Movimento "nao_entendi".
 Se a última fala dela responde à sua pergunta, mesmo curta ou vaga, ou se o PASSO já manda responder a uma dúvida dela,
 nada disso vale: siga o PASSO. Movimento "seguir".
 
@@ -127,19 +134,42 @@ FORMATO DA RESPOSTA
 Responda com um objeto JSON e nada mais: {"fala": "...", "movimento": "seguir"}
 - "fala": o que o Totti diz, em texto puro, sem prefixo e sem explicações.
 - "movimento": "seguir" (a fala executa o PASSO), "repetir" (ela pediu e a fala traz de novo a pergunta ou o resumo em aberto),
-  "esclarecer" (ela não entendeu e a fala reformula ou explica o que você quer saber) ou "responder" (a fala responde a algo
-  que ELA perguntou ou comentou). Na dúvida, "seguir".
+  "esclarecer" (ela não entendeu e a fala reformula ou explica o que você quer saber), "nao_entendi" (você não entendeu a
+  fala dela e refaz a pergunta em aberto) ou "responder" (a fala responde a algo que ELA perguntou ou comentou).
+  Na dúvida, "seguir".
 - "decisao": só quando a entrada traz DECISÃO PENDENTE; os valores possíveis vêm nela.`;
 
 /**
  * Que movimento de conversa é a fala do Totti (contrato comum da issue #22). Quem decide é o modelo.
  *  - `repetir`: ela pediu para repetir, e a fala traz a mesma pergunta (ou o mesmo resumo) que estava em aberto;
  *  - `esclarecer`: ela não entendeu a pergunta, e a fala a reformula ou explica o que se quer saber, em palavras de RH;
+ *  - `nao_entendi`: a fala dela não faz sentido como resposta (transcrição quebrada, frase sem relação com a pergunta), e
+ *    a fala diz que não entendeu e refaz a pergunta em aberto (issue #76);
  *  - `responder`: a fala responde a algo que ELA perguntou ou comentou (dúvida, "tá me ouvindo?", pedido de tempo);
  *  - `seguir`: todo o resto, ou seja, executar o passo do planejador. Campo ausente vale `seguir`.
  */
-export const Movimento = z.enum(["repetir", "esclarecer", "responder", "seguir"]);
+export const Movimento = z.enum(["repetir", "esclarecer", "nao_entendi", "responder", "seguir"]);
 export type Movimento = z.infer<typeof Movimento>;
+
+/**
+ * Com estes movimentos a fala dela não era uma resposta: o que foi lido dela é desfeito e nada dela vai para a
+ * extração. Função pura.
+ */
+export function falaDelaNaoEraResposta(movimento: Movimento | string): boolean {
+  return movimento === "repetir" || movimento === "esclarecer" || movimento === "nao_entendi";
+}
+
+/** Vezes seguidas que o Totti pode dizer que não entendeu antes de oferecer que ela digite. */
+export const MAX_NAO_ENTENDI = 2;
+
+/**
+ * Fala quando o Totti já disse `MAX_NAO_ENTENDI` vezes seguidas que não entendeu: oferece que ela digite e refaz a
+ * pergunta. Sem pergunta em aberto, só oferece. Função pura.
+ */
+export function falaParaDigitar(pergunta: string | undefined): string {
+  const oferta = "Não estou conseguindo te entender pela voz. Se preferir, digite a resposta aqui no chat.";
+  return pergunta ? `${oferta} ${pergunta}` : oferta;
+}
 
 /** Saída do modelo. `movimento` é opcional, e um valor que não existe conta como ausente. */
 const SaidaDoModelo = z.object({
@@ -225,6 +255,11 @@ export function perguntaEmAberto(transcricao: Turno[]): string | undefined {
     if (pergunta) return pergunta;
   }
   return undefined;
+}
+
+/** Última fala dela na transcrição, se houver. Função pura. */
+export function ultimaFalaDaRecrutadora(transcricao: Turno[]): string | undefined {
+  return transcricao.filter((t) => t.role === "recrutadora").at(-1)?.text;
 }
 
 const FORMATO_FALA: Record<Rascunho["mode"], string> = {
@@ -497,9 +532,33 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     }
     case "perguntar_contexto":
       return (
-        "Pergunte o que a descrição da vaga não diz e só ela sabe: se tem algo que reprova o candidato direto, ou o que fez uma " +
-        `contratação passada não dar certo. Uma pergunta só, curta e natural (ex.: '${PERGUNTA_CONTEXTO}'). ${SEM_LOGISTICA}`
+        "Pergunte o que a descrição da vaga não diz e só ela sabe: o que reprova o candidato direto, ou o que fez uma " +
+        `contratação passada não dar certo. Uma pergunta só, curta, natural e aberta, que peça o que é, não se existe ` +
+        `(ex.: '${PERGUNTA_CONTEXTO}'). ${SEM_LOGISTICA}`
       );
+    case "pedir_o_que_faltou": {
+      if (passo.sobre === "contexto") {
+        return (
+          "Ela disse que existe algo que reprova direto (ou que já deu errado numa contratação), mas não disse o quê. " +
+          "Pergunte só qual é, numa pergunta curta e aberta, sobre o que ela confirmou: se falou de uma contratação passada " +
+          `('já aconteceu'), o que deu errado; se falou do que reprova, o que reprova (ex.: '${PERGUNTA_O_QUE_REPROVA}'). ` +
+          `Não repita a pergunta anterior inteira e não faça outra pergunta. ${SEM_LOGISTICA}`
+        );
+      }
+      const area = nomeAreaFala(passo.area, r.mode);
+      const padrao = CATALOGO[r.mode]
+        .filter((c) => c.focus === passo.area)
+        .map((c) => c.description)
+        .join(" ");
+      return (
+        `Você perguntou sobre ${area} e a resposta dela fez sentido, mas foi vaga: não diz como isso aparece na entrevista. ` +
+        "Peça o concreto, com as palavras dela: ofereça duas formas concretas de como isso apareceria na entrevista, ou peça um exemplo. " +
+        `As opções saem do que a entrevista observa nesse assunto: ${padrao}\n` +
+        "Uma frase só, com um único '?' no fim (ex.: para 'só que ele raciocine': 'Raciocinar como: explicar por que escolheu " +
+        "um banco, ou estimar o volume antes de desenhar?'; não copie esse exemplo). Não diga que a resposta foi vaga. " +
+        SEM_LOGISTICA
+      );
+    }
     case "informar_formato_indisponivel":
       return (
         "Ela pediu system design, que ainda não está disponível nesta versão. Diga isso numa frase curta, sem pedir desculpa, " +
@@ -528,8 +587,24 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     }
     case "resumo_final":
       if (passo.revisao) {
+        const mudou = sessao.resumo ? mudancasDesdeOResumo(sessao) : undefined;
+        // Nada do que ela pediu virou mudança no plano: confirmar seria inventar, ou dizer um efeito colateral.
+        if (mudou && !mudou.algo) {
+          return (
+            "Ela pediu uma mudança depois do resumo, mas formato, nível, foco, tom, dicas, duração e linguagem não mudaram. " +
+            "Se o pedido é sobre o que avaliar (um critério, uma competência, o que entra ou sai), ele é aplicado depois, pela " +
+            "leitura da conversa: confirme numa frase curta com as palavras dela e pergunte se pode finalizar. " +
+            "Se não, não diga que ajustou nada: diga em uma frase curta o que você entendeu do pedido dela e pergunte se é isso. " +
+            "Não faça outra pergunta."
+          );
+        }
+        const lista = mudou ? descreverMudancas(mudou, sessao.rascunho) : [];
         return (
           "Ela pediu uma mudança depois do resumo. Confirme só o que mudou, numa frase curta com as palavras dela, sem repetir o resumo. " +
+          (lista.length
+            ? `O que mudou no plano desde o resumo: ${listar(lista)}. Comece pelo que ela pediu. Se o que ela pediu não está ` +
+              "nessa lista, não foi aplicado: diga o que entendeu e pergunte se é isso, sem confirmar o resto como se fosse o pedido. "
+            : "") +
           "Se a mudança for sobre dicas, diga 'sem dicas' ou 'com uma dica leve se ele travar'. " +
           "Depois pergunte se pode finalizar. Não faça outra pergunta."
         );
@@ -576,7 +651,9 @@ function instrucaoDaDecisao(pendente: DecisaoPendente, sessao: Sessao): string {
   const valores = VALORES_DE_DECISAO[pendente.tipo].map((v) => `"${v}"`).join(", ");
   const comum =
     "- Ela pediu um tempo: aceite em poucas palavras e espere (\"decisao\": \"adiar\").\n" +
-    "- Ela pediu para repetir ou não entendeu: repita ou explique, como em QUANDO A CONVERSA SAI DO ROTEIRO (\"decisao\": \"adiar\").";
+    "- Ela pediu para repetir ou não entendeu: repita ou explique, como em QUANDO A CONVERSA SAI DO ROTEIRO (\"decisao\": \"adiar\").\n" +
+    "- A fala dela não faz sentido como resposta (transcrição quebrada, sem relação com a pergunta): diga que não entendeu e " +
+    "refaça a pergunta, como em QUANDO A CONVERSA SAI DO ROTEIRO (movimento \"nao_entendi\", \"decisao\": \"adiar\").";
   switch (pendente.tipo) {
     case "troca": {
       const { area, modoAlternativo } = pendente.oferta;
@@ -845,25 +922,123 @@ export function fechamentoDoResumo(variante = Math.floor(Math.random() * FECHAME
   return FECHAMENTOS[variante % FECHAMENTOS.length];
 }
 
-/**
- * Confirmação da revisão quando a mudança é só de tom, dicas ou duração: sai pronta, sem o modelo.
- * Compara com o último resumo falado. Se não houve essa mudança, devolve undefined e o modelo confirma.
- */
-function confirmacaoDeterministica(sessao: Sessao): string | undefined {
+/** O foco como fica guardado no resumo: áreas do mais pesado para o menos, com o peso arredondado a uma casa. */
+export function focoDoResumo(r: Rascunho): Array<{ area: FocusArea; weight: number }> {
+  return [...r.focus]
+    .sort((a, b) => b.weight - a.weight || a.area.localeCompare(b.area))
+    .map((f) => ({ area: f.area, weight: Math.round(f.weight * 10) / 10 }));
+}
+
+/** O que mudou no plano desde o último resumo falado (ver `sessao.resumo`). */
+export interface MudancasDoResumo {
+  algo: boolean;
+  formato: boolean;
+  nivel: boolean;
+  foco: boolean;
+  tom: boolean;
+  dicas: boolean;
+  /** A duração que vale mudou (por pedido dela ou pela troca de formato). */
+  duracao: boolean;
+  /** A duração mudou só porque o formato mudou: ninguém disse uma duração, e vale o padrão do formato novo. */
+  duracaoPorFormato: boolean;
+  linguagens: boolean;
+}
+
+/** Compara o plano de agora com o último resumo falado. Sem resumo, nada mudou. Função pura. */
+export function mudancasDesdeOResumo(sessao: Sessao): MudancasDoResumo {
   const anterior = sessao.resumo;
-  if (!anterior) return undefined;
+  const r = sessao.rascunho;
+  const atual = sessao.preferencias;
+  const nada: MudancasDoResumo = {
+    algo: false, formato: false, nivel: false, foco: false, tom: false, dicas: false, duracao: false, duracaoPorFormato: false, linguagens: false,
+  };
+  if (!anterior) return nada;
+  const langs = (atual.linguagens ?? [...LINGUAGENS_IDE]).join();
+  const langsAntes = (anterior.preferencias.linguagens ?? [...LINGUAGENS_IDE]).join();
+  const m: MudancasDoResumo = {
+    ...nada,
+    // Resumo guardado antes destes campos existirem: sem o valor de antes, não dá para dizer que mudou.
+    formato: anterior.mode !== undefined && anterior.mode !== r.mode,
+    nivel: anterior.seniority !== undefined && anterior.seniority !== r.seniority,
+    foco: anterior.foco !== undefined && JSON.stringify(anterior.foco) !== JSON.stringify(focoDoResumo(r)),
+    tom: atual.tom !== anterior.preferencias.tom,
+    dicas: atual.dicas !== anterior.preferencias.dicas,
+    duracao: duracaoDoRascunho(r, atual) !== anterior.duracaoMin,
+    // Linguagem só existe em live coding.
+    linguagens: r.mode === "live_coding" && langs !== langsAntes,
+  };
+  m.duracaoPorFormato = m.duracao && m.formato && atual.duracaoMin === undefined && r.durationMin === undefined;
+  m.algo = m.formato || m.nivel || m.foco || m.tom || m.dicas || m.duracao || m.linguagens;
+  return m;
+}
+
+/** Cada ajuste de logística em poucas palavras, como a confirmação diz ("sem dicas", "quarenta e cinco minutos"). */
+function ajustesDeLogistica(m: MudancasDoResumo, sessao: Sessao, comDuracao: boolean): string[] {
   const atual = sessao.preferencias;
   const partes: string[] = [];
-  if (atual.tom !== anterior.preferencias.tom) partes.push(atual.tom === "desafiador" ? "tom mais desafiador" : "tom amigável");
-  if (atual.dicas !== anterior.preferencias.dicas) {
-    partes.push(atual.dicas === "nenhuma" ? "sem dicas" : atual.dicas === "livres" ? "dicas quando ele pedir" : "dica leve se ele travar");
-  }
-  const duracao = duracaoDoRascunho(sessao.rascunho, sessao.preferencias);
-  if (duracao !== anterior.duracaoMin) partes.push(`${porExtenso(duracao)} minutos`);
-  const langs = atual.linguagens ?? [...LINGUAGENS_IDE];
-  if (langs.join() !== (anterior.preferencias.linguagens ?? [...LINGUAGENS_IDE]).join()) {
+  if (m.tom) partes.push(atual.tom === "desafiador" ? "tom mais desafiador" : "tom amigável");
+  if (m.dicas) partes.push(atual.dicas === "nenhuma" ? "sem dicas" : atual.dicas === "livres" ? "dicas quando ele pedir" : "dica leve se ele travar");
+  if (comDuracao && m.duracao) partes.push(`${porExtenso(duracaoDoRascunho(sessao.rascunho, atual))} minutos`);
+  if (m.linguagens) {
+    const langs = atual.linguagens ?? [...LINGUAGENS_IDE];
     partes.push(langs.length >= LINGUAGENS_IDE.length ? "linguagem livre" : `só ${nomesDasLinguagens(langs)}`);
   }
+  return partes;
+}
+
+/** O que mudou, em palavras, para o modelo confirmar a revisão começando pelo que ela pediu. */
+function descreverMudancas(m: MudancasDoResumo, r: Rascunho): string[] {
+  const partes: string[] = [];
+  if (m.formato) partes.push(`o formato agora é ${FORMATO_FALA[r.mode]}`);
+  if (m.nivel) partes.push(`o nível agora é ${SENIORIDADE_FALA[r.seniority]}`);
+  if (m.foco) partes.push(`o foco agora é, do mais pesado: ${nomesDoFoco(r)}`);
+  if (m.tom || m.dicas || m.duracao || m.linguagens) partes.push("um ajuste de tom, dicas, duração ou linguagem (não fale dele: fica na tela)");
+  return partes;
+}
+
+/**
+ * Confirmação da revisão montada sem o modelo, comparando com o último resumo falado (issue #76):
+ *  - só tom, dicas, duração ou linguagens mudaram: "Ajustei X e Y. Posso finalizar?";
+ *  - o formato mudou: a confirmação começa pela troca e só depois diz o que mudou junto, por consequência
+ *    ("Troquei para system design, no quadro. Com isso a entrevista fica com quarenta e cinco minutos. Posso finalizar?");
+ *  - o nível mudou (sem mudar o foco): começa pelo nível;
+ *  - o formato mudou junto com o foco: a troca e depois o foco como fica;
+ *  - o foco mudou sem troca de formato, ou nada mudou: undefined, e o modelo confirma (ou diz o que entendeu e pergunta);
+ *  - ela pediu um formato que não foi aplicado: undefined, para não confirmar como pedido o que mudou por outro caminho.
+ */
+export function confirmacaoDeterministica(sessao: Sessao): string | undefined {
+  if (!sessao.resumo) return undefined;
+  const m = mudancasDesdeOResumo(sessao);
+  const r = sessao.rascunho;
+  if (!m.algo) return undefined;
+  // Ela pediu um formato e ele não mudou: o pedido não virou mudança, e o resto (nível, duração, tom...) seria
+  // efeito colateral confirmado como se fosse o pedido. Vai ao modelo.
+  const formatoPedido = lerFormato(ultimaFalaDaRecrutadora(sessao.transcricao) ?? "");
+  if (formatoPedido && formatoPedido !== r.mode) return undefined;
+  // Mudança de foco sem troca de formato vai ao modelo: são as palavras dela que dizem o que entrou ou saiu.
+  if (m.foco && !m.formato) return undefined;
+
+  if (m.formato || m.nivel) {
+    const frases: string[] = [];
+    if (m.formato) {
+      const comoFica = r.mode === "system_design" ? "system design, no quadro" : "live coding, com código na IDE";
+      frases.push(`Troquei para ${comoFica}${m.nivel ? `, nível ${SENIORIDADE_FALA[r.seniority]}` : ""}.`);
+      // O foco que mudou junto (pela troca ou por pedido dela no mesmo turno) é dito, para ela não aprovar sem ouvir.
+      if (m.foco) frases.push(`O foco fica em ${nomesDoFoco(r)}.`);
+    } else {
+      frases.push(`Mudei o nível para ${SENIORIDADE_FALA[r.seniority]}.`);
+    }
+    // A duração que mudou só pela troca de formato vem como consequência; a que ela pediu entra com os outros ajustes.
+    if (m.duracaoPorFormato) {
+      frases.push(`Com isso a entrevista fica com ${porExtenso(duracaoDoRascunho(r, sessao.preferencias))} minutos.`);
+    }
+    const outros = ajustesDeLogistica(m, sessao, !m.duracaoPorFormato);
+    if (outros.length) frases.push(`Também ajustei ${outros.join(" e ")}.`);
+    frases.push("Posso finalizar?");
+    return frases.join(" ");
+  }
+
+  const partes = ajustesDeLogistica(m, sessao, true);
   if (partes.length === 0) return undefined;
   return `Ajustei ${partes.join(" e ")}. Posso finalizar?`;
 }
@@ -938,6 +1113,40 @@ export function limparFala(texto: string, opcoes: { manterReconhecimento?: boole
   return semReconhecimento.charAt(0).toUpperCase() + semReconhecimento.slice(1);
 }
 
+/** Palavras de uma fala, normalizadas (sem acento, pontuação nem caixa). */
+function palavrasNormalizadas(texto: string): string[] {
+  return normalizarTexto(texto).split(" ").filter(Boolean);
+}
+
+/** Fala dela curta demais para a trava de repetição: "sim", "pode ser" e "isso mesmo" são o começo natural de muita fala. */
+const MIN_PALAVRAS_REPETICAO = 3;
+
+/**
+ * Se a fala do Totti começa com a fala dela inteira ("Ele diz expresso. Qual pesa mais...?"), a repetição sai e a
+ * capital volta na nova primeira letra. Fala dela com menos de 3 palavras não conta, e se não sobrar nada a fala fica
+ * como estava. Função pura.
+ */
+export function semRepeticaoDaFalaDela(texto: string, falaDela: string | undefined): string {
+  const dela = palavrasNormalizadas(falaDela ?? "");
+  if (dela.length < MIN_PALAVRAS_REPETICAO) return texto;
+  // Cada pedaço entre espaços do texto do Totti pode virar zero, uma ou mais palavras normalizadas ("Node.js" vira duas).
+  const pedacos = texto.split(/(\s+)/);
+  let lidas = 0;
+  let corte = 0;
+  for (let i = 0; i < pedacos.length && lidas < dela.length; i++) {
+    corte += pedacos[i].length;
+    if (/^\s+$/.test(pedacos[i])) continue;
+    for (const palavra of palavrasNormalizadas(pedacos[i])) {
+      if (lidas >= dela.length || palavra !== dela[lidas]) return texto;
+      lidas += 1;
+    }
+  }
+  if (lidas < dela.length) return texto;
+  const resto = texto.slice(corte).replace(/^[\s.,;:!?…-]+/, "");
+  if (!resto) return texto;
+  return resto.charAt(0).toUpperCase() + resto.slice(1);
+}
+
 /** Uma trava que reescreveu a fala do modelo: o nome dela e a fala antes e depois. */
 export interface TravaAplicada {
   trava: string;
@@ -994,11 +1203,15 @@ function mesmaPerguntaDoPasso(a: Passo, b: Passo | undefined): boolean {
  * Reserva para o modelo rápido, que às vezes não declara o movimento: se a fala traz quase a mesma pergunta que estava
  * em aberto e o planejador tinha escolhido outra pergunta, o modelo repetiu, e a fala conta como `repetir`.
  * Não vale quando a repetição é o próprio passo: nova tentativa da mesma pergunta, resposta a dúvida (que retoma a
- * pergunta) e pergunta de nível (sempre as mesmas palavras, inclusive quando a abertura já a fez). Função pura.
+ * pergunta), pergunta de nível (sempre as mesmas palavras, inclusive quando a abertura já a fez) e pedido do que
+ * faltou na pergunta de contexto (usa as palavras da pergunta anterior: "E o que é: o que reprova direto?"). Função pura.
  */
 export function movimentoDaFala(declarado: Movimento, fala: string, sessao: Sessao, passo: Passo): Movimento {
   if (declarado !== "seguir") return declarado;
   if (passo.tipo === "responder_duvida" || passo.tipo === "perguntar_nivel") return declarado;
+  // Só o pedido de contexto reusa as palavras da pergunta anterior; o do critério tem de trazer opções novas, e
+  // repetir a pergunta do aprofundamento continua sendo `repetir`.
+  if (passo.tipo === "pedir_o_que_faltou" && passo.sobre === "contexto") return declarado;
   if (mesmaPerguntaDoPasso(passo, passoEmCurso(sessao))) return declarado;
   const aberta = perguntaEmAberto(sessao.transcricao);
   // A pergunta que vai para a voz: com `seguir`, a fala é cortada na primeira pergunta (`cortar_na_primeira_pergunta`).
@@ -1029,7 +1242,7 @@ export interface OpcoesResponder {
 export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResponder = {}): Promise<RespostaAgente> {
   if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
   if (passo.tipo === "informar_formato_indisponivel") return respostaFixa(falaFormatoIndisponivel(sessao.rascunho.mode));
-  // Revisão de tom, dicas ou duração: a confirmação sai pronta. Mudança de foco ou de critério segue com o modelo.
+  // Revisão de formato, nível, tom, dicas ou duração: a confirmação sai pronta. Mudança de foco segue com o modelo.
   if (passo.tipo === "resumo_final" && passo.revisao && !opcoes.pendente) {
     const confirmacao = confirmacaoDeterministica(sessao);
     if (confirmacao) return respostaFixa(confirmacao);
@@ -1066,6 +1279,8 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
     texto = depois;
   };
 
+  // A fala dela repetida no começo da fala do Totti ("Ele diz expresso. ..."): sai, seja qual for o movimento.
+  if (texto) aplicar("repeticao_da_fala_dela", semRepeticaoDaFalaDela(texto, ultimaFalaDaRecrutadora(sessao.transcricao)));
   // Palavra de reconhecimento no começo ("Certo.", "Entendi,"): só sai numa fala que executa o passo. Ao responder,
   // repetir ou esclarecer, ela é a reação natural ao que ela disse e fica.
   if (texto && segue) aplicar("reconhecimento_inicial", limparFala(texto));
@@ -1097,6 +1312,11 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   // Uma pergunta por fala: corta a parte do modelo antes de qualquer sufixo que o código acrescente.
   // Numa fala `responder` não corta: ela pode responder à dúvida dela e depois retomar a pergunta em aberto.
   if (texto && movimento !== "responder") aplicar("cortar_na_primeira_pergunta", cortarNaPrimeiraPergunta(texto));
+  // Não entendeu e não perguntou: a pergunta em aberto volta no fim, senão ela não sabe o que responder.
+  if (texto && movimento === "nao_entendi" && !texto.includes("?")) {
+    const aberta = perguntaEmAberto(sessao.transcricao);
+    if (aberta) aplicar("pergunta_no_nao_entendi", `${texto} ${aberta}`);
+  }
   // Pergunta no molde óbvio ("o que separa um ótimo de um fraco?"): troca pela pergunta do banco, sem nova chamada.
   // Só quando a fala executa o passo: uma repetição, um esclarecimento ou uma resposta não viram outra pergunta.
   const areaAprofundada = passo.tipo === "aprofundar" ? passo.area : passo.tipo === "confirmar_mudanca_foco" ? passo.proximo?.area : undefined;
@@ -1104,8 +1324,20 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
     const doBanco = perguntasDoBanco(sessao, areaAprofundada)[0];
     if (doBanco) aplicar("pergunta_do_banco", trocarPergunta(texto, doBanco.texto));
   }
-  if (texto && segue && passo.tipo === "perguntar_contexto" && (!texto.includes("?") || perguntaObvia(texto))) {
-    aplicar("pergunta_de_contexto", trocarPergunta(texto, PERGUNTA_CONTEXTO));
+  // Pergunta de contexto (e o pedido de qual é o eliminatório): sem "?" ou no molde óbvio, sai a pergunta fixa, que é
+  // aberta (pede o que é, não se existe: "Tem alguma coisa que...?" convidava um "Tem" seco).
+  const perguntaDeContexto =
+    passo.tipo === "perguntar_contexto"
+      ? PERGUNTA_CONTEXTO
+      : passo.tipo === "pedir_o_que_faltou" && passo.sobre === "contexto"
+        ? PERGUNTA_O_QUE_REPROVA
+        : undefined;
+  if (texto && segue && perguntaDeContexto && (!texto.includes("?") || perguntaObvia(texto))) {
+    aplicar("pergunta_de_contexto", trocarPergunta(texto, perguntaDeContexto));
+  }
+  // Pedido do concreto depois de resposta vaga: sem pergunta, o passo contaria como feito sem pedir nada.
+  if (texto && segue && !texto.includes("?") && passo.tipo === "pedir_o_que_faltou" && passo.sobre === "criterio") {
+    aplicar("pergunta_no_fim", `${texto} ${PERGUNTA_EXEMPLO}`);
   }
   // A leitura da resposta dela confere a pergunta em aberto, que precisa trazer as três opções.
   if (texto && segue && passo.tipo === "perguntar_nivel" && !pedeONivel(ultimaPergunta(texto))) {

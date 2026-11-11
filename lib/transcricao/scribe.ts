@@ -1,42 +1,67 @@
 import { AudioFormat, CommitStrategy, RealtimeEvents, Scribe } from "@elevenlabs/client";
 import { capturarAudio } from "./captura";
+import { iniciarCapturaAntecipada, type CapturaAntecipada } from "./capturaAntecipada";
 import type { EventosTranscricao, SessaoTranscricao } from "./tipos";
+import { normalizarTermos, TERMOS_RECRUTAMENTO } from "./vocabulario";
+import { criarDetectorDeFala, trechoPlausivel } from "../presenca/transcricao";
+import { energiaPcm16 } from "./energia";
 
-export async function iniciarScribe({ token, stream, signal, eventos }: {
+export { energiaPcm16 } from "./energia";
+
+/** Igual ao vadSilenceThresholdSecs: voz mais recente que isso, quando um trecho é confirmado, já é do próximo. */
+const JANELA_DO_PROXIMO_TRECHO_MS = 1000;
+
+export async function iniciarScribe({ token, termos, stream, signal, eventos, captura: antecipada }: {
   token: string;
+  /** Vocabulário extra (palavras do título da vaga), somado à lista fixa de recrutamento técnico. */
+  termos?: readonly string[];
   stream?: MediaStream | null;
   signal: AbortSignal;
   eventos: EventosTranscricao;
+  /** Captura já iniciada pelo chamador (no clique, antes do token): o áudio guardado vai quando a sessão abrir. */
+  captura?: CapturaAntecipada;
 }, dependencias = { conectar: Scribe.connect, capturar: capturarAudio }): Promise<SessaoTranscricao> {
-  signal.throwIfAborted();
-  const conexao = dependencias.conectar({
-    token,
-    modelId: "scribe_v2_realtime",
-    languageCode: "pt",
-    audioFormat: AudioFormat.PCM_16000,
-    sampleRate: 16000,
-    commitStrategy: CommitStrategy.VAD,
-    vadSilenceThresholdSecs: 1,
-    // Sem isso o Scribe transcreve hesitações ao pé da letra ("ca-- s--", "ééé", "hã"). Testado com o
-    // scribe_v2_realtime: "Eu tô querendo ca-- ééé, contratar, hã..." vira "Eu tô querendo contratar...".
-    noVerbatim: true,
-  });
+  if (signal.aborted) { antecipada?.cancelar(); signal.throwIfAborted(); }
+  // A captura começa antes da sessão do Scribe abrir; o áudio espera no buffer e sai todo no SESSION_STARTED.
+  const captura = antecipada ?? iniciarCapturaAntecipada({ stream, capturar: dependencias.capturar });
+  const conexao = (() => {
+    try {
+      return dependencias.conectar({
+        token,
+        modelId: "scribe_v2_realtime",
+        languageCode: "pt",
+        audioFormat: AudioFormat.PCM_16000,
+        sampleRate: 16000,
+        commitStrategy: CommitStrategy.VAD,
+        vadSilenceThresholdSecs: 1,
+        // Sem isso o Scribe transcreve hesitações ao pé da letra ("ca-- s--", "ééé", "hã"). Testado com o
+        // scribe_v2_realtime: "Eu tô querendo ca-- ééé, contratar, hã..." vira "Eu tô querendo contratar...".
+        noVerbatim: true,
+        keyterms: normalizarTermos(TERMOS_RECRUTAMENTO, termos),
+      });
+    } catch (erro) {
+      captura.cancelar();
+      throw erro;
+    }
+  })();
   let encerrada = false;
   let parando = false;
-  let captura: Awaited<ReturnType<typeof capturarAudio>> | undefined;
   let confirmar: (() => void) | undefined;
   let rejeitarInicio: ((erro: Error) => void) | undefined;
   let parada: Promise<void> | undefined;
   let enviouAudio = false;
   let bytesEnviados = 0;
-  const controladorCaptura = new AbortController();
+  /** Voz (ms) que o microfone captou desde o último trecho confirmado: o mesmo portão das salas. */
+  let vozNoTrecho = 0;
+  /** Últimos blocos enviados (duração e se tinham voz), cobrindo ao menos JANELA_DO_PROXIMO_TRECHO_MS. */
+  const recentes: { ms: number; voz: boolean }[] = [];
+  const detector = criarDetectorDeFala();
 
   function encerrar() {
     if (encerrada) return;
     encerrada = true;
     signal.removeEventListener("abort", cancelar);
-    controladorCaptura.abort();
-    captura?.cancelar();
+    captura.cancelar();
     conexao.close();
     confirmar?.();
     eventos.aoParcial("");
@@ -59,7 +84,13 @@ export async function iniciarScribe({ token, stream, signal, eventos }: {
   conexao.on(RealtimeEvents.COMMITTED_TRANSCRIPT, ({ text }) => {
     if (encerrada) return;
     eventos.aoParcial("");
-    if (text.trim()) eventos.aoTexto(text.trim());
+    const texto = text.trim();
+    // Sem voz no microfone, ou voz curta demais para o tamanho do texto: frase inventada pelo Scribe.
+    if (texto && trechoPlausivel(texto, vozNoTrecho)) eventos.aoTexto(texto);
+    else if (texto) console.info("[transcrição] descartada (voz insuficiente para o texto)", { vozMs: Math.round(vozNoTrecho), texto });
+    // O VAD só confirma depois de 1 s de silêncio: voz no último segundo enviado já é do trecho seguinte (o commit
+    // pode chegar depois de o próximo áudio sair). Zerar aqui descartaria esse trecho como inventado.
+    vozNoTrecho = recentes.reduce((soma, b) => soma + (b.voz ? b.ms : 0), 0);
     if (parando) confirmar?.();
   });
   conexao.on(RealtimeEvents.ERROR, (evento) => {
@@ -84,16 +115,23 @@ export async function iniciarScribe({ token, stream, signal, eventos }: {
       });
     });
     signal.throwIfAborted();
-    captura = await dependencias.capturar({ stream, signal: controladorCaptura.signal, aoAudio: (audioBase64) => {
+    await captura.pronta;
+    signal.throwIfAborted();
+    if (encerrada) throw new Error("A transcrição foi interrompida.");
+    captura.ligar((audioBase64) => {
       if (encerrada) return;
+      const { energia, duracaoMs } = energiaPcm16(audioBase64);
+      const { voz } = detector.medir(energia, duracaoMs, vozNoTrecho > 0);
+      if (voz) vozNoTrecho += duracaoMs;
+      recentes.push({ ms: duracaoMs, voz });
+      let total = recentes.reduce((soma, b) => soma + b.ms, 0);
+      while (recentes.length > 1 && total - recentes[0].ms >= JANELA_DO_PROXIMO_TRECHO_MS) total -= recentes.shift()!.ms;
       try {
         conexao.send({ audioBase64 });
         bytesEnviados += atob(audioBase64).length;
         enviouAudio = true;
       } catch { falhar(new Error("Não consegui enviar o áudio. Tente novamente.")); }
-    } });
-    signal.throwIfAborted();
-    if (encerrada) { captura.cancelar(); throw new Error("A transcrição foi interrompida."); }
+    });
   } catch (erro) {
     encerrar();
     throw erro;
@@ -105,7 +143,7 @@ export async function iniciarScribe({ token, stream, signal, eventos }: {
       if (parada) return parada;
       parada = (async () => {
         if (encerrada) return;
-        await captura?.parar();
+        await captura.parar();
         if (encerrada) return;
         // Um commit por silêncio pode chegar depois que o próximo áudio já foi enviado.
         // Sempre drena o fim da captura, mesmo se um segmento acabou de ser confirmado.

@@ -45,7 +45,7 @@ function estado(extra: Partial<EstadoPlanejamento>): EstadoPlanejamento {
   };
 }
 
-describe("aprofundar: uma pergunta por área, sem follow-up", () => {
+describe("aprofundar: uma pergunta por área", () => {
   it("pula a área que ela já tratou na fala", () => {
     const passo = proximoPasso(
       estado({
@@ -60,9 +60,23 @@ describe("aprofundar: uma pergunta por área, sem follow-up", () => {
     assert.deepEqual(passo, { tipo: "aprofundar", area: "pressao", motivo: "inicial" });
   });
 
-  it("resposta vaga não reabre a área: segue para a próxima ou para o resumo", () => {
+  it("resposta vaga não reabre a área com outro aprofundamento: o pedido do concreto é outro passo", () => {
     const anterior = { tipo: "aprofundar" as const, area: "pressao" as const, motivo: "inicial" as const };
-    const comOutraArea = proximoPasso(
+    const passo = proximoPasso(
+      estado({
+        focus: [{ area: "pressao", weight: 1 }],
+        ultimoPasso: anterior,
+        perguntasPorTopico: { confirmou_inicio: 1, criterio_pressao: 1 },
+        sinais: { resposta_vaga: 1 },
+        mode: "live_coding",
+      }),
+    );
+    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "pressao" });
+  });
+
+  it("o pedido do concreto não toma a vaga de outra área ainda não perguntada", () => {
+    const anterior = { tipo: "aprofundar" as const, area: "pressao" as const, motivo: "inicial" as const };
+    const passo = proximoPasso(
       estado({
         focus: [
           { area: "pressao", weight: 0.5 },
@@ -74,18 +88,7 @@ describe("aprofundar: uma pergunta por área, sem follow-up", () => {
         mode: "live_coding",
       }),
     );
-    assert.deepEqual(comOutraArea, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
-
-    const soUmaArea = proximoPasso(
-      estado({
-        focus: [{ area: "pressao", weight: 1 }],
-        ultimoPasso: anterior,
-        perguntasPorTopico: { confirmou_inicio: 1, criterio_pressao: 1 },
-        sinais: { resposta_vaga: 1 },
-        mode: "live_coding",
-      }),
-    );
-    assert.equal(soUmaArea.tipo, "resumo_final");
+    assert.deepEqual(passo, { tipo: "aprofundar", area: "escala_produto", motivo: "inicial" });
   });
 
   it("área que já teve sua pergunta não volta, mesmo sem resposta boa", () => {
@@ -554,5 +557,118 @@ describe("decisões: escolha, recusa ou incerto", () => {
   it("nível por estimativa deixa de estar em aberto", () => {
     assert.equal(nivelEmAberto(planoInicial(), ["seniority"], false), true);
     assert.equal(nivelEmAberto({ ...planoInicial(), nivelPorEstimativa: true }, ["seniority"], false), false);
+  });
+});
+
+/** Issue #72: resposta que faz sentido, mas não diz o conteúdo ("Tem", "Somente que ele raciocine"). */
+describe("pedir o que faltou", () => {
+  const CONTEXTO = { tipo: "perguntar_contexto" as const };
+  /** Depois da pergunta de contexto, sem eliminatório coberto. */
+  const depoisDoContexto = (extra: Partial<EstadoPlanejamento> = {}) =>
+    estado({
+      focus: [{ area: "escala_produto", weight: 1 }],
+      cobertura: { confirmou_inicio: 1 },
+      perguntasPorTopico: { confirmou_inicio: 1, criterio_escala_produto: 1, contexto: 1 },
+      ultimoPasso: CONTEXTO,
+      mode: "system_design",
+      ...extra,
+    });
+
+  it("'Tem' seco depois da pergunta de contexto: pergunta qual é, antes do resumo", () => {
+    const passo = proximoPasso(depoisDoContexto({ sinais: { disse_que_tem_sem_dizer: 0.9, resposta_vaga: 0.77 } }));
+    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "contexto" });
+  });
+
+  it("só uma vez: sem resposta concreta de novo, segue para o resumo", () => {
+    const antes = depoisDoContexto({ sinais: { disse_que_tem_sem_dizer: 0.9 } });
+    const plano = aplicarPasso(antes, { tipo: "pedir_o_que_faltou", sobre: "contexto" });
+    assert.equal(plano.perguntasPorTopico.faltou_contexto, 1);
+    // Mesmo que ela diga "tem" de novo.
+    assert.equal(proximoPasso({ ...antes, ...plano, sinais: { disse_que_tem_sem_dizer: 0.9 } }).tipo, "resumo_final");
+  });
+
+  it("com o eliminatório dito, ou sem ela confirmar que existe, vai direto para o resumo", () => {
+    const coberto = depoisDoContexto({ cobertura: { confirmou_inicio: 1, eliminatorios: 0.9 }, sinais: { disse_que_tem_sem_dizer: 0.9 } });
+    assert.equal(proximoPasso(coberto).tipo, "resumo_final");
+    // "Não, nada" ou uma fala sem sentido (caso da #76): o sinal diz não, e esta issue não dispara.
+    assert.equal(proximoPasso(depoisDoContexto({ sinais: { disse_que_tem_sem_dizer: 0.1 } })).tipo, "resumo_final");
+  });
+
+  it("depois de uma dúvida respondida, o 'Tem' ainda vale para a pergunta de contexto retomada", () => {
+    const duvida = { tipo: "responder_duvida" as const, retomar: CONTEXTO, seguidas: 1 };
+    const passo = proximoPasso(depoisDoContexto({ ultimoPasso: duvida, sinais: { disse_que_tem_sem_dizer: 0.9 } }));
+    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "contexto" });
+  });
+
+  const ESCALA = { tipo: "aprofundar" as const, area: "escala_produto" as const, motivo: "inicial" as const };
+  /** Depois de um aprofundamento de escalabilidade, com o eliminatório já dito (o contexto não entra). */
+  const depoisDoAprofundamento = (extra: Partial<EstadoPlanejamento> = {}) =>
+    estado({
+      focus: [
+        { area: "escala_produto", weight: 0.6 },
+        { area: "tecnico", weight: 0.4 },
+      ],
+      perguntasPorTopico: { confirmou_inicio: 1, criterio_escala_produto: 1 },
+      ultimoPasso: ESCALA,
+      mode: "system_design",
+      ...extra,
+    });
+
+  it("resposta vaga num aprofundamento ('Somente que ele raciocine'): pede o concreto da mesma área", () => {
+    const passo = proximoPasso(depoisDoAprofundamento({ sinais: { resposta_vaga: 0.77 }, cobertura: { confirmou_inicio: 1, eliminatorios: 1, criterio_escala_produto: 0.06 } }));
+    assert.deepEqual(passo, { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "escala_produto" });
+  });
+
+  it("resposta concreta não ganha follow-up", () => {
+    const concreta = depoisDoAprofundamento({ sinais: { resposta_vaga: 0.1 }, cobertura: { confirmou_inicio: 1, eliminatorios: 1, criterio_escala_produto: 0.9 } });
+    assert.notEqual(proximoPasso(concreta).tipo, "pedir_o_que_faltou");
+    // O sinal de vaga sozinho não basta se o critério da área ficou coberto.
+    assert.notEqual(proximoPasso({ ...concreta, sinais: { resposta_vaga: 0.9 } }).tipo, "pedir_o_que_faltou");
+  });
+
+  it("uma vez por conversa, não por área, e conta no teto de aprofundamentos", () => {
+    const antes = depoisDoAprofundamento({ sinais: { resposta_vaga: 0.9 } });
+    const plano = aplicarPasso(antes, { tipo: "pedir_o_que_faltou", sobre: "criterio", area: "escala_produto" });
+    assert.equal(plano.perguntasPorTopico.faltou_criterio, 1);
+    // O pedido ocupa a segunda vaga do teto: a área técnica não é perguntada, e a conversa vai para o resumo.
+    assert.equal(proximoPasso({ ...antes, ...plano, sinais: { resposta_vaga: 0.9 } }).tipo, "resumo_final");
+
+    // Outra área com resposta vaga, já tendo usado o pedido: nada de follow-up.
+    const tecnico = { tipo: "aprofundar" as const, area: "tecnico" as const, motivo: "inicial" as const };
+    const segunda = depoisDoAprofundamento({
+      ultimoPasso: tecnico,
+      perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1, faltou_criterio: 1 },
+      sinais: { resposta_vaga: 0.9 },
+    });
+    assert.notEqual(proximoPasso(segunda).tipo, "pedir_o_que_faltou");
+  });
+
+  it("no teto de aprofundamentos, resposta vaga não ganha follow-up", () => {
+    const noTeto = depoisDoAprofundamento({
+      perguntasPorTopico: { confirmou_inicio: 1, criterio_tecnico: 1, criterio_escala_produto: 1 },
+      sinais: { resposta_vaga: 0.9 },
+    });
+    assert.equal(proximoPasso(noTeto).tipo, "resumo_final");
+  });
+
+  it("área dispensada na mesma fala não ganha follow-up", () => {
+    const passo = proximoPasso(depoisDoAprofundamento({ sinais: { resposta_vaga: 0.9, dispensa_escala_produto: 0.9 } }));
+    assert.notEqual(passo.tipo, "pedir_o_que_faltou");
+  });
+
+  it("não vale para o aprofundamento emendado numa confirmação de mudança de foco ('pode ser' responde à mudança)", () => {
+    const mudanca = { tipo: "confirmar_mudanca_foco" as const, entra: ["escala_produto" as const], sai: [], duvida: [], proximo: ESCALA };
+    const passo = proximoPasso(depoisDoAprofundamento({ ultimoPasso: mudanca, mudancasPerguntadas: ["escala_produto"], sinais: { resposta_vaga: 0.9 } }));
+    assert.notEqual(passo.tipo, "pedir_o_que_faltou");
+  });
+
+  it("depois do resumo, nada de pedido do que faltou", () => {
+    assert.notEqual(proximoPasso(depoisDoContexto({ resumos: 1, sinais: { disse_que_tem_sem_dizer: 0.9 } })).tipo, "pedir_o_que_faltou");
+    assert.notEqual(proximoPasso(depoisDoAprofundamento({ resumos: 1, sinais: { resposta_vaga: 0.9 } })).tipo, "pedir_o_que_faltou");
+  });
+
+  it("a pergunta de contexto é aberta, não de sim ou não", () => {
+    assert.doesNotMatch(PERGUNTA_CONTEXTO, /^(tem|existe|há)\b/i);
+    assert.match(PERGUNTA_CONTEXTO, /^O que/);
   });
 });

@@ -2,13 +2,21 @@
 // Registra CANDIDATO_FALOU / AGENTE_FALOU no estado. Não lança por causa do LLM.
 import { neutralizar, REGRA_DADOS } from "../seguranca/injecao";
 import { blocoDoBriefing } from "./briefing";
-import { aceitaEncerrar, aplicarGuardas, comVezDevolvida, eSoReacao, limitarFrases, OFERTA_DE_ENCERRAR, semPerguntaNoFim } from "./guardas";
-import { reacaoNeutra } from "../totti/guardas";
+import { candidatasDoQuadro, perguntasJaOuvidas, type ApontarNoQuadro } from "./fechamento";
+import { aplicarGuardas, comVezDevolvida, eSoReacao, limitarFrases, semPerguntaNoFim } from "./guardas";
 import {
-  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoQuadro, ficouSemResposta, sinalDeConclusao,
-  type SituacaoDoTurno,
+  gatilhoDoFechamento, iniciarFechamento, proximoPasso,
+  type EstadoFechamento, type EtapaDoFechamento, type PassoDoFechamento,
+} from "../totti/fechamento";
+import { reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
+import { frasesSemPergunta } from "../totti/texto";
+import {
+  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoQuadro, ficouSemResposta, perguntouComClareza,
+  sinalDeConclusao,
+  type LeituraDoTurno, type SituacaoDoTurno,
 } from "../totti/turno";
 import { garantirMarca, mapearAcoesVisuais, pecasCitadas, type AcaoVisual } from "../presenca/acoesVisuais";
+import { caminhoPrincipalDesenhado } from "./sessao/fechamento";
 import { extrairIdsDoGrafo } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
@@ -18,9 +26,12 @@ import {
   montarSistemaEstaticoPerguntar,
   NOME_SCHEMA_PERGUNTAR,
 } from "./prompts/entrevistador";
-import { blocosDoSistemaDinamicoPerguntarV2, FALAS_NO_PROMPT_V2, montarSistemaEstaticoPerguntarV2, NOME_SCHEMA_PERGUNTAR_V2, tamanhoDosBlocos, type NomeDoBloco } from "./prompts/entrevistador-v2";
+import {
+  blocosDoSistemaDinamicoPerguntarV2, FALAS_NO_PROMPT_V2, linhaDoFechamento, montarSistemaEstaticoPerguntarV2, NOME_SCHEMA_PERGUNTAR_V2, tamanhoDosBlocos,
+  type ContextoDoFechamento, type NomeDoBloco,
+} from "./prompts/entrevistador-v2";
 import { historicoDaConversa } from "./prompts/contexto";
-import { MAX_SEGUIMENTOS, transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
+import { MAX_SEGUIMENTOS, tempoRestanteMs, transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
 import type { Fase, FalaRecente } from "./sessao/tipos";
 import { logPadrao, type LogMeta } from "./analisar";
 
@@ -62,6 +73,16 @@ export type EntradaPerguntar = {
   mudancas?: string;
   /** Há quantos segundos ele não mexe no desenho. Ausente: o quadro não informou. */
   desenhoParadoHaS?: number;
+  /** A fala junta a anterior, que ele continuou antes de ouvir a resposta: o passo do fechamento dado por ela é refeito. */
+  substitui?: boolean;
+};
+
+/** O que um turno fez com o fechamento comum, para a rota reaplicar sobre o estado mais recente da sessão. */
+export type PassoNaSessao = {
+  /** O turno que começou o fechamento foi substituído por esta fala: ele foi desfeito antes de ela ser lida. */
+  desfeito: boolean;
+  /** O fechamento começou (`inicio`) ou andou um passo neste turno. */
+  atualizado: { inicio: boolean; nucleo: EstadoFechamento; antes: EstadoFechamento | null } | null;
 };
 
 export type ResultadoPerguntar = {
@@ -83,6 +104,13 @@ export type ResultadoPerguntar = {
   perguntou?: boolean;
   /** Custo e tamanho do prompt deste turno, quando o modelo respondeu (a rota grava por sessão). */
   uso?: UsoPerguntar;
+  /**
+   * A etapa do fechamento comum depois deste turno (lib/totti/fechamento.ts), ou "suspenso" quando ele estava em
+   * andamento e deixou de estar (o candidato voltou a desenhar). Ausente: a entrevista não está fechando.
+   */
+  fechamento?: EtapaDoFechamento | "suspenso";
+  /** O que o turno fez com o fechamento (só para a rota: não vai ao navegador). */
+  passoDoFechamento?: PassoNaSessao;
   estado: EstadoSessao;
 };
 
@@ -111,6 +139,25 @@ export const AVISOS_DE_QUE_VAI_OLHAR = avisosDeQueVaiOlhar("quadro");
 const MAX_MS_PARA_GERAR_DE_NOVO = 3500;
 /** ...e tem este prazo, para as duas caberem no prazo da rota. */
 const PRAZO_SEGUNDA_GERACAO_MS = 3500;
+/**
+ * No fechamento a fala seguinte não depende do modelo (a sequência é do núcleo): a leitura do turno tem prazo curto
+ * e, se não vier, o fechamento segue pelo que a fala mostra.
+ */
+export const PRAZO_DA_LEITURA_NO_FECHAMENTO_MS = 3500;
+
+/** O contrato do cliente pede timeout; este teto também protege contra um provedor que ignore o cancelamento. */
+async function leituraNoPrazo<T>(tarefa: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([tarefa, new Promise<never>((_, rejeitar) => {
+      timer = setTimeout(() => rejeitar(new Error("prazo da leitura do fechamento")), PRAZO_DA_LEITURA_NO_FECHAMENTO_MS);
+    })]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+/** Fases em que há entrevista em andamento (o tempo que resta só conta nelas). */
+const FASES_DA_ENTREVISTA: Fase[] = ["REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
 
 const MAX_CARACTERES_REQUISITO = 60;
 /** Quantas falas recentes do agente o convite do fim evita repetir. */
@@ -125,19 +172,44 @@ export async function perguntar(
   sinal?: AbortSignal,
 ): Promise<ResultadoPerguntar> {
   const medida: { uso?: UsoPerguntar } = {};
-  const r = await responderFala(deps, estado, entrada, agora, sinal, medida);
-  return medida.uso ? { ...r, uso: medida.uso } : r;
+  const turno: PassoNaSessao = { desfeito: false, atualizado: null };
+  const r = await responderFala(deps, estado, entrada, agora, sinal, medida, turno);
+  // Para o quadro: em que etapa o fechamento ficou, ou que ele foi suspenso neste turno.
+  const fechamento = r.estado.fechamento?.nucleo.etapa ?? (estado.fechamento ? "suspenso" as const : undefined);
+  return {
+    ...r,
+    ...(medida.uso ? { uso: medida.uso } : {}),
+    ...(fechamento ? { fechamento } : {}),
+    ...(turno.desfeito || turno.atualizado ? { passoDoFechamento: turno } : {}),
+  };
 }
 
 async function responderFala(
   deps: DepsPerguntar,
-  estado: EstadoSessao,
+  recebido: EstadoSessao,
   entrada: EntradaPerguntar,
   agora: number,
   sinal: AbortSignal | undefined,
   medida: { uso?: UsoPerguntar },
+  turno: PassoNaSessao,
 ): Promise<ResultadoPerguntar> {
   const log = deps.log ?? logPadrao;
+  // Peças novas no desenho desde que ele disse que terminou: o desenho deixa de estar concluído e o fechamento, se
+  // estava em andamento, é suspenso antes de a fala ser lida (ela é tratada como uma fala normal).
+  let estado = entrada.grafo !== undefined
+    ? transicionar(recebido, { tipo: "DESENHO_ATUALIZADO", grafo: entrada.grafo }, agora).estado
+    : recebido;
+  // O fechamento comum em andamento (lib/totti/fechamento.ts). Se esta fala substitui a anterior (ele continuou
+  // antes de ouvir a resposta), o passo dado pela anterior é refeito: a sequência recomeça de antes dela.
+  let nucleo: EstadoFechamento | null = estado.fechamento?.nucleo ?? null;
+  if (estado.fechamento && entrada.substitui) {
+    if (estado.fechamento.antes) nucleo = estado.fechamento.antes;
+    else {
+      estado = transicionar(estado, { tipo: "FECHAMENTO_DESFEITO" }, agora).estado;
+      nucleo = null;
+      turno.desfeito = true;
+    }
+  }
   // A fala entra na conversa antes de o LLM ver o histórico (ele recebe a fala como mensagem).
   const comFala = transicionar(
     estado,
@@ -145,17 +217,18 @@ async function responderFala(
     agora,
   ).estado;
   const mudo = (): ResultadoPerguntar => ({ responder: false, texto: "", requisito: null, concluiu: false, desfecho: null, estado: comFala });
-  // O Totti ofereceu encerrar e ele aceitou (ou só não tem mais nada a dizer): fecha, sem gastar uma chamada ao modelo.
-  // Numa entrevista real ele pediu para terminar cinco vezes e o Totti seguiu devolvendo a vez.
-  const ultimaDoAgente = estado.conversa.findLast((f) => f.quem === "agente")?.texto;
-  if (ultimaDoAgente === OFERTA_DE_ENCERRAR && aceitaEncerrar(entrada.texto)) return { ...mudo(), encerrar: true };
+  // A despedida já foi dita: não há mais o que responder, o quadro encerra.
+  if (nucleo?.etapa === "encerrada") return { ...mudo(), encerrar: true };
 
   const v2 = (deps.versao ?? versaoTottiQuadro()) === "v2";
   // O convite do fim varia: não repete um que o Totti acabou de dizer.
   const jaDitas = estado.conversa.filter((f) => f.quem === "agente").slice(-MAX_FALAS_PARA_VARIAR_CONVITE).map((f) => f.texto);
   const minhaUltima = jaDitas.at(-1);
+  // A pergunta do fechamento que ele está respondendo: a pergunta final em aberto ou o "quer acrescentar algo?".
+  const perguntaDoFechamento = nucleo ? (nucleo.atual?.pergunta ?? (nucleo.etapa === "ultima_palavra" ? minhaUltima : undefined)) : undefined;
+  const perguntaAberta = perguntaDoFechamento ?? entrada.perguntaAtiva;
   // O desfecho só vale quando havia pergunta ativa: sem ela, não há assunto para encerrar.
-  const haPerguntaAtiva = !!(entrada.perguntaAtiva || estado.perguntaAtiva);
+  const haPerguntaAtiva = !!(perguntaAberta || estado.perguntaAtiva);
   // Quantas vezes ele já tinha dito que terminou, antes desta.
   const conclusoesAntes = estado.conclusoes ?? 0;
   // A leitura do turno é a do Totti único (lib/totti/turno.ts), a mesma do live coding.
@@ -167,11 +240,43 @@ async function responderFala(
     conclusoes: conclusoesAntes,
     paradoHaS: entrada.desenhoParadoHaS,
   };
-  let saida;
-  try {
+  // O que o modelo precisa saber do fim: o desenho está concluído e, no fechamento, em que etapa a conversa está.
+  const contextoDoFim: ContextoDoFechamento = {
+    desenhoConcluido: !!estado.desenhoConcluido || !!nucleo,
+    ...(nucleo?.etapa === "perguntas_finais" || nucleo?.etapa === "ultima_palavra" ? { etapa: nucleo.etapa } : {}),
+  };
+  const ids = extrairIdsDoGrafo(entrada.grafo ?? "");
+  /** Um passo do fechamento comum vira a resposta do turno: a fala do núcleo sai como está, sem análise nem ritmo. */
+  const comPasso = (
+    passo: PassoDoFechamento,
+    o: { inicio: boolean; antes: EstadoFechamento | null; base: EstadoSessao; concluiu: boolean; desfecho: Desfecho | null; antesDaFala?: string },
+  ): ResultadoPerguntar => {
+    turno.atualizado = { inicio: o.inicio, nucleo: passo.estado, antes: o.antes };
+    let final = transicionar(o.base, { tipo: "FECHAMENTO_ATUALIZADO", inicio: o.inicio, nucleo: passo.estado, antes: o.antes, grafo: entrada.grafo }, agora).estado;
+    const texto = [o.antesDaFala, passo.fala].filter(Boolean).join(" ").trim();
+    log("perguntar_fechamento", {
+      sessao_id: entrada.sessao_id, fase: entrada.fase, etapa: passo.etapa, inicio: o.inicio, gatilho: passo.estado.gatilho,
+      encerrar: passo.encerrar, na_fila: passo.estado.fila.length, origem: passo.estado.atual?.origem,
+    });
+    const encerrar = passo.encerrar ? { encerrar: true } : {};
+    // O núcleo continua ouvindo ("hmm, deixa eu pensar"): nada é dito e a etapa não muda.
+    if (!texto) return { responder: false, texto: "", requisito: null, concluiu: o.concluiu, desfecho: o.desfecho, estado: final, ...encerrar };
+    const perguntou = texto.endsWith("?");
+    final = transicionar(final, { tipo: "AGENTE_FALOU", texto, ...(perguntou ? { perguntou } : {}) }, agora).estado;
+    // A pergunta final que veio da análise traz as peças e as marcas dela; as outras marcam a peça que citam pelo nome.
+    const apontar = passo.apontar as ApontarNoQuadro | undefined;
+    const alvos = (apontar?.elementos ?? (perguntou ? pecasCitadas(texto, entrada.grafo ?? "") : [])).filter((id) => ids.has(id));
+    const visual = garantirMarca(mapearAcoesVisuais(apontar?.visual, (id) => ids.has(id) ? id : null), alvos, estado.conversa.length);
+    return {
+      responder: true, texto, requisito: null, concluiu: o.concluiu, desfecho: o.desfecho, estado: final,
+      ...(perguntou ? { perguntou } : {}), ...encerrar, ...(visual !== undefined ? { visual } : {}),
+    };
+  };
+  /** A leitura do turno pelo modelo. Lança se ele falhar; `prazoMs` encurta a espera (fechamento). */
+  const gerar = async (prazoMs?: number) => {
     const blocos = v2
-      ? blocosDoSistemaDinamicoPerguntarV2(estado, deps.kit, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora))
-      : [{ bloco: "resto" as const, texto: montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, entrada.perguntaAtiva, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora)) }];
+      ? blocosDoSistemaDinamicoPerguntarV2(estado, deps.kit, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, perguntaAberta, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora), FALAS_NO_PROMPT_V2, contextoDoFim)
+      : [{ bloco: "resto" as const, texto: `${montarSistemaDinamicoPerguntar(estado, entrada.fase, entrada.requisitosAtuais ?? [], entrada.grafo, perguntaAberta, entrada.gestosRecentes, agora, entrada.conversaDoQuadro, entrada.mudancas, !!entrada.imagemBase64, blocoDoBriefing(deps.kit, estado, agora))}\n${linhaDoFechamento(contextoDoFim)}` }];
     const pedido = {
       sistema: {
         estatico: `${v2 ? montarSistemaEstaticoPerguntarV2(deps.kit, deps.problema) : montarSistemaEstaticoPerguntar(deps.kit, deps.problema)}\n\n${REGRA_DADOS}`,
@@ -183,11 +288,12 @@ async function responderFala(
       nomeSchema: v2 ? NOME_SCHEMA_PERGUNTAR_V2 : NOME_SCHEMA_PERGUNTAR,
       modelo: deps.modelo,
       maxTokens: deps.maxTokens ?? 200,
-      sinal,
+      sinal: prazoMs === undefined ? sinal : AbortSignal.any([AbortSignal.timeout(prazoMs), ...(sinal ? [sinal] : [])]),
       imagem: entrada.imagemBase64 ?? null,
+      ...(prazoMs !== undefined ? { timeoutMs: prazoMs } : {}),
     };
     const r = await deps.llm.completarJson(pedido);
-    saida = r.dados;
+    let dados = r.dados;
     // Quem respondeu de fato este turno: com reserva e disjuntor no `lib/llm`, o modelo configurado nem sempre é
     // o que fala. Sem isso não dá para saber se o Totti "burro" era o modelo forte ou a reserva.
     medida.uso = {
@@ -205,7 +311,7 @@ async function responderFala(
     log("perguntar_llm", { sessao_id: entrada.sessao_id, versao: v2 ? "v2" : "v1", ...medida.uso });
     // Ele fez uma pergunta clara ("o que tu acha", "posso usar um cache?") e o modelo ficou quieto: gera de novo,
     // uma vez, avisando. Se esta falhar, vale a primeira leitura (e a fala de reserva, mais abaixo).
-    if (r.ms <= MAX_MS_PARA_GERAR_DE_NOVO && ficouSemResposta(deSaidaDoQuadro(saida, situacao), situacao)) {
+    if (prazoMs === undefined && r.ms <= MAX_MS_PARA_GERAR_DE_NOVO && ficouSemResposta(deSaidaDoQuadro(dados, situacao), situacao)) {
       log("perguntar_pergunta_sem_resposta", { sessao_id: entrada.sessao_id, fase: entrada.fase });
       const deNovo = await deps.llm
         .completarJson({
@@ -214,14 +320,42 @@ async function responderFala(
           timeoutMs: PRAZO_SEGUNDA_GERACAO_MS,
         })
         .catch(() => null);
-      if (deNovo) saida = deNovo.dados;
+      if (deNovo) dados = deNovo.dados;
     }
+    return dados;
+  };
+  const registrarFalha = (e: unknown) => log("perguntar_falhou", {
+    sessao_id: entrada.sessao_id,
+    fase: entrada.fase,
+    codigo: (e as { codigo?: string }).codigo ?? "desconhecido",
+    ...(nucleo ? { fechamento: nucleo.etapa } : {}),
+  });
+
+  // Fechamento em andamento: a fala dele vai ao núcleo, e a próxima fala do Totti (reação e pergunta final seguinte,
+  // última palavra ou despedida) sai na hora, sem esperar análise do desenho, intervalo nem cota de perguntas.
+  if (nucleo) {
+    let lida: LeituraDoTurno | null = null;
+    try {
+      const lido = await leituraNoPrazo(gerar(PRAZO_DA_LEITURA_NO_FECHAMENTO_MS));
+      const guardada = aplicarGuardas(lido.texto, { falaDoCandidato: entrada.texto, falasDoTotti: jaDitas });
+      if (guardada.travas.length) log("perguntar_travas", { sessao_id: entrada.sessao_id, fase: entrada.fase, travas: guardada.travas });
+      lida = deSaidaDoQuadro({ ...lido, texto: limitarFrases(guardada.texto, MAX_FRASES_FALA) }, situacao);
+    } catch (e) {
+      // O fechamento não para por causa do modelo: sem leitura, o núcleo decide pelo que a fala mostra.
+      registrarFalha(e);
+    }
+    if (perguntouComClareza(entrada.texto) && (!lida || !lida.responder || !lida.texto)) {
+      lida = comRespostaDeReserva(lida ?? deSaidaDoQuadro({ responder: false, texto: "" }, situacao), situacao).leitura;
+    }
+    const passo = proximoPasso(nucleo, lida, entrada.texto, { tempoRestanteMs: tempoRestanteMs(estado, agora) });
+    return comPasso(passo, { inicio: false, antes: nucleo, base: comFala, concluiu: false, desfecho: null });
+  }
+
+  let saida;
+  try {
+    saida = await gerar();
   } catch (e) {
-    log("perguntar_falhou", {
-      sessao_id: entrada.sessao_id,
-      fase: entrada.fase,
-      codigo: (e as { codigo?: string }).codigo ?? "desconhecido",
-    });
+    registrarFalha(e);
     return { ...mudo(), falhou: true };
   }
 
@@ -230,7 +364,7 @@ async function responderFala(
   const peloSinal = saida.concluiu !== true && saida.encerrar !== true && sinalDeConclusao(situacao);
   if (peloSinal) log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["sinal_de_conclusao"] });
   const concluiu = saida.concluiu === true || peloSinal;
-  const comConclusao = (e: EstadoSessao) => concluiu ? transicionar(e, { tipo: "CANDIDATO_CONCLUIU" }, agora).estado : e;
+  const comConclusao = (e: EstadoSessao) => concluiu ? transicionar(e, { tipo: "CANDIDATO_CONCLUIU", grafo: entrada.grafo }, agora).estado : e;
   const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho, estado: comConclusao(comFala) });
   /** Silêncio, a não ser que ele tenha feito uma pergunta clara: essa nunca fica sem resposta (regra comum às salas). */
@@ -242,8 +376,6 @@ async function responderFala(
     const final = transicionar(comConclusao(comFala), { tipo: "AGENTE_FALOU", texto: fala, ...(v2 ? { perguntou: true } : {}) }, agora).estado;
     return { responder: true, texto: fala, requisito: null, concluiu, desfecho, estado: final, ...(v2 ? { perguntou: true } : {}) };
   };
-  // Pedido para encerrar a entrevista: quem fecha é o quadro (com a despedida), nada mais a decidir aqui.
-  if (saida.encerrar === true) return { ...mudo(), encerrar: true };
   const fasesDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO" || entrada.fase === "FECHAMENTO";
   // As travas da fala são as do Totti único (lib/totti/guardas.ts), as mesmas do live coding: cumprimento fora da
   // abertura, validação, eco do que o candidato disse, reação vazia repetida e, no v2, pergunta que ele já ouviu
@@ -263,6 +395,44 @@ async function responderFala(
   const perguntaBarrada = guardada.travas.includes("pergunta_repetida") || guardada.travas.includes("pergunta_de_conducao");
   // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
   const curto = limitarFrases(guardada.texto, MAX_FRASES_FALA);
+
+  // É hora de fechar? Quem decide é o núcleo (lib/totti/fechamento.ts), com o que o quadro sabe do momento: pedido
+  // para encerrar vai direto à despedida; "terminei" com o caminho principal desenhado fecha na primeira vez, e sem
+  // ele, na segunda; tempo acabando fecha de qualquer jeito. A fala do turno passa a ser a do fechamento (o anúncio
+  // já com a primeira pergunta final), no lugar do aviso de que vai olhar e da oferta de encerrar de antes.
+  const restanteMs = tempoRestanteMs(estado, agora);
+  const gatilho = gatilhoDoFechamento({
+    pediuEncerrar: saida.encerrar === true,
+    concluiu,
+    conclusoesAntes,
+    materialPronto: fasesDeDesenho && caminhoPrincipalDesenhado(entrada.grafo),
+    ...(FASES_DA_ENTREVISTA.includes(entrada.fase) ? { tempoRestanteMs: restanteMs } : {}),
+  });
+  if (gatilho) {
+    const inicial = iniciarFechamento({
+      sala: "quadro", gatilho, tempoRestanteMs: restanteMs,
+      candidatas: candidatasDoQuadro(deps.kit, deps.problema, estado, agora),
+      perguntasJaFeitas: perguntasJaOuvidas(estado),
+    });
+    const passo = proximoPasso(inicial, undefined, "", { tempoRestanteMs: restanteMs });
+    // O tempo acabou no meio de uma pergunta dele: a resposta vem antes do anúncio, para ela não ficar no ar.
+    const antesDaFala = gatilho === "tempo" && saida.responder && perguntouComClareza(entrada.texto)
+      ? frasesSemPergunta(semConviteDeSeguir(curto))
+      : "";
+    return comPasso(passo, { inicio: true, antes: null, base: comConclusao(comFala), concluiu, desfecho, antesDaFala });
+  }
+  // Ele já disse que terminou o desenho (e não voltou a desenhar): nenhuma fala manda continuar o desenho. Numa
+  // entrevista real o Totti respondeu "pode seguir com a próxima parte do seu desenho" a quem tinha acabado de dizer
+  // que terminou. Se ele respondia a uma pergunta e só sobrava o convite, fica uma reação curta: a pergunta seguinte
+  // vem da análise.
+  const desenhoJaConcluido = fasesDeDesenho && (!!estado.desenhoConcluido || concluiu);
+  const semMandarSeguir = (fala: string): string => {
+    if (!desenhoJaConcluido) return fala;
+    const semConvite = semConviteDeSeguir(fala);
+    if (semConvite === fala) return fala;
+    log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["sem_convite_de_seguir"] });
+    return semConvite || (situacao.respondiaAoTotti ? reacaoNeutra(jaDitas) : "");
+  };
   let texto: string;
   let seguimento = false;
   if (v2) {
@@ -280,17 +450,11 @@ async function responderFala(
     // um "Tá." ou um fato solto: sem pergunta nem próximo passo, entra um convite.
     const decidido = decidirTurno(deSaidaDoQuadro({ ...saida, texto: base, concluiu }, situacao), situacao);
     if (decidido.regras.length) log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: decidido.regras });
-    texto = decidido.leitura.texto;
-    // Ele já disse duas vezes que terminou e diz de novo: o Totti não devolve a vez com outro convite, oferece fechar.
-    // (Na primeira e na segunda, a pergunta seguinte vem da análise do desenho, que roda logo depois.)
-    if (concluiu && conclusoesAntes >= 2 && fasesDeDesenho && !haPerguntaAtiva) {
-      // `concluiu` vai false: a oferta já é a vez dele, e nenhuma pergunta nova deve vir atrás dela.
-      const final = transicionar(comFala, { tipo: "AGENTE_FALOU", texto: OFERTA_DE_ENCERRAR, perguntou: true }, agora).estado;
-      return { responder: true, texto: OFERTA_DE_ENCERRAR, requisito: null, concluiu: false, desfecho, estado: final, perguntou: true };
-    }
+    texto = semMandarSeguir(decidido.leitura.texto);
     // A fala era só a pergunta que a trava barrou (repetida ou de condução): ele fica quieto.
     if (perguntaBarrada && !texto) return calar();
-    // Ele disse que terminou: a pergunta seguinte é a da análise do desenho (concreta, com a peça marcada). Um convite
+    // Ele disse que terminou pela primeira vez e o caminho principal ainda não está no quadro (senão o fechamento
+    // teria começado acima): a pergunta seguinte é a da análise do desenho (concreta, com a peça marcada). Um convite
     // vago aqui ("quer detalhar algo?") deixava ele sem saber o que fazer e ainda derrubava a pergunta pronta.
     if (concluiu && !texto.trim().endsWith("?") && fasesDeDesenho && !haPerguntaAtiva) {
       const aviso = AVISOS_DE_QUE_VAI_OLHAR[conclusoesAntes % AVISOS_DE_QUE_VAI_OLHAR.length];
@@ -310,7 +474,7 @@ async function responderFala(
     const faseDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO";
     const podeSeguir = desfecho === "respondeu" && saida.aprofundar === true && fioAberto && faseDeDesenho;
     const semAprofundar = desfecho === "nao_sabe" || desfecho === "pulou" || (desfecho === "respondeu" && !podeSeguir);
-    texto = comVezDevolvida(semAprofundar ? semPerguntaNoFim(curto, jaDitas) : curto, jaDitas);
+    texto = semMandarSeguir(comVezDevolvida(semAprofundar ? semPerguntaNoFim(curto, jaDitas) : curto, jaDitas));
     if (!saida.responder || !texto) return calar();
     seguimento = podeSeguir && texto.endsWith("?");
   }
@@ -322,7 +486,6 @@ async function responderFala(
   // v2: a pergunta do Conversador conta no intervalo do plin, para o Pensador não emendar outra logo em seguida.
   const perguntou = v2 && texto.trim().endsWith("?");
   const final = transicionar(comConclusao(comFala), { tipo: "AGENTE_FALOU", texto, ...(perguntou ? { perguntou } : {}) }, agora).estado;
-  const ids = extrairIdsDoGrafo(entrada.grafo ?? "");
   // A pergunta que cita uma peça pelo nome marca essa peça no quadro, mesmo que o modelo não tenha pedido gesto.
   const citadas = perguntou ? pecasCitadas(texto, entrada.grafo ?? "").filter((id) => ids.has(id)) : [];
   const visual = garantirMarca(mapearAcoesVisuais(saida.visual, (id) => ids.has(id) ? id : null), citadas, estado.conversa.length);

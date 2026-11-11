@@ -7,7 +7,8 @@ export const metadata: Metadata = {
 };
 
 /** Fim da entrevista para o candidato. O relatório vai só para a recrutadora. */
-export default function Obrigado() {
+export default async function Obrigado({ searchParams }: { searchParams?: Promise<{ debug?: string; sessao?: string }> }) {
+  const busca = await searchParams;
   return (
     <TemaRecrutador>
       <main className="grid min-h-dvh place-items-center p-6">
@@ -20,6 +21,11 @@ export default function Obrigado() {
             Foi um prazer ver você pensar em voz alta. A recrutadora recebe o relatório da sua entrevista e
             volta a falar com você sobre os próximos passos. Pode fechar esta janela.
           </p>
+          {busca?.debug === "1" && busca.sessao && (
+            <a href={`/relatorio/${encodeURIComponent(busca.sessao)}`} className="text-sm text-texto-suave underline">
+              Demo: ver o relatório da recrutadora
+            </a>
+          )}
           <span className="font-display text-[18px] leading-none font-bold tracking-[-0.02em] text-texto">totti</span>
         </section>
       </main>

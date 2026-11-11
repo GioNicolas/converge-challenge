@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
-  analisar, criarSessao, enviarEventos, enviarImagem, perguntar, sintetizarFala, tokenTranscricao,
+  analisar, criarSessao, enviarEventos, enviarImagem, finalizar, perguntar, sintetizarFala, tokenTranscricao,
   type Alinhamento, type FalaRecente, type PedidoAnalise, type Sessao,
 } from "../servidor";
 
@@ -49,6 +49,13 @@ const sessao: Sessao = {
   tempos: { REQUISITOS: 60, ALTO_NIVEL: 120, APROFUNDAMENTO: 300 },
 };
 const alinhamento: Alinhamento = { characters: ["O", "i"], character_start_times_seconds: [0, 0.1], character_end_times_seconds: [0.1, 0.2] };
+
+test("finalizar mantém o pedido vivo se a página fechar durante a despedida", async (t) => {
+  const chamadas = substituirFetch(t, () => json({ ok: true }));
+  await finalizar("sessao-1");
+  assert.equal(chamadas[0].opcoes.keepalive, true);
+  assert.equal(chamadas[0].rota, "/api/sessoes/sessao-1/finalizar");
+});
 
 test("criarSessao envia identificadores no contrato e valida a sessão recebida", async (t) => {
   const chamadas = substituirFetch(t, () => json(sessao, 201));

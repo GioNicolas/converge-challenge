@@ -15,6 +15,7 @@ import {
   extrairIdsDoGrafo,
   filtrarResposta,
   podeAnalisar,
+  podeLevantarPlin,
   REGRAS_PADRAO,
   motivoBloqueioPlin,
   type Regras,
@@ -47,6 +48,11 @@ export type ResultadoAnalise = {
 };
 
 export const logPadrao: LogMeta = (evento, meta) => console.warn(`[agente] ${evento}`, meta);
+
+export const CONVITES_SILENCIO_INICIAL = [
+  "Quando quiser, me conta como está pensando em começar. Pode tirar dúvidas comigo.",
+  "Pode me contar por onde está pensando em começar. Se tiver alguma dúvida, pode perguntar.",
+] as const;
 
 export function respostaSilencio(): RespostaAnalise {
   return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
@@ -174,6 +180,20 @@ export async function analisar(
       ajustes.push("pergunta_repetida");
       resposta = { ...resposta, status: "ok" };
     }
+  }
+
+  // O convite é uma decisão do servidor. A análise continua colhendo observações,
+  // mas não escolhe a fala nem precisa sugerir uma pergunta para liberar o convite.
+  // Também substitui convites antigos ainda pendentes, depois da deduplicação.
+  if (estado.fase === "REQUISITOS" && podeLevantarPlin(estado, "duvida", agora, regras, {
+    paradoHaS: pedido.parado_ha_s, temDesenho: extrairIdsDoGrafo(pedido.grafo).size > 0,
+  })) {
+    const indice = Math.abs(estado.faseIniciadaEm ?? 0) % CONVITES_SILENCIO_INICIAL.length;
+    resposta = {
+      ...resposta, status: "duvida", pergunta: CONVITES_SILENCIO_INICIAL[indice],
+      nota: "Pode tirar dúvidas comigo", elementos: [], visual: [], degrau: null,
+    };
+    ajustes.push("convite_fixo");
   }
 
   if (resposta.pergunta && /\b[a-z]\d+\b/i.test(resposta.pergunta)) {
