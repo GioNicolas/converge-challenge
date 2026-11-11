@@ -13,6 +13,10 @@ import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import { completeJson } from "@/lib/llm";
 import { aplicarGuardas, eSoReacao, escolherConvite, falaNaoRepetida, reacaoNeutra, semReacaoRepetida } from "@/lib/totti/guardas";
+import {
+  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoLiveCoding, paraSaidaDoLiveCoding,
+  type SituacaoDoTurno,
+} from "@/lib/totti/turno";
 import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
@@ -193,11 +197,32 @@ async function turno(
     const esperaResposta = !opening && !perguntou && (found !== undefined || o.concluded === true || respondendoAoTotti(req.messages));
     return { ...o, reply: guardada.texto || (esperaResposta ? reacaoNeutra(naConversa) : "") };
   };
+  // A leitura do turno é a do Totti único (lib/totti/turno.ts), a mesma do quadro: a saída do modelo vira a
+  // leitura comum, as decisões comuns agem sobre ela (sinal de conclusão, sem pergunta nova depois de "não sei",
+  // vez devolvida depois de uma resposta) e ela volta para a saída desta sala.
+  const situacao: SituacaoDoTurno = {
+    sala: "codigo",
+    falaDoCandidato: req.messages.findLast((m) => m.role === "candidate")?.text ?? "",
+    respondiaAoTotti: found !== undefined || respondendoAoTotti(req.messages),
+    falasDoTotti: falasDoAgente(session, req.messages),
+    // Há quanto tempo ele não digita: a última versão do código que a sessão recebeu.
+    paradoHaS: Math.max(0, elapsedMs(session) - (session.codeHistory.at(-1)?.t ?? 0)) / 1000,
+    ajudando: travado(req.messages),
+  };
+  const comTurno = (o: InterviewerOutput): InterviewerOutput => {
+    if (opening) return o;
+    const decidido = decidirTurno(deSaidaDoLiveCoding(o, situacao), situacao);
+    if (decidido.regras.length) console.info("[interviewer] turno", { regras: decidido.regras, antes: o.reply });
+    return paraSaidaDoLiveCoding(decidido.leitura, o);
+  };
+  /** A saída do modelo depois das travas da fala, das decisões do turno e do limite de perguntas desta sala. */
+  const lida = (o: InterviewerOutput): InterviewerOutput => limitarPerguntas(comTurno(comGuardas(o)), question, req.messages, opening);
+  const calou = (o: InterviewerOutput): boolean => o.respond === false || o.reply.trim() === "";
   let output: InterviewerOutput;
   const prazo = Date.now() + PRAZO_TURNO_MS;
   const sobra = () => prazo - Date.now();
   try {
-    output = limitarPerguntas(comGuardas(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra()))), question, req.messages, opening);
+    output = lida(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra())));
     // Pediu para encerrar a entrevista: quem se despede e fecha é a IDE (como no botão Finalizar).
     if (!opening && output.finish === true) {
       registrarEvidencia(session, output);
@@ -205,12 +230,23 @@ async function turno(
     }
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
-    if (!opening && perguntou && (output.respond === false || output.reply.trim() === "") && sobra() >= MIN_PARA_REGERAR_MS) {
+    if (!opening && perguntou && calou(output) && output.finish !== true && sobra() >= MIN_PARA_REGERAR_MS) {
       // Ele perguntou e o modelo ficou quieto: era o "você pode me explicar?" sem resposta.
-      output = limitarPerguntas(
-        comGuardas(await generate(session, system, `${user}\n\nATENÇÃO: ele te fez uma pergunta e você não respondeu. respond = true: responda a ela agora.`, Math.min(PRAZO_GERACAO_MS, sobra()))),
-        question, req.messages, opening,
-      );
+      output = lida(await generate(session, system, `${user}\n\n${avisoDePerguntaSemResposta("respond")}`, Math.min(PRAZO_GERACAO_MS, sobra())));
+    }
+    if (!opening) {
+      // Pergunta clara nunca fica sem resposta (regra comum às duas salas): se nem a segunda geração respondeu,
+      // o Totti pede para ele repetir, em vez de ignorar.
+      const reserva = comRespostaDeReserva(deSaidaDoLiveCoding(output, situacao), situacao);
+      if (reserva.regras.length) {
+        console.info("[interviewer] turno", { regras: reserva.regras });
+        output = { ...paraSaidaDoLiveCoding(reserva.leitura, output), end: false, highlight: null };
+      }
+      // Ele avisou que terminou (pelo modelo ou pelo sinal da fala com as mãos paradas) e não veio fala: o Totti
+      // avisa que vai olhar, e a pergunta seguinte vem da análise do código, como no quadro.
+      if (output.concluded === true && output.finish !== true && calou(output)) {
+        output = { ...output, respond: true, reply: falaNaoRepetida(avisosDeQueVaiOlhar("codigo"), falasDoAgente(session, req.messages)), end: true, highlight: null };
+      }
     }
     // Encerramento com todos os pontos já perguntados: a resposta dele ao último é o fim. Ficar ouvindo deixava o
     // candidato esperando ~30 s até perguntar "tem mais alguma pergunta?".
@@ -263,7 +299,7 @@ async function turno(
           system,
           `${user}\n\nATENÇÃO: sua fala anterior ("${output.reply}") foi barrada: ${verdict.reason}. Escreva outra que não faça isso.`,
           Math.min(PRAZO_GERACAO_MS, sobra() - PRAZO_FILTRO_MS / 2),
-        ).then((o) => limitarPerguntas(comGuardas(o), question, req.messages, opening)).catch((err) => {
+        ).then(lida).catch((err) => {
           console.info("[interviewer] segunda geração falhou, indo de fala segura:", err instanceof Error ? err.message : err);
           return opening
             ? { ...barrada, reply: found.question.question, highlight: found.question.highlight ?? null, end: false, gaveHint: false, challenge: null }
