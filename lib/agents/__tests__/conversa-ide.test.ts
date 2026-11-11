@@ -138,13 +138,13 @@ test("pergunta do candidato sem '?': o Totti responde antes de perguntar", async
 });
 
 test("sem 'entendi, entendi': a resposta não abre com outro reconhecimento depois do 'uhum' nem repete o da fala anterior", async () => {
-  const { semReconhecimentoRepetido } = await import("@/lib/agents/interviewer");
-  assert.equal(semReconhecimentoRepetido("Saquei. E o custo de memória?", [], true), "E o custo de memória?");
-  assert.equal(semReconhecimentoRepetido("Entendi, fica mais direto. Qual o custo?", [], true), "Fica mais direto. Qual o custo?");
-  assert.equal(semReconhecimentoRepetido("Saquei. E o custo?", [], false), "Saquei. E o custo?");
-  const antes = [{ role: "agent" as const, text: "Saquei. Pode seguir." }, { role: "candidate" as const, text: "beleza" }];
-  assert.equal(semReconhecimentoRepetido("Saquei, e a pilha vazia?", antes, false), "E a pilha vazia?");
-  assert.equal(semReconhecimentoRepetido("Saquei.", [], true), "Saquei.");
+  // A trava agora é a comum às duas salas (lib/totti/guardas.ts, com os casos em lib/totti/__tests__).
+  const { semReacaoRepetida } = await import("@/lib/totti/guardas");
+  assert.equal(semReacaoRepetida("Saquei. E o custo de memória?", [], true), "E o custo de memória?");
+  assert.equal(semReacaoRepetida("Entendi, fica mais direto. Qual o custo?", [], true), "Fica mais direto. Qual o custo?");
+  assert.equal(semReacaoRepetida("Saquei. E o custo?", [], false), "Saquei. E o custo?");
+  assert.equal(semReacaoRepetida("Saquei, e a pilha vazia?", ["Saquei. Pode seguir."], false), "E a pilha vazia?");
+  assert.equal(semReacaoRepetida("Saquei.", [], true), "Saquei.");
 });
 
 test("fim da entrevista: 'já terminei' encerra; travado ou perguntando, a pergunta do Totti não é cortada", async () => {
