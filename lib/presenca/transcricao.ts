@@ -45,6 +45,32 @@ export const VOZ_MINIMA_MS = 200;
  * não corta. Abrir continua exigindo LIMIAR_VOZ_RMS, para o ruído de fundo não abrir o portão sozinho.
  */
 export const LIMIAR_SUSTENTAR_RMS = 0.004;
+/**
+ * Quanto tempo depois da última voz (acima de LIMIAR_VOZ_RMS) a energia baixa ainda sustenta o portão. Sem esse
+ * limite, um ruído constante entre os dois limiares (ventilador, TV a ~-44 dBFS) mantinha o portão aberto até o
+ * fim da sessão. Passado o limite, só voz de verdade conta, e o portão fecha depois da folga.
+ */
+export const SUSTENTAR_MAXIMO_MS = 3000;
+
+export type DetectorDeFala = {
+  /** Classifica um bloco: `voz` acima de LIMIAR_VOZ_RMS; `fala` é o que mantém (ou abre) o portão. */
+  medir(energia: number, duracaoMs: number, portaoAberto: boolean): { voz: boolean; fala: boolean };
+  reiniciar(): void;
+};
+
+/** Voz abre o portão; aberto, energia baixa sustenta a fala por até SUSTENTAR_MAXIMO_MS depois da última voz. */
+export function criarDetectorDeFala(sustentarMaximoMs = SUSTENTAR_MAXIMO_MS): DetectorDeFala {
+  let desdeVoz = Infinity;
+  return {
+    medir(energia, duracaoMs, portaoAberto) {
+      const voz = energia >= LIMIAR_VOZ_RMS;
+      desdeVoz = voz ? 0 : desdeVoz + duracaoMs;
+      const fala = voz || (portaoAberto && energia >= LIMIAR_SUSTENTAR_RMS && desdeVoz <= sustentarMaximoMs);
+      return { voz, fala };
+    },
+    reiniciar() { desdeVoz = Infinity; },
+  };
+}
 
 export function energiaRms(amostras: Float32Array): number {
   if (!amostras.length) return 0;

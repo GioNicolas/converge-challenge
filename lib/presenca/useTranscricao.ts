@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ErroTokenTranscricao, tokenTranscricao } from "./tokenTranscricao";
 import {
-  atualizarTranscricao, criarFilaDeAmostras, criarPortaoDeVoz, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
-  energiaRms, LIMIAR_SUSTENTAR_RMS, LIMIAR_VOZ_RMS, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
+  atualizarTranscricao, criarDetectorDeFala, criarFilaDeAmostras, criarPortaoDeVoz, esperaParaReconectar, estadoInicialTranscricao,
+  energiaRms, mensagemDeAudio, misturarMono, reamostrar, urlDoScribe, VOZ_MINIMA_MS,
   type EstadoReamostragem, type TrechoTranscrito,
 } from "./transcricao";
 
@@ -92,6 +92,7 @@ export function criarEscutaTranscricao(opcoes: {
   let vozSemCommit = false;
   let commitDeSeguranca: ReturnType<typeof setTimeout> | null = null;
   const portao = criarPortaoDeVoz();
+  const detector = criarDetectorDeFala();
   let ultimoEnvio = 0;
   let amostrasEnviadas = 0;
   let fimDaSessao: number | null = null;
@@ -119,8 +120,12 @@ export function criarEscutaTranscricao(opcoes: {
     texto = { ...texto, parcial: null };
     vozNoTrecho = 0;
     reamostragem = { soma: 0, peso: 0 };
+  }
+  /** Descarta o áudio que ainda não saiu e o estado do portão: só quando o socket deixa de existir. */
+  function descartarAudio() {
     pendentes.limpar();
     portao.reiniciar();
+    detector.reiniciar();
   }
   function receber(valor: string, final: boolean, chave: string) {
     if (encerrado || !podeOuvir()) return;
@@ -146,6 +151,7 @@ export function criarEscutaTranscricao(opcoes: {
       try { anterior.close(); } catch {}
     }
     limparParcial();
+    descartarAudio();
   }
   function limparAudio() {
     if (processador) processador.onaudioprocess = null;
@@ -186,8 +192,16 @@ export function criarEscutaTranscricao(opcoes: {
     if (!vozSemCommit) return;
     commitDeSeguranca = setTimeout(() => {
       commitDeSeguranca = null;
-      if (!vozSemCommit || portao.aberto || pendentes.length) return;
+      // Portão aberto: uma fala nova começou, e o fechamento dela agenda o próximo commit.
+      if (!vozSemCommit || portao.aberto) return;
+      // Ainda há áudio do trecho na fila (rajada ou socket conectando): tenta escoar e confere de novo depois.
+      if (pendentes.length) {
+        escoar(true);
+        agendarCommitDeSeguranca();
+        return;
+      }
       if (enviarAudio(new Float32Array(AMOSTRAS_MANTER_VIVO), true)) vozSemCommit = false;
+      else agendarCommitDeSeguranca();
     }, COMMIT_DE_SEGURANCA_MS);
   }
   /** Envia o que o portão deixou passar em blocos de 200 ms; `tudo` manda também o resto menor que um bloco. */
@@ -232,11 +246,11 @@ export function criarEscutaTranscricao(opcoes: {
         }
         const canais = Array.from({ length: evento.inputBuffer.numberOfChannels }, (_, i) => evento.inputBuffer.getChannelData(i));
         const amostras = misturarMono(canais);
-        const energia = energiaRms(amostras);
-        const voz = energia >= LIMIAR_VOZ_RMS;
-        if (voz) vozNoTrecho += (amostras.length / contexto.sampleRate) * 1000;
-        // Aberto, o portão segue com fala mais baixa (fim de frase dito baixo); abrir pede LIMIAR_VOZ_RMS.
-        const fala = voz || (portao.aberto && energia >= LIMIAR_SUSTENTAR_RMS);
+        const duracaoMs = (amostras.length / contexto.sampleRate) * 1000;
+        // Aberto, o portão segue com fala mais baixa (fim de frase dito baixo) por um tempo limitado depois da
+        // última voz, para ruído constante não o manter aberto; abrir pede LIMIAR_VOZ_RMS.
+        const { voz, fala } = detector.medir(energiaRms(amostras), duracaoMs, portao.aberto);
+        if (voz) vozNoTrecho += duracaoMs;
         const convertido = reamostrar(amostras, contexto.sampleRate, 16000, reamostragem);
         reamostragem = convertido.estado;
         const passou = portao.passar(convertido.amostras, fala);
@@ -393,7 +407,11 @@ export function criarEscutaTranscricao(opcoes: {
     if (encerrado) return;
     const ouvir = podeOuvir();
     if (!ouvir && ouvindoAntes) {
+      // A folga de fechamento e o que a rajada não mandou ficam na fila e saem nos próximos tiques: descartá-los
+      // deixaria o trecho sem fechamento no Scribe. O portão volta ao zero para não levar áudio de antes da pausa.
       fecharTrechoAberto();
+      portao.reiniciar();
+      detector.reiniciar();
       limparParcial();
       cancelarRepeticao();
       if (reconhecimento && (reconhecendo || iniciando)) {

@@ -676,6 +676,75 @@ test("fim de frase dito baixo segue com o portão aberto; ruído baixo sozinho n
   assert.equal(baixasDepois, 8 * 4096, "toda a fala baixa depois da voz foi enviada");
 });
 
+test("ruído constante entre os limiares não mantém o portão aberto depois da fala", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  const ws = m.sockets[0];
+  const RUIDO = 0.006; // ventilador ou TV a ~-44 dBFS: acima de LIMIAR_SUSTENTAR_RMS, abaixo de LIMIAR_VOZ_RMS
+  const AMOSTRA_RUIDO = Math.round(RUIDO * 32767);
+  const commits = () => ws.enviados.filter((d) => (JSON.parse(d) as { commit: boolean }).commit).length;
+  await audio.blocos(VOZ, 1024);
+  await audio.blocos(RUIDO, 60_000);
+  const ruidoEnviado = ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_RUIDO).length / 16000;
+  // Sustenta até 3 s depois da última voz e segue a folga de 1,2 s; o resto do minuto de ruído não vai.
+  assert.ok(ruidoEnviado <= 3 + 1.2 + 0.3, `ruído enviado: ${ruidoEnviado.toFixed(2)} s`);
+  assert.ok(ruidoEnviado >= 3, "o fim de frase baixo continua indo");
+  assert.equal(commits(), 1, "o trecho é confirmado mesmo com o ruído");
+  // Voz nova no meio do ruído abre o portão de novo.
+  await audio.blocos(VOZ, 512);
+  await audio.blocos(RUIDO, 10_000);
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 6 * 4096);
+  assert.equal(commits(), 2);
+});
+
+test("o commit de segurança espera a fila escoar em vez de desistir", async (t) => {
+  const m = montar(t, { taxa: 16000 });
+  const audio = relogioDeAudio(t, m);
+  m.controle.ativar(true);
+  await andar();
+  m.sockets[0].iniciar();
+  const ws = m.sockets[0];
+  const commits = () => ws.enviados.filter((d) => (JSON.parse(d) as { commit: boolean }).commit).length;
+  ws.bufferedAmount = 100_000; // acima de LIMITE_RAJADA: a rede está lenta, a fila não escoa
+  await audio.blocos(VOZ, 512);
+  await audio.blocos(SILENCIO, 3072); // o portão fecha e o commit de segurança vence com a fila cheia
+  assert.equal(commits(), 0);
+  ws.bufferedAmount = 0; // a rede escoou
+  await audio.blocos(SILENCIO, 2048);
+  assert.equal(commits(), 1, "o commit sai depois que a fila esvazia");
+  const ultimo = JSON.parse(ws.enviados.findLast((d) => (JSON.parse(d) as { commit: boolean }).commit)!) as { commit: boolean };
+  assert.equal(ultimo.commit, true);
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 2 * 4096);
+});
+
+test("pausa no meio de uma rajada não descarta a fala nem a folga de fechamento", async (t) => {
+  let resolver!: (token: string) => void;
+  const m = montar(t, { taxa: 16000, obterToken: () => new Promise((resolve) => { resolver = resolve; }) });
+  m.controle.ativar(true);
+  await andar();
+  m.processar(VOZ, 30); // ~7,7 s de fala esperando a conexão
+  resolver("token");
+  await andar();
+  const ws = m.sockets[0];
+  const enviar = ws.send.bind(ws);
+  ws.send = (dados: string) => { ws.bufferedAmount += dados.length; enviar(dados); };
+  ws.iniciar();
+  assert.ok(ws.enviados.length < 30 * 4096 / 3200, "parte fica para depois");
+  m.controle.ativar(false); // o Totti começa a falar no meio da rajada
+  for (let i = 0; i < 30; i++) {
+    ws.bufferedAmount = 0;
+    t.mock.timers.tick(200);
+  }
+  const enviadas = ws.enviados.flatMap(amostrasDe);
+  assert.equal(enviadas.filter((a) => a === AMOSTRA_VOZ).length, 30 * 4096, "nenhuma fala perdida");
+  const depois = enviadas.slice(enviadas.lastIndexOf(AMOSTRA_VOZ) + 1);
+  assert.ok(depois.length >= 1.2 * 16000 && depois.every((a) => a === 0), "a folga de fechamento saiu");
+  assert.equal(ws.fechamentos, 0);
+});
+
 test("se o VAD não confirma o trecho, o portão confirma à mão depois de fechar", async (t) => {
   const m = montar(t, { taxa: 16000 });
   const audio = relogioDeAudio(t, m);
@@ -713,7 +782,7 @@ test("socket fechando não descarta o que estava para sair", async (t) => {
   assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 3 * 4096);
 });
 
-test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais da metade", async (t) => {
+async function linhaDoTempo(t: TestContext, fundo: number) {
   const m = montar(t, { taxa: 16000 });
   const audio = relogioDeAudio(t, m);
   m.controle.ativar(true);
@@ -722,7 +791,7 @@ test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais d
   let falado = 0;
   let ouvindo = 0;
   const falar = async (ms: number) => { falado += Math.round(ms / 256) * 4096; ouvindo += ms; await audio.blocos(VOZ, ms); };
-  const calar = async (ms: number) => { ouvindo += ms; await audio.blocos(SILENCIO, ms); };
+  const calar = async (ms: number) => { ouvindo += ms; await audio.blocos(fundo, ms); };
   // Ciclo de 1 min: Totti pergunta, candidato responde com uma pausa curta, digita, diz "sim", comenta.
   for (let ciclo = 0; ciclo < 30; ciclo++) {
     m.controle.ativar(false);
@@ -745,6 +814,16 @@ test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais d
   const uso = m.controle.uso();
   const antigo = ouvindo / 1000 + 30 * 12; // caminho antigo: a sessão inteira, silêncio no lugar do Totti
   assert.ok(Math.abs(uso.sessaoS - antigo) < 5, `sessão: ${uso.sessaoS} s`);
-  assert.ok(uso.audioEnviadoS <= 0.5 * antigo, `enviado ${uso.audioEnviadoS.toFixed(0)} s de ${antigo.toFixed(0)} s`);
-  console.info(`[linha do tempo] enviado ${uso.audioEnviadoS.toFixed(0)} s de ${uso.sessaoS.toFixed(0)} s de sessão`);
+  console.info(`[linha do tempo, fundo ${fundo}] enviado ${uso.audioEnviadoS.toFixed(0)} s de ${uso.sessaoS.toFixed(0)} s de sessão`);
+  return { enviadoS: uso.audioEnviadoS, antigoS: antigo };
+}
+
+test("linha do tempo de 30 min (candidato fala 30%): o áudio enviado cai mais da metade", async (t) => {
+  const { enviadoS, antigoS } = await linhaDoTempo(t, SILENCIO);
+  assert.ok(enviadoS <= 0.5 * antigoS, `enviado ${enviadoS.toFixed(0)} s de ${antigoS.toFixed(0)} s`);
+});
+
+test("linha do tempo de 30 min com ruído de fundo constante (~-44 dBFS): a economia continua", async (t) => {
+  const { enviadoS, antigoS } = await linhaDoTempo(t, 0.006);
+  assert.ok(enviadoS <= 0.6 * antigoS, `enviado ${enviadoS.toFixed(0)} s de ${antigoS.toFixed(0)} s`);
 });

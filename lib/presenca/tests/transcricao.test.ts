@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  criarFilaDeAmostras, criarPortaoDeVoz,
+  criarDetectorDeFala, criarFilaDeAmostras, criarPortaoDeVoz,
   atualizarTranscricao, esperaParaReconectar, estadoInicialTranscricao, mensagemDeAudio,
   misturarMono, pcm16LE, reamostrar, urlDoScribe,
 } from "../transcricao";
@@ -153,4 +153,17 @@ test("fila de amostras tira na ordem, devolve ao começo e descarta o mais antig
   fila.limpar();
   assert.equal(fila.length, 0);
   assert.equal(fila.tirar(3).length, 0);
+});
+
+test("detector de fala: energia baixa sustenta o portão aberto só por um tempo depois da voz", () => {
+  const detector = criarDetectorDeFala(1000);
+  assert.deepEqual(detector.medir(0.006, 256, false), { voz: false, fala: false }, "energia baixa não abre");
+  assert.deepEqual(detector.medir(0.3, 256, false), { voz: true, fala: true });
+  for (let i = 0; i < 3; i++) assert.equal(detector.medir(0.006, 256, true).fala, true, `bloco ${i}`);
+  assert.equal(detector.medir(0.006, 256, true).fala, false, "passou de 1 s sem voz");
+  assert.equal(detector.medir(0.001, 256, true).fala, false, "silêncio nunca sustenta");
+  assert.equal(detector.medir(0.3, 256, true).fala, true);
+  assert.equal(detector.medir(0.006, 256, true).fala, true, "voz nova reinicia a contagem");
+  detector.reiniciar();
+  assert.equal(detector.medir(0.006, 256, true).fala, false, "reiniciado, sem voz recente");
 });
