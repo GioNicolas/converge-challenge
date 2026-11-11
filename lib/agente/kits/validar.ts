@@ -11,7 +11,8 @@ export const MIN_ARMADILHAS = 3;
 export const MIN_PERGUNTAS = 3;
 export const MIN_TIPOS_PERGUNTA = 4;
 export const MAX_ENUNCIADO = 500;
-export const MAX_FALA_DO_DESAFIO = 600;
+/** Alvo do prompt: 2 frases e ~220 caracteres (12 s de voz); 300 é a folga. Os problemas FIXOS do catálogo têm falas maiores e não passam por este validador. */
+export const MAX_FALA_DO_DESAFIO = 300;
 
 /** Id seguro para URL, log e chave de mapa: minúsculas, dígitos e "_", começando por letra. */
 export const RE_SLUG = /^[a-z][a-z0-9_]{1,63}$/;
