@@ -4,6 +4,7 @@
 // Só servidor.
 import { neutralizar } from "../../seguranca/injecao";
 import { normalizar } from "../guardas";
+import { avisoDeFalaCortada, foiInterrompida, MARCA_INTERROMPIDA } from "../../totti/interrupcao";
 import { conversaSemRepeticao, tempoDaEntrevista, type EstadoSessao, type PerguntaFeita } from "../sessao/estado";
 import type { FalaRecente, Fase } from "../sessao/tipos";
 
@@ -26,7 +27,27 @@ export function historicoDaConversa(servidor: FalaRecente[], doQuadro: FalaRecen
   // slice(-0) devolveria tudo: sem falas pedidas, nenhuma.
   if (max <= 0) return [];
   if (!base.length) return quadro.slice(-max);
-  return mesclarEmOrdem(base, quadro).slice(-max);
+  return mesclarEmOrdem(comFalasCortadas(base, quadro), quadro).slice(-max);
+}
+
+/**
+ * O servidor guarda a fala do Totti inteira; só o quadro sabe que o candidato a cortou (#97). A versão cortada do
+ * quadro toma o lugar da inteira (a mais recente que começa igual), para o modelo não achar que ele ouviu o resto.
+ */
+function comFalasCortadas(base: FalaRecente[], quadro: FalaRecente[]): FalaRecente[] {
+  const cortadas = quadro.filter((f) => f.quem === "agente" && foiInterrompida(f.texto));
+  if (!cortadas.length) return base;
+  const saida = [...base];
+  for (const cortada of cortadas) {
+    const ouvido = normalizar(cortada.texto.replace(MARCA_INTERROMPIDA, ""));
+    if (!ouvido) continue;
+    for (let i = saida.length - 1; i >= 0; i--) {
+      const f = saida[i];
+      if (f.quem !== "agente" || foiInterrompida(f.texto)) continue;
+      if (normalizar(f.texto).startsWith(ouvido)) { saida[i] = cortada; break; }
+    }
+  }
+  return saida;
 }
 
 const chaveDaFala = (f: FalaRecente) => `${f.quem}:${normalizar(f.texto)}`;
@@ -70,7 +91,8 @@ function mesclarEmOrdem(base: FalaRecente[], extra: FalaRecente[]): FalaRecente[
 export function conversaEmTexto(falas: FalaRecente[], nomeAgente = "Você (Totti)"): string {
   if (!falas.length) return "(nada ainda)";
   // Sem etiqueta falsa: a fala do candidato não consegue "fechar" o bloco de dados (lib/seguranca/injecao.ts).
-  return falas.map((f) => `${f.quem === "agente" ? nomeAgente : "Candidato"}: ${neutralizar(f.texto)}`).join("\n");
+  return falas.map((f) => `${f.quem === "agente" ? nomeAgente : "Candidato"}: ${neutralizar(f.texto)}`).join("\n")
+    + avisoDeFalaCortada(falas.filter((f) => f.quem === "agente").map((f) => f.texto));
 }
 
 const ETAPA: Partial<Record<Fase, string>> = {

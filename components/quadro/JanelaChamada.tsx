@@ -52,6 +52,8 @@ type Props = {
   agentePensando?: boolean;
   onTerminarResposta: () => void;
   onEncerrar: () => void;
+  /** Com o agente falando e a fala interrompível: mostra o botão que o corta (#97). */
+  onInterromper?: () => void;
 };
 
 export default function JanelaChamada({
@@ -65,6 +67,7 @@ export default function JanelaChamada({
   agentePensando = false,
   onTerminarResposta,
   onEncerrar,
+  onInterromper,
 }: Props) {
   // Minimizada por padrão: a pílula basta. O candidato clica nela para abrir a janela, com a câmera.
   const [minimizada, setMinimizada] = useState(true);
@@ -186,7 +189,17 @@ export default function JanelaChamada({
                 <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
                 <span className="font-mono font-medium tabular-nums">{formatarTempo(segundos)}</span>
               </button>
-              {respondendo && (
+              {agenteFalando && onInterromper && (
+                <button
+                  type="button"
+                  onClick={onInterromper}
+                  title="Interromper o Totti (Esc)"
+                  className="rounded-full bg-texto-claro/12 px-3 py-1.5 text-xs font-medium transition-colors duration-150 ease-suave hover:bg-texto-claro/20"
+                >
+                  Interromper
+                </button>
+              )}
+              {respondendo && !(agenteFalando && onInterromper) && (
                 <button
                   type="button"
                   onClick={onTerminarResposta}
@@ -250,7 +263,17 @@ export default function JanelaChamada({
                 </div>
               </div>
 
-              {respondendo && (
+              {agenteFalando && onInterromper ? (
+                <div className="px-2 pt-2">
+                  <button
+                    onClick={onInterromper}
+                    title="Interromper o Totti (Esc)"
+                    className="w-full rounded-full bg-texto-claro/12 py-2 text-sm font-medium transition-colors duration-150 ease-suave hover:bg-texto-claro/20"
+                  >
+                    Interromper o Totti
+                  </button>
+                </div>
+              ) : respondendo && (
                 <div className="px-2 pt-2">
                   <button
                     onClick={onTerminarResposta}

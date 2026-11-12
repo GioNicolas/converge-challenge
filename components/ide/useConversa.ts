@@ -16,6 +16,7 @@ import { FilaFalas } from "@/lib/audio/filaFalas";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import type { Blip, ChatMessage, ChatResponse, EditorCommand } from "@/lib/contracts";
 import { postChat } from "./api";
+import { falaInterrompida } from "@/lib/totti/interrupcao";
 import type { EventInput } from "./useSession";
 
 /** Fala na conversa: a mensagem do contrato mais o horário em que aconteceu (Date.now()). */
@@ -112,6 +113,12 @@ export function useConversa(deps: ConversaDeps) {
   /** A próxima fala que vai ao entrevistador veio depois de um "uhum": a resposta não abre com outro. */
   const reconheceuRef = useRef(false);
   const reconhecimentosRef = useRef(0);
+  /** A fala do Totti que está tocando agora, e a lista em que ela está: é a que uma interrupção corta. */
+  const tocandoRef = useRef<{ fala: Fala; lista: Fala[] } | null>(null);
+  /** Falas que o candidato cortou (#97): no histórico ficam só até onde ele ouviu. */
+  const cortadasRef = useRef(new WeakSet<Fala>());
+  /** A pergunta do assunto aberto foi cortada: a próxima resposta dele não fecha o assunto. */
+  const perguntaCortadaRef = useRef(false);
 
   const listaAtual = () => fioRef.current?.falas ?? livresRef.current;
   const aparar = () => {
@@ -155,12 +162,16 @@ export function useConversa(deps: ConversaDeps) {
     const versao = ++versaoRef.current;
     pendenteRef.current = { versao, lista, fala };
     d.applyCommands([{ type: "clear_highlights" }, ...res.commands.filter((c) => c.type !== "clear_highlights")]);
+    tocandoRef.current = { fala, lista };
     const tocou = await d.falar(res.reply);
+    if (tocandoRef.current?.fala === fala) tocandoRef.current = null;
     if (pendenteRef.current?.versao === versao) pendenteRef.current = null;
     if (versaoRef.current !== versao) return;
     ultimaFalaDoAgenteEmRef.current = Date.now();
-    void d.sendEvent({ type: "speech", role: "agent", text: res.reply, blipId: blip?.id });
-    if (!tocou) d.onSemVoz?.(res.reply);
+    const cortada = cortadasRef.current.has(fala);
+    // Cortada: a linha do tempo recebe o que ele ouviu (nada, se não ouviu palavra nenhuma), e não vai para a legenda.
+    if (!cortada || lista.includes(fala)) void d.sendEvent({ type: "speech", role: "agent", text: fala.text, blipId: blip?.id });
+    if (!tocou && !cortada) d.onSemVoz?.(res.reply);
     // Pergunta feita dentro de um assunto: se ele não responder, o assunto fecha sozinho (ver FIO_SEM_RESPOSTA_MS).
     if (res.fechamento || (!res.end && blip && fioRef.current?.blip.id === blip.id)) semRespostaDesdeRef.current = Date.now();
     if (res.fechamento || !res.end) return;
@@ -208,8 +219,11 @@ export function useConversa(deps: ConversaDeps) {
       return;
     }
     if (res.listening || !res.reply.trim()) return;
+    // A pergunta foi cortada no meio: o que ele disse agora não é a resposta a ela, e o assunto segue aberto.
+    const perguntaCortada = perguntaCortadaRef.current && !!blip && fioRef.current?.blip.id === blip.id;
+    perguntaCortadaRef.current = false;
     // A resposta toca sem segurar a fila: se ele voltar a falar antes de ela começar, a fila a substitui.
-    void responder(res, lista, blip);
+    void responder(perguntaCortada && res.end && !res.fechamento ? { ...res, end: false } : res, lista, blip);
   }, [responder]);
 
   /** Fala que não é resposta a nada (apresentação, despedida, pedido para repetir): entra na conversa e é dita. */
@@ -221,9 +235,12 @@ export function useConversa(deps: ConversaDeps) {
     void d.sendEvent({ type: "speech", role: "agent", text: texto, blipId: fioRef.current?.blip.id });
     const versao = ++versaoRef.current;
     pendenteRef.current = null;
+    const lista = listaAtual();
+    tocandoRef.current = { fala, lista };
     const tocou = await d.falar(texto);
+    if (tocandoRef.current?.fala === fala) tocandoRef.current = null;
     if (versaoRef.current === versao) ultimaFalaDoAgenteEmRef.current = Date.now();
-    if (!tocou && versaoRef.current === versao) d.onSemVoz?.(texto);
+    if (!tocou && versaoRef.current === versao && !cortadasRef.current.has(fala)) d.onSemVoz?.(texto);
     return tocou;
   }, []);
 
@@ -386,6 +403,28 @@ export function useConversa(deps: ConversaDeps) {
     [],
   );
 
+  /**
+   * O candidato cortou o Totti (#97): a voz para, e a fala que tocava fica no histórico só até onde ele ouviu
+   * (`ate`: caracteres já falados), marcada como cortada. Uma pergunta do assunto aberto cortada continua pendente.
+   */
+  const interromper = useCallback((ate: number) => {
+    const tocando = tocandoRef.current;
+    tocandoRef.current = null;
+    if (tocando) {
+      const { fala, lista } = tocando;
+      const ouvido = falaInterrompida(fala.text, ate);
+      if (ouvido !== fala.text) {
+        cortadasRef.current.add(fala);
+        if (fioRef.current?.falas === lista && fala.text.includes("?")) perguntaCortadaRef.current = true;
+        if (ouvido === null) {
+          const i = lista.indexOf(fala);
+          if (i >= 0) lista.splice(i, 1);
+        } else fala.text = ouvido;
+      }
+    }
+    depsRef.current.parar();
+  }, []);
+
   /** Encerrou a entrevista: nada mais vai ao entrevistador. */
   const parar = useCallback(() => {
     filaRef.current?.limpar();
@@ -395,5 +434,5 @@ export function useConversa(deps: ConversaDeps) {
     semRespostaDesdeRef.current = null;
   }, []);
 
-  return { fio, pensando, ouvir, abrirFio, pedirLicenca, fecharFio, dizer, ocupada, soEsperandoResposta, parar, ultimaFalaDoAgenteEmRef, fioRef };
+  return { fio, pensando, ouvir, abrirFio, pedirLicenca, fecharFio, dizer, ocupada, soEsperandoResposta, parar, interromper, ultimaFalaDoAgenteEmRef, fioRef };
 }

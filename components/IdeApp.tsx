@@ -18,6 +18,7 @@ import ProblemPanel from "./ProblemPanel";
 import RunResults, { type RunState } from "./RunResults";
 import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
+import { useInterrupcao } from "@/lib/voz/useInterrupcao";
 import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
 import { TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
 import { criarEncerrarComDespedida } from "./ide/encerrarComDespedida";
@@ -228,8 +229,21 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   }, []);
   useEffect(() => () => clearTimeout(bufferTimerRef.current), []);
 
-  // Sem barge-in: ninguém fala por cima de ninguém. O Totti termina a frase dele (a escuta pausa enquanto ele
-  // fala) e só toma a vez numa pausa do candidato (lib/conversa/turnos.ts).
+  // O Totti só toma a vez numa pausa do candidato (lib/conversa/turnos.ts), mas o candidato pode cortá-lo (#97):
+  // falando por cima (a escuta pausada mede o microfone), pelo botão da chamada ou com Esc. A despedida não se corta.
+  // A fala cortada fica na conversa só até onde ele ouviu (useConversa.interromper).
+  const vozFalaRef = useRef(voz.fala);
+  vozFalaRef.current = voz.fala;
+  const interrupcao = useInterrupcao({
+    falando: voz.estado === "falando",
+    permitida: !session.ended && !encerrando,
+    aoInterromper: (como) => {
+      // A vez é dele agora: o Totti não volta a falar logo depois de ser cortado.
+      ultimaFalaEmRef.current = Date.now();
+      conversa.interromper(vozFalaRef.current?.ate ?? 0);
+      void session.sendEvent({ type: "speech_interrupted", by: como, heardChars: vozFalaRef.current?.ate ?? 0 });
+    },
+  });
   const escuta = useTranscricao({
     stream: midia.stream,
     // A escuta só para enquanto a voz do agente toca (preparando, ela ainda ouve: o candidato pode continuar falando).
@@ -237,6 +251,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
     sessaoId: session.sessionId,
     aoParcial: receberParcial,
     aoFinal: aoFalar,
+    interrupcao: interrupcao.escuta,
   });
 
   // Estado do turno lido pelos intervalos abaixo (sem recriá-los a cada render).
@@ -573,6 +588,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
           midia={midia}
           agenteFalando={voz.estado === "falando"}
           agentePensando={conversa.pensando || voz.estado === "preparando"}
+          onInterromper={interrupcao.podeInterromper ? () => interrupcao.interromper("manual") : undefined}
         />
 
         <Legenda fala={voz.fala ?? legendaSemVoz} />

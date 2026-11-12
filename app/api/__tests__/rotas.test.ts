@@ -327,6 +327,21 @@ describe("POST /api/sessoes/[id]/perguntar", () => {
     assert.equal(dados.custo_usd, 0.0009);
     assert.ok(dados.blocos.grafo > 0);
   });
+  it("pergunta cortada pelo candidato (#97): a fala seguinte não conta como resposta a ela", async () => {
+    const { sessao_id } = await novaSessao();
+    const sessao = (await repo.obter(sessao_id))!;
+    const pergunta = { numero: 1, status: "duvida" as const, pergunta: "Como esse banco aguenta o pico de acessos?", nota: null,
+      elementos: [], degrau: null, fase: "APROFUNDAMENTO" as const, feitaEm: relogio };
+    await repo.salvarEstado(sessao_id, { ...sessao.estado, fase: "APROFUNDAMENTO", perguntaAtiva: pergunta, perguntas: [pergunta] });
+    const respondeu = () => criarClienteFalso([{ responder: true, texto: "O pico é de manhã cedo.", requisito: null, desfecho: "respondeu" }]);
+    definirContextoParaTestes({ repositorio: repo, llm: respondeu(), agora: () => relogio });
+    const cortada = await perguntarPost(post("/x", { sessao_id, fase: "APROFUNDAMENTO", texto: "Pera, qual pico?", pergunta_cortada: true }), params(sessao_id));
+    assert.equal(cortada.status, 200);
+    assert.equal((await repo.obter(sessao_id))!.estado.perguntas[0].desfecho, undefined, "a pergunta segue sem resposta");
+    definirContextoParaTestes({ repositorio: repo, llm: respondeu(), agora: () => relogio });
+    await perguntarPost(post("/x", { sessao_id, fase: "APROFUNDAMENTO", texto: "Com réplicas de leitura." }), params(sessao_id));
+    assert.equal((await repo.obter(sessao_id))!.estado.perguntas[0].desfecho, "respondeu");
+  });
   it("repassa o contexto do quadro para a devolutiva rápida", async () => {
     const { sessao_id } = await novaSessao();
     const llm = criarClienteFalso([{ responder: true, texto: "Você ligou a API ao banco.", requisito: null }]);

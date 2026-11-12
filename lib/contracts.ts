@@ -184,6 +184,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("run"), result: RunResult }),
   z.object({ ...base, type: z.literal("paste"), chars: z.number().int(), lines: z.number().int(), startLine: z.number().int() }),
   z.object({ ...base, type: z.literal("speech"), role: z.enum(["candidate", "agent"]), text: z.string(), blipId: z.string().optional() }),
+  /** O candidato cortou a fala do Totti (#97): falando por cima ou pelo botão/Esc. `heardChars`: até onde ele ouviu. */
+  z.object({ ...base, type: z.literal("speech_interrupted"), by: z.enum(["voz", "manual"]), heardChars: z.number().int().nonnegative() }),
   z.object({ ...base, type: z.literal("hint"), level: z.number().int(), text: z.string() }),
   z.object({ ...base, type: z.literal("blip_opened"), blipId: z.string() }),
   z.object({ ...base, type: z.literal("blip_closed"), blipId: z.string(), reason: z.enum(["agent", "button"]) }),

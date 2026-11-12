@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import JanelaChamada from "@/components/quadro/JanelaChamada";
+import { useInterrupcao } from "@/lib/voz/useInterrupcao";
 import Legenda from "@/components/quadro/Legenda";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import CursorAgente, { type ControleCursor } from "@/components/CursorAgente";
@@ -271,8 +272,13 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     if (texto && timerVoz.current) agendarEnvioVoz();
   }, [registrarFalaParcial, agendarEnvioVoz]);
 
-  // Sem barge-in: ninguém fala por cima de ninguém. O Totti termina a frase dele e só toma a vez numa pausa do
-  // candidato (lib/conversa/turnos.ts); o botão "Interromper voz" continua para quem quiser calar de propósito.
+  // O Totti só toma a vez numa pausa do candidato (lib/conversa/turnos.ts), mas o candidato pode cortá-lo (#97):
+  // falando por cima (a escuta pausada mede o microfone), pelo botão da chamada ou com Esc. A despedida não se corta.
+  const interrupcao = useInterrupcao({
+    falando: entrevista.agenteFalando,
+    permitida: !entrevista.despedindo && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA",
+    aoInterromper: entrevista.interromper,
+  });
   const escuta = useTranscricao({
     stream: midia.stream,
     ativo: midia.microfoneLigado && !entrevista.despedindo && estado.fase !== "AGUARDANDO" && estado.fase !== "ENCERRADA" && !entrevista.agenteFalando,
@@ -281,6 +287,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
     servidor: usarServidor(),
     aoParcial: receberParcial,
     aoFinal: receberVoz,
+    interrupcao: interrupcao.escuta,
   });
 
   const pronto = quadro !== null && sessao !== null;
@@ -312,6 +319,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
           agentePensando={entrevista.aguardandoResposta}
           onTerminarResposta={entrevista.terminarResposta}
           onEncerrar={() => setConfirmandoFim(true)}
+          onInterromper={interrupcao.podeInterromper ? () => interrupcao.interromper("manual") : undefined}
         />
         </div>
       )}
@@ -376,7 +384,7 @@ export default function SalaEntrevista({ configId, convite }: { configId?: strin
             {entrevista.vozHabilitada ? "Silenciar voz" : "Ativar voz"}
           </button>
           {entrevista.agenteFalando && (
-            <button type="button" onClick={entrevista.silenciar} className="rounded-full border border-borda bg-vidro px-3 py-2 text-xs shadow-padrao">
+            <button type="button" onClick={() => interrupcao.interromper("manual")} title="Interromper o Totti (Esc)" className="rounded-full border border-borda bg-vidro px-3 py-2 text-xs shadow-padrao">
               Interromper voz
             </button>
           )}

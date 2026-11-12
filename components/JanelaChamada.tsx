@@ -43,9 +43,11 @@ type Props = {
   agenteFalando: boolean;
   /** Uma resposta está sendo preparada: o orbe mostra que o agente pensa. */
   agentePensando?: boolean;
+  /** Com o agente falando e a fala interrompível: "Falando…" vira o botão que o corta (#97). */
+  onInterromper?: () => void;
 };
 
-export default function JanelaChamada({ oculta, encerrada, iniciadaEm, midia, agenteFalando, agentePensando = false }: Props) {
+export default function JanelaChamada({ oculta, encerrada, iniciadaEm, midia, agenteFalando, agentePensando = false, onInterromper }: Props) {
   const ativa = iniciadaEm !== null && !encerrada;
   const segundos = useCronometro(iniciadaEm, ativa);
   const estadoAgente: EstadoAgente = agenteFalando ? "falando" : agentePensando ? "pensando" : "ouvindo";
@@ -128,7 +130,16 @@ export default function JanelaChamada({ oculta, encerrada, iniciadaEm, midia, ag
       >
         <OndaDeVoz estado={estadoAgente} volume={estadoAgente === "ouvindo" ? midia.volume : 0} tamanho="md" />
         <span className="font-medium tabular-nums">{formatarTempo(segundos)}</span>
-        {agenteFalando && <span className="text-texto-claro/60">Falando…</span>}
+        {agenteFalando && onInterromper ? (
+          <button
+            type="button"
+            onClick={onInterromper}
+            title="Interromper o Totti (Esc)"
+            className="rounded-full bg-texto-claro/12 px-3 py-1 text-xs font-medium transition-colors duration-150 ease-suave hover:bg-texto-claro/20"
+          >
+            Interromper
+          </button>
+        ) : agenteFalando && <span className="text-texto-claro/60">Falando…</span>}
         <button
           type="button"
           onClick={midia.alternarMicrofone}
