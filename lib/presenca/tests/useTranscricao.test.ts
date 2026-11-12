@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { criarEscutaTranscricao, type EstadoEscuta } from "../useTranscricao";
+import { criarEscutaTranscricao, type EstadoEscuta, type InterrupcaoPelaVoz } from "../useTranscricao";
 import { ErroTokenTranscricao, type CredencialTranscricao } from "../tokenTranscricao";
 import type { TrechoTranscrito } from "../transcricao";
 
@@ -29,6 +29,7 @@ function globalFalso(t: TestContext, nome: string, valor: unknown) {
 function montar(t: TestContext, opcoes: {
   servidor?: boolean; navegador?: boolean; prefixado?: boolean; semAudio?: boolean; taxa?: number;
   obterToken?: (id: string) => Promise<string | CredencialTranscricao>;
+  interrupcao?: InterrupcaoPelaVoz;
 } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const estados: EstadoEscuta[] = [];
@@ -113,6 +114,7 @@ function montar(t: TestContext, opcoes: {
     stream, sessaoId: "sessao", servidor: opcoes.servidor ?? true,
     aoEstado: (estado) => estados.push(estado), aoTrecho: (trecho) => trechos.push(trecho),
     obterToken: opcoes.obterToken ?? (async (id) => { assert.equal(id, "sessao"); return `token-${++tokens}`; }),
+    interrupcao: opcoes.interrupcao,
   });
   t.after(() => controle.parar());
   return {
@@ -896,4 +898,104 @@ test("o vocabulário do servidor vai como keyterms na URL do Scribe", async (t) 
   await andar();
   const url = new URL(m.sockets[0].url);
   assert.deepEqual(url.searchParams.getAll("keyterms"), ["dicionário de pares", "two sum"]);
+});
+
+// Interrupção pela voz nas salas (#97): com o Totti falando, a escuta pausada mede o microfone e não manda nada.
+function comInterrupcao(t: TestContext, ativa = () => true) {
+  let disparos = 0;
+  let disparouEm: number | null = null;
+  let relogio = 0;
+  const m = montar(t, { taxa: 16000, interrupcao: { ativa, aoInterromper: () => { disparos++; disparouEm = relogio; } } });
+  const audio = relogioDeAudio(t, m);
+  return {
+    m,
+    get disparos() { return disparos; },
+    get disparouEm() { return disparouEm; },
+    async blocos(valor: number, ms: number) {
+      for (let i = 0; i < Math.round(ms / 256); i++) {
+        await audio.blocos(valor, 256);
+        relogio += 256;
+      }
+    },
+  };
+}
+const FOLGA_E_LINHA_DE_BASE_MS = 1280;
+
+test("com fone, falar por cima do Totti interrompe em menos de 0,5 s e nada vai ao Scribe antes", async (t) => {
+  const c = comInterrupcao(t);
+  c.m.controle.ativar(true);
+  await andar();
+  c.m.sockets[0].iniciar();
+  c.m.controle.ativar(false); // o Totti começou a falar
+  await c.blocos(0.002, FOLGA_E_LINHA_DE_BASE_MS); // folga de silêncio e quase nada de vazamento no fone
+  await c.blocos(0.003, 2048);
+  assert.equal(c.disparos, 0, "o vazamento do fone não interrompe");
+  const comecou = FOLGA_E_LINHA_DE_BASE_MS + 2048;
+  await c.blocos(VOZ, 512);
+  assert.equal(c.disparos, 1);
+  assert.ok(c.disparouEm !== null && c.disparouEm - comecou < 500, `disparou ${c.disparouEm! - comecou} ms depois da fala`);
+  const ws = c.m.sockets[0];
+  assert.equal(ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length, 0, "pausada, a escuta não manda a fala");
+});
+
+test("depois do disparo, a escuta retomada manda primeiro o áudio de antes: a primeira palavra não se perde", async (t) => {
+  const c = comInterrupcao(t);
+  c.m.controle.ativar(true);
+  await andar();
+  c.m.sockets[0].iniciar();
+  c.m.controle.ativar(false);
+  await c.blocos(0.002, FOLGA_E_LINHA_DE_BASE_MS + 1024);
+  await c.blocos(VOZ, 512); // o primeiro bloco já dispara; o segundo é a fala seguindo enquanto a voz para
+  assert.equal(c.disparos, 1);
+  c.m.controle.ativar(true); // a sala parou o Totti e reabriu a escuta
+  const ws = c.m.sockets[0];
+  const antes = ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length;
+  assert.ok(antes >= 4096, `o áudio da fala de antes de reabrir saiu (${antes} amostras de voz)`);
+  await c.blocos(VOZ, 512);
+  await c.blocos(SILENCIO, 1536);
+  const total = ws.enviados.flatMap(amostrasDe).filter((a) => a === AMOSTRA_VOZ).length;
+  // Os dois blocos de voz de antes de reabrir (o do disparo e o seguinte) e os dois de depois.
+  assert.equal(total, 4 * 4096, "e a fala segue inteira depois");
+  ws.mensagem({ message_type: "committed_transcript", text: "Pera, deixa eu explicar uma coisa antes." });
+  assert.equal(c.m.trechos.at(-1)?.texto, "Pera, deixa eu explicar uma coisa antes.", "a voz de antes conta: o trecho não parece inventado");
+});
+
+test("com caixa de som, o Totti não se interrompe sozinho em 20 falas seguidas", async (t) => {
+  const c = comInterrupcao(t);
+  c.m.controle.ativar(true);
+  await andar();
+  c.m.sockets[0].iniciar();
+  for (let fala = 0; fala < 20; fala++) {
+    c.m.controle.ativar(false);
+    await c.blocos(0.001, 768); // a folga de silêncio da fala
+    // A voz dele voltando pelo microfone, variando em volta do nível da primeira sílaba.
+    for (let i = 0; i < 12; i++) await c.blocos(0.04 + 0.05 * Math.abs(Math.sin(i / 2 + fala)), 256);
+    c.m.controle.ativar(true);
+    await c.blocos(SILENCIO, 1536); // a pausa entre as falas
+  }
+  assert.equal(c.disparos, 0);
+  c.m.controle.ativar(false);
+  await c.blocos(0.001, 768);
+  await c.blocos(0.06, 512);
+  await c.blocos(0.5, 512); // falar bem mais alto que ele interrompe
+  assert.equal(c.disparos, 1);
+});
+
+test("sem poder interromper (despedida) ou com o microfone mudo, a vigília não dispara", async (t) => {
+  let podeInterromper = false;
+  const c = comInterrupcao(t, () => podeInterromper);
+  c.m.controle.ativar(true);
+  await andar();
+  c.m.sockets[0].iniciar();
+  c.m.controle.ativar(false);
+  await c.blocos(0.002, FOLGA_E_LINHA_DE_BASE_MS);
+  await c.blocos(VOZ, 1024);
+  assert.equal(c.disparos, 0, "despedida: não interrompe");
+  c.m.controle.ativar(true);
+  podeInterromper = true;
+  c.m.trilha.enabled = false;
+  c.m.controle.ativar(false);
+  await c.blocos(0.002, FOLGA_E_LINHA_DE_BASE_MS);
+  await c.blocos(VOZ, 1024);
+  assert.equal(c.disparos, 0, "mudo: não interrompe");
 });

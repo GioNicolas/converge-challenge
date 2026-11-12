@@ -8,8 +8,21 @@ import {
   AMOSTRAS_MINIMAS_TRECHO,
   type EstadoReamostragem, type TrechoTranscrito,
 } from "./transcricao";
+import { AMOSTRAS_ANTES_DO_DISPARO, criarRegraDeInterrupcao, type OpcoesRegra } from "../voz/detectorDeInterrupcao";
 
 export type { TrechoTranscrito } from "./transcricao";
+
+/**
+ * Interrupção pela voz nas salas (#97): enquanto a escuta está pausada porque o Totti fala, ela mede o microfone
+ * (sem mandar nada ao Scribe) com a mesma regra da pré-entrevista. Ao disparar, chama `aoInterromper`; quando a sala
+ * reativa a escuta, os ~600 ms anteriores ao disparo vão primeiro, e a primeira palavra do candidato não se perde.
+ */
+export type InterrupcaoPelaVoz = {
+  /** Pode interromper agora (o Totti está falando e a fala não é a despedida). */
+  ativa: () => boolean;
+  aoInterromper: () => void;
+  regra?: OpcoesRegra;
+};
 
 /** Tempo de pausa (sem poder ouvir) com o socket aberto antes de fechá-lo. */
 const PAUSA_MAXIMA_MS = 30_000;
@@ -70,6 +83,7 @@ export function criarEscutaTranscricao(opcoes: {
   aoTrecho?: (trecho: TrechoTranscrito) => void;
   /** Token do Scribe; o servidor pode mandar junto o vocabulário da sessão (keyterms). */
   obterToken?: (sessaoId: string) => Promise<string | CredencialTranscricao>;
+  interrupcao?: InterrupcaoPelaVoz;
 }): { ativar(ativo: boolean): void; parar(): void; uso(): UsoTranscricao } {
   const trilha = opcoes.stream.getAudioTracks()[0];
   const janela = typeof window === "undefined" ? undefined : window as JanelaDeVoz;
@@ -115,9 +129,60 @@ export function criarEscutaTranscricao(opcoes: {
   let falhasNavegador = 0;
   let navegadorBloqueado = false;
   let aceitaTrilha = true;
+  /** Vigília da interrupção (escuta pausada pelo Totti falando): regra, últimas amostras e se já disparou. */
+  const regraDeInterrupcao = criarRegraDeInterrupcao(opcoes.interrupcao?.regra);
+  let reamostragemVigia: EstadoReamostragem = { soma: 0, peso: 0 };
+  let antesDoDisparo = new Float32Array(0);
+  let disparou = false;
+  /** A sala dizia, no bloco anterior, que dava para interromper: cada fala nova do Totti recalibra a regra. */
+  let vigiaAtiva = false;
 
-  const podeOuvir = () => ativo && (typeof document === "undefined" || !document.hidden)
+  const microfoneAberto = () => (typeof document === "undefined" || !document.hidden)
     && !!trilha && trilha.readyState === "live" && trilha.enabled && !trilha.muted;
+  const podeOuvir = () => ativo && microfoneAberto();
+  /** Começa uma vigília nova (o Totti começou a falar): mede o vazamento de novo e esquece o áudio guardado. */
+  function reiniciarVigia() {
+    regraDeInterrupcao.reiniciar();
+    reamostragemVigia = { soma: 0, peso: 0 };
+    antesDoDisparo = new Float32Array(0);
+    disparou = false;
+    vigiaAtiva = false;
+  }
+  /** Escuta pausada só porque o Totti fala (microfone aberto): mede e guarda, sem mandar nada ao Scribe. */
+  function vigiar(amostras: Float32Array, taxa: number) {
+    if (ativo || !opcoes.interrupcao || !microfoneAberto()) return;
+    const convertido = reamostrar(amostras, taxa, 16000, reamostragemVigia);
+    reamostragemVigia = convertido.estado;
+    const junto = new Float32Array(antesDoDisparo.length + convertido.amostras.length);
+    junto.set(antesDoDisparo);
+    junto.set(convertido.amostras, antesDoDisparo.length);
+    // Depois do disparo, guarda tudo até a sala reativar a escuta (é a fala do candidato).
+    antesDoDisparo = disparou ? junto.slice(Math.max(0, junto.length - MAXIMO_PENDENTE)) : junto.slice(Math.max(0, junto.length - AMOSTRAS_ANTES_DO_DISPARO));
+    if (disparou) return;
+    const ativa = opcoes.interrupcao.ativa();
+    // Uma fala nova do Totti (ou o microfone religado no meio dela): a linha de base é medida de novo.
+    if (ativa && !vigiaAtiva) regraDeInterrupcao.reiniciar();
+    vigiaAtiva = ativa;
+    if (!ativa) return;
+    if (regraDeInterrupcao.medir(energiaRms(amostras), (amostras.length / taxa) * 1000)) {
+      disparou = true;
+      opcoes.interrupcao.aoInterromper();
+    }
+  }
+  /** A escuta voltou depois de uma interrupção: o áudio do disparo entra primeiro, como fala, pelo portão. */
+  function retomarDepoisDoDisparo() {
+    const antes = antesDoDisparo;
+    const retomar = disparou && antes.length > 0;
+    reiniciarVigia();
+    if (!retomar) return;
+    const passou = portao.passar(antes, true);
+    amostrasNoTrecho = passou.amostras.length;
+    // O disparo pediu ~250 ms seguidos acima do vazamento: é voz, e conta para o trecho não parecer inventado.
+    vozNoTrecho += (antes.length / 16000) * 1000;
+    pendentes.guardar(passou.amostras);
+    vozSemCommit = true;
+    cancelarCommitDeSeguranca();
+  }
   const agora = () => inicio === null ? 0 : Math.max(0, performance.now() - inicio);
   function publicar(novo: EstadoEscuta) {
     if (encerrado) return;
@@ -260,16 +325,19 @@ export function criarEscutaTranscricao(opcoes: {
       ganho.gain.value = 0;
       processador.onaudioprocess = (evento) => {
         evento.outputBuffer.getChannelData(0).fill(0);
-        // Enquanto conecta (token e handshake) o áudio também passa pelo portão e espera em `pendentes`.
-        if (encerrado || !contexto || (!socket && !conectando)) return;
-        // Sem poder ouvir (Totti falando, mudo, aba escondida) o microfone não vai ao Scribe: o tempo enviado é
-        // cobrado. Só o bloco curto que mantém a conexão (o Scribe fecha após 15 s sem mensagens) continua.
-        if (!podeOuvir()) {
-          fecharTrechoAberto();
-          return;
-        }
+        if (encerrado || !contexto) return;
         const canais = Array.from({ length: evento.inputBuffer.numberOfChannels }, (_, i) => evento.inputBuffer.getChannelData(i));
         const amostras = misturarMono(canais);
+        // Sem poder ouvir (Totti falando, mudo, aba escondida) o microfone não vai ao Scribe: o tempo enviado é
+        // cobrado. Só o bloco curto que mantém a conexão (o Scribe fecha após 15 s sem mensagens) continua. Com o
+        // Totti falando, a vigília da interrupção mede o microfone, mesmo com o socket fechado pela pausa longa.
+        if (!podeOuvir()) {
+          vigiar(amostras, contexto.sampleRate);
+          if (socket || conectando) fecharTrechoAberto();
+          return;
+        }
+        // Enquanto conecta (token e handshake) o áudio também passa pelo portão e espera em `pendentes`.
+        if (!socket && !conectando) return;
         const duracaoMs = (amostras.length / contexto.sampleRate) * 1000;
         // Aberto, o portão segue com fala mais baixa (fim de frase dito baixo) por um tempo limitado depois da
         // última voz, para ruído constante não o manter aberto; abrir pede LIMIAR_VOZ_RMS.
@@ -452,6 +520,7 @@ export function criarEscutaTranscricao(opcoes: {
         try { reconhecimento.abort(); } catch {}
       }
     }
+    if (ouvir && !ouvindoAntes) retomarDepoisDoDisparo();
     ouvindoAntes = ouvir;
     pausadoDesde = ouvir ? null : (pausadoDesde ?? performance.now());
     // Pausa longa: fecha o socket em vez de mantê-lo vivo (retomar pede token novo).
@@ -494,7 +563,13 @@ export function criarEscutaTranscricao(opcoes: {
     // O stream pertence a useMidiaLocal: suas trilhas nunca são paradas aqui.
   }
   return {
-    ativar(valor) { if (valor) inicio ??= performance.now(); ativo = valor; sincronizarAtividade(); },
+    ativar(valor) {
+      if (valor) inicio ??= performance.now();
+      // O Totti começou a falar (a sala pausou a escuta): a vigília começa do zero, para esta fala.
+      if (!valor && ativo) reiniciarVigia();
+      ativo = valor;
+      sincronizarAtividade();
+    },
     parar,
     uso: () => ({
       audioEnviadoS: amostrasEnviadas / 16000,
@@ -513,8 +588,12 @@ export function useTranscricao(opcoes: {
   aoFinal?: (texto: string) => void;
   contexto?: "coding" | "quadro";
   servidor?: boolean;
+  /** Interrupção pela voz enquanto a escuta está pausada pelo Totti falando (ver InterrupcaoPelaVoz). */
+  interrupcao?: { ativa: boolean; aoInterromper: () => void };
 }): EstadoEscuta {
   const { stream, ativo, sessaoId, aoParcial, aoFinal } = opcoes;
+  const interrupcao = useRef(opcoes.interrupcao);
+  interrupcao.current = opcoes.interrupcao;
   const [estado, setEstado] = useState<EstadoEscuta>({ motor: "nenhum", escutando: false, erro: null });
   const callbacks = useRef({ aoParcial, aoFinal });
   const escuta = useRef<ReturnType<typeof criarEscutaTranscricao> | null>(null);
@@ -530,6 +609,10 @@ export function useTranscricao(opcoes: {
     const controle = criarEscutaTranscricao({
       stream, sessaoId, servidor, aoEstado: setEstado,
       obterToken: (id) => tokenTranscricao(id, contexto),
+      interrupcao: {
+        ativa: () => !!interrupcao.current?.ativa,
+        aoInterromper: () => interrupcao.current?.aoInterromper(),
+      },
       aoTrecho: (trecho) => {
         if (trecho.final) {
           callbacks.current.aoParcial?.("");

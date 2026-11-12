@@ -308,6 +308,8 @@ const EsquemaPerguntar = z.object({
   desenho_parado_ha_s: z.number().min(0).max(86_400).optional(),
   /** A fala junta a anterior, que ele continuou antes de ouvir a resposta: a anterior sai do histórico. */
   substitui: z.boolean().optional(),
+  /** O candidato cortou a pergunta ativa (#97): esta fala não é a resposta a ela, que continua pendente. */
+  pergunta_cortada: z.boolean().optional(),
   /** Falas recentes que o quadro tem e o servidor talvez não (apresentação, desafio). */
   conversa_do_quadro: z
     .array(EsquemaFalaRecente.extend({ texto: z.string().transform((v) => v.slice(0, 4000)) }))
@@ -439,7 +441,8 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto, ...(resposta.perguntou ? { perguntou: true } : {}) }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
   const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
-  if (desfecho && numeroDaPergunta !== null) {
+  // Pergunta cortada no meio: "pera", uma dúvida ou um comentário não respondem a ela.
+  if (desfecho && numeroDaPergunta !== null && !corpo.dados.pergunta_cortada) {
     novo = transicionar(novo, { tipo: "DESFECHO_DA_PERGUNTA", numero: numeroDaPergunta, desfecho, resposta: texto }, agora).estado;
   }
   if (resposta.seguimento && numeroDaPergunta !== null) {

@@ -118,7 +118,7 @@ export async function analisar(pedido: PedidoAnalise, sinal: AbortSignal): Promi
   }
 }
 
-export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[]; substitui?: boolean; desenho_parado_ha_s?: number } = {}, sinal?: AbortSignal): Promise<RespostaPerguntar> {
+export async function perguntar(sessaoId: string, fase: string, texto: string, contexto: { grafo?: string; pergunta_ativa?: string; requisitos?: string[]; gestos_recentes?: string[]; mudancas?: string; imagem_base64?: string; conversa_do_quadro?: unknown[]; substitui?: boolean; desenho_parado_ha_s?: number; pergunta_cortada?: boolean } = {}, sinal?: AbortSignal): Promise<RespostaPerguntar> {
   const rota = rotaDaSessao(sessaoId, "perguntar");
   const dados = await lerJson(rota, jsonPost({ sessao_id: sessaoId, fase, texto, ...contexto }, sinal));
   return validar(rota, dados, EsquemaPergunta);

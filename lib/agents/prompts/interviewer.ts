@@ -10,6 +10,7 @@ import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
 import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/seguranca/injecao";
 import { blocoDaPersona } from "@/lib/totti/persona";
+import { avisoDeFalaCortada } from "@/lib/totti/interrupcao";
 import { candidatoPerguntou as perguntouNaFala } from "@/lib/totti/turno";
 
 export function buildInterviewerSystem(config: InterviewConfig, problem: Problem): string {
@@ -217,6 +218,8 @@ function dicaSemValor(politica: InterviewerTurnInput["hintsPolicy"]): string {
 }
 
 export function buildInterviewerUser(input: InterviewerTurnInput): string {
+  // Fora da etiqueta de dados: é instrução, não fala de ninguém.
+  const aviso = avisoDeFalaCortada(input.messages.filter((m) => m.role === "agent").map((m) => m.text));
   const transcript = input.messages.length
     ? input.messages.map((m) => `${m.role === "agent" ? "Você" : "Candidato"}: ${m.text}`).join("\n")
     : "(a conversa ainda não começou: esta é sua primeira fala)";
@@ -254,5 +257,5 @@ Código atual:
 ${dado("codigo_do_candidato", input.numberedCode)}
 
 Conversa até agora:
-${dado("conversa", transcript)}${pergunta}`;
+${dado("conversa", transcript)}${aviso}${pergunta}`;
 }

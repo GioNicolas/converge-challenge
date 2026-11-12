@@ -50,6 +50,7 @@ import {
 import { criarGatilho, type Gatilho } from "@/lib/sessao/gatilho";
 import { criarConversor, type Instantaneo } from "@/lib/excalidraw/conversor";
 import { descreverMudancas, houveMudancaRelevante } from "@/lib/excalidraw/diff";
+import { falaInterrompida } from "@/lib/totti/interrupcao";
 
 /** Como uma fala do Totti entra na fila única (ver lib/audio/filaDoAgente.ts). */
 /**
@@ -183,6 +184,11 @@ export function useEntrevista(
 
   // O que o agente está falando agora (para o orb e a legenda).
   const [falaAtual, setFalaAtual] = useState<FalaNaTela | null>(null);
+  /** A fala na tela e até onde ela foi falada: é o que uma interrupção corta (#97). */
+  const falaAtualRef = useRef(falaAtual);
+  falaAtualRef.current = falaAtual;
+  /** O candidato cortou a pergunta ativa: o que ele disser em seguida não é a resposta a ela. */
+  const perguntaCortada = useRef(false);
   const [agenteFalando, setAgenteFalando] = useState(false);
   const [vozHabilitada, setVozHabilitada] = useState(true);
   const vozHabilitadaRef = useRef(true);
@@ -369,6 +375,30 @@ export function useEntrevista(
       linhaDoTempo.current?.registrar(...args),
     [],
   );
+  /**
+   * O candidato cortou o Totti (#97): falando por cima, pelo botão da chamada ou com Esc. A voz para, e a fala fica na
+   * conversa que vai ao servidor só até onde ele ouviu, marcada como cortada (lib/totti/interrupcao.ts). Uma pergunta
+   * cortada continua ativa e não conta como respondida pela próxima fala dele.
+   */
+  const interromper = useCallback((como: "voz" | "manual") => {
+    const fala = falaAtualRef.current;
+    if (fala && agenteFalandoRef.current) {
+      const ouvido = falaInterrompida(fala.texto, fala.ate);
+      if (ouvido !== fala.texto.trim()) {
+        const i = conversa.current.findLastIndex((f) => f.quem === "agente" && f.texto === fala.texto);
+        if (i >= 0) {
+          if (ouvido === null) conversa.current.splice(i, 1);
+          else conversa.current[i] = { quem: "agente", texto: ouvido };
+        }
+        revisaoDaConversa.current++;
+        if (estadoAtual.current.perguntaAtiva?.pergunta === fala.texto) perguntaCortada.current = true;
+        registrar("fala", { quem: "agente", texto: ouvido ?? "", interrompida: true, por: como, falaInteira: fala.texto });
+      }
+    }
+    // A vez é dele: o Totti não volta a falar logo depois de ser cortado.
+    ultimaFalaEm.current = Date.now();
+    silenciar();
+  }, [registrar, silenciar]);
   /**
    * Manda já o que está na fila (sem esperar o lote de 5s). Pergunta e resposta mudam o estado
    * do servidor, e a análise seguinte precisa chegar depois delas. O prazo evita travar a análise.
@@ -1022,7 +1052,9 @@ export function useEntrevista(
           // conclusão mesmo que o modelo não marque (lib/totti/turno.ts). Antes do primeiro traço não há o que informar.
           ...(ultimoDesenhoEm.current > 0 ? { desenho_parado_ha_s: Math.round((Date.now() - ultimoDesenhoEm.current) / 1000) } : {}),
           ...(substitui ? { substitui: true } : {}),
+          ...(perguntaCortada.current ? { pergunta_cortada: true } : {}),
         }, sinal);
+        perguntaCortada.current = false;
         if (sinal?.aborted) throw new DOMException("Substituída por uma fala nova.", "AbortError");
         // Só conta como enviada a foto que chegou ao Totti: sem ela (exportação lenta), a próxima fala tenta de novo.
         if (imagem_base64) desenhoDaUltimaFoto.current = desenho;
@@ -1212,6 +1244,7 @@ export function useEntrevista(
     vozHabilitada,
     alternarVoz,
     silenciar,
+    interromper,
     desenhoMudou,
     comecar,
     perguntaDemo,

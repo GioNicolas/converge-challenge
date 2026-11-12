@@ -4,6 +4,7 @@
 // de condução vaga. `aplicarGuardas` encadeia todas e diz quais agiram, para o log de cada sala.
 // O que é de uma sala só (ids do grafo no quadro, filtro de spoiler no live coding) continua na sala.
 import { comMaiuscula, frasesDe, frasesSemPergunta, normalizar, sobreposicao, tokens, type Sala } from "./texto";
+import { foiInterrompida, semMarcaDeInterrupcao } from "./interrupcao";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Convite para seguir
@@ -384,7 +385,9 @@ export type Trava = "cumprimento" | "validacao" | "eco" | "reacao_repetida" | "p
 export function aplicarGuardas(fala: string, contexto: ContextoDaFala = {}): { texto: string; travas: Trava[] } {
   const travas: Trava[] = [];
   const falasDoTotti = contexto.falasDoTotti ?? [];
-  let texto = fala.trim();
+  let texto = semMarcaDeInterrupcao(fala.trim());
+  // Pergunta cortada pelo candidato não foi feita: retomá-la não é repetir.
+  const perguntasJaFeitas = contexto.perguntasJaFeitas?.filter((p) => !foiInterrompida(p));
   const passo = (trava: Trava, depois: string) => {
     if (depois !== texto) travas.push(trava);
     texto = depois;
@@ -397,7 +400,7 @@ export function aplicarGuardas(fala: string, contexto: ContextoDaFala = {}): { t
   }
   if (texto && contexto.falaDoCandidato) passo("eco", semEcoNoComeco(texto, contexto.falaDoCandidato, contexto.candidatoPerguntou));
   if (texto) {
-    const repetida = texto.endsWith("?") && !!contexto.perguntasJaFeitas?.length && perguntaJaFeita(texto, contexto.perguntasJaFeitas);
+    const repetida = texto.endsWith("?") && !!perguntasJaFeitas?.length && perguntaJaFeita(texto, perguntasJaFeitas);
     if (repetida) passo("pergunta_repetida", frasesSemPergunta(texto));
     else if (contexto.barrarConducao !== false && perguntaDeConducao(texto)) passo("pergunta_de_conducao", frasesSemPergunta(texto));
   }

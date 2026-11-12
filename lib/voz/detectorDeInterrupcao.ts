@@ -7,12 +7,14 @@
  * energia passa de linha de base × fator por um tempo mínimo seguido. Com fone a linha de base é quase zero e vale o
  * piso; com caixa de som o limiar sobe sozinho.
  *
- * Reutilizável: a pré-entrevista usa hoje; o quadro e o live coding vão usar na #97.
+ * A regra (`criarRegraDeInterrupcao`) é a mesma nas três telas: a pré-entrevista usa o detector abaixo; o quadro e o
+ * live coding a usam dentro da escuta (lib/presenca/useTranscricao.ts), que já tem o microfone aberto.
  */
 import { iniciarCapturaAntecipada, MAXIMO_BYTES_ANTECIPADOS, type CapturaAntecipada } from "../transcricao/capturaAntecipada";
 import { capturarAudio } from "../transcricao/captura";
 import { energiaPcm16 } from "../transcricao/energia";
 import { LIMIAR_VOZ_RMS } from "../presenca/transcricao";
+import { QUADROS_ANTES_DEPOIS_DE_PARADA, segundosDeQuadros } from "./folga";
 
 export type OpcoesRegra = {
   /** Ignorado no começo de cada fala: a folga de silêncio antes da voz (lib/voz/folga.ts) não é vazamento. */
@@ -27,8 +29,14 @@ export type OpcoesRegra = {
   minimoMs?: number;
 };
 
+/**
+ * A folga de silêncio antes da voz chega a ~0,7 s depois de uma parada (lib/voz/folga.ts). Medida como linha de base,
+ * ela dava vazamento zero, e com caixa de som a própria voz do Totti passava do piso e o interrompia.
+ */
+const MAIOR_FOLGA_MS = Math.ceil(segundosDeQuadros(QUADROS_ANTES_DEPOIS_DE_PARADA) * 1000);
+
 export const REGRA_PADRAO: Required<OpcoesRegra> = {
-  ignorarMs: 300,
+  ignorarMs: MAIOR_FOLGA_MS + 100,
   linhaDeBaseMs: 300,
   fator: 3,
   piso: LIMIAR_VOZ_RMS * 2,
@@ -84,6 +92,8 @@ export function criarRegraDeInterrupcao(opcoes: OpcoesRegra = {}): RegraDeInterr
 
 /** Áudio de antes do disparo entregue à transcrição: ~300 ms antes da fala mais os ~300 ms que dispararam. */
 export const BYTES_ANTES_DO_DISPARO = 19_200;
+/** O mesmo, em amostras de 16 kHz (PCM 16 bits: 2 bytes por amostra). */
+export const AMOSTRAS_ANTES_DO_DISPARO = BYTES_ANTES_DO_DISPARO / 2;
 
 export type DetectorDeInterrupcao = {
   /** Começa a escutar (o Totti começou a falar). Chamar de novo numa fala nova recalibra. */
