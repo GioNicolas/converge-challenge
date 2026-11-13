@@ -30,7 +30,6 @@ import {
   EsquemaImagemOpcional,
   EsquemaFase,
   EsquemaPedidoAnalise,
-  STATUS_ANALISE,
   type PedidoAnalise,
   type RespostaAnalise,
 } from "../sessao/tipos";
@@ -613,21 +612,10 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       return fase.success ? [{ tipo: "SINCRONIZAR_FASE", fase: fase.data }] : [];
     }
     case "pergunta": {
-      // O quadro manda o texto que falou. Sem texto, o clique segue como antes (só vale com dúvida pendente).
+      // O quadro manda o texto que falou. Só o texto: ele serve para achar a dúvida descartada no servidor, e o resto
+      // (nota, peças, status, escopo) sai de lá (ver RegistroDaPergunta). Sem texto, o clique segue como antes.
       const pergunta = typeof d.pergunta === "string" ? d.pergunta.trim().slice(0, 2000) : "";
-      if (!pergunta) return [{ tipo: "PLIN_CLICADO" }];
-      const status = STATUS_ANALISE.find((s) => s === d.status);
-      const elementos = Array.isArray(d.elementos) ? d.elementos.filter((x): x is string => typeof x === "string") : [];
-      return [{
-        tipo: "PLIN_CLICADO",
-        registro: {
-          pergunta,
-          nota: typeof d.nota === "string" ? d.nota : null,
-          elementos,
-          ...(status ? { status } : {}),
-          ...(d.escopo === true ? { escopo: true } : {}),
-        },
-      }];
+      return pergunta ? [{ tipo: "PLIN_CLICADO", registro: { pergunta } }] : [{ tipo: "PLIN_CLICADO" }];
     }
     case "resposta":
       return [

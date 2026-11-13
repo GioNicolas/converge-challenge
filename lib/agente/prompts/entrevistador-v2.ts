@@ -125,7 +125,7 @@ export function linhaDoFechamento(contexto: ContextoDoFechamento | undefined): s
       : "";
   }
   const etapa = contexto.etapa === "ultima_palavra"
-    ? "você perguntou se ele quer acrescentar algo. Se ele trouxer um assunto, responda em até duas frases, sem pergunta nova"
+    ? "você perguntou se ele quer acrescentar algo. Se ele disser que não tem mais nada (\"não\", \"nada\", \"pode encerrar\", \"é isso\"), encerrar = true. Se ele perguntar algo, candidatoPerguntou = true e responda. Se ele trouxer um assunto, responda em até duas frases, sem pergunta nova"
     : "ele responde às suas perguntas finais. Reaja em uma frase curta e neutra ao que ele disse, sem pergunta nova (a próxima pergunta é escolhida pelo sistema); só se ele não entendeu a pergunta, explique-a em uma frase";
   return `Fechamento da entrevista: o desenho está concluído e você já avisou que só falta fechar uns pontos. Nesta etapa, ${etapa}. Não peça para continuar o desenho e não se despeça: a despedida é do sistema. "Não sei" e "pula" são aceitos sem insistir (desfecho). Se ele pedir para encerrar, encerrar = true.\n`;
 }
