@@ -16,7 +16,7 @@ import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
 import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
-import { buscarSessao, criarSessao, enviarFala, finalizar, usarServidor } from "@/lib/pre-entrevista/tela/cliente";
+import { buscarSessao, criarSessao, enviarFala, finalizar, salvarRascunho, usarServidor } from "@/lib/pre-entrevista/tela/cliente";
 import { curvaSuave } from "@/lib/design/motion";
 import EntradaVaga from "./EntradaVaga";
 import LeituraDaVaga from "./LeituraDaVaga";
@@ -94,10 +94,23 @@ export default function PreEntrevistaTotti({
   const abrirConversa = useCallback(() => setEtapa("conversa"), []);
   // Do plano de volta à conversa: ela nunca desmonta (só se esconde), então reabre em silêncio, com o texto e a
   // rolagem de antes. `seguirConversando` tira o cartão de "plano pronto" de cima do campo de texto.
+  // O que ela editou na revisão é guardado no servidor ao voltar (fica fixado até ela falar daquilo de novo).
+  const editadoNaRevisao = useRef<Rascunho | null>(null);
+  const sessaoId = estado?.id;
   const voltarParaConversa = useCallback(() => {
     setSeguirConversando(true);
     setEtapa("conversa");
-  }, []);
+    const editado = editadoNaRevisao.current;
+    editadoNaRevisao.current = null;
+    if (!editado || !sessaoId) return;
+    // Já na tela: se ela reabrir o plano antes da resposta, vê o que editou.
+    setEstado((atual) => (atual ? { ...atual, rascunho: editado } : atual));
+    salvarRascunho(sessaoId, editado)
+      .then((novo) => setEstado((atual) => (atual?.id === novo.id ? { ...atual, rascunho: novo.rascunho } : atual)))
+      .catch(() => {
+        // Falha ao guardar não trava a volta: a edição continua na tela e vai junto ao publicar.
+      });
+  }, [sessaoId]);
 
   // Workspace: retoma a sessão salva (se ainda existir) ou começa a leitura da vaga. Roda uma vez só.
   const iniciou = useRef(false);
@@ -371,7 +384,7 @@ export default function PreEntrevistaTotti({
                   publicado={!!(posPublicacao && config)}
                   erros={errosRevisao}
                   onConfirmar={confirmar}
-                  onVoltar={voltarParaConversa}
+                  onMudar={(r) => { editadoNaRevisao.current = r; }}
                 />
                 <AnimatePresence>{posPublicacao && config && posPublicacao(config)}</AnimatePresence>
               </div>

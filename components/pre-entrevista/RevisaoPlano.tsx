@@ -7,7 +7,7 @@
 // ou ligar/desligar uma área refaz os critérios (`ajustarCriterios`), para nunca publicar um plano incoerente.
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowLeft, ArrowRight, Minus, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { FocusArea, type Criterion, type InterviewMode } from "@/lib/contracts";
 import { ajustarCriterios, mede, modoAlternativoQueMede } from "@/lib/pre-entrevista/catalogo";
 import { camposMudados } from "@/lib/pre-entrevista/fixados";
@@ -23,8 +23,6 @@ type Props = {
   publicado?: boolean;
   erros: string[];
   onConfirmar: (rascunho: Rascunho) => void;
-  /** Ao voltar à conversa: o rascunho editado (para guardar), ou null se nada mudou. */
-  onVoltar: (rascunhoEditado: Rascunho | null) => void;
   /** Avisa a cada mudança: o rascunho editado, ou null se está igual ao original (para quem volta fora daqui). */
   onMudar?: (rascunhoEditado: Rascunho | null) => void;
 };
@@ -132,7 +130,7 @@ function pesosDoFormato(p: Pesos, mode: InterviewMode): Pesos {
   return novo;
 }
 
-export default function RevisaoPlano({ rascunho, enviando, publicado = false, erros, onConfirmar, onVoltar, onMudar }: Props) {
+export default function RevisaoPlano({ rascunho, enviando, publicado = false, erros, onConfirmar, onMudar }: Props) {
   const [inicial] = useState(() => {
     const base = Object.fromEntries(FocusArea.options.map((a) => [a, 0])) as Pesos;
     for (const f of rascunho.focus) base[f.area] = Math.round(f.weight * 100);
@@ -431,6 +429,18 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
             </button>
           </Cartao>
 
+          {/* Instruções de comportamento do Totti: não viram critério nem entram na nota. Uma por linha. */}
+          <Cartao titulo="Como o Totti deve conduzir" dica="O que ele faz na entrevista. Não entra na nota. Uma instrução por linha.">
+            <textarea
+              value={r.conducao.join("\n")}
+              onChange={(e) => setR({ ...r, conducao: e.target.value.split("\n") })}
+              rows={Math.max(2, r.conducao.length)}
+              placeholder="Ex.: redirecione o candidato se ele errar o escopo."
+              className={`${campo} resize-y leading-relaxed`}
+              aria-label="Como o Totti deve conduzir"
+            />
+          </Cartao>
+
           <Cartao titulo="Observações para o entrevistador" dica="Tom, contexto do time, o que evitar.">
             <textarea
               value={r.recruiterNotes}
@@ -460,13 +470,8 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
             </ul>
           )}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => onVoltar(editado)}
-              className="flex items-center gap-1.5 rounded-full px-4 py-2.5 text-[14px] text-texto-suave transition-colors hover:bg-superficie-2/60 hover:text-texto"
-            >
-              <ArrowLeft size={15} /> Voltar à conversa
-            </button>
-            <span className="numero ml-auto hidden text-[13px] text-texto-suave sm:block">
+            {/* Voltar à conversa fica num botão só, no cabeçalho (ver `PreEntrevistaTotti`). */}
+            <span className="numero ml-auto hidden pl-3 text-[13px] text-texto-suave sm:block">
               {NOME_FORMATO[r.mode]} · {NOME_SENIORIDADE[r.seniority]} · {duracao} min · {r.criteria.length} critérios
             </span>
             {publicado ? (

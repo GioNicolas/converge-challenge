@@ -74,6 +74,8 @@ export interface Patch {
   eliminatorios?: string[];
   /** Trecho literal sobre o time, a empresa ou o momento da contratação. Validado antes de aplicar. */
   contexto?: string;
+  /** Instruções de condução da entrevista (comportamento do Totti), separadas dos critérios de nota. */
+  conducao?: string[];
   durationMin?: number;
   problemId?: string;
 }
@@ -107,8 +109,15 @@ Regras:
    contratação. Se ela não falou disso, omita o campo.
 7. confirmado: marque true só para mode, seniority ou focus que ela confirmou ou corrigiu explicitamente nesta conversa.
    Um "sim" a uma proposta que cobre formato, senioridade e foco de uma vez conta para os três.
-8. durationMin: inteiro, em minutos, só se ela disse.
-9. problemId: só se ela pediu uma questão específica pelo nome ("usa o two sum"). Devolva o id da lista QUESTÕES DO BANCO
+8. conducao: instruções sobre COMO o Totti se comporta durante a entrevista, em frases curtas e imperativas, na voz dela
+   ("redirecione o candidato se errar o escopo", "não dê a resposta", "pergunte sobre testes", "deixe ele pensar em silêncio").
+   Isso NUNCA vai em criteria: critério é o que se observa no candidato para dar nota; conducao é o que o Totti faz.
+   Exemplos: "redirecione ele se errar o escopo" -> conducao. "Ruim é não perceber que errou o escopo" -> critério.
+   "Quero que pergunte sobre complexidade" -> conducao. "Tem que saber explicar a complexidade" -> critério.
+   Lista completa e final (inclua as que já estavam no rascunho e que ela não retirou). Se ela não deu nenhuma, omita o campo.
+   Tom e dicas continuam fora daqui: são preferências à parte.
+9. durationMin: inteiro, em minutos, só se ela disse.
+10. problemId: só se ela pediu uma questão específica pelo nome ("usa o two sum"). Devolva o id da lista QUESTÕES DO BANCO
    (por exemplo "two-sum"), nunca o nome que ela falou. Se ela pediu uma que não está na lista, devolva o nome que ela
    disse, curto. Se ela não pediu, não envie.
 
@@ -116,7 +125,7 @@ Regras:
 Modos válidos: live_coding (código ao vivo, codar, programar, construir um algoritmo, IDE), system_design (quadro, Excalidraw, desenhar a arquitetura ou o sistema).
 Senioridades válidas: junior, pleno, senior.
 
-Dentro dos textos (description, eliminatorios, contexto), não use aspas duplas: se precisar citar, use aspas simples.
+Dentro dos textos (description, eliminatorios, contexto, conducao), não use aspas duplas: se precisar citar, use aspas simples.
 Use o JSON válido: strings em uma linha só, sem vírgula sobrando.
 
 Formato de saída (apenas o JSON, sem texto antes ou depois, sem cercas de código):
@@ -124,7 +133,7 @@ Formato de saída (apenas o JSON, sem texto antes ou depois, sem cercas de códi
   "mode": "...", "seniority": "...",
   "confirmado": {"mode": true, "seniority": true, "focus": true},
   "criteria": [{"id": "...", "name": "...", "focus": "...", "weight": 1, "description": "Bom: ... Ruim: ...", "evidencia": "..."}],
-  "eliminatorios": ["..."], "contexto": "...",
+  "eliminatorios": ["..."], "contexto": "...", "conducao": ["..."],
   "durationMin": 40, "problemId": "..."
 }
 Inclua apenas as chaves que mudaram.`;
@@ -202,6 +211,7 @@ function lerPatch(bruto: unknown, avisos: Avisos): Patch {
     evidencias: criterios && Object.fromEntries(criterios.flatMap((c) => (c.evidencia ? [[c.id, c.evidencia]] : []))),
     eliminatorios: lista("eliminatorios", z.string().min(1), bruto.eliminatorios, avisos),
     contexto: campo("contexto", z.string().min(1), bruto.contexto, avisos),
+    conducao: lista("conducao", z.string().trim().min(1), bruto.conducao, avisos),
     durationMin: campo("durationMin", z.number().int().positive(), bruto.durationMin, avisos),
     problemId: campo("problemId", z.string().min(1), bruto.problemId, avisos),
   };
@@ -280,6 +290,17 @@ export function validarEvidencias(p: Patch, transcricao: Turno[], modo: Intervie
   return { ...p, criteria, origens: p.criteria ? origens : undefined, eliminatorios, contexto };
 }
 
+/** A lista sem repetições, na ordem (ignora maiúsculas, acento e pontuação). */
+function semRepetir(lista: string[]): string[] {
+  const vistas = new Set<string>();
+  return lista.filter((s) => {
+    const k = normalizarTexto(s);
+    if (!k || vistas.has(k)) return false;
+    vistas.add(k);
+    return true;
+  });
+}
+
 /**
  * Aplica o patch ao rascunho. Não muta o rascunho original. O foco não muda aqui: quem decide é `pesosPelaEnfase`.
  * Critério que ganha fala dela nesta leitura pesa 1,5×; o que perde a fala volta ao normal. Assim, repetir a leitura
@@ -308,6 +329,8 @@ export function aplicarPatch(r: Rascunho, p: Patch, avisos: Avisos = []): Rascun
     origens: Object.fromEntries(Object.entries(origensDoPatch).filter(([id]) => ids.has(id))),
     eliminatorios: p.eliminatorios ?? r.eliminatorios,
     contexto: p.contexto ?? r.contexto,
+    // O patch traz a lista completa (ver regra 8 do prompt): substitui, para que ela consiga retirar uma instrução.
+    conducao: p.conducao ? semRepetir(p.conducao) : r.conducao,
     durationMin: p.durationMin ?? r.durationMin,
     // Problema escolhido para o modo antigo não serve para o novo; volta ao padrão do modo.
     problemId: modeMudou ? undefined : r.problemId,

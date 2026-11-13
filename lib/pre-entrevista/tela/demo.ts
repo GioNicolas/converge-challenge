@@ -140,6 +140,7 @@ export function estadoInicialDemo(vaga: Vaga): EstadoSessao {
       eliminatorios: [],
       contexto: "",
       fixados: [],
+      conducao: [],
     },
     topicos: TOPICOS.map((t) => ({ ...t, cobertura: 0, coberto: false })),
     faltando: TOPICOS.filter((t) => !t.opcional).map((t) => t.id),

@@ -111,6 +111,8 @@ export const Rascunho = z.object({
   contexto: z.string().default(""),
   /** Campos editados à mão na revisão, que o automático não sobrescreve (interno: não vai no InterviewConfig). */
   fixados: z.array(CampoFixado).default([]),
+  /** Instruções de como o Totti conduz a entrevista (vão para `conductNotes` da config; não entram na nota). */
+  conducao: z.array(z.string()).default([]),
 });
 export type Rascunho = z.infer<typeof Rascunho>;
 
@@ -269,6 +271,7 @@ export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
     eliminatorios: [],
     contexto: "",
     fixados: [],
+    conducao: [],
   };
 }
 
@@ -316,6 +319,7 @@ export function paraInterviewConfig(
   naoAvaliado: string[] = [],
 ): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
   const erros: string[] = [];
+  const conducao = r.conducao.map((l) => l.trim()).filter(Boolean);
 
   if (r.focus.length === 0) erros.push("focus: precisa de pelo menos uma área");
   const areas = new Set(r.focus.map((f) => f.area));
@@ -334,6 +338,8 @@ export function paraInterviewConfig(
     seniority: r.seniority,
     focus: r.focus,
     recruiterNotes: [acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado), notaDoTema(r)].filter(Boolean).join("\n"),
+    // Linhas em branco da tela de revisão (uma instrução por linha) não entram.
+    ...(conducao.length > 0 ? { conductNotes: conducao } : {}),
     tone: preferencias?.tom ?? "amigavel",
     hints: preferencias?.dicas ?? "leves",
     criteria,
