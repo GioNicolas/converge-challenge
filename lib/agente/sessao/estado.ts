@@ -112,6 +112,14 @@ export type EstadoSessao = {
    * não sai logo depois dela. Ausente em estados guardados antes desse campo.
    */
   ultimaFalaDoAgenteEm?: number | null;
+  /**
+   * Quando ele pediu tempo para pensar ("calma", "deixa eu pensar") por último. Enquanto ele não desenhar nem falar
+   * depois disso, a bola segue com ele (ver `pedidoDeTempoPendente`) e a análise sabe que ele pediu tempo. Ausente/null:
+   * não pediu.
+   */
+  pediuTempoEm?: number | null;
+  /** O Totti já respondeu ao primeiro pedido de tempo da entrevista (depois disso, ele fica calado nesses pedidos). */
+  reacaoAoPensarDita?: boolean;
 
   /** Todas as perguntas feitas, com os elementos citados. */
   perguntas: PerguntaFeita[];
@@ -161,6 +169,8 @@ export type EventoSessao =
   | { tipo: "ELEMENTOS_ALTERADOS"; ids: string[] }
   | { tipo: "PLIN_CLICADO" }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
+  /** Ele pediu tempo para pensar. `reagiu`: o Totti respondeu com a reação curta (a primeira vez na entrevista). */
+  | { tipo: "CANDIDATO_PEDIU_TEMPO"; reagiu: boolean }
   /** `perguntou`: a fala do Conversador terminou numa pergunta (v2); conta no intervalo antes do próximo plin. */
   | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
   /**
@@ -614,6 +624,16 @@ export function transicionar(
       const retomado: EstadoSessao = { ...semFechamento(estado), desenhoConcluido: null };
       return { estado: retomado, efeitos: f ? [{ tipo: "FECHAMENTO_SUSPENSO" }] : [] };
     }
+
+    case "CANDIDATO_PEDIU_TEMPO":
+      return {
+        estado: {
+          ...estado,
+          pediuTempoEm: agora,
+          ...(evento.reagiu ? { reacaoAoPensarDita: true } : {}),
+        },
+        efeitos: [],
+      };
 
     case "AGENTE_FALOU":
       return {

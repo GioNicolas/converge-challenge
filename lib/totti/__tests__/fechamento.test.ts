@@ -261,7 +261,7 @@ describe("o que a fala do candidato mostra no fechamento", () => {
     for (const nao of ["queria saber quando sai o resultado dessa etapa do processo seletivo", "eu queria acrescentar uma coisa sobre o cache", ""]) assert.equal(aceitaEncerrar(nao), false, nao);
   });
   it("ainda pensando: só a fala curta de quem monta a resposta", () => {
-    for (const sim of ["hmm", "hmm, deixa eu pensar", "deixa eu ver", "peraí", "um segundo"]) assert.equal(aindaPensando(sim), true, sim);
+    for (const sim of ["hmm", "hmm, deixa eu pensar", "deixa eu ver", "peraí", "um segundo", "calma, tô pensando", "to pensando", "pensando"]) assert.equal(aindaPensando(sim), true, sim);
     for (const nao of ["hmm, não sei", "nada", "pode encerrar", "eu olharia a taxa de acerto do cache", "então eu colocaria uma fila na frente do serviço de códigos para segurar o pico", ""]) assert.equal(aindaPensando(nao), false, nao);
   });
 });

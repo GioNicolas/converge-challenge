@@ -116,6 +116,40 @@ describe("adaptadores: a saída de cada sala vira a mesma leitura", () => {
   });
 });
 
+describe("quadro: sem convite repetido enquanto ele só reage", () => {
+  // O Totti acabou de devolver a vez (convite) e o candidato só disse "tá": o convite não volta a sair.
+  const reagiu = { respondiaAoTotti: true, falaDoCandidato: "Tá.", falasDoTotti: ["Pode seguir com o desenho."] };
+
+  it("sem o sinal, a reação ganha o convite de sempre (o comportamento de antes)", () => {
+    const r = decidirTurno(lida({ intencao: "respondeu", texto: "Certo." }), situacao({ sala: "quadro", ...reagiu }));
+    assert.match(r.leitura.texto, /^Certo\. \S/);
+    assert.ok(r.regras.includes("vez_devolvida"));
+  });
+
+  it("com o sinal (desde o convite ele só reagiu), a reação sai sem convite nenhum", () => {
+    const r = decidirTurno(lida({ intencao: "respondeu", texto: "Certo." }), situacao({ sala: "quadro", ...reagiu, semAcaoDesdeOConvite: true }));
+    assert.equal(r.leitura.texto, "Certo.");
+    assert.deepEqual(r.regras, []);
+  });
+
+  it("com o sinal, a fala que só devolve um fato também não ganha convite a mais", () => {
+    const fato = lida({ intencao: "respondeu", texto: "Isso, um bilhão por mês." });
+    const r = decidirTurno(fato, situacao({ sala: "quadro", respondiaAoTotti: true, falaDoCandidato: "Tá.", semAcaoDesdeOConvite: true }));
+    assert.equal(r.leitura.texto, "Isso, um bilhão por mês.");
+  });
+
+  it("o live coding não usa o sinal: a fala de sempre (sem convite para reação)", () => {
+    const r = decidirTurno(lida({ intencao: "respondeu", texto: "Certo." }), situacao({ sala: "codigo", ...reagiu, semAcaoDesdeOConvite: true }));
+    assert.equal(r.leitura.texto, "Certo.");
+  });
+
+  it("\"pensando\" é uma leitura de pensando alto, sem resposta", () => {
+    const r = deSaidaDoQuadro({ responder: false, texto: "", desfecho: "pensando" }, situacao({ sala: "quadro", respondiaAoTotti: true }));
+    assert.equal(r.intencao, "pensando_alto");
+    assert.equal(r.responder, false);
+  });
+});
+
 describe("decisões comuns", () => {
   it("\"não sei\" ou \"pula\": sem pergunta nova na mesma fala, com um próximo passo", () => {
     for (const sala of ["quadro", "codigo"] as const) {

@@ -22,13 +22,13 @@ import {
   type EventoSessao,
 } from "../lib/agente/sessao/estado";
 import type { PedidoAnalise } from "../lib/agente/sessao/tipos";
-import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "../lib/contracts";
 import { podeTomarTurno } from "../lib/conversa/turnos";
 import type { Fase, RespostaAnalise } from "../lib/sessao/cliente";
 import { contarComponentes, esperaDoEmpecilho } from "../lib/sessao/empecilho";
 import { interrupcaoAtrasada, motivoDoMomento, RITMO } from "../lib/interrupcao/politica";
 import { aceitaPlin, estadoInicial, marcoDeFase, podeAnalisar, ritmoDoCliente, transicionar, type EstadoEntrevista, type EventoEntrevista } from "../lib/sessao/estados";
 import { LIMITE_PADRAO_MS, PAUSA_PADRAO_MS } from "../lib/sessao/gatilho";
+import { deveForcarAnalise } from "../lib/sessao/silencio";
 import { instantaneo, resumoDoCusto } from "./custo";
 
 const TICK_MS = 500;
@@ -328,11 +328,9 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
       pausaEm = null;
       await disparar(false, "pausa depois de desenhar");
     }
-    const fasesComSilencio = cliente.fase === "REQUISITOS" || cliente.fase === "ALTO_NIVEL" || cliente.fase === "APROFUNDAMENTO" || cliente.fase === "FECHAMENTO";
-    const referencia = Math.max(ultimaAtividade, ultimoDisparoParado);
-    const primeiro = (cliente.fase === "REQUISITOS" ? SILENCIO_INICIAL_S : SILENCIO_S) * 1000;
-    const limite = ultimoDisparoParado > ultimaAtividade ? SILENCIO_REPETIR_S * 1000 : primeiro;
-    if (fasesComSilencio && cliente.plin === "LIVRE" && t - referencia > limite) {
+    // A mesma regra do navegador (lib/sessao/silencio.ts, deveForcarAnalise): depois de uma fala do Totti, espera
+    // SILENCIO_SEM_ACAO_S e quebra uma vez por período de silêncio.
+    if (cliente.plin === "LIVRE" && deveForcarAnalise({ agora: t, fase: cliente.fase, ultimaAtividade, ultimaFalaDoAgente: ultimaFalaDoAgenteEm, ultimoDisparo: ultimoDisparoParado })) {
       ultimoDisparoParado = t;
       await disparar(true, `silêncio de ${Math.round((t - ultimaAtividade) / 1000)} s`);
     }

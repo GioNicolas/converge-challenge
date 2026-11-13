@@ -315,3 +315,67 @@ describe("convite do fim no /perguntar", () => {
     assert.notEqual(convite2, convite1);
   });
 });
+
+describe("perguntar (v2): \"tô pensando\" é pedido de tempo, não resposta", () => {
+  const v2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ ...deps(llm), versao: "v2" as const });
+  const emAltoNivel = { ...estado, fase: "ALTO_NIVEL" as const, faseIniciadaEm: AGORA - 60_000 };
+  const pensando = { responder: false, texto: "", requisito: null, concluiu: false, desfecho: "pensando" };
+
+  it("na primeira vez na entrevista, uma reação curta fixa, sem convite e sem pergunta", async () => {
+    const llm = criarClienteFalso([{ ...pensando, responder: true, texto: "Certo, pode pensar. Pode seguir quando quiser." }]);
+    const r = await perguntar(v2(llm), emAltoNivel, { fase: "ALTO_NIVEL", texto: "Calma, tô pensando." }, AGORA);
+    assert.equal(r.responder, true);
+    assert.equal(r.texto, "Claro, fica à vontade.");
+    assert.equal(r.perguntou, undefined);
+    assert.deepEqual(r.pediuTempo, { reagiu: true });
+    assert.equal(r.estado.pediuTempoEm, AGORA);
+    assert.equal(r.estado.reacaoAoPensarDita, true);
+    assert.equal(r.estado.ultimaFalaDoAgenteEm, AGORA);
+  });
+
+  it("nas vezes seguintes, fica calado: sem convite, sem pergunta, mas o pedido fica registrado", async () => {
+    const jaReagiu = { ...emAltoNivel, reacaoAoPensarDita: true };
+    const llm = criarClienteFalso([{ ...pensando, responder: true, texto: "Pode continuar de onde parou." }]);
+    const r = await perguntar(v2(llm), jaReagiu, { fase: "ALTO_NIVEL", texto: "Deixa eu pensar um pouco." }, AGORA);
+    assert.equal(r.responder, false);
+    assert.equal(r.texto, "");
+    assert.deepEqual(r.pediuTempo, { reagiu: false });
+    assert.equal(r.estado.pediuTempoEm, AGORA);
+    assert.equal(r.estado.reacaoAoPensarDita, true);
+  });
+
+  it("com pergunta ativa, o pedido não vira desfecho da pergunta nem grava observação", async () => {
+    const comPergunta = { ...emAltoNivel, perguntaAtiva: {
+      numero: 1, status: "duvida" as const, pergunta: "Por que o cache fica na frente do banco?", nota: null, elementos: [],
+      degrau: null, fase: "ALTO_NIVEL" as const, feitaEm: AGORA - 30_000,
+    } };
+    const llm = criarClienteFalso([{ ...pensando, desfecho: "pensando" }]);
+    const r = await perguntar(v2(llm), comPergunta, { fase: "ALTO_NIVEL", texto: "Um minuto, deixa eu pensar.", perguntaAtiva: "Por que o cache fica na frente do banco?" }, AGORA);
+    assert.equal(r.desfecho, null);
+    assert.equal(r.estado.observacoes.length, 0);
+    assert.equal(r.estado.perguntaAtiva?.desfecho, undefined);
+  });
+
+  it("o modelo pede tempo, mas a fala é só \"Tá.\": o pedido ainda é o que vale (não sai a reação do convite)", async () => {
+    const llm = criarClienteFalso([{ ...pensando, responder: true, texto: "Tá. Pode seguir." }]);
+    const r = await perguntar(v2(llm), { ...emAltoNivel, reacaoAoPensarDita: true }, { fase: "ALTO_NIVEL", texto: "Calma." }, AGORA);
+    assert.equal(r.responder, false);
+    assert.equal(r.pediuTempo?.reagiu, false);
+  });
+
+  it("depois de ele só reagir à última fala (que devolveu a vez), a reação sai sem convite de novo (ele não desenhou)", async () => {
+    const depoisDoConvite = { ...emAltoNivel, ultimaFalaDoAgenteEm: AGORA - 10_000,
+      conversa: [{ quem: "agente" as const, texto: "Como você separa a leitura da escrita?", em: AGORA - 10_000 }] };
+    const llm = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false, desfecho: null }]);
+    const r = await perguntar(v2(llm), depoisDoConvite, { fase: "ALTO_NIVEL", texto: "Tá.", desenhoParadoHaS: 30 }, AGORA);
+    assert.equal(r.texto, "Certo.");
+  });
+
+  it("se ele desenhou depois da fala que devolveu a vez, a reação volta a ter convite (a regra de sempre)", async () => {
+    const depoisDoConvite = { ...emAltoNivel, ultimaFalaDoAgenteEm: AGORA - 10_000,
+      conversa: [{ quem: "agente" as const, texto: "Como você separa a leitura da escrita?", em: AGORA - 10_000 }] };
+    const llm = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false, desfecho: null }]);
+    const r = await perguntar(v2(llm), depoisDoConvite, { fase: "ALTO_NIVEL", texto: "Tá.", desenhoParadoHaS: 2 }, AGORA);
+    assert.match(r.texto, /^Certo\. \S/);
+  });
+});

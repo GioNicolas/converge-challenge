@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S } from "../../../contracts";
+import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../../contracts";
 import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "../../../interrupcao/politica";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
   extrairIdsDoGrafo,
   filtrarResposta,
   motivoBloqueio,
+  falaQueContaParaABola,
   motivoBloqueioPlin,
+  pedidoDeTempoPendente,
   podeAnalisar,
   podeLevantarPlin,
   REGRAS_PADRAO,
@@ -298,15 +300,41 @@ describe("a bola está com o candidato depois de uma fala solta do agente", () =
     assert.equal(motivoBloqueioPlin(falou(), AGORA + 3_000, regras, { paradoHaS: 2 }), null);
   });
 
-  it("sem ação dele, um silêncio de verdade (o limite que já quebra o silêncio) libera a pergunta", () => {
-    assert.equal(motivoBloqueioPlin(falou(), AGORA + 8_000 - 1, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
-    assert.equal(motivoBloqueioPlin(falou(), AGORA + 8_000, regras, { paradoHaS: 60 }), null);
+  it("sem ação dele, só um silêncio total de SILENCIO_SEM_ACAO_S (60 s) libera a pergunta", () => {
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + SILENCIO_SEM_ACAO_S * 1000 - 1, regras, { paradoHaS: 120 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + SILENCIO_SEM_ACAO_S * 1000, regras, { paradoHaS: 120 }), null);
   });
 
-  it("em REQUISITOS o silêncio que libera é o inicial, mais longo", () => {
+  it("o mesmo limite de 60 s vale em REQUISITOS (antes era 15 s)", () => {
     const req = transicionar(estadoEm("REQUISITOS", base), { tipo: "AGENTE_FALOU", texto: "Uns 4 mil por segundo." }, AGORA).estado;
-    assert.equal(motivoBloqueioPlin(req, AGORA + 10_000, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
-    assert.equal(motivoBloqueioPlin(req, AGORA + 15_000, regras, { paradoHaS: 60 }), null);
+    assert.equal(motivoBloqueioPlin(req, AGORA + 15_000, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(req, AGORA + 60_000, regras, { paradoHaS: 120 }), null);
+  });
+
+  it("o pedido de tempo conta como fala do Totti: sem ação dele, a bola segura 60 s depois do pedido e libera", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: false }, AGORA + 1_000).estado;
+    assert.equal(motivoBloqueioPlin(pediu, AGORA + 60_999, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(pediu, AGORA + 61_000, regras, { paradoHaS: 61 }), null);
+    assert.equal(pedidoDeTempoPendente(pediu, AGORA + 61_000, 61), true);
+  });
+
+  it("o pedido só conta como fala se for a última coisa do agente (a fala mais recente vale)", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: false }, AGORA + 1_000).estado;
+    assert.equal(falaQueContaParaABola(pediu), AGORA + 1_000);
+    assert.equal(falaQueContaParaABola(estadoEm("APROFUNDAMENTO", base)), null);
+  });
+
+  it("depois do pedido, ele agir (desenhar ou falar) libera a regra: o pedido deixa de estar pendente", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: false }, AGORA + 1_000).estado;
+    // Última ação há 2 s, depois do pedido: ele voltou a agir.
+    assert.equal(pedidoDeTempoPendente(pediu, AGORA + 10_000, 2), false);
+    assert.equal(motivoBloqueioPlin(pediu, AGORA + 10_000, regras, { paradoHaS: 2 }), null);
+  });
+
+  it("sem saber se ele agiu desde o pedido, a espera vale", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: true }, AGORA).estado;
+    assert.equal(pedidoDeTempoPendente(pediu, AGORA + 10_000), true);
+    assert.equal(pedidoDeTempoPendente(estadoEm("APROFUNDAMENTO", base), AGORA + 10_000), false);
   });
 
   it("sem saber há quanto tempo ele está parado, a regra não se aplica", () => {

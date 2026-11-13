@@ -127,6 +127,22 @@ describe("bloco dinâmico", () => {
     assert.ok(sem.includes("tempo desconhecido") && sem.includes("Requisitos já combinados no quadro: (nenhum)"));
   });
 
+  it("com o pedido de tempo pendente, a análise sabe quantos segundos faz e que não é sinal negativo", () => {
+    const pediu = { ...estado, pediuTempoEm: AGORA - 20_000 };
+    const din = montarPromptAvaliador(kitDemo, problema, pediu, { ...pedido(), parado_ha_s: 25 }, AGORA).sistema.dinamico;
+    assert.ok(din.includes("Candidato pediu tempo para pensar há 20 s"));
+    assert.ok(din.includes("Não quebre o silêncio ainda: faltam 40 s"));
+    assert.ok(din.includes("Não registre isso como dificuldade nem sinal negativo"));
+    // Passados os 60 s do pedido, o prompt libera uma quebra de silêncio.
+    const depois = montarPromptAvaliador(kitDemo, problema, { ...estado, pediuTempoEm: AGORA - 70_000 }, { ...pedido(), parado_ha_s: 70 }, AGORA).sistema.dinamico;
+    assert.ok(depois.includes("pode quebrar o silêncio UMA vez"));
+    // Depois do pedido ele desenhou (a última ação é de 2 s, posterior ao pedido): o aviso sai.
+    const agiu = montarPromptAvaliador(kitDemo, problema, pediu, { ...pedido(), parado_ha_s: 2 }, AGORA).sistema.dinamico;
+    assert.ok(!agiu.includes("pediu tempo para pensar"));
+    const semPedido = montarPromptAvaliador(kitDemo, problema, estado, pedido(), AGORA).sistema.dinamico;
+    assert.ok(!semPedido.includes("pediu tempo para pensar"));
+  });
+
   it("avisa quando o plin está bloqueado por intervalo (mas a análise continua)", () => {
     assert.ok(d.includes("NÃO pode ser feita agora (INTERVALO_ENTRE_PERGUNTAS)"));
     const livre = montarPromptAvaliador(kitDemo, problema, { ...estado, ultimaPerguntaEm: null }, pedido(), AGORA).sistema.dinamico;

@@ -1,7 +1,7 @@
 // Política do "portão de entrada": funções puras que decidem SE a análise pode rodar e SE uma
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
-import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_S } from "../../contracts";
+import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../contracts";
 import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
@@ -15,10 +15,10 @@ export type Regras = {
 };
 
 /**
- * Silêncio total do candidato (sem mexer no desenho nem falar) a partir do qual o agente pode quebrá-lo.
- * Provisório, para os testes. O quadro usa o mesmo valor em `useEntrevista.ts` (SILENCIO_MS).
+ * Silêncio total do candidato (sem mexer no desenho nem falar) depois de uma fala do agente a partir do qual o agente
+ * pode quebrá-lo. O quadro usa o mesmo valor em `useEntrevista.ts` (ver `deveForcarAnalise`, lib/sessao/silencio.ts).
  */
-export const LIMITE_SILENCIO_S = SILENCIO_S;
+export const LIMITE_SILENCIO_S = SILENCIO_SEM_ACAO_S;
 /**
  * Idem para o começo (fase REQUISITOS): sem falar, sem escrever na conversa e sem desenhar nada.
  * Provisório. O quadro usa o mesmo valor em `useEntrevista.ts` (SILENCIO_INICIAL_MS).
@@ -188,18 +188,37 @@ export function motivoBloqueioPlin(
   const motivo = motivoDoRitmo(extra ? { ...ritmo, feitas: 0, marco: true } : ritmo);
   if (motivo) return CODIGO_DO_RITMO[motivo.codigo];
   // A bola está com o candidato: depois de qualquer fala solta do agente (resposta, comentário, continuação) ele
-  // não pergunta de novo até o candidato agir (falar ou mexer no desenho). Sem ação dele, só um silêncio de verdade
-  // (o mesmo limite que já quebra o silêncio) libera a pergunta.
+  // não pergunta de novo até o candidato agir (falar ou mexer no desenho). Sem ação dele, só um silêncio total de
+  // SILENCIO_SEM_ACAO_S libera a pergunta (em todas as fases). O pedido de tempo para pensar conta como essa fala.
   // Exceção: ele acabou de dizer que terminou e o Totti só avisou que ia olhar o desenho. Ali a pergunta é esperada.
-  const fala = estado.ultimaFalaDoAgenteEm;
+  const fala = falaQueContaParaABola(estado);
   const acabouDeConcluir = estado.ultimaConclusaoEm != null && agora - estado.ultimaConclusaoEm < RITMO.marcoDeConclusaoMs
     && (fala == null || fala <= estado.ultimaConclusaoEm);
   if (!acabouDeConcluir && fala != null && candidato.paradoHaS !== undefined) {
     const agiuDepois = agora - candidato.paradoHaS * 1000 > fala;
-    const silencioS = estado.fase === "REQUISITOS" ? SILENCIO_REQUISITOS_S : SILENCIO_S;
-    if (!agiuDepois && agora - fala < silencioS * 1000) return "BOLA_COM_O_CANDIDATO";
+    if (!agiuDepois && agora - fala < SILENCIO_SEM_ACAO_S * 1000) return "BOLA_COM_O_CANDIDATO";
   }
   return null;
+}
+
+/**
+ * O candidato pediu tempo para pensar ("calma", "deixa eu pensar") e ainda não agiu desde então (não desenhou nem
+ * falou). O pedido conta como fala do Totti para a regra da bola (ver `falaQueContaParaABola`). `paradoHaS` é o tempo
+ * desde a última ação dele (ausente: não se sabe, e então não há como dizer que ele agiu).
+ */
+export function pedidoDeTempoPendente(estado: EstadoSessao, agora: number, paradoHaS?: number): boolean {
+  const pedido = estado.pediuTempoEm;
+  if (pedido == null) return false;
+  return paradoHaS === undefined || agora - paradoHaS * 1000 <= pedido;
+}
+
+/** A última fala do agente ou o último pedido de tempo dele (o pedido conta como fala do Totti para a regra da bola). */
+export function falaQueContaParaABola(estado: EstadoSessao): number | null {
+  const fala = estado.ultimaFalaDoAgenteEm ?? null;
+  const pedido = estado.pediuTempoEm ?? null;
+  if (fala === null) return pedido;
+  if (pedido === null) return fala;
+  return Math.max(fala, pedido);
 }
 
 /** Uma resposta com este status pode virar plin agora? (fase + intervalo + limite) */

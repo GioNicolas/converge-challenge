@@ -15,7 +15,7 @@ import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
 import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno, respostaTerminouPorSilencio } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
-import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
+import { deveForcarAnalise } from "@/lib/sessao/silencio";
 import { definirSessaoDaVoz } from "@/lib/voz/cliente";
 import {
   analisar,
@@ -78,10 +78,6 @@ interface OpcoesDeFala {
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
-/** Silêncios que disparam uma análise para o agente poder quebrá-los (valores compartilhados com o cérebro em lib/contracts.ts). */
-const SILENCIO_MS = SILENCIO_S * 1000;
-const SILENCIO_INICIAL_MS = SILENCIO_INICIAL_S * 1000;
-const REPETIR_SILENCIO_MS = SILENCIO_REPETIR_S * 1000;
 /** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
 const COR_ENUNCIADO = "#1e1e1e";
 /** Silêncio depois de uma fala sem resposta do agente que encerra a resposta à pergunta ativa. */
@@ -198,6 +194,8 @@ export function useEntrevista(
   const ultimaFalaEm = useRef(0);
   /** Última vez que o agente começou ou terminou de falar (o empecilho espera um respiro). */
   const ultimaFalaDoAgenteEm = useRef<number | null>(null);
+  /** Quando o servidor disse que ele pediu tempo para pensar (conta como fala do Totti para o silêncio). */
+  const pedidoDeTempoEm = useRef<number | null>(null);
   const falaParcial = useRef(false);
   const agenteFalandoRef = useRef(false);
   const pedidosEmAndamento = useRef(0);
@@ -833,17 +831,20 @@ export function useEntrevista(
   }, [estado.fase]);
 
   // Silêncio total do candidato (sem desenhar nem falar): força uma análise, e o modelo decide se quebra o silêncio.
+  // A regra está em lib/sessao/silencio.ts (deveForcarAnalise): depois de uma fala do Totti, espera SILENCIO_SEM_ACAO_S e
+  // quebra uma vez por período de silêncio.
   const ultimoDisparoParado = useRef(Date.now());
   useEffect(() => {
     const id = setInterval(() => {
       const e = estadoAtual.current;
-      // No FECHAMENTO também: sem isso, nada disparava análise e a pergunta final quase nunca saía.
-      const fasesComSilencio = e.fase === "REQUISITOS" || e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO" || e.fase === "FECHAMENTO";
-      const referencia = Math.max(ultimaAtividade.current, ultimoDisparoParado.current);
-      // Primeira vez: SILENCIO_MS depois da última atividade. Se o silêncio continua, só volta a cada REPETIR_SILENCIO_MS.
-      const primeiro = e.fase === "REQUISITOS" ? SILENCIO_INICIAL_MS : SILENCIO_MS;
-      const limite = ultimoDisparoParado.current > ultimaAtividade.current ? REPETIR_SILENCIO_MS : primeiro;
-      if (fasesComSilencio && e.plin === "LIVRE" && Date.now() - referencia > limite) {
+      if (e.plin === "LIVRE" && deveForcarAnalise({
+        agora: Date.now(),
+        fase: e.fase,
+        ultimaAtividade: ultimaAtividade.current,
+        ultimaFalaDoAgente: ultimaFalaDoAgenteEm.current,
+        pedidoDeTempoEm: pedidoDeTempoEm.current,
+        ultimoDisparo: ultimoDisparoParado.current,
+      })) {
         ultimoDisparoParado.current = Date.now();
         gatilho.current?.dispararAgora();
       }
@@ -1055,6 +1056,7 @@ export function useEntrevista(
           ...(perguntaCortada.current ? { pergunta_cortada: true } : {}),
         }, sinal);
         perguntaCortada.current = false;
+        if (r.pediuTempo) pedidoDeTempoEm.current = Date.now();
         if (sinal?.aborted) throw new DOMException("Substituída por uma fala nova.", "AbortError");
         // Só conta como enviada a foto que chegou ao Totti: sem ela (exportação lenta), a próxima fala tenta de novo.
         if (imagem_base64) desenhoDaUltimaFoto.current = desenho;

@@ -47,6 +47,12 @@ export type SituacaoDoTurno = {
   paradoHaS?: number;
   /** Ele travou no trabalho e o Totti está ajudando: ali uma pergunta ("onde travou?", "quer uma dica?") é ajuda. */
   ajudando?: boolean;
+  /**
+   * (Quadro) A última fala do Totti já devolveu a vez e, desde então, o candidato não desenhou: só disse uma reação
+   * ou pediu tempo. Ali não entra convite de novo (o "Pode seguir." repetido soa como gravação). Ausente: a regra
+   * de sempre (live coding e quadro sem essa informação).
+   */
+  semAcaoDesdeOConvite?: boolean;
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -145,7 +151,8 @@ export type SaidaDoQuadro = {
   texto: string;
   concluiu?: boolean;
   encerrar?: boolean;
-  desfecho?: "respondeu" | "nao_sabe" | "pulou" | null;
+  /** "pensando": ele pediu tempo para pensar (não é resposta; lib/agente/perguntar.ts trata). */
+  desfecho?: "respondeu" | "nao_sabe" | "pulou" | "pensando" | null;
   visual?: unknown;
 };
 
@@ -183,6 +190,7 @@ export function deSaidaDoQuadro(saida: SaidaDoQuadro, situacao: SituacaoDoTurno)
   const intencao: Intencao =
     saida.encerrar === true ? "encerrar"
     : saida.concluiu === true ? "concluiu"
+    : saida.desfecho === "pensando" ? "pensando_alto"
     : desfecho === "nao_sabe" ? "nao_sabe"
     : desfecho === "pulou" ? "pulou"
     : desfecho === "respondeu" ? "respondeu"
@@ -266,7 +274,8 @@ export function decidirTurno(lida: LeituraDoTurno, situacao: SituacaoDoTurno): {
   // Ele acabou de responder a uma pergunta do Totti (ou de soltar o assunto): a réplica não para num "Tá." solto,
   // senão ele fica sem saber o que fazer.
   if (situacao.respondiaAoTotti || soltou) {
-    const comVez = eSoReacao(texto) ? `${texto} ${escolherConvite(texto, jaDitas, situacao.sala)}`
+    const comVez = situacao.semAcaoDesdeOConvite ? texto
+      : eSoReacao(texto) ? `${texto} ${escolherConvite(texto, jaDitas, situacao.sala)}`
       : CONVITE_EM_TODA_RESPOSTA[situacao.sala] ? comVezDevolvida(texto, jaDitas, situacao.sala)
       : texto;
     if (comVez !== texto) regras.push("vez_devolvida");

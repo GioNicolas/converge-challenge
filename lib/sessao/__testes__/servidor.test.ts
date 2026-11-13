@@ -86,7 +86,7 @@ test("analisar preserva a normalização de resposta sem pergunta", async (t) =>
 test("perguntar envia sessão, fase e texto e aceita requisito nulo", async (t) => {
   const resposta = { responder: true, texto: "Considere cem mil requisições por segundo.", requisito: null };
   const chamadas = substituirFetch(t, () => json(resposta));
-  assert.deepEqual(await perguntar("sessao-1", "REQUISITOS", "Qual a escala?"), { ...resposta, concluiu: false, seguimento: false, encerrar: false });
+  assert.deepEqual(await perguntar("sessao-1", "REQUISITOS", "Qual a escala?"), { ...resposta, concluiu: false, seguimento: false, encerrar: false, pediuTempo: false });
   assert.equal(chamadas[0].rota, "/api/sessoes/sessao-1/perguntar");
   assert.equal(chamadas[0].opcoes.method, "POST");
   assert.deepEqual(corpo(chamadas[0]), { sessao_id: "sessao-1", fase: "REQUISITOS", texto: "Qual a escala?" });

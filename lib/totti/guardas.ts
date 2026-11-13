@@ -166,6 +166,14 @@ export function reacaoNeutra(falasDoTotti: string[] = []): string {
   return REACOES_NEUTRAS.find((r) => reconhecimentoQueAbre(r) !== ultima) ?? REACOES_NEUTRAS[0];
 }
 
+/** Reações ao pedido de tempo ("calma, deixa eu pensar"): curtas, sem convite. Só a primeira vez na entrevista. */
+const REACOES_AO_PENSAR = ["Claro, fica à vontade.", "Claro, sem pressa."];
+
+/** A reação ao pedido de tempo que o Totti ainda não disse. */
+export function reacaoAoPensar(falasDoTotti: string[] = []): string {
+  return falaNaoRepetida(REACOES_AO_PENSAR, falasDoTotti);
+}
+
 /**
  * Reação vazia repetida. "Hm." atrás de "Hm." vira bordão na voz: a segunda reação vazia seguida não sai (a vez já
  * é dele). E a fala não abre com o mesmo reconhecimento da fala anterior, nem com outro quando a sala acabou de

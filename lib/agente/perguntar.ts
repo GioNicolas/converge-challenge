@@ -8,7 +8,7 @@ import {
   gatilhoDoFechamento, iniciarFechamento, proximoPasso,
   type EstadoFechamento, type EtapaDoFechamento, type PassoDoFechamento,
 } from "../totti/fechamento";
-import { reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
+import { devolveAVez, reacaoAoPensar, reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
 import { frasesSemPergunta } from "../totti/texto";
 import {
   avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoQuadro, ficouSemResposta, perguntouComClareza,
@@ -97,6 +97,11 @@ export type ResultadoPerguntar = {
   seguimento?: boolean;
   /** Ele pediu para encerrar a entrevista: o quadro se despede e fecha. */
   encerrar?: boolean;
+  /**
+   * Ele pediu tempo para pensar neste turno. `reagiu`: o Totti disse a reação curta (a primeira vez na entrevista).
+   * A rota grava o pedido no estado (`CANDIDATO_PEDIU_TEMPO`).
+   */
+  pediuTempo?: { reagiu: boolean };
   /** Falha de infraestrutura: não confundir com a decisão deliberada de escutar. */
   falhou?: boolean;
   visual?: AcaoVisual[];
@@ -231,6 +236,9 @@ async function responderFala(
   const haPerguntaAtiva = !!(perguntaAberta || estado.perguntaAtiva);
   // Quantas vezes ele já tinha dito que terminou, antes desta.
   const conclusoesAntes = estado.conclusoes ?? 0;
+  // Desde que o Totti devolveu a vez, ele desenhou? (O quadro manda há quantos segundos ele não mexe no desenho.)
+  const desenhouDesdeAFala = entrada.desenhoParadoHaS !== undefined && estado.ultimaFalaDoAgenteEm != null
+    && agora - entrada.desenhoParadoHaS * 1000 > estado.ultimaFalaDoAgenteEm;
   // A leitura do turno é a do Totti único (lib/totti/turno.ts), a mesma do live coding.
   const situacao: SituacaoDoTurno = {
     sala: "quadro",
@@ -239,6 +247,8 @@ async function responderFala(
     falasDoTotti: jaDitas,
     conclusoes: conclusoesAntes,
     paradoHaS: entrada.desenhoParadoHaS,
+    // A última fala dele já devolveu a vez, e agora ele só reage: não se repete o convite.
+    semAcaoDesdeOConvite: !!minhaUltima && devolveAVez(minhaUltima) && eSoReacao(entrada.texto) && !desenhouDesdeAFala,
   };
   // O que o modelo precisa saber do fim: o desenho está concluído e, no fechamento, em que etapa a conversa está.
   const contextoDoFim: ContextoDoFechamento = {
@@ -365,7 +375,8 @@ async function responderFala(
   if (peloSinal) log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["sinal_de_conclusao"] });
   const concluiu = saida.concluiu === true || peloSinal;
   const comConclusao = (e: EstadoSessao) => concluiu ? transicionar(e, { tipo: "CANDIDATO_CONCLUIU", grafo: entrada.grafo }, agora).estado : e;
-  const desfecho = haPerguntaAtiva ? (saida.desfecho ?? null) : null;
+  // "pensando" não é resposta à pergunta: ele pediu tempo (tratado logo abaixo).
+  const desfecho: Desfecho | null = haPerguntaAtiva && saida.desfecho !== "pensando" ? (saida.desfecho ?? null) : null;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho, estado: comConclusao(comFala) });
   /** Silêncio, a não ser que ele tenha feito uma pergunta clara: essa nunca fica sem resposta (regra comum às salas). */
   const calar = (): ResultadoPerguntar => {
@@ -376,6 +387,19 @@ async function responderFala(
     const final = transicionar(comConclusao(comFala), { tipo: "AGENTE_FALOU", texto: fala, ...(v2 ? { perguntou: true } : {}) }, agora).estado;
     return { responder: true, texto: fala, requisito: null, concluiu, desfecho, estado: final, ...(v2 ? { perguntou: true } : {}) };
   };
+  // Ele pediu tempo para pensar ("calma, deixa eu pensar"): não é resposta nem pergunta, e não há o que analisar ainda.
+  // Na primeira vez na entrevista o Totti diz uma reação curta; depois disso fica calado. Nunca acrescenta convite nem
+  // levanta pergunta, e a bola segue com ele (`pedidoDeTempoPendente`, na política). Não gera observação negativa: o
+  // desfecho é null, então nada grava a resposta à pergunta ativa.
+  if (v2 && saida.desfecho === "pensando") {
+    const reagiu = !estado.reacaoAoPensarDita;
+    const fala = reagiu ? reacaoAoPensar(jaDitas) : "";
+    log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["pediu_tempo"] });
+    const comPedido = transicionar(comFala, { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu }, agora).estado;
+    if (!fala) return { responder: false, texto: "", requisito: null, concluiu: false, desfecho: null, pediuTempo: { reagiu }, estado: comPedido };
+    const final = transicionar(comPedido, { tipo: "AGENTE_FALOU", texto: fala }, agora).estado;
+    return { responder: true, texto: fala, requisito: null, concluiu: false, desfecho: null, pediuTempo: { reagiu }, estado: final };
+  }
   const fasesDeDesenho = entrada.fase === "ALTO_NIVEL" || entrada.fase === "APROFUNDAMENTO" || entrada.fase === "FECHAMENTO";
   // As travas da fala são as do Totti único (lib/totti/guardas.ts), as mesmas do live coding: cumprimento fora da
   // abertura, validação, eco do que o candidato disse, reação vazia repetida e, no v2, pergunta que ele já ouviu

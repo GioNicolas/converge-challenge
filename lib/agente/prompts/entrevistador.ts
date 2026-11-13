@@ -13,14 +13,20 @@ import { blocoDaEntrevista, conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAG
 
 export const NOME_SCHEMA_PERGUNTAR = "resposta_entrevistador";
 
+/** O desfecho da pergunta ativa, mais "pensando" (ele pediu tempo; não é resposta a pergunta, ver perguntar.ts). */
+const DESFECHOS_DA_SAIDA = [...DESFECHOS, "pensando"] as const;
+
 export const EsquemaSaidaPerguntar = z.object({
   responder: z.boolean(),
   texto: z.string(),
   requisito: z.string().nullable(),
   /** O candidato sinalizou que terminou o que estava fazendo ("pronto", "terminei"). */
   concluiu: z.boolean().optional(),
-  /** Como ele reagiu à pergunta ativa (só quando há uma). "nao_sabe" e "pulou" encerram o assunto. */
-  desfecho: z.enum(DESFECHOS).nullable().optional(),
+  /**
+   * Como ele reagiu à pergunta ativa (só quando há uma). "nao_sabe" e "pulou" encerram o assunto. "pensando": ele pediu
+   * tempo para pensar; o Totti fica quieto (ou diz uma reação curta, na primeira vez) e não levanta pergunta.
+   */
+  desfecho: z.enum(DESFECHOS_DA_SAIDA).nullable().optional(),
   /** A fala termina numa pergunta de continuação do mesmo fio (item d): resposta vaga ou fio que ainda rende. */
   aprofundar: z.boolean().nullable().optional(),
   /** Ele pediu para encerrar a entrevista inteira (item j). */

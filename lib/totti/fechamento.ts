@@ -195,11 +195,12 @@ export function aceitaEncerrar(fala: string): boolean {
 }
 
 /** O que alguém diz enquanto monta a resposta, sem dizer nada ainda. */
-const SO_ENCHIMENTO = /^(h+m+|hu+m+|a+h+|e+h+|e|bom|entao|pera|perai|espera|calma|aqui|tipo|assim|olha)$/;
+const SO_ENCHIMENTO = /^(h+m+|hu+m+|a+h+|e+h+|e|bom|entao|pera|perai|espera|calma|aqui|tipo|assim|olha|to|pensando)$/;
 
 /**
- * Ele ainda está montando a resposta ("hmm, deixa eu pensar"): o Totti espera em vez de passar para a próxima. Só
- * conta a fala que é inteira de quem pensa; qualquer palavra com conteúdo ("hmm, não sei") já é uma resposta.
+ * Ele ainda está montando a resposta ("hmm, deixa eu pensar", "calma, tô pensando"): o Totti espera em vez de passar
+ * para a próxima. Só conta a fala que é inteira de quem pensa; qualquer palavra com conteúdo ("hmm, não sei") já é uma
+ * resposta.
  */
 export function aindaPensando(fala: string): boolean {
   const t = normalizar(fala);

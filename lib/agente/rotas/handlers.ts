@@ -390,6 +390,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const { fase, texto } = corpo.dados;
   let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual" | "perguntou"> = { responder: false, texto: "", requisito: null, concluiu: false };
   let desfecho: Desfecho | null = null;
+  let pediuTempo: { reagiu: boolean } | undefined;
   let passoDoFechamento: PassoNaSessao | undefined;
   let gravandoUso: Promise<unknown> | undefined;
   // A fala substitui a anterior (ele continuou antes de ouvir a resposta): a anterior e a resposta não ouvida saem.
@@ -421,6 +422,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),
       ...(r.visual !== undefined ? { visual: r.visual } : {}), ...(r.perguntou ? { perguntou: true } : {}) };
     desfecho = r.desfecho;
+    pediuTempo = r.pediuTempo;
     passoDoFechamento = r.passoDoFechamento;
   }
 
@@ -438,6 +440,8 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
     // suspenso, e a fala dele (a pergunta final seguinte, a despedida) já não vale. O quadro fica quieto.
     if (!novo.fechamento) resposta = { responder: false, texto: "", requisito: null, concluiu: resposta.concluiu };
   }
+  // Ele pediu tempo para pensar: a bola segue com ele até ele agir (lib/agente/sessao/politica.ts).
+  if (pediuTempo) novo = transicionar(novo, { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: pediuTempo.reagiu }, agora).estado;
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto, ...(resposta.perguntou ? { perguntou: true } : {}) }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
   const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
@@ -457,7 +461,9 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   await gravandoUso;
   // `fechamento`: a etapa do fechamento comum depois deste turno. Ausente: a entrevista não está fechando (se o
   // quadro achava que estava, é porque ele foi suspenso).
-  return json(fechamento ? { ...resposta, fechamento } : resposta);
+  // Ele pediu tempo: o quadro guarda a hora (o pedido conta como fala do Totti para o silêncio, lib/sessao/silencio.ts).
+  const pediu = pediuTempo ? { pediuTempo: true } : {};
+  return json(fechamento ? { ...resposta, ...pediu, fechamento } : { ...resposta, ...pediu });
 }
 
 // ---------------------------------------------------------------------------------------------

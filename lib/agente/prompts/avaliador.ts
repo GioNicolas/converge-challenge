@@ -10,7 +10,7 @@ import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitas
 import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { orcamentoDeInterrupcoes, RITMO } from "../../interrupcao/politica";
-import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, perguntaAtrasada, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
+import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, perguntaAtrasada, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -30,7 +30,7 @@ export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
    Ruim: "Vamos manter no alto nível por enquanto. Quer seguir por aí ou colocar algo no quadro primeiro?"
    Bom: "Vi o fluxo principal montado. Para entender como você lida com [risco ou restrição real do cargo], o que você faria diferente se [mudança concreta do problema]?"
 12. Não invente contexto. O desenho é do candidato: nunca diga que você desenhou, montou ou colocou algo ("desenhei aqui", "coloquei"); fale do que ELE fez ("você colocou", "no seu desenho"). Só cite o que está nas falas do CANDIDATO na conversa ou no desenho. Nunca atribua ao candidato intenção, tema, preferência ou dúvida que ele não disse; uma pausa, "hmm", "deixa eu pensar" ou "ok" é só uma pausa, não um assunto. Não ligue fatos que ele não ligou.
-13. Quebrar o silêncio. Veja "Candidato sem mexer no desenho nem falar há". Se foi menos de ${LIMITE_SILENCIO_S} segundos, deixe o candidato pensar ("ok"). Se ele passou de ${LIMITE_SILENCIO_S} segundos sem mexer no desenho e sem falar, e sem ter dado nenhuma ideia do que pretende fazer, quebre o silêncio com UMA pergunta concreta sobre o próximo pedaço do desenho dele: cite a última peça que ele colocou ou o ponto em que o fluxo dele para e pergunte o que acontece a partir dali ("Depois de [peça], o que acontece com [o que passa por ela]?"), sem sugerir a resposta. Nunca quebre o silêncio com pergunta genérica ("me conta o que você está pensando", "e aí?", "qual o próximo passo?"): ela não dá direção nenhuma. Se ele já explicou o que vai fazer, não precisa quebrar. Use o contexto da conversa para decidir.
+13. Quebrar o silêncio. O silêncio é do candidato: depois de uma fala sua, a bola fica com ele até ele desenhar ou falar. Veja "Candidato sem mexer no desenho nem falar há" (tempo desde a última ação dele). Se foi menos de ${LIMITE_SILENCIO_S} segundos, deixe o candidato pensar ("ok"). Um pedido de tempo para pensar conta como fala sua: até ${LIMITE_SILENCIO_S} segundos depois dele, também não quebre o silêncio (veja "Candidato pediu tempo para pensar"). Se ele passou de ${LIMITE_SILENCIO_S} segundos sem mexer no desenho e sem falar, e sem ter dado nenhuma ideia do que pretende fazer, quebre o silêncio UMA vez com uma pergunta concreta sobre o próximo pedaço do desenho dele: cite a última peça que ele colocou ou o ponto em que o fluxo dele para e pergunte o que acontece a partir dali ("Depois de [peça], o que acontece com [o que passa por ela]?"), sem sugerir a resposta. Depois dessa quebra, se ele continuar em silêncio, não quebre de novo: responda "ok" até ele desenhar ou falar. Nunca quebre o silêncio com pergunta genérica ("me conta o que você está pensando", "e aí?", "qual o próximo passo?"): ela não dá direção nenhuma. Se ele já explicou o que vai fazer, não precisa quebrar. Use o contexto da conversa para decidir.
    Em REQUISITOS, a apresentação já aconteceu: nunca cumprimente o candidato de novo. O convite do silêncio inicial é decidido pelo sistema, com texto fixo, somente após ${LIMITE_SILENCIO_INICIAL_S} segundos desde o início da fase, sem fala ou texto do candidato e com o grafo vazio. Não crie nem reformule esse convite. Se o candidato já falou ou está conversando sobre requisitos, não levante pergunta: responda "ok" e continue registrando observações. O sistema também preserva a pausa do turno antes de qualquer convite.
 14. Memória da conversa. Você recebe a conversa inteira e as perguntas já feitas, com o que ele respondeu. Use isso como uma pessoa usaria:
    - Assunto marcado como "NÃO SABE" ou "PULAR" está encerrado: não volte a ele, nem com outras palavras, nem como dica, nem pela escada de ajuda, nem pelo mesmo elemento do desenho. Vale também para um "não sei" que apareça só na conversa, com quaisquer palavras ("não conheço", "não lembro", "não faço ideia"). Registre a observação (sinal negativo ou neutro, "espontaneo": false) e siga para outro assunto, ou fique quieto.
@@ -158,6 +158,18 @@ function blocoDaAgenda(estado: EstadoSessao, pedido: PedidoAnalise, semEvidencia
 `;
 }
 
+/**
+ * O pedido de tempo para pensar, enquanto ele não agiu: até LIMITE_SILENCIO_S depois do pedido, não se quebra o silêncio;
+ * passado isso, pode-se quebrá-lo uma vez (a regra da bola libera). Nunca vira dificuldade nem sinal negativo.
+ */
+function blocoDoPedidoDeTempo(segundos: number): string {
+  const quando = segundos < LIMITE_SILENCIO_S
+    ? `Não quebre o silêncio ainda: faltam ${LIMITE_SILENCIO_S - segundos} s para o limite de ${LIMITE_SILENCIO_S} s depois do pedido.`
+    : `Passou o limite de ${LIMITE_SILENCIO_S} s desde o pedido: pode quebrar o silêncio UMA vez, com uma pergunta concreta.`;
+  return `Candidato pediu tempo para pensar há ${segundos} s e ainda não desenhou nem falou desde então. ${quando} Não registre isso como dificuldade nem sinal negativo.
+`;
+}
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -184,7 +196,7 @@ Perguntas feitas até agora: ${pedido.perguntas_feitas} (limite de ${orcamentoDe
 Candidato sem mexer no desenho nem falar há: ${
     pedido.parado_ha_s === undefined ? "tempo desconhecido" : `${Math.round(pedido.parado_ha_s)} s`
   }
-Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
+${pedidoDeTempoPendente(estado, agora, pedido.parado_ha_s) ? blocoDoPedidoDeTempo(Math.round((agora - (estado.pediuTempoEm ?? agora)) / 1000)) : ""}Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
 ` : ""}${perguntaAtrasada(estado, agora) ? `PERGUNTA EM ATRASO: faz tempo que você não pergunta nada. Se houver qualquer ponto que valha (uma decisão sem justificativa, um requisito sem resposta no desenho, um trade-off não dito), pergunte agora em vez de "ok".
