@@ -5,7 +5,7 @@
 import { blocoDoBriefing } from "../briefing";
 import type { Kit, Problema } from "../kits/tipos";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
-import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
+import { criteriosDoPlanoSemEvidencia, criteriosSemEvidencia, nomesDosCriteriosDoPlano, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
 import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
@@ -120,7 +120,7 @@ REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
 - "nota": versão escrita no quadro, no máximo 40 caracteres (ex.: "Prazo: e se atrasar?"), coerente com a pergunta e com os elementos circulados. Para "ok", null.
 - "elementos": ids curtos que existem no grafo recebido (ex.: "e1"), SOMENTE os elementos sobre os quais a pergunta fala. Se a pergunta é sobre um requisito, sobre algo que ainda não está no quadro, ou sobre o desenho como um todo, use lista vazia. Nunca invente ids.
 - "degrau": 1, 2 ou 3 conforme a escada de ajuda; senão null.
-- "observacoes": 0 a 3 itens, cada um com "criterio" (id da rubrica), "sinal" (positivo, negativo ou neutro), "espontaneo" (true/false) e "evidencia" (curta, citando o elemento do desenho ou um trecho da fala). Registre só o que é novo desde as análises anteriores: nunca repita, com outras palavras, uma observação que você já fez. Registre também o que ele FEZ e PENSOU (sinal neutro ou positivo): que peças colocou, como ligou uma à outra, que motivo deu. O relatório precisa contar a solução dele, não só o que faltou. Pedido de repetição ou esclarecimento ("como é?", "não entendi", "repete"), correção ao entrevistador ("não tem interrogação aí") e pedido para encerrar NÃO viram observação: não dizem nada sobre o candidato, e a falha pode ter sido da pergunta.
+- "observacoes": 0 a 3 itens, cada um com "criterio" (id da rubrica; para um critério da recrutadora, o nome exato dele como está em "Critérios da recrutadora"), "sinal" (positivo, negativo ou neutro), "espontaneo" (true/false) e "evidencia" (curta, citando o elemento do desenho ou um trecho da fala). Registre só o que é novo desde as análises anteriores: nunca repita, com outras palavras, uma observação que você já fez. Registre também o que ele FEZ e PENSOU (sinal neutro ou positivo): que peças colocou, como ligou uma à outra, que motivo deu. O relatório precisa contar a solução dele, não só o que faltou. Pedido de repetição ou esclarecimento ("como é?", "não entendi", "repete"), correção ao entrevistador ("não tem interrogação aí") e pedido para encerrar NÃO viram observação: não dizem nada sobre o candidato, e a falha pode ter sido da pergunta.
 - "avancar_fase": true somente quando a fase atual é ALTO_NIVEL e o candidato já mostrou o suficiente dela: as peças principais do desenho estão no quadro e ligadas entre si (o caminho principal do problema aparece de ponta a ponta), de modo que o próximo passo natural é aprofundar. É um sinal de progresso, independente de "status": pode vir com "ok". Em qualquer outra fase, ou se o desenho ainda está incompleto ou o candidato acabou de começar, false. Não use para apressar nem para punir; na dúvida, false.
 - "parteFechada": true somente quando a fase atual é ALTO_NIVEL ou APROFUNDAMENTO, o candidato fechou uma parte do desenho (princípio 1) e você tem o que perguntar sobre a parte inteira. Parte pela metade, peça solta ou texto solto: false. Em REQUISITOS e FECHAMENTO, false. Na dúvida, false.
 - Na dúvida entre perguntar e ficar quieto: com pergunta permitida, uma parte fechada do desenho ainda sem explicação (ALTO_NIVEL, com "parteFechada": true) ou um ponto do plano ou da rubrica sem evidência (APROFUNDAMENTO), pergunte; em REQUISITOS e FECHAMENTO, fique quieto ("ok").
@@ -144,6 +144,27 @@ function blocoDoEmpecilho(estado: EstadoSessao, agora: number): string {
   return `MUDANÇA NO PROBLEMA (você anunciou há ${ha} s; vale daqui pra frente): ${JSON.stringify(e.fala)}
 O que ela pede do desenho (só para você; nunca diga nem sugira): ${e.exige}
 Acompanhe como o candidato se adapta: se ele revisa o desenho onde a mudança pega, ignora a mudança ou recomeça do zero. Registre isso nas observações do critério mais ligado, com a evidência começando por "Após a mudança:". Não repita a mudança nem dê a solução; se ele ignorar a mudança, uma pergunta curta sobre o efeito dela no desenho é válida.
+`;
+}
+
+/**
+ * A partir dessa fração do tempo total, a análise prioriza os critérios da recrutadora (do plano) ainda sem evidência.
+ * Antes disso, só lista. Mesmo corte do live coding (AGENDA_START_FRACTION em lib/agents/policy.ts, 30% nas duas salas).
+ */
+export const A_PARTIR_DA_FRACAO_CRITERIOS = 0.3;
+
+/**
+ * Critérios que a recrutadora pediu no plano e ainda sem evidência. Aparecem sempre que o plano tem critérios; a partir
+ * de A_PARTIR_DA_FRACAO_CRITERIOS do tempo, a próxima pergunta deve puxar um deles. Os nomes vêm da recrutadora: vão
+ * como dado, nunca como instrução. Sem critérios no plano: string vazia.
+ */
+function blocoDosCriteriosDoPlano(estado: EstadoSessao, total: ReturnType<typeof tempoDaEntrevista>): string {
+  if (!nomesDosCriteriosDoPlano(estado.plano).length) return "";
+  const pendentes = criteriosDoPlanoSemEvidencia(estado);
+  const linha = `Critérios da recrutadora ainda sem evidência: ${pendentes.length ? dadoEmLinha("criterios", pendentes.join(" | ")) : "nenhum"}\n`;
+  const fracao = total.totalMin > 0 ? total.decorridoMin / total.totalMin : 0;
+  if (!pendentes.length || fracao < A_PARTIR_DA_FRACAO_CRITERIOS) return linha;
+  return `${linha}PRIORIDADE DOS CRITÉRIOS DA RECRUTADORA: já passou ${Math.round(fracao * 100)}% do tempo e ainda faltam critérios dela. Quando for perguntar (parte fechada), prefira uma pergunta que traga evidência de um destes critérios, ligada ao que ELE desenhou, sem citar o nome do critério ao candidato. Cada um deve ser puxado pelo menos uma vez antes do fechamento.
 `;
 }
 
@@ -183,6 +204,9 @@ export function montarSistemaDinamico(
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
   const bloqueio = motivoBloqueioPlin(estado, agora, undefined, { paradoHaS: pedido.parado_ha_s });
   const semEvidencia = criteriosSemEvidencia(estado);
+  // A linha da rubrica deixa de fora os critérios do plano (eles têm a própria linha, ver `blocoDosCriteriosDoPlano`).
+  const doPlano = nomesDosCriteriosDoPlano(estado.plano);
+  const rubricaSemEvidencia = semEvidencia.filter((c) => !doPlano.includes(c));
   const pendente = estado.perguntaPendente;
   // A conversa inteira do servidor, mais as falas recentes que só o quadro tem (a apresentação, o desafio).
   const conversa = conversaEmTexto(historicoDaConversa(estado.conversa, pedido.conversa_recente), "Entrevistador (você)");
@@ -204,8 +228,8 @@ ${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perg
 ` : ""}${tetoDaPergunta(estado, agora, pecasDoGrafo(pedido.grafo)) ? `PERGUNTA EM ATRASO: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta e o desenho mudou desde então. Pergunte agora sobre a parte mais forte do desenho, citando as peças pelo nome, mesmo que ela ainda não esteja fechada, em vez de "ok".
 ` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
-Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}
-${blocoDaAgenda(estado, pedido, semEvidencia, agora)}${briefing ? `
+Critérios da rubrica ainda SEM evidência: ${rubricaSemEvidencia.length ? rubricaSemEvidencia.join(", ") : "nenhum"}
+${blocoDosCriteriosDoPlano(estado, total)}${blocoDaAgenda(estado, pedido, semEvidencia, agora)}${briefing ? `
 ${briefing}
 ` : ""}
 Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):

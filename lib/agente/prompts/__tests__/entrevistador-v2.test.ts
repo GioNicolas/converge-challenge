@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FalaRecente } from "../../sessao/tipos";
+import type { PlanoDaSessao } from "../../plano";
 import { blocoDoRitmo, blocosDoSistemaDinamicoPerguntarV2 } from "../entrevistador-v2";
 import { KIT_SYSTEM_DESIGN as kit } from "../../kits/system-design";
 import { estadoInicial } from "../../sessao/estado";
@@ -39,5 +40,36 @@ describe("notação do desenho no prompt da conversa (#81)", () => {
       assert.ok(texto.includes(trecho), `faltou: ${trecho}`);
     }
     assert.ok(texto.indexOf("COMO LER O DESENHO ATUAL") < texto.indexOf("Desenho atual (dados"));
+  });
+});
+
+describe("critérios do plano em 'Ainda sem nenhum sinal' (#129, bloco D)", () => {
+  const plano: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [
+      { nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 },
+      { nome: "Falha no gateway", descricao: "", peso: 1 },
+    ],
+  };
+  const textoDo = (estado: ReturnType<typeof estadoInicial>) =>
+    blocosDoSistemaDinamicoPerguntarV2(estado, kit, "APROFUNDAMENTO", [], "- [s1] A → (sem destino)", undefined, [], Date.now())
+      .map((b) => b.texto).join("");
+  const semSinal = (texto: string) => texto.match(/Ainda sem nenhum sinal[^\n]*/)?.[0] ?? "";
+
+  it("lista os critérios do plano sem evidência, pelos nomes, junto com os da rubrica", () => {
+    const linha = semSinal(textoDo(estadoInicial({ criterios: kit.criterios.map((c) => c.id), plano })));
+    assert.ok(linha.includes("Idempotência") && linha.includes("Falha no gateway"), linha);
+  });
+
+  it("some da lista quando o critério do plano ganha evidência", () => {
+    const base = estadoInicial({ criterios: kit.criterios.map((c) => c.id), plano });
+    const comEvidencia = { ...base, cobertura: { ...base.cobertura, Idempotência: { positivo: 1, negativo: 0, neutro: 0 } } };
+    const linha = semSinal(textoDo(comEvidencia));
+    assert.ok(!linha.includes("Idempotência") && linha.includes("Falha no gateway"), linha);
+  });
+
+  it("sem plano, a lista é a da rubrica (sem nomes de plano)", () => {
+    const linha = semSinal(textoDo(estadoInicial({ criterios: kit.criterios.map((c) => c.id) })));
+    assert.ok(!linha.includes("Idempotência"));
   });
 });

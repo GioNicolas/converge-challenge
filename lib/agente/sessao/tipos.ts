@@ -56,6 +56,9 @@ export const EsquemaPedidoAnalise = z.object({
 });
 export type PedidoAnalise = z.infer<typeof EsquemaPedidoAnalise>;
 
+// Contrato com o scorecard (Pessoa 5): `criterio` é o id de um critério da rubrica do kit OU o nome exato de um critério
+// do plano da recrutadora (`plano.criterios[].nome`). Observação com o nome do plano é evidência daquele critério da
+// recrutadora, e a cobertura do estado tem uma chave por nome (ver `estadoInicial` e `criteriosDoPlanoSemEvidencia`).
 export const EsquemaObservacao = z.object({
   criterio: z.string(),
   sinal: z.enum(["positivo", "negativo", "neutro"]),

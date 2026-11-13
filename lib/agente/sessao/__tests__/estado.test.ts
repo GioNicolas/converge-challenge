@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  criteriosDoPlanoSemEvidencia,
   criteriosSemEvidencia,
   estadoInicial,
+  nomesDosCriteriosDoPlano,
   transicionar,
   type EstadoSessao,
   type EventoSessao,
 } from "../estado";
+import type { PlanoDaSessao } from "../../plano";
 import { intervaloMinimoMs, orcamentoDeInterrupcoes } from "../../../interrupcao/politica";
 import type { Fase, RespostaAnalise } from "../tipos";
 
@@ -338,6 +341,68 @@ describe("SINCRONIZAR_FASE", () => {
     assert.equal(b.estado.fase, "APROFUNDAMENTO");
     assert.deepEqual(b.efeitos, []);
     assert.equal(transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "ENCERRADA" }, T0).estado.fase, "ENCERRADA");
+  });
+});
+
+describe("critérios do plano na cobertura (#129, bloco D)", () => {
+  const plano: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [
+      { nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 },
+      { nome: "Falha no gateway", descricao: "o que acontece se o gateway cair", peso: 1 },
+      { nome: "escalabilidade", descricao: "", peso: 1 },
+    ],
+  };
+  const RUBRICA = ["escalabilidade", "dados"];
+
+  it("a cobertura tem uma chave por critério do plano, pelo nome, sem duplicar o id da rubrica", () => {
+    const e = estadoInicial({ criterios: RUBRICA, plano });
+    assert.deepEqual(Object.keys(e.cobertura).sort(), ["Falha no gateway", "Idempotência", "dados", "escalabilidade"]);
+    assert.deepEqual(e.cobertura.Idempotência, { positivo: 0, negativo: 0, neutro: 0 });
+  });
+
+  it("sem plano, a cobertura é só a rubrica (como antes)", () => {
+    const e = estadoInicial({ criterios: RUBRICA });
+    assert.deepEqual(Object.keys(e.cobertura), RUBRICA);
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(e), []);
+  });
+
+  it("nomes vazios ou repetidos do plano não viram critério", () => {
+    const sujo: PlanoDaSessao = { ...plano, criterios: [{ nome: "  ", descricao: "", peso: 1 }, { nome: "Idempotência", descricao: "", peso: 1 }, { nome: "Idempotência", descricao: "x", peso: 1 }] };
+    assert.deepEqual(nomesDosCriteriosDoPlano(sujo), ["Idempotência"]);
+    assert.deepEqual(Object.keys(estadoInicial({ plano: sujo }).cobertura), ["Idempotência"]);
+  });
+
+  it("criteriosDoPlanoSemEvidencia lista só os do plano, pelo nome", () => {
+    const e = estadoInicial({ criterios: RUBRICA, plano });
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(e), ["Idempotência", "Falha no gateway", "escalabilidade"]);
+    assert.deepEqual(criteriosSemEvidencia(e), ["escalabilidade", "dados", "Idempotência", "Falha no gateway"]);
+  });
+
+  it("uma observação com o nome do plano soma na cobertura daquele critério e o tira da lista", () => {
+    let e = estadoInicial({ criterios: RUBRICA, plano });
+    e = transicionar(e, { tipo: "COMECAR" }, T0).estado;
+    e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
+    const ok: RespostaAnalise = {
+      status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
+      observacoes: [{ criterio: "Idempotência", sinal: "positivo", espontaneo: true, evidencia: "chave por pedido" }],
+    };
+    e = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000).estado;
+    assert.deepEqual(e.cobertura.Idempotência, { positivo: 1, negativo: 0, neutro: 0 });
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(e), ["Falha no gateway", "escalabilidade"]);
+    assert.ok(!criteriosSemEvidencia(e).includes("Idempotência"));
+  });
+
+  it("estado antigo (plano sem as chaves na cobertura) conta os critérios do plano como sem evidência", () => {
+    const antigo: EstadoSessao = { ...estadoInicial({ criterios: RUBRICA, plano }), cobertura: { escalabilidade: { positivo: 1, negativo: 0, neutro: 0 }, dados: { positivo: 0, negativo: 0, neutro: 0 } } };
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(antigo), ["Idempotência", "Falha no gateway"]);
+    assert.deepEqual(criteriosSemEvidencia(antigo), ["dados", "Idempotência", "Falha no gateway"]);
+  });
+
+  it("o estado com plano sobrevive a JSON.stringify/parse", () => {
+    const e = estadoInicial({ criterios: RUBRICA, plano });
+    assert.deepEqual(JSON.parse(JSON.stringify(e)), e);
   });
 });
 

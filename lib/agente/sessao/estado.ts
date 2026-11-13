@@ -326,6 +326,11 @@ function semFechamento(estado: EstadoSessao): EstadoSessao {
 /** Fases em que "terminei" fala do desenho (em REQUISITOS ele só terminou de perguntar). */
 const FASES_DE_DESENHO: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
 
+/** Nomes dos critérios que a recrutadora definiu no plano (sem vazios nem repetidos). Cada um é uma chave da cobertura. */
+export function nomesDosCriteriosDoPlano(plano: PlanoDaSessao | null | undefined): string[] {
+  return [...new Set((plano?.criterios ?? []).map((c) => c.nome).filter((nome) => nome.trim() !== ""))];
+}
+
 export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; plano?: PlanoDaSessao | null } = {}): EstadoSessao {
   return {
     fase: "AGUARDANDO",
@@ -342,19 +347,37 @@ export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; p
     ultimaRespostaEm: null,
     perguntas: [],
     observacoes: [],
+    // Cobertura: a rubrica do kit mais os critérios do plano, pelo nome. Um nome igual a um id da rubrica é o mesmo
+    // critério (a chave aparece uma vez só).
     cobertura: Object.fromEntries(
-      (opcoes.criterios ?? []).map((c) => [c, { positivo: 0, negativo: 0, neutro: 0 }]),
+      [...new Set([...(opcoes.criterios ?? []), ...nomesDosCriteriosDoPlano(opcoes.plano)])]
+        .map((c) => [c, { positivo: 0, negativo: 0, neutro: 0 }]),
     ),
     conversa: [],
     empecilho: null,
   };
 }
 
-/** Critérios da rubrica que ainda não têm nenhuma evidência. */
+/**
+ * Critérios sem nenhuma evidência: os da rubrica e os do plano da recrutadora (pelo nome). Estado antigo, sem as
+ * chaves do plano na cobertura, conta os do plano mesmo assim.
+ */
 export function criteriosSemEvidencia(estado: EstadoSessao): string[] {
-  return Object.entries(estado.cobertura)
+  const daCobertura = Object.entries(estado.cobertura)
     .filter(([, e]) => e.positivo + e.negativo + e.neutro === 0)
     .map(([criterio]) => criterio);
+  return [...new Set([...daCobertura, ...criteriosDoPlanoSemEvidencia(estado)])];
+}
+
+/**
+ * Só os critérios do plano da recrutadora que ainda não têm nenhuma evidência (pelo nome). Para o fechamento decidir
+ * se pode encerrar cedo (bloco F do #129, ainda não feito).
+ */
+export function criteriosDoPlanoSemEvidencia(estado: EstadoSessao): string[] {
+  return nomesDosCriteriosDoPlano(estado.plano).filter((nome) => {
+    const e = Object.prototype.hasOwnProperty.call(estado.cobertura, nome) ? estado.cobertura[nome] : undefined;
+    return !e || e.positivo + e.negativo + e.neutro === 0;
+  });
 }
 
 const PROXIMA_FASE: Partial<Record<Fase, Fase>> = {
