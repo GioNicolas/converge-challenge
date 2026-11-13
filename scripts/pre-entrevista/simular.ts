@@ -582,7 +582,6 @@ function imprimirTranscricao(persona: Persona, sessao: Sessao, registros: Regist
 
 function imprimirConfig(sessao: Sessao): InterviewConfig | undefined {
   console.log("\n--- trade-off e competências ---");
-  console.log(`  oferta na abertura: ${sessao.plano.tradeoffNaAbertura ? "sim" : "não"}`);
   console.log(`  decisões de troca: ${JSON.stringify(sessao.plano.decisoesTradeoff)}`);
   console.log(`  formato escolhido na troca: ${sessao.plano.modoEscolhido ?? "(nenhum)"}`);
   console.log(

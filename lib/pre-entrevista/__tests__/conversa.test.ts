@@ -2,7 +2,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  aberturaDoAgente,
   confirmacaoDeterministica,
+  falaDePerguntarAjuste,
+  fechamentoDoResumo,
   falaDelaNaoEraResposta,
   falaParaDigitar,
   focoDoResumo,
@@ -15,7 +18,8 @@ import {
   semRepeticaoDaFalaDela,
 } from "../conversa";
 import { aplicarPasso, type Passo } from "../planejador";
-import { chatFalso, ela, saida, sessaoAberta, totti } from "./apoio";
+import { criarSessao } from "../sessoes";
+import { CLASSIFICACAO, COMPETENCIAS, VAGA, chatFalso, ela, saida, sessaoAberta, totti } from "./apoio";
 
 describe("perguntaEmAberto", () => {
   it("fala com uma pergunta só: a pergunta inteira", () => {
@@ -80,7 +84,7 @@ describe("montarMensagensConversa", () => {
 
   it("a entrada traz a pergunta em aberto numa linha própria", () => {
     const [, entrada] = montarMensagensConversa(sessaoAberta([ela("pode repetir?")]), { tipo: "confirmar_inicio" });
-    assert.match(entrada.content, /^PERGUNTA SUA EM ABERTO: É isso, ou quer focar em outra coisa\?$/m);
+    assert.match(entrada.content, /^PERGUNTA SUA EM ABERTO: O que pesa mais pra você nessa contratação\?$/m);
   });
 
   it("sem pergunta em aberto, a linha diz (nenhuma)", () => {
@@ -218,7 +222,7 @@ describe("responder: as travas obedecem ao movimento", () => {
   it("no passo confirmar_inicio, sem movimento, a fala sem pergunta continua ganhando uma", async () => {
     const sessao = sessaoAberta([ela("hum")]);
     const r = await responder(sessao, { tipo: "confirmar_inicio" }, { chat: chatFalso(saida("A proposta é live coding pra nível pleno.")).chat });
-    assert.equal(r.texto, "A proposta é live coding pra nível pleno. Prefere seguir assim ou mudar alguma coisa?");
+    assert.equal(r.texto, "A proposta é live coding pra nível pleno. Posso seguir assim?");
   });
 
   it("fala `responder` mantém a palavra de reconhecimento do começo; sem movimento ela sai", async () => {
@@ -261,7 +265,7 @@ describe("responder: as travas obedecem ao movimento", () => {
     const r = await responder(sessao, { tipo: "resumo_final" }, { chat: chatFalso(saida("Vai ser live coding pra nível pleno. Vou olhar a qualidade do código.")).chat });
     assert.match(r.texto, /^Vai ser live coding pra nível pleno\. Vou olhar a qualidade do código\. /);
     assert.match(r.texto, /minutos/);
-    assert.match(r.texto, /posso finalizar\?$/);
+    assert.match(r.texto, /quer (mudar|ajustar)( mais)? alguma coisa\?$/i);
   });
 
   it("texto puro, sem JSON, segue valendo como fala", async () => {
@@ -593,5 +597,68 @@ describe("esclarecer termina em pergunta (issue #113)", () => {
   it("o prompt traz o exemplo de pergunta direta no esclarecer", () => {
     const [sistema] = montarMensagensConversa(sessaoAberta(), APROFUNDAR);
     assert.match(sistema.content, /Pergunte de forma direta, não\s+indireta/);
+  });
+});
+
+/** As frases de uma fala: termina em ".", "!" ou "?" seguido de espaço (não corta em "Node.js"). */
+const frases = (texto: string) => texto.split(/(?<=[.!?])\s+/).filter((f) => f.trim());
+
+describe("abertura: cumprimenta, diz o que entendeu da vaga e faz uma pergunta (issue #127)", () => {
+  const resumoVaga = "APIs de pagamento em Node.js, com Postgres e filas";
+  const comResumo = (classificacao = CLASSIFICACAO) => ({ ...criarSessao(VAGA, classificacao, Date.now(), COMPETENCIAS), resumoVaga });
+
+  it("com o resumo da vaga: no máximo 2 frases, a primeira com o cargo e o resumo, e uma pergunta só", () => {
+    const fala = aberturaDoAgente(comResumo());
+    assert.equal(frases(fala).length, 2, fala);
+    assert.match(frases(fala)[0], /Backend Pleno.*APIs de pagamento em Node\.js, com Postgres e filas\.$/);
+    assert.equal(fala.match(/\?/g)?.length, 1);
+    assert.ok(fala.endsWith("?"));
+  });
+
+  it("não propõe formato, nível nem foco: isso vem nos passos seguintes", () => {
+    const fala = aberturaDoAgente(comResumo());
+    assert.doesNotMatch(fala, /live coding|system design|nível|júnior|sênior|olhando/i);
+  });
+
+  it("sem resumo da vaga, ainda cabe em 2 frases", () => {
+    const fala = aberturaDoAgente(criarSessao(VAGA, CLASSIFICACAO, Date.now(), COMPETENCIAS));
+    assert.ok(frases(fala).length <= 2, fala);
+  });
+
+  it("com o formato incerto, a pergunta é o formato, e continua em 2 frases", () => {
+    const fala = aberturaDoAgente(comResumo({ ...CLASSIFICACAO, confirmar: ["mode"] }));
+    assert.ok(frases(fala).length <= 2, fala);
+    assert.match(fala, /live coding ou system design\?$/);
+  });
+
+  it("com o nível incerto, a abertura não pergunta o nível (o passo perguntar_nivel pergunta)", () => {
+    const fala = aberturaDoAgente(comResumo({ ...CLASSIFICACAO, nivelExplicito: 0.2, confirmar: ["seniority"] }));
+    assert.ok(frases(fala).length <= 2, fala);
+    assert.doesNotMatch(fala, /júnior/);
+  });
+});
+
+describe("perguntas de fechamento e de ajuste (issue #127)", () => {
+  it("o fechamento do resumo tem uma alternativa só: não oferece 'ou' entre ajustar e finalizar", () => {
+    for (let v = 0; v < 6; v++) {
+      const fala = fechamentoDoResumo(v);
+      assert.match(fala, /^Quer (mudar|ajustar)/);
+      assert.doesNotMatch(fala, /\bou\b|finalizar/i);
+    }
+  });
+
+  it("a pergunta de ajuste é uma frase só, de pergunta, em todas as variações", () => {
+    for (let v = 0; v < 6; v++) {
+      const fala = falaDePerguntarAjuste(v);
+      assert.equal(frases(fala).length, 1, fala);
+      assert.ok(fala.endsWith("?"));
+    }
+  });
+
+  it("o passo perguntar_ajuste sai fixo, sem chamar o modelo", async () => {
+    const falso = chatFalso(saida("não devia ser usada"));
+    const r = await responder(sessaoAberta([ela("quero")]), { tipo: "perguntar_ajuste" }, { chat: falso.chat });
+    assert.equal(falso.chamadas.length, 0);
+    assert.ok(r.texto.endsWith("?"));
   });
 });

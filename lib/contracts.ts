@@ -62,6 +62,8 @@ export const InterviewConfig = z.object({
   focus: z.array(z.object({ area: FocusArea, weight: z.number().min(0).max(1) })),
   /** Notas livres da recrutadora ("time pequeno, precisa de autonomia"). */
   recruiterNotes: z.string().default(""),
+  /** Instruções de como o Totti conduz a entrevista ("redirecione se errar o escopo"). Não entram na nota. */
+  conductNotes: z.array(z.string()).optional(),
   /** Tom que a recrutadora pediu. Sem valor = amigável. */
   tone: z.enum(["amigavel", "desafiador"]).optional(),
   /** Política de dicas: livres = todas as do problema; leves = no máximo 1; nenhuma = nenhuma. Sem valor = livres. */

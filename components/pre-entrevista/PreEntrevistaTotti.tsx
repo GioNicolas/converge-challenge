@@ -16,7 +16,7 @@ import type { InterviewConfig } from "@/lib/contracts";
 import type { Vaga } from "@/lib/pre-entrevista/classificador";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
 import type { EstadoSessao } from "@/lib/pre-entrevista/sessoes";
-import { buscarSessao, criarSessao, enviarFala, finalizar, usarServidor } from "@/lib/pre-entrevista/tela/cliente";
+import { buscarSessao, criarSessao, enviarFala, finalizar, salvarRascunho, usarServidor } from "@/lib/pre-entrevista/tela/cliente";
 import { curvaSuave } from "@/lib/design/motion";
 import EntradaVaga from "./EntradaVaga";
 import LeituraDaVaga from "./LeituraDaVaga";
@@ -92,6 +92,38 @@ export default function PreEntrevistaTotti({
   }
 
   const abrirConversa = useCallback(() => setEtapa("conversa"), []);
+  // Do plano de volta à conversa: ela nunca desmonta (só se esconde), então reabre em silêncio, com o texto e a
+  // rolagem de antes. `seguirConversando` tira o cartão de "plano pronto" de cima do campo de texto.
+  // O que ela editou na revisão é guardado no servidor ao voltar (fica fixado até ela falar daquilo de novo).
+  // `base` é o rascunho de que ela partiu ao abrir a revisão: o servidor fixa só o que mudou em relação a ele.
+  const editadoNaRevisao = useRef<{ editado: Rascunho; base: Rascunho } | null>(null);
+  // A edição que o servidor ainda não confirmou (salvando ou com falha). Enquanto existir, o que chega do servidor (a
+  // busca de 1,5 s, a resposta do Totti) não troca o rascunho da tela: senão a edição sumia sem ela ver.
+  const edicaoPendente = useRef<Rascunho | null>(null);
+  const comPendente = useCallback((e: EstadoSessao): EstadoSessao => (edicaoPendente.current ? { ...e, rascunho: edicaoPendente.current } : e), []);
+  const sessaoId = estado?.id;
+  const voltarParaConversa = useCallback(() => {
+    setSeguirConversando(true);
+    setEtapa("conversa");
+    const guardado = editadoNaRevisao.current;
+    editadoNaRevisao.current = null;
+    if (!guardado || !sessaoId) return;
+    const { editado, base } = guardado;
+    edicaoPendente.current = editado;
+    // Já na tela: se ela reabrir o plano antes da resposta, vê o que editou.
+    setEstado((atual) => (atual ? { ...atual, rascunho: editado } : atual));
+    // Uma segunda tentativa se a primeira falhar; se também falhar, a edição fica na tela (e vai ao publicar) com um aviso.
+    salvarRascunho(sessaoId, editado, base)
+      .catch(() => salvarRascunho(sessaoId, editado, base))
+      .then((novo) => {
+        // Outra edição pode ter entrado enquanto esta salvava: só esta limpa o pendente.
+        if (edicaoPendente.current === editado) edicaoPendente.current = null;
+        setEstado((atual) => (atual?.id === novo.id ? comPendente({ ...atual, rascunho: novo.rascunho }) : atual));
+      })
+      .catch((e) => {
+        setErro(`Não consegui guardar o que você mudou no plano: ${e instanceof Error ? e.message : String(e)}. A edição continua na tela e vai ao publicar.`);
+      });
+  }, [sessaoId, comPendente]);
 
   // Workspace: retoma a sessão salva (se ainda existir) ou começa a leitura da vaga. Roda uma vez só.
   const iniciou = useRef(false);
@@ -116,7 +148,7 @@ export default function PreEntrevistaTotti({
     setEstado({ ...estado, transcricao: [...estado.transcricao, { role: "recrutadora", text: texto }] });
     try {
       const [novo] = await Promise.all([enviarFala(estado.id, texto), esperar(RESPOSTA_MINIMA_MS)]);
-      setEstado(novo);
+      setEstado(comPendente(novo));
     } catch (e) {
       setEstado(estado);
       setErro(`O Totti não respondeu: ${e instanceof Error ? e.message : String(e)}`);
@@ -138,7 +170,7 @@ export default function PreEntrevistaTotti({
             atual &&
             (novo.transcricao.length > atual.transcricao.length ||
               (novo.transcricao.length === atual.transcricao.length && novo.status.versaoExtraida >= atual.status.versaoExtraida))
-              ? novo
+              ? comPendente(novo)
               : atual,
           );
       } catch {
@@ -146,7 +178,7 @@ export default function PreEntrevistaTotti({
       }
     }, 1500);
     return () => clearInterval(t);
-  }, [etapa, estado?.id]);
+  }, [etapa, estado?.id, comPendente]);
 
   async function confirmar(rascunho: Rascunho) {
     if (!estado) return;
@@ -239,7 +271,7 @@ export default function PreEntrevistaTotti({
 
         {(etapa === "conversa" || etapa === "plano") && estado && (
           <motion.div
-            key={etapa}
+            key="conversa-e-plano"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -250,8 +282,8 @@ export default function PreEntrevistaTotti({
             <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 max-md:grid-cols-[1fr_auto]">
               <div className="flex min-w-0 items-center gap-1 justify-self-start rounded-full bg-superficie py-1.5 pr-4 pl-1.5">
                 <button
-                  onClick={etapa === "plano" && !config ? () => setEtapa("conversa") : (onSair ?? novaEntrevista)}
-                  aria-label={etapa === "plano" ? "Voltar à conversa" : onSair ? "Voltar para as vagas" : "Começar de novo"}
+                  onClick={onSair ?? novaEntrevista}
+                  aria-label={onSair ? "Voltar para as vagas" : "Começar de novo"}
                   className="flex size-8 shrink-0 items-center justify-center rounded-full text-texto-suave transition-colors hover:bg-fundo hover:text-texto"
                 >
                   <ArrowLeft size={16} />
@@ -282,10 +314,26 @@ export default function PreEntrevistaTotti({
                     </motion.span>
                   </motion.button>
                 )}
+                {/* Um só botão para ir e voltar entre a conversa e o plano. */}
+                {etapa === "plano" && !config && (
+                  <button
+                    onClick={voltarParaConversa}
+                    className="flex items-center gap-2 rounded-full bg-superficie px-4 py-2.5 text-[14px] font-medium text-texto transition-colors hover:bg-superficie-2"
+                  >
+                    <ArrowLeft size={15} /> Voltar à conversa
+                  </button>
+                )}
               </div>
             </header>
 
-            {etapa === "conversa" ? (
+            {/* Conversa e plano ficam montados juntos: a que não está à vista só se esconde (e fica inerte),
+                para não perder rolagem nem texto digitado, nem repetir a fala de encerramento. */}
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div
+                inert={etapa !== "conversa"}
+                aria-hidden={etapa !== "conversa"}
+                className={`flex min-h-0 flex-1 flex-col ${etapa !== "conversa" ? "pointer-events-none invisible absolute inset-0" : ""}`}
+              >
               <div
                 className={`mx-auto grid min-h-0 w-full flex-1 gap-4 transition-[max-width] duration-[900ms] ease-saida [grid-template-rows:minmax(0,1fr)] ${
                   fechada ? "max-w-[1360px] lg:[grid-template-columns:minmax(0,1.3fr)_minmax(360px,1fr)]" : "max-w-[760px]"
@@ -297,7 +345,18 @@ export default function PreEntrevistaTotti({
                     fechada && larga ? "pointer-events-none opacity-55" : ""
                   }`}
                 >
-                  <ConversaTotti sessaoId={estado.id} cargo={estado.vaga?.roleTitle} transcricao={estado.transcricao} pensando={pensando} bloqueada={finalizando} pausarEntrada={planoPronto} erro={erro} onEnviar={responder} />
+                  <ConversaTotti
+                    sessaoId={estado.id}
+                    cargo={estado.vaga?.roleTitle}
+                    transcricao={estado.transcricao}
+                    pensando={pensando}
+                    bloqueada={finalizando}
+                    pausarEntrada={planoPronto}
+                    ativa={etapa === "conversa"}
+                    abrirEmSilencio={tottiTerminou} /* só vale na montagem: sessão retomada já encerrada */
+                    erro={erro}
+                    onEnviar={responder}
+                  />
                   <AnimatePresence>
                     {fechada && !larga && (
                       <ConversaConcluida
@@ -329,19 +388,21 @@ export default function PreEntrevistaTotti({
                   )}
                 </AnimatePresence>
               </div>
-            ) : (
-              <div className="relative flex min-h-0 flex-1 flex-col">
+              </div>
+              {etapa === "plano" && (
+                <div className="relative flex min-h-0 flex-1 flex-col">
                 <RevisaoPlano
                   rascunho={estado.rascunho}
                   enviando={finalizando}
                   publicado={!!(posPublicacao && config)}
                   erros={errosRevisao}
                   onConfirmar={confirmar}
-                  onVoltar={() => setEtapa("conversa")}
+                  onMudar={(r, base) => { editadoNaRevisao.current = r ? { editado: r, base } : null; }}
                 />
                 <AnimatePresence>{posPublicacao && config && posPublicacao(config)}</AnimatePresence>
               </div>
-            )}
+              )}
+            </div>
           </motion.div>
         )}
 

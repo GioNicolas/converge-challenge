@@ -254,12 +254,19 @@ function emAprofundamento(sessao: Sessao): boolean {
 // Casos
 // ---------------------------------------------------------------------------
 
+/**
+ * Resposta à abertura, que só cumprimenta, diz o que entendeu da vaga e pergunta o que pesa mais (issue #127): sem
+ * escolher nada, para o Totti propor o formato, o nível e o foco no passo seguinte.
+ */
+const PRIMEIRA_RESPOSTA = "pode ser, como você achar melhor";
+
 const NO_APROFUNDAMENTO = { descricao: "último passo do Totti: aprofundar", chegou: emAprofundamento };
 /** Leva a vaga de pagamentos até a primeira pergunta de aprofundamento. */
-const ATE_APROFUNDAR = ["isso, pode seguir assim", "é isso mesmo, system design e nível sênior"];
+const ATE_APROFUNDAR = [PRIMEIRA_RESPOSTA, "isso, pode seguir assim", "é isso mesmo, system design e nível sênior"];
 
 /** Leva a vaga de pagamentos até o resumo. */
 const ATE_O_RESUMO = [
+  PRIMEIRA_RESPOSTA,
   "isso, pode seguir assim",
   "o pior é não pensar no que acontece quando a rede cai no meio do pagamento",
   "reprova direto quem trata o pagamento como se a rede nunca falhasse",
@@ -268,10 +275,14 @@ const ATE_O_RESUMO = [
   "pode resumir",
 ];
 const NO_RESUMO = { descricao: "último passo do Totti: resumo_final", chegou: (s: Sessao) => emCurso(s)?.tipo === "resumo_final" };
-const NA_OFERTA_DE_TROCA = { descricao: "a abertura ofereceu a troca de formato", chegou: (s: Sessao) => s.plano.tradeoffNaAbertura === true };
+const NA_OFERTA_DE_TROCA = {
+  descricao: "último passo do Totti: oferecer_tradeoff (a oferta de troca de formato vem depois da abertura)",
+  chegou: (s: Sessao) => emCurso(s)?.tipo === "oferecer_tradeoff",
+};
 const NA_PERGUNTA_DE_NIVEL = {
-  descricao: "a abertura perguntou o nível (vaga sem nível)",
-  chegou: (s: Sessao) => nivelEmAberto(s.plano, s.classificacao.confirmar, s.rascunho.confirmado.seniority),
+  descricao: "último passo do Totti: perguntar_nivel (vaga sem nível; a pergunta vem depois da abertura)",
+  chegou: (s: Sessao) =>
+    emCurso(s)?.tipo === "perguntar_nivel" && nivelEmAberto(s.plano, s.classificacao.confirmar, s.rascunho.confirmado.seniority),
 };
 
 const semDecisaoDeTroca = (r: Resultado): Checagem => ({
@@ -311,6 +322,7 @@ export const TERMOS_DUVIDA_CONVERSA = ["candidat", "conversa", "acess", "compart
  * conforme o modelo). Se a pergunta de contexto chegar antes, o resto do histórico não é enviado.
  */
 const ATE_O_CONTEXTO = [
+  PRIMEIRA_RESPOSTA,
   "isso, pode seguir assim",
   "o pior é cobrar o cliente duas vezes quando a rede cai no meio do pagamento",
   "quero ver se ele estima o volume de pagamentos antes de escolher o banco",
@@ -511,7 +523,7 @@ export const CASOS: Caso[] = [
   {
     id: "repetir-nivel",
     vaga: VAGA_SEM_NIVEL,
-    historico: [],
+    historico: [PRIMEIRA_RESPOSTA],
     situacao: NA_PERGUNTA_DE_NIVEL,
     fala: "oi? não ouvi",
     conferir: (r) => [
@@ -528,13 +540,100 @@ export const CASOS: Caso[] = [
   {
     id: "repetir-oferta-troca",
     vaga: "ia-pleno",
-    historico: [],
+    historico: [PRIMEIRA_RESPOSTA],
     situacao: NA_OFERTA_DE_TROCA,
     fala: "não entendi, quais eram as opções mesmo",
     conferir: (r) => [
       semDecisaoDeTroca(r),
       contem(r, "a fala traz os caminhos de novo", ["system design", "próxima etapa"]),
       planoIgual(r),
+    ],
+  },
+  // A abertura é curta e o resto vem aos poucos (issue #127).
+  {
+    id: "abertura-em-partes",
+    vaga: "backend-senior-pagamentos",
+    historico: [],
+    situacao: { descricao: "logo depois da abertura", chegou: () => true },
+    fala: PRIMEIRA_RESPOSTA,
+    conferir: (r) => [
+      {
+        nome: "a abertura cabe em 2 frases",
+        ok: frasesDe(r.antes.fala).length <= 2,
+        detalhe: `${frasesDe(r.antes.fala).length} frase(s): "${r.antes.fala}"`,
+      },
+      {
+        nome: "a abertura tem uma pergunta só",
+        ok: perguntasDe(r.antes.fala).length === 1,
+        detalhe: `${perguntasDe(r.antes.fala).length} pergunta(s)`,
+      },
+      {
+        nome: "o passo seguinte é a proposta, o nível ou a oferta de troca (formato, nível e foco vêm depois da abertura)",
+        ok: ["confirmar_inicio", "perguntar_nivel", "oferecer_tradeoff"].includes(r.passo.tipo),
+        detalhe: `passo: ${descrever(r.passo)}`,
+      },
+      umaPerguntaSo(r),
+    ],
+  },
+  // "Quero" para a pergunta de fechamento escolhe ajustar, não aprova (issue #127).
+  {
+    id: "quero-ao-fechamento",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "quero",
+    conferir: (r) => [
+      naoEncerra(r),
+      semOutroResumo(r),
+      passoE(r, "perguntar_ajuste"),
+      falaCurta(r),
+      umaPerguntaSo(r),
+      contem(r, "pergunta o que mudar", [["mudar", "ajustar"]]),
+    ],
+  },
+  {
+    id: "quero-com-o-que-mudar",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "quero tirar a dica",
+    conferir: (r) => [
+      naoEncerra(r),
+      {
+        nome: "não pergunta o que mudar: ela já disse",
+        ok: r.passo.tipo !== "perguntar_ajuste",
+        detalhe: `passo: ${descrever(r.passo)}`,
+      },
+      terminaEmPergunta(r),
+    ],
+  },
+  // "Não" para "quer mudar alguma coisa?" aprova.
+  {
+    id: "nao-ao-fechamento",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "não, tá ótimo",
+    conferir: (r) => [
+      {
+        nome: "encerra",
+        ok: r.passo.tipo === "encerrar" || r.depois.ultimoPasso?.tipo === "encerrar",
+        detalhe: `passo: ${descrever(r.passo)}`,
+      },
+    ],
+  },
+  {
+    id: "pode-finalizar-ao-fechamento",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "pode finalizar",
+    conferir: (r) => [
+      {
+        nome: "encerra",
+        ok: r.passo.tipo === "encerrar" || r.depois.ultimoPasso?.tipo === "encerrar",
+        detalhe: `passo: ${descrever(r.passo)}`,
+      },
     ],
   },
   {
@@ -579,7 +678,7 @@ export const CASOS: Caso[] = [
   {
     id: "troca-deixa-eu-pensar",
     vaga: "ia-pleno",
-    historico: [],
+    historico: [PRIMEIRA_RESPOSTA],
     situacao: NA_OFERTA_DE_TROCA,
     fala: "hum, deixa eu pensar",
     conferir: (r) => [semDecisaoDeTroca(r), falaCurta(r), passoNaoAvanca(r)],
@@ -587,7 +686,7 @@ export const CASOS: Caso[] = [
   {
     id: "troca-pede-recomendacao",
     vaga: "ia-pleno",
-    historico: [],
+    historico: [PRIMEIRA_RESPOSTA],
     situacao: NA_OFERTA_DE_TROCA,
     fala: "tanto faz, o que você recomenda?",
     conferir: (r) => [semDecisaoDeTroca(r), terminaEmPergunta(r), passoNaoAvanca(r)],
@@ -595,7 +694,7 @@ export const CASOS: Caso[] = [
   {
     id: "nivel-nao-sabe",
     vaga: VAGA_SEM_NIVEL,
-    historico: [],
+    historico: [PRIMEIRA_RESPOSTA],
     situacao: NA_PERGUNTA_DE_NIVEL,
     fala: "não sei, o gestor não me falou",
     conferir: (r) => [

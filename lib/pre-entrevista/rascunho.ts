@@ -66,6 +66,13 @@ export type Foco = z.infer<typeof Foco>;
 export const Origem = z.union([z.object({ fala: z.string(), turno: z.number().int() }), z.literal("catalogo")]);
 export type Origem = z.infer<typeof Origem>;
 
+/**
+ * Campos que a recrutadora pode editar na revisão. Um campo editado fica "fixado": a extração e os pesos
+ * automáticos não o sobrescrevem até ela falar daquele campo de novo (ver `fixados.ts`).
+ */
+export const CampoFixado = z.enum(["mode", "seniority", "focus", "criteria", "recruiterNotes", "durationMin", "conducao"]);
+export type CampoFixado = z.infer<typeof CampoFixado>;
+
 export const Rascunho = z.object({
   mode: InterviewMode,
   roleTitle: z.string(),
@@ -102,6 +109,15 @@ export const Rascunho = z.object({
   eliminatorios: z.array(z.string()).default([]),
   /** Trecho literal em que ela falou do time, da empresa ou do momento da contratação (interno; vai para o guia). */
   contexto: z.string().default(""),
+  /** Campos editados à mão na revisão, que o automático não sobrescreve (interno: não vai no InterviewConfig). */
+  fixados: z.array(CampoFixado).default([]),
+  /** Instruções de como o Totti conduz a entrevista (vão para `conductNotes` da config; não entram na nota). */
+  conducao: z.array(z.string()).default([]),
+  /**
+   * Instruções de condução que o automático já produziu, mesmo as que ela depois apagou ou reescreveu na revisão (interno).
+   * Serve para a extração não trazer de volta o que ela tirou, sem barrar instrução nova (ver `reaplicarFixados`).
+   */
+  conducaoVista: z.array(z.string()).default([]),
 });
 export type Rascunho = z.infer<typeof Rascunho>;
 
@@ -259,6 +275,9 @@ export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
     origens: {},
     eliminatorios: [],
     contexto: "",
+    fixados: [],
+    conducao: [],
+    conducaoVista: [],
   };
 }
 
@@ -306,6 +325,7 @@ export function paraInterviewConfig(
   naoAvaliado: string[] = [],
 ): { ok: true; config: InterviewConfig } | { ok: false; erros: string[] } {
   const erros: string[] = [];
+  const conducao = r.conducao.map((l) => l.trim()).filter(Boolean);
 
   if (r.focus.length === 0) erros.push("focus: precisa de pelo menos uma área");
   const areas = new Set(r.focus.map((f) => f.area));
@@ -324,6 +344,8 @@ export function paraInterviewConfig(
     seniority: r.seniority,
     focus: r.focus,
     recruiterNotes: [acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado), notaDoTema(r)].filter(Boolean).join("\n"),
+    // Linhas em branco da tela de revisão (uma instrução por linha) não entram.
+    ...(conducao.length > 0 ? { conductNotes: conducao } : {}),
     tone: preferencias?.tom ?? "amigavel",
     hints: preferencias?.dicas ?? "leves",
     criteria,

@@ -2,16 +2,18 @@
 
 // O plano da entrevista ao lado da conversa, quando o Totti a encerra. É o único lugar da tela que diz o que
 // está acontecendo, então o carregamento tem de ser óbvio: enquanto a extração em segundo plano junta o que foi
-// combinado, uma barra corre no topo, o título diz "Montando o plano…" com a lista do que falta (cada item gira
-// até virar ✓) e o botão do rodapé já aparece, girando, no lugar onde vai estar "Revisar e publicar".
+// combinado, uma barra corre no topo, o título diz "Montando o plano…" e uma etapa em gerúndio por vez (como
+// o "pensando" do Totti) mostra o que ele está fazendo; o botão do rodapé já aparece, girando, no lugar onde
+// vai estar "Revisar e publicar". Nada do plano aparece antes de ficar pronto: só então vêm as seções.
 // Sem porcentagem: o Totti pode encerrar sem cobrir todo tópico, e um "50%" parado parecia travado.
 // A ordem das seções é a da revisão (RevisaoPlano).
-import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import type { FocusArea } from "@/lib/contracts";
-import { duracaoDoRascunho, type Rascunho } from "@/lib/pre-entrevista/rascunho";
+import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { curvaSuave } from "@/lib/design/motion";
-import { NOME_AREA, NOME_FORMATO, NOME_SENIORIDADE } from "./textos";
+import { NOME_AREA } from "./textos";
 
 type Props = {
   rascunho: Rascunho;
@@ -22,6 +24,10 @@ type Props = {
 };
 
 /** Mesmos tons da barra de pesos da revisão: sem cor de destaque, só opacidade. */
+/** O que o Totti diz estar fazendo enquanto monta, uma por vez e em volta. */
+const ETAPAS_PENSANDO = ["Decidindo formato e nível…", "Preparando o que mais pesa…", "Formulando critérios…"];
+const TROCA_ETAPA_MS = 1800;
+
 const TOM: Record<FocusArea, string> = {
   tecnico: "bg-texto",
   escala_produto: "bg-texto/65",
@@ -34,18 +40,6 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
   const somaFoco = foco.reduce((s, f) => s + f.weight, 0) || 1;
   const criterios = [...rascunho.criteria].sort((a, b) => b.weight - a.weight);
   const somaCriterios = criterios.reduce((s, c) => s + c.weight, 0) || 1;
-  const fatos = [
-    { rotulo: "Formato", valor: NOME_FORMATO[rascunho.mode], ok: rascunho.confirmado.mode },
-    { rotulo: "Nível", valor: NOME_SENIORIDADE[rascunho.seniority], ok: rascunho.confirmado.seniority },
-    { rotulo: "Duração", valor: `${duracaoDoRascunho(rascunho)} min`, ok: true },
-  ];
-  // O que o Totti ainda está juntando, na ordem das seções abaixo.
-  const etapas = [
-    { rotulo: "Formato e nível", feito: rascunho.confirmado.mode && rascunho.confirmado.seniority },
-    { rotulo: "O que mais pesa", feito: foco.length > 0 },
-    { rotulo: "Critérios de avaliação", feito: criterios.length > 0 },
-  ];
-
   return (
     <aside
       aria-label="Plano da entrevista"
@@ -65,45 +59,14 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
             <p className="text-[14px] leading-relaxed text-texto-suave">
               O Totti está organizando o que vocês combinaram. Leva alguns segundos; depois é só revisar.
             </p>
-            <ul className="flex flex-col gap-1.5 rounded-2xl bg-fundo px-4 py-3">
-              {etapas.map((e) => (
-                <li key={e.rotulo} className={`flex items-center gap-2.5 text-[14px] ${e.feito ? "text-texto" : "text-texto-suave"}`}>
-                  {e.feito ? (
-                    <span className="anim-surgir flex size-4 shrink-0 items-center justify-center rounded-full bg-texto text-texto-claro" aria-hidden>
-                      <Check />
-                    </span>
-                  ) : (
-                    <Loader2 size={16} className="shrink-0 animate-spin" aria-hidden />
-                  )}
-                  {e.rotulo}
-                  <span className="sr-only">{e.feito ? "(pronto)" : "(em andamento)"}</span>
-                </li>
-              ))}
-            </ul>
+            <Pensando />
           </>
         )}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6">
-        <Secao titulo="Como vai ser">
-          <div className="grid grid-cols-3 divide-x divide-texto/8 rounded-2xl bg-fundo">
-            {fatos.map((f) => (
-              <div key={f.rotulo} className="flex min-w-0 flex-col gap-1 px-4 py-3">
-                <span className="text-[12.5px] text-texto-suave">{f.rotulo}</span>
-                {f.ok ? (
-                  <span className="anim-surgir truncate text-[15px] font-semibold">{f.valor}</span>
-                ) : (
-                  <Esqueleto className="my-1 h-3.5 w-16 rounded-full" />
-                )}
-              </div>
-            ))}
-          </div>
-        </Secao>
-
+        {pronto && foco.length > 0 && (
         <Secao titulo="O que mais pesa">
-          {foco.length === 0 ? (
-            <Esqueleto className="h-2 w-full rounded-full" />
-          ) : (
             <div className="flex flex-col gap-3">
               <div className="flex h-2 gap-0.5 overflow-hidden rounded-full">
                 {foco.map((f) => (
@@ -124,16 +87,11 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
                 ))}
               </ul>
             </div>
-          )}
         </Secao>
+        )}
 
-        <Secao titulo="Critérios" contagem={criterios.length || undefined}>
-          {criterios.length === 0 ? (
-            <div className="flex flex-col gap-2">
-              <Esqueleto className="h-10 w-full rounded-2xl" />
-              <Esqueleto className="h-10 w-full rounded-2xl" />
-            </div>
-          ) : (
+        {pronto && criterios.length > 0 && (
+        <Secao titulo="Critérios" contagem={criterios.length}>
             <ul className="flex flex-col divide-y divide-texto/8 rounded-2xl bg-fundo">
               {criterios.map((c) => {
                 const doTime = rascunho.origens[c.id] && rascunho.origens[c.id] !== "catalogo";
@@ -150,10 +108,10 @@ export default function PlanoSeMontando({ rascunho, pronto, onRevisar, onContinu
                 );
               })}
             </ul>
-          )}
         </Secao>
+        )}
 
-        {rascunho.eliminatorios.length > 0 && (
+        {pronto && rascunho.eliminatorios.length > 0 && (
           <Secao titulo="Reprova direto">
             <ul className="flex flex-col gap-2">
               {rascunho.eliminatorios.map((e) => (
@@ -248,6 +206,28 @@ function Secao({ titulo, contagem, children }: { titulo: string; contagem?: numb
   );
 }
 
-function Esqueleto({ className = "" }: { className?: string }) {
-  return <span className={`anim-brilho block ${className}`} aria-hidden />;
+/** Uma etapa em gerúndio por vez, trocando sozinha: o Totti "pensando" enquanto monta o plano. */
+function Pensando() {
+  const reduzido = useReducedMotion();
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((k) => (k + 1) % ETAPAS_PENSANDO.length), TROCA_ETAPA_MS);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="flex h-10 items-center gap-2.5 overflow-hidden rounded-2xl bg-fundo px-4 text-[14px] text-texto" role="status">
+      <Loader2 size={16} className="shrink-0 animate-spin text-texto-suave" aria-hidden />
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={i}
+          initial={{ opacity: 0, y: reduzido ? 0 : 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: reduzido ? 0 : -8 }}
+          transition={{ duration: 0.28, ease: curvaSuave }}
+        >
+          {ETAPAS_PENSANDO[i]}
+        </motion.span>
+      </AnimatePresence>
+    </div>
+  );
 }

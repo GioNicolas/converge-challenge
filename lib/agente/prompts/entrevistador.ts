@@ -6,7 +6,7 @@ import { neutralizar } from "../../seguranca/injecao";
 import { z } from "zod";
 import { EsquemaVisualOpcional, INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import type { Kit, Problema } from "../kits/tipos";
-import { blocoDoPlano } from "../plano";
+import { blocoDoPlanoParaEntrevistar } from "../plano";
 import { DESFECHOS, type EstadoSessao } from "../sessao/estado";
 import type { FalaRecente, Fase } from "../sessao/tipos";
 import { blocoDaEntrevista, conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
@@ -133,7 +133,7 @@ export function montarSistemaDinamicoPerguntar(
   briefing = "",
 ): string {
   const conversa = historicoDaConversa(estado.conversa, conversaDoQuadro);
-  const plano = blocoDoPlano(estado.plano);
+  const plano = blocoDoPlanoParaEntrevistar(estado.plano);
   return `${plano ? `${plano}
 
 ` : ""}${blocoDaEntrevista({ ...estado, fase }, agora)}

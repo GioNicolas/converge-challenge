@@ -48,13 +48,31 @@ type Props = {
   pensando: boolean;
   bloqueada?: boolean;
   pausarEntrada?: boolean;
+  /** Falso quando a conversa está escondida (o plano está na tela): sem voz e sem microfone, mas o texto e a rolagem ficam. */
+  ativa?: boolean;
+  /** A sessão já estava encerrada quando a conversa montou: a última fala do Totti não toca de novo. */
+  abrirEmSilencio?: boolean;
   erro: string | null;
   onEnviar: (mensagem: string) => void;
   /** Cargo da vaga: as palavras dele entram no vocabulário da transcrição (keyterms). */
   cargo?: string;
 };
 
-export default function ConversaTotti({ sessaoId, transcricao, pensando, bloqueada = false, pausarEntrada = false, erro, onEnviar, cargo }: Props) {
+export default function ConversaTotti({
+  sessaoId,
+  transcricao,
+  pensando,
+  bloqueada: bloqueadaProp = false,
+  pausarEntrada: pausarEntradaProp = false,
+  ativa = true,
+  abrirEmSilencio = false,
+  erro,
+  onEnviar,
+  cargo,
+}: Props) {
+  // Escondida, a conversa fica travada como se o Totti estivesse pensando: a voz para e o microfone fecha.
+  const bloqueada = bloqueadaProp || !ativa;
+  const pausarEntrada = pausarEntradaProp || !ativa;
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<Documento[]>([]);
   const [erroAnexo, setErroAnexo] = useState<string | null>(null);
@@ -77,8 +95,11 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
   const seletor = useRef<HTMLInputElement>(null);
 
   const ultima = transcricao.at(-1);
+  // As falas que já existiam ao montar com a sessão encerrada não tocam (só as novas).
+  const silenciadasAte = useRef(abrirEmSilencio ? transcricao.length - 1 : -1);
+  const falaDaVez = ultima?.role === "agente" && transcricao.length - 1 > silenciadasAte.current;
   const voz = useVozAgente({
-    ultimaFala: ultima?.role === "agente" ? { id: String(transcricao.length - 1), texto: ultima.text } : null,
+    ultimaFala: falaDaVez ? { id: String(transcricao.length - 1), texto: ultima.text } : null,
     bloqueada: pensando || bloqueada,
     sessao: sessaoId ? { sessao_id: sessaoId, contexto: "pre" } : null,
   });
@@ -93,6 +114,13 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
   useEffect(() => {
     lista.current?.scrollTo({ top: lista.current.scrollHeight, behavior: "smooth" });
   }, [transcricao.length, digitando]);
+
+  // Ao voltar do plano, o campo de texto já está pronto para escrever.
+  const jaMontou = useRef(false);
+  useEffect(() => {
+    if (ativa && jaMontou.current) campo.current?.focus({ preventScroll: true });
+    jaMontou.current = true;
+  }, [ativa]);
 
   useEffect(() => {
     const c = campo.current;
@@ -126,6 +154,13 @@ export default function ConversaTotti({ sessaoId, transcricao, pensando, bloquea
   const mudarModoVoz = (ligado: boolean) => { modoVoz.current = ligado; setEmModoVoz(ligado); };
   // Quantos turnos havia quando a pessoa enviou pela voz (null: nada esperando resposta para reabrir o mic).
   const [turnosNoEnvio, setTurnosNoEnvio] = useState<number | null>(null);
+  // Ao esconder a conversa, sai do modo voz: o mic não reabre sozinho quando a pessoa voltar.
+  useEffect(() => {
+    if (ativa) return;
+    clearTimeout(timerPausa.current);
+    mudarModoVoz(false);
+    setTurnosNoEnvio(null);
+  }, [ativa]);
   const vozJaTocou = useRef(false);
 
   /** `comDitado`: o envio automático já parou o ditado, mas o estado do hook ainda não foi re-renderizado. */

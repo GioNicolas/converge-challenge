@@ -14,10 +14,10 @@
 import { z } from "zod";
 import type { FocusArea } from "@/lib/contracts";
 import { areasEmJogo, AREAS, LIMIAR, nomeAreaFala } from "./cobertura";
-import { CATALOGO, COMO_AVALIAMOS, mede, modoAlternativoQueMede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
+import { CATALOGO, COMO_AVALIAMOS, mede, ROTULO_NAO_AVALIADO, semMedicaoNoFormato } from "./catalogo";
 import { chat, ErroChat, extrairJson, type Alvo, type Mensagem, type Tentativa } from "./llm";
 import { registrarEvento } from "./log";
-import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type OferecerTradeoffPasso, type Passo } from "./planejador";
+import { descreverPasso, nivelEmAberto, VALORES_DE_DECISAO, type DecisaoPendente, type Passo } from "./planejador";
 import { PERGUNTA_CONTEXTO, PERGUNTA_EXEMPLO, PERGUNTA_O_QUE_REPROVA, perguntaObvia, perguntasDaArea } from "./perguntas";
 import { normalizarTexto } from "./frases";
 import { fraseDaDivisao } from "./pesos";
@@ -28,7 +28,7 @@ import { LINGUAGENS_IDE, nomesDasLinguagens } from "./linguagens";
 import type { Preferencias } from "./preferencias";
 import { DURACAO_PADRAO, duracaoDoRascunho, listar, type Rascunho, type Turno } from "./rascunho";
 import type { Sessao } from "./sessoes";
-import { afirmacaoDaMemoria, pedidoDaRegra, perguntaDaMemoria, regrasDoFormato, resumoDaMemoria } from "@/lib/squad-memory/fala";
+import { afirmacaoDaMemoria, pedidoDaRegra, regrasDoFormato, resumoDaMemoria } from "@/lib/squad-memory/fala";
 
 const TEMPERATURA_CONVERSA = 0.5;
 const MAX_TOKENS_CONVERSA = 400;
@@ -296,13 +296,7 @@ const ROTULOS_NA_VAGA: Record<FocusArea, Array<[RegExp, string]>> = {
   uso_ia: [[/\bIA\b|LLM|agente|copilot|cursor|prompt/i, "IA aplicada"]],
 };
 
-/** Como cada área aparece na oferta de troca: "ele mostra bem X" (se o formato mede) e "não mede Y" (se não mede). */
-const MOSTRA_BEM: Record<FocusArea, string> = {
-  tecnico: "algoritmos e qualidade de código",
-  pressao: "lidar com pressão e imprevistos",
-  escala_produto: "escalabilidade",
-  uso_ia: "IA aplicada",
-};
+/** Como cada área aparece na oferta de troca: o que o formato atual não mede. */
 const NAO_MEDE_FALA: Record<FocusArea, string> = {
   tecnico: "algoritmos e qualidade de código",
   pressao: "como ele lida com pressão e imprevistos",
@@ -340,61 +334,6 @@ function nomesDoFoco(r: Rascunho, quantos = r.focus.length): string {
   );
 }
 
-/** Área que o formato atual não mede e que outro formato mede: a oferta de troca da abertura. Função pura. */
-export function tradeoffDaAbertura(sessao: Sessao): OferecerTradeoffPasso | undefined {
-  // Com o formato incerto, a abertura pergunta o formato. A oferta de troca vem depois, pelo planejador.
-  if (sessao.classificacao.confirmar.includes("mode")) return undefined;
-  const r = sessao.rascunho;
-  const duasDeMaiorPeso = [...r.focus]
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 2)
-    .map((f) => f.area);
-  for (const area of duasDeMaiorPeso) {
-    if (mede(r.mode, area)) continue;
-    const alternativo = modoAlternativoQueMede(r.mode, area);
-    if (alternativo) return { tipo: "oferecer_tradeoff", area, modoAlternativo: alternativo };
-  }
-  return undefined;
-}
-
-/**
- * Frase da oferta de troca na abertura: o que o formato mostra bem, o que não mede e a alternativa, numa frase só.
- * O nível entra só quando já está confirmado (senão a pergunta de nível vem no fim da abertura). Função pura.
- */
-function fraseDoTradeoff(r: Rascunho, oferta: OferecerTradeoffPasso, nivel?: string): string {
-  const duasDeMaiorPeso = [...r.focus]
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 2)
-    .map((f) => f.area);
-  const mostradas = duasDeMaiorPeso.filter((a) => mede(r.mode, a)).map((a) => MOSTRA_BEM[a]);
-  const frente = mostradas.length ? `que mostra bem ${listar(mostradas)} mas ` : "";
-  const complemento = COMPLEMENTO_OFERTA[oferta.area];
-  const alternativa = `${FORMATO_CURTO[oferta.modoAlternativo]}${complemento ? ` ${complemento}` : ""}`;
-  return (
-    `Pensei em ${FORMATO_CURTO[r.mode]}${nivel ? ` pra nível ${nivel}` : ""}, ${frente}não mede ${NAO_MEDE_FALA[oferta.area]}; ` +
-    `se isso for central, ${alternativa} avalia melhor.`
-  );
-}
-
-/**
- * Frase da abertura para a área do foco que o formato não mede e que nenhum outro formato disponível mede:
- * ela fica pra próxima etapa, sem oferta de troca. Função pura.
- */
-function fraseSemMedicao(r: Rascunho): string | undefined {
-  const area = [...r.focus]
-    .sort((a, b) => b.weight - a.weight)
-    .map((f) => f.area)
-    .find((a) => semMedicaoNoFormato(r.mode, a));
-  if (!area) return undefined;
-  const frase = `${FORMATO_CURTO[r.mode]} não mede ${NAO_MEDE_FALA[area]}, então isso fica pra próxima etapa.`;
-  return frase.charAt(0).toUpperCase() + frase.slice(1);
-}
-
-/**
- * Primeira fala do agente, montada sem LLM, em até 4 frases: saudação com o cargo, o resumo da vaga (se houver),
- * o formato e o foco (ou o trade-off, se o formato não mede uma área de peso) e a pergunta final.
- * Nível não dito na vaga vira pergunta, não afirmação. Se o formato não está claro, a pergunta é o formato.
- */
 /** As regras da squad que valem no formato atual da conversa. */
 function memoriaDoFormato(sessao: Sessao) {
   return regrasDoFormato(
@@ -403,52 +342,25 @@ function memoriaDoFormato(sessao: Sessao) {
   );
 }
 
+/** A pergunta da abertura: aberta, sobre o que pesa para ela. Formato, nível e foco vêm nos passos seguintes. */
+const PERGUNTA_DA_ABERTURA = "O que pesa mais pra você nessa contratação?";
+
+/** A abertura precisa do formato antes de qualquer outra coisa: com ele incerto, a pergunta é o formato. */
+const PERGUNTA_DO_FORMATO = "Você prefere live coding ou system design?";
+
+/**
+ * Primeira fala do agente, montada sem LLM, em até 2 frases (issue #127): cumprimenta e diz o que entendeu da vaga
+ * numa frase só, e faz uma pergunta. Formato, nível e foco entram nos passos seguintes do planejador
+ * (`perguntar_nivel`, `oferecer_tradeoff`, `confirmar_inicio`), e a memória da squad entra na confirmação do início.
+ * Se o formato não está claro, a pergunta é o formato.
+ */
 export function aberturaDoAgente(sessao: Sessao): string {
   const r = sessao.rascunho;
-  const memoria = memoriaDoFormato(sessao);
-  const afirmacao = afirmacaoDaMemoria(memoria);
-  const frases = [`Oi! Sou Totti, vou montar a entrevista de ${r.roleTitle} com você.`];
   // O resumo entra no meio da frase: a primeira letra vai para minúscula, sem mexer em sigla (APIs, iOS).
-  const resumo = sessao.resumoVaga?.replace(/^([A-ZÀ-Ú])(?=[a-zà-ú])/, (letra) => letra.toLowerCase());
-  if (resumo) frases.push(`Vi que a vaga gira em torno de ${resumo}.`);
-
-  const incerto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, r.confirmado.seniority);
-  const nivel = SENIORIDADE_FALA[r.seniority];
-  const focos = listar(rotulosDoFoco(r, 2));
-  const perguntaNivel = PERGUNTA_DE_NIVEL;
-
-  if (sessao.classificacao.confirmar.includes("mode")) {
-    frases.push(incerto ? `Olhando principalmente ${focos}.` : `A vaga é de nível ${nivel}, olhando principalmente ${focos}.`);
-    if (afirmacao) frases.push(afirmacao);
-    frases.push(
-      incerto
-        ? `Você prefere live coding ou system design, e qual o nível: ${perguntaNivel}`
-        : "Você prefere live coding ou system design?",
-    );
-    return frases.join(" ");
-  }
-  const oferta = tradeoffDaAbertura(sessao);
-  if (oferta) {
-    frases.push(fraseDoTradeoff(r, oferta, incerto ? undefined : nivel));
-    if (afirmacao) frases.push(afirmacao);
-    frases.push(incerto ? `Qual faz mais sentido, e qual o nível: ${perguntaNivel}` : "Qual faz mais sentido?");
-    return frases.join(" ");
-  }
-  frases.push(
-    incerto
-      ? `Pensei em ${FORMATO_CURTO[r.mode]}, olhando principalmente ${focos}.`
-      : `Pensei em ${FORMATO_CURTO[r.mode]} pra nível ${nivel}, olhando principalmente ${focos}.`,
-  );
-  const semMedicao = fraseSemMedicao(r);
-  if (semMedicao) frases.push(semMedicao);
-  // Com memória da squad, a pergunta final confirma o plano e o que o time pediu da última vez, numa pergunta só.
-  if (incerto) {
-    if (afirmacao) frases.push(afirmacao);
-    frases.push(`O nível não está claro na vaga: ${perguntaNivel}`);
-  } else {
-    frases.push(perguntaDaMemoria(memoria) ?? "É isso, ou quer focar em outra coisa?");
-  }
-  return frases.join(" ");
+  const resumo = sessao.resumoVaga?.replace(/^([A-ZÀ-Ú])(?=[a-zà-ú])/, (letra) => letra.toLowerCase()).replace(/[.!?\s]+$/, "");
+  const apresentacao = `Oi, sou o Totti e vou montar a entrevista de ${r.roleTitle} com você`;
+  const frase = resumo ? `${apresentacao}; vi que a vaga gira em torno de ${resumo}.` : `${apresentacao}.`;
+  return `${frase} ${sessao.classificacao.confirmar.includes("mode") ? PERGUNTA_DO_FORMATO : PERGUNTA_DA_ABERTURA}`;
 }
 
 /** O que já se sabe, em linguagem natural (sem JSON e sem rótulos internos). */
@@ -525,11 +437,16 @@ function divisaoNaRevisao(sessao: Sessao): string {
 function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
   const r = sessao.rascunho;
   switch (passo.tipo) {
-    case "confirmar_inicio":
+    case "confirmar_inicio": {
+      // A abertura não propôs nada: é aqui que o Totti diz o formato, o nível e o foco, e a memória da squad.
+      const memoria = afirmacaoDaMemoria(memoriaDoFormato(sessao));
       return (
-        `Ainda não ficou claro se ela concorda com a proposta (${FORMATO_CURTO[r.mode]} pra nível ${SENIORIDADE_FALA[r.seniority]}, ` +
-        `olhando ${listar(rotulosDoFoco(r, 2))}). Pergunte de forma leve se é isso ou se ela quer focar em outra coisa. Uma pergunta só.`
+        `Diga a proposta em uma frase: ${FORMATO_CURTO[r.mode]} pra nível ${SENIORIDADE_FALA[r.seniority]}, ` +
+        `olhando principalmente ${listar(rotulosDoFoco(r, 2))}. ` +
+        (memoria ? `Em outra frase, diga com estas palavras: '${memoria}' ` : "") +
+        "Termine perguntando de forma leve se é isso mesmo. Uma pergunta só."
       );
+    }
     case "perguntar_nivel":
       return (
         `A vaga não deixa o nível claro e ela ainda não disse. Pergunte só o nível, em uma frase curta: ` +
@@ -591,7 +508,7 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     case "informar_formato_indisponivel":
       return (
         "Ela pediu system design, que ainda não está disponível nesta versão. Diga isso numa frase curta, sem pedir desculpa, " +
-        `e que a entrevista segue em ${FORMATO_CURTO[r.mode]}. Depois pergunte se ela prefere seguir assim ou mudar alguma coisa. Uma pergunta só.`
+        `e que a entrevista segue em ${FORMATO_CURTO[r.mode]}. Depois pergunte se pode seguir assim. Uma pergunta só.`
       );
     case "oferecer_tradeoff": {
       const complemento = COMPLEMENTO_OFERTA[passo.area] ? ` ${COMPLEMENTO_OFERTA[passo.area]}` : "";
@@ -687,6 +604,9 @@ function instrucaoDoPasso(passo: Passo, sessao: Sessao): string {
     case "encerrar":
       // Não passa pelo modelo: a fala de encerramento é fixa (ver `falaDeEncerramento`).
       return "Fala fixa, sem modelo.";
+    case "perguntar_ajuste":
+      // Não passa pelo modelo: a pergunta é fixa (ver `falaDePerguntarAjuste`). Só chega aqui para retomar depois de uma dúvida.
+      return "Pergunte só o que ela quer mudar, em uma frase curta (ex.: 'O que você quer mudar?').";
   }
 }
 
@@ -739,6 +659,7 @@ function instrucaoDaDecisao(pendente: DecisaoPendente, sessao: Sessao): string {
         `nem pediu uma mudança clara. Leia você e responda com "decisao" (${valores}):\n` +
         '- Ela aprovou com outras palavras: "finalizar". O sistema encerra; a fala pode ser uma frase curta.\n' +
         '- Ela pediu uma mudança: confirme só o que mudou, numa frase, e pergunte se pode finalizar ("mudar").\n' +
+        '- Ela escolheu ajustar, mas não disse o quê ("quero", "tem sim"): isso não é aprovação. Pergunte só o que ela quer mudar, numa frase ("decisao": "adiar").\n' +
         "- Ela perguntou algo (por exemplo, quanto ficou a duração): responda com o que está abaixo e em 'O QUE JÁ SE SABE', " +
         'e pergunte de novo se pode finalizar ("decisao": "adiar").\n' +
         `${comum}\n` +
@@ -812,7 +733,7 @@ function comoAvaliamosDoFoco(sessao: Sessao): string[] {
 function perguntaParaRetomar(passo: Passo, sessao: Sessao): string {
   switch (passo.tipo) {
     case "resumo_final":
-      return "pergunte se ela quer mudar algo ou se pode finalizar.";
+      return "pergunte se pode finalizar assim.";
     case "confirmar_mudanca_foco":
       if (passo.confirmarTirar?.length || passo.sugerir) return instrucaoDoPasso(passo, sessao);
       if (passo.duvida.length) {
@@ -836,7 +757,7 @@ const LOGISTICA_NA_FALA = /\b(dicas?|tom|clima|minutos?|dura[çc][ãa]o|quinze|t
 export function removerLogisticaDaRevisao(texto: string): string {
   const frases = texto.split(/(?<=[.!?])\s+/).filter((f) => f.trim() && !LOGISTICA_NA_FALA.test(f));
   const limpo = frases.join(" ").trim();
-  return limpo || "Certo. Quer mudar mais alguma coisa, ou posso finalizar?";
+  return limpo || "Certo. Posso finalizar?";
 }
 
 /**
@@ -893,6 +814,14 @@ const FALAS_DE_ENCERRAMENTO = [
   "Agora é só revisar na tela e confirmar.",
   "Tudo anotado. Falta só revisar na tela e confirmar.",
 ];
+
+/** Perguntas do passo `perguntar_ajuste`: ela escolheu ajustar sem dizer o quê. Uma frase, uma pergunta. */
+const FALAS_DE_AJUSTE = ["O que você quer mudar?", "Claro, o que você quer ajustar?", "Pode dizer: o que você quer mudar?"];
+
+/** Pergunta do passo `perguntar_ajuste`: fixa, escolhida ao acaso entre as variações. Não usa o modelo. */
+export function falaDePerguntarAjuste(variante = Math.floor(Math.random() * FALAS_DE_AJUSTE.length)): string {
+  return FALAS_DE_AJUSTE[variante % FALAS_DE_AJUSTE.length];
+}
 
 /** Fala de encerramento: fixa, escolhida ao acaso entre as variações. Não usa o modelo. */
 export function falaDeEncerramento(): string {
@@ -960,11 +889,12 @@ function fraseLinguagem(p: Preferencias): string {
   return `O código vai ser só em ${nomesDasLinguagens(langs)}.`;
 }
 
-const FECHAMENTOS = [
-  "Quer mudar algo ou posso finalizar?",
-  "Quer ajustar alguma coisa ou posso finalizar?",
-  "Quer mudar alguma coisa, ou posso finalizar?",
-];
+/**
+ * Perguntas de fechamento do resumo. Cada uma tem uma alternativa só ("posso finalizar?"): "sim" é aprovar, e "quero"
+ * não responde a ela. "Quer ajustar alguma coisa ou posso finalizar?" fazia um "quero" valer como aprovação (issue #127).
+ */
+// Uma alternativa só, com resposta de sim/não sem ambiguidade: "quero" = ajustar; "não" ou "pode finalizar" = aprovar.
+const FECHAMENTOS = ["Quer mudar alguma coisa?", "Quer ajustar alguma coisa?", "Quer mudar mais alguma coisa?"];
 
 /** Pergunta final do resumo, em uma das variações. */
 export function fechamentoDoResumo(variante = Math.floor(Math.random() * FECHAMENTOS.length)): string {
@@ -1259,7 +1189,7 @@ export function contarFrases(texto: string): number {
 
 /** Aviso de que system design não está disponível: fala fixa, sem modelo. Só com a trava desligada (ver `SYSTEM_DESIGN_ATIVO`). */
 export function falaFormatoIndisponivel(modo: Rascunho["mode"]): string {
-  return `System design ainda não está disponível nesta versão, então a entrevista segue em ${FORMATO_CURTO[modo]}. Prefere seguir assim ou mudar alguma coisa?`;
+  return `System design ainda não está disponível nesta versão, então a entrevista segue em ${FORMATO_CURTO[modo]}. Posso seguir assim?`;
 }
 
 /** O passo em curso: o último que o Totti executou (a dúvida respondida não conta, vale o passo que ela retomou). */
@@ -1319,6 +1249,7 @@ export interface OpcoesResponder {
  */
 export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResponder = {}): Promise<RespostaAgente> {
   if (passo.tipo === "encerrar") return respostaFixa(falaDeEncerramento());
+  if (passo.tipo === "perguntar_ajuste") return respostaFixa(falaDePerguntarAjuste());
   if (passo.tipo === "informar_formato_indisponivel") return respostaFixa(falaFormatoIndisponivel(sessao.rascunho.mode));
   // Revisão de formato, nível, tom, dicas ou duração: a confirmação sai pronta. Mudança de foco segue com o modelo.
   if (passo.tipo === "resumo_final" && passo.revisao && !opcoes.pendente) {
@@ -1428,7 +1359,7 @@ export async function responder(sessao: Sessao, passo: Passo, opcoes: OpcoesResp
   // Confirmação do início e resposta a dúvida devolvem a decisão para ela: sem pergunta, o código acrescenta uma.
   // Fora do `seguir` não acrescenta: um "Claro, sem pressa." viraria cobrança.
   if (texto && segue && !texto.includes("?") && (passo.tipo === "confirmar_inicio" || passo.tipo === "responder_duvida")) {
-    aplicar("pergunta_no_fim", `${texto} ${passo.tipo === "confirmar_inicio" ? "Prefere seguir assim ou mudar alguma coisa?" : "O que você prefere?"}`);
+    aplicar("pergunta_no_fim", `${texto} ${passo.tipo === "confirmar_inicio" ? "Posso seguir assim?" : "O que você prefere?"}`);
   }
   // No resumo, o código acrescenta o que fica de fora, duração, tom e dicas (do estado) e a pergunta final, em variações.
   // Revisão feita pelo modelo: dica, tom e duração só entram pela frase determinística (que compara com o estado).
