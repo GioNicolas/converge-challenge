@@ -40,9 +40,11 @@ export const Problema = z.object({
 });
 /**
  * Empecilho do quadro: no meio da entrevista o entrevistador traz UMA mudança no problema (um requisito muda,
- * entra uma restrição nova ou cai uma parte do sistema). O conteúdo é escrito à mão, por problema, e nunca
- * inventado pelo modelo. Fica fora do schema Zod de propósito: o gerador de kits (modo estrito, todo campo
- * obrigatório) não deve ser forçado a criar um. Só servidor até ser anunciado.
+ * entra uma restrição nova ou cai uma parte do sistema). Vem de três lugares: escrito à mão no kit (problemas
+ * fixos); criado pelo gerador da questão da vaga (regras em `validar.ts`, `empecilhoGerado`); ou uma das genéricas
+ * do kit de system design (`empecilhos-genericos.ts`) quando o problema não tem um. Fica fora do schema Zod de
+ * propósito: o gerador de kits (modo estrito, todo campo obrigatório) não deve ser forçado a criar um. Só servidor
+ * até ser anunciado.
  */
 export type Empecilho = {
   id: string;

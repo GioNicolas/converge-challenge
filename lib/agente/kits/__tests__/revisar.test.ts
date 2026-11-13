@@ -202,7 +202,7 @@ describe("revisão na questão da vaga e no papel do modelo", () => {
   const doModelo = (p: Problema) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...resto } = p;
-    return resto;
+    return { ...resto, empecilho: { tipo: "requisito_muda", fala: "Entram duas vezes mais pedidos. Onde isso pesa primeiro?", requisito: "Mudança: 2x pedidos", exige: "Rever a escrita." } };
   };
   // A questão real sem os erros que o validador pega: passa na geração, e a revisão ainda melhora o título.
   const geradaComErro = semErrosDeTexto;

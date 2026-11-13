@@ -139,6 +139,11 @@ export type EstadoSessao = {
   conversa: FalaRegistrada[];
   /** Mudança no problema já anunciada. Ausente/null: ainda não (estados antigos não têm o campo). */
   empecilho?: EmpecilhoAnunciado | null;
+  /**
+   * Quando a análise abriu a brecha da mudança por último (ela responde "ok" por um ciclo, depois dos 60% do tempo).
+   * Ausente/null: nunca abriu. Ver `precisaAbrirBrechaDaMudanca` (lib/agente/analisar.ts).
+   */
+  brechaEmpecilhoEm?: number | null;
   /** Quantas vezes o candidato disse que terminou ("pronto", "acho que é isso") e quando foi a última. */
   conclusoes?: number;
   ultimaConclusaoEm?: number | null;
@@ -290,13 +295,18 @@ export function tempoDaEntrevista(estado: EstadoSessao, agora: number): { totalM
   return { totalMin, decorridoMin, restanteMin: Math.max(0, totalMin - decorridoMin) };
 }
 
+/** Duração total da entrevista em segundos: o plano da vaga, ou a soma dos tempos das fases (estado antigo). */
+export function duracaoTotalS(estado: EstadoSessao): number {
+  if (estado.plano?.duracaoMin !== undefined) return estado.plano.duracaoMin * 60;
+  return Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
+}
+
 /**
  * Quanto falta para o fim da entrevista, em milissegundos (o fechamento comum decide por ele quantas perguntas
  * finais cabem). A mesma conta de `tempoDaEntrevista`, sem arredondar para minutos.
  */
 export function tempoRestanteMs(estado: EstadoSessao, agora: number): number {
-  const somaS = Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
-  const totalMs = (estado.plano?.duracaoMin !== undefined ? estado.plano.duracaoMin * 60 : somaS) * 1000;
+  const totalMs = duracaoTotalS(estado) * 1000;
   let decorridoMs: number;
   if (estado.iniciadaEm) decorridoMs = agora - estado.iniciadaEm;
   else {

@@ -6,6 +6,8 @@ import { criarClienteFalso, type ClienteFalso } from "../../llm/cliente";
 import { kitFalso } from "../falso";
 import { KIT_SYSTEM_DESIGN } from "../system-design";
 import { avaliacaoDaConfig, avaliacaoGeradaDaConfig, garantirQuestaoDaVaga, gerarQuestaoDaVaga } from "../questao-da-vaga";
+import { idEmpecilhoDoProblema } from "../validar";
+import { paraJsonSchema } from "../../llm/jsonschema";
 import { criarRepositorioAvaliacoesEmMemoria } from "../repositorio";
 
 const configDe = (extra: Partial<InterviewConfig> = {}): InterviewConfig =>
@@ -24,11 +26,24 @@ const configDe = (extra: Partial<InterviewConfig> = {}): InterviewConfig =>
     ...extra,
   });
 
-/** O que o modelo devolve: só o problema, sem id. */
+/** A mudança no meio da entrevista que o modelo cria para a logística (sem id: o código o dá). */
+const EMPECILHO_DO_MODELO = {
+  tipo: "parte_cai",
+  fala: "Uma mudança no problema: o rastreio dos motoristas ficou fora do ar por dez minutos, sem aviso. O que acontece com as entregas que estavam em rota?",
+  requisito: "Mudança: rastreio fora por 10 min",
+  exige: "Tratar a falha do rastreio: a entrega segue sem perder a parada, o motorista reenvia a posição depois e nada é cobrado duas vezes.",
+};
+
+/** O que o modelo devolve: o problema sem id, com a mudança no problema. */
 const problemaDoModelo = () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { id, empecilho, ...p } = kitFalso("Logística").problemas[0] as ReturnType<typeof kitFalso>["problemas"][0] & { empecilho?: unknown };
-  return { ...p, titulo: "Roteirização de entregas", enunciado: "Desenhe a roteirização das entregas de última milha para os motoristas." };
+  return {
+    ...p,
+    titulo: "Roteirização de entregas",
+    enunciado: "Desenhe a roteirização das entregas de última milha para os motoristas.",
+    empecilho: EMPECILHO_DO_MODELO,
+  };
 };
 
 /** O cliente falso com um atraso, para a geração ainda estar rodando quando o candidato chega. */
@@ -59,7 +74,20 @@ describe("questão do quadro gerada para a vaga", () => {
     assert.equal(llm.chamadas[0].nomeSchema, "problema_quadro");
     assert.deepEqual(r.kit.criterios, KIT_SYSTEM_DESIGN.criterios);
     assert.equal(r.kit.persona, KIT_SYSTEM_DESIGN.persona);
+    // A mudança do modelo entra no problema, com o id dado pelo código.
+    assert.deepEqual(r.problema.empecilho, { ...EMPECILHO_DO_MODELO, id: idEmpecilhoDoProblema(r.problema.id) });
+    assert.equal(r.kit.problemas[0].empecilho?.id, r.problema.empecilho?.id);
+  });
+
+  it("mudança fora das regras (fala sem pergunta) sai do problema, e a questão segue aprovada", async () => {
+    const repositorio = criarRepositorioAvaliacoesEmMemoria();
+    const semPergunta = { ...problemaDoModelo(), empecilho: { ...EMPECILHO_DO_MODELO, fala: "Os motoristas perderam o rastreio por dez minutos." } };
+    const llm = criarClienteFalso([semPergunta]);
+    const id = await gerarQuestaoDaVaga(configDe(), { llm, repositorio });
+    const r = await repositorio.obter(id!);
+    assert.ok(r?.aprovado);
     assert.equal(r.problema.empecilho, undefined);
+    assert.equal("empecilho" in r.problema, false, "o campo bruto do modelo não fica no problema");
   });
 
   it("a vaga e o que a recrutadora combinou vão na mensagem ao gerador", async () => {
@@ -133,5 +161,18 @@ describe("questão do quadro gerada para a vaga", () => {
       esperarMs: 5000,
     });
     assert.equal(id, "demo");
+  });
+});
+
+describe("gerador da questão: a mudança no problema faz parte do pedido", () => {
+  it("o prompt pede o empecilho e o schema estrito o exige, com os quatro campos", async () => {
+    const llm = criarClienteFalso([problemaDoModelo()]);
+    await gerarQuestaoDaVaga(configDe(), { llm, repositorio: criarRepositorioAvaliacoesEmMemoria() });
+    const chamada = llm.chamadas[0];
+    assert.match(chamada.sistema.estatico, /empecilho/);
+    assert.match(chamada.sistema.estatico, /requisito_muda/);
+    const json = paraJsonSchema(chamada.schema) as { required: string[]; properties: { empecilho: { required: string[] } } };
+    assert.ok(json.required.includes("empecilho"));
+    assert.deepEqual([...json.properties.empecilho.required].sort(), ["exige", "fala", "requisito", "tipo"]);
   });
 });

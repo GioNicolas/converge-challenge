@@ -3,6 +3,9 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { criarRepositorioEmMemoria, type RepositorioSessoes } from "../../../lib/agente/armazenamento";
+import { criarRepositorioAvaliacoesEmMemoria } from "../../../lib/agente/kits/repositorio";
+import { definirRepositorioAvaliacoesParaTestes } from "../../../lib/agente/kits/repositorio";
+import { EMPECILHOS_GENERICOS } from "../../../lib/agente/kits/empecilhos-genericos";
 import { KIT_SYSTEM_DESIGN } from "../../../lib/agente/kits/system-design";
 import { definirContextoParaTestes } from "../../../lib/agente/rotas/contexto";
 import { limitadorCriacao } from "../../../lib/agente/rotas/handlers";
@@ -130,5 +133,36 @@ describe("POST /api/sessoes/[id]/empecilho", () => {
       assert.ok(r.corpo.empecilho.requisito.length <= 50, `${avaliacao}: requisito curto`);
       assert.ok(r.corpo.empecilho.fala.trim().endsWith("?"), `${avaliacao}: termina com pergunta`);
     }
+  });
+});
+
+describe("mudança genérica quando o problema não tem uma (system design)", () => {
+  it("problema de system design sem mudança própria: a genérica pela cobertura do momento", async () => {
+    const repoAval = criarRepositorioAvaliacoesEmMemoria();
+    definirRepositorioAvaliacoesParaTestes(repoAval);
+    try {
+      // Sem `empecilho` no problema: a rota tem que escolher uma genérica do kit.
+      const { empecilho: _semMudanca, ...semMudanca } = KIT_SYSTEM_DESIGN.problemas[0];
+      await repoAval.criar({ avaliacaoId: "questao-sem-mudanca", kit: { ...KIT_SYSTEM_DESIGN, problemas: [semMudanca] }, problema: semMudanca, vagaId: "v1" });
+      await repoAval.aprovar("questao-sem-mudanca");
+
+      const id = await novaSessao("questao-sem-mudanca");
+      await irParaFase(id, "ALTO_NIVEL");
+      relogio += 300_000;
+      const { status, corpo } = await pedir(id);
+      assert.equal(status, 200);
+      // Sem evidência de escalabilidade no começo: volume 10x.
+      assert.equal(corpo.empecilho.requisito, EMPECILHOS_GENERICOS.volume.requisito);
+      assert.equal((await repo.obter(id))?.estado.empecilho?.id, EMPECILHOS_GENERICOS.volume.id);
+    } finally {
+      definirRepositorioAvaliacoesParaTestes(null);
+    }
+  });
+
+  it("kit sem genéricas (design de produto) segue sem mudança prevista", async () => {
+    const produto = await novaSessao("demo-produto");
+    await irParaFase(produto, "ALTO_NIVEL");
+    relogio += 300_000;
+    assert.deepEqual((await pedir(produto)).corpo, { empecilho: null, motivo: "problema sem mudança prevista" });
   });
 });

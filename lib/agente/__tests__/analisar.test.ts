@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analisar, assinaturaDaAnalise, CONVITES_SILENCIO_INICIAL, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
+import {
+  analisar,
+  assinaturaDaAnalise,
+  CONVITES_SILENCIO_INICIAL,
+  INTERVALO_BRECHA_EMPECILHO_MS,
+  precisaAbrirBrechaDaMudanca,
+  refiltrarComEstadoAtual,
+  type DepsAnalisar,
+} from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
-import { estadoInicial, transicionar, type EstadoSessao } from "../sessao/estado";
+import { duracaoTotalS, estadoInicial, transicionar, type EstadoSessao } from "../sessao/estado";
 import type { Fase, PedidoAnalise, RespostaAnalise } from "../sessao/tipos";
 
 const AGORA = 10_000_000;
@@ -371,5 +379,41 @@ describe("analisar: ritmo por conteúdo do quadro (#129, bloco B)", () => {
     assert.deepEqual(r.estado.perguntaPendente?.pecas, ["r1", "e1", "s1"]);
     const feita = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
     assert.deepEqual(feita.desenhoNaUltimaPergunta, ["r1", "e1", "s1"]);
+  });
+});
+
+describe("brecha da mudança depois dos 60% (#129, decisão G)", () => {
+  const total = duracaoTotalS(estadoInicial({ criterios }));
+  /** No meio do aprofundamento, com a entrevista começada `fracao` do tempo total atrás. */
+  const comFracao = (fracao: number, extra: Partial<EstadoSessao> = {}) =>
+    estadoEm("APROFUNDAMENTO", { iniciadaEm: AGORA - fracao * total * 1000, ...extra });
+  const anunciada = { id: "x", fala: "f?", requisito: "r", exige: "e", anunciadoEm: AGORA - 1, fase: "ALTO_NIVEL" as const, forcado: false };
+
+  it("só passada a fração da garantia, no meio da entrevista, sem mudança anunciada e com mudança prevista", () => {
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.59), AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.6), AGORA, true), true);
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.7, { empecilho: anunciada }), AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca({ ...comFracao(0.7), fase: "FECHAMENTO" }, AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.7), AGORA, false), false, "problema sem mudança prevista");
+  });
+
+  it("um ciclo por vez: depois de uma brecha, espera o intervalo", () => {
+    const e = comFracao(0.7, { brechaEmpecilhoEm: AGORA - 30_000 });
+    assert.equal(precisaAbrirBrechaDaMudanca(e, AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(e, AGORA + INTERVALO_BRECHA_EMPECILHO_MS - 30_000, true), true);
+  });
+
+  it("a análise troca a dúvida por ok, registra o ajuste e guarda a hora da brecha", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), comFracao(0.7), pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.ok(r.diagnostico.ajustes.includes("abre_brecha_empecilho"));
+    assert.equal(r.estado.brechaEmpecilhoEm, AGORA);
+  });
+
+  it("antes da garantia a dúvida segue e nada é registrado", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), comFracao(0.3), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("abre_brecha_empecilho"), false);
+    assert.equal(r.estado.brechaEmpecilhoEm, undefined);
   });
 });

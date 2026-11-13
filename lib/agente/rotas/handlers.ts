@@ -12,7 +12,8 @@ import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, assinaturaDaAnalise, perguntaBloqueadaNaAnalise, refiltrarComEstadoAtual, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
-import type { Kit, Problema } from "../kits/tipos";
+import type { Empecilho, Kit, Problema } from "../kits/tipos";
+import { escolherEmpecilhoGenerico, temMudancaPrevista } from "../kits/empecilhos-genericos";
 import { apresentacaoReserva, DESPEDIDA_RESERVA, type Abertura, type ContextoAbertura } from "../prompts/abertura";
 import { etapasEmTexto } from "../prompts/contexto";
 import { escalarTempos, planoDaConfig } from "../plano";
@@ -21,7 +22,7 @@ import { perguntar, type PassoNaSessao } from "../perguntar";
 import { gatilhoDoFechamento, iniciarFechamento, proximoPasso, type EtapaDoFechamento } from "../../totti/fechamento";
 import { candidatasDoQuadro, perguntasJaOuvidas } from "../fechamento";
 import { pecasDoGrafo } from "../sessao/fechamento";
-import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
+import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, criteriosSemEvidencia, duracaoTotalS, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
   EsquemaImagemOpcional,
@@ -222,6 +223,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   let resposta: RespostaAnalise = respostaSilencio();
   let origem = "sem_llm";
   let usoAnalise: Record<string, unknown> | undefined;
+  let abriuBrecha = false;
   const assinatura = assinaturaDaAnalise(pedido, estado.conversa.length + pedido.conversa_recente.length);
   const bloqueadaAgora = perguntaBloqueadaNaAnalise(estado, pedido, t0);
 
@@ -239,6 +241,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     if (r) {
       resposta = r.resposta;
       origem = r.diagnostico.origem;
+      abriuBrecha = r.diagnostico.ajustes.includes("abre_brecha_empecilho");
       const u = r.diagnostico.uso;
       if (u) usoAnalise = {
         modelo: u.modelo, provedor: u.provedor, reserva_disparada: u.reservaDisparada ?? false, ms: r.diagnostico.ms,
@@ -264,6 +267,8 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
       observacoes: novo.observacoes.map((o, i) => i < anteriores ? o : {
         ...o, desenho: { horario: new Date(t0).toISOString(), grafo: pedido.grafo },
       }),
+      // A brecha da mudança (decisão G) conta para o próximo ciclo: ver precisaAbrirBrechaDaMudanca.
+      ...(abriuBrecha ? { brechaEmpecilhoEm: fim } : {}),
     };
   } else if (origem === "sem_novidade") {
     novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, ctx.agora()).estado;
@@ -495,6 +500,9 @@ function motivoDoEmpecilho(estado: EstadoSessao, grafo: string, forcar: boolean,
     respondendoPergunta: estado.plin === "PERGUNTA_ATIVA",
     componentes: contarComponentes(grafo),
     ultimaFalaDoAgenteEm: ultimaDoAgente?.em ?? null,
+    iniciadaEm: estado.iniciadaEm ?? null,
+    duracaoTotalS: duracaoTotalS(estado),
+    ultimaPerguntaEm: estado.ultimaPerguntaEm,
   });
 }
 
@@ -517,8 +525,7 @@ export async function empecilhoHandler(req: Request, { params }: ParamsId): Prom
   if (!sessao) return notFound();
   const alvo = await resolverAvaliacao(sessao.avaliacaoId);
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
-  const empecilho = alvo.problema.empecilho;
-  if (!empecilho) return json({ empecilho: null, motivo: "problema sem mudança prevista" });
+  if (!temMudancaPrevista(alvo.kit, alvo.problema)) return json({ empecilho: null, motivo: "problema sem mudança prevista" });
 
   const agora = ctx.agora();
   const estado = sincronizarFase(sessao.estado, corpo.dados.fase, agora);
@@ -529,6 +536,8 @@ export async function empecilhoHandler(req: Request, { params }: ParamsId): Prom
     return json({ empecilho: null, motivo });
   }
 
+  // A mudança do problema (gerada ou escrita à mão); sem ela, a genérica do kit para a cobertura do momento.
+  const empecilho: Empecilho = alvo.problema.empecilho ?? escolherEmpecilhoGenerico(criteriosSemEvidencia(estado));
   const novo = transicionar(estado, {
     tipo: "EMPECILHO_ANUNCIADO",
     empecilho: { id: empecilho.id, fala: empecilho.fala, requisito: empecilho.requisito, exige: empecilho.exige, forcado: forcar },

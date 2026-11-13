@@ -151,7 +151,7 @@ describe("geração aceita problema que só falha na coerência", () => {
   const doModelo = (p: Problema) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...resto } = p;
-    return resto;
+    return { ...resto, empecilho: { tipo: "requisito_muda", fala: "Entram duas vezes mais pedidos. Onde isso pesa primeiro?", requisito: "Mudança: 2x pedidos", exige: "Rever a escrita." } };
   };
   const ok = () => ({ ...base().problemas[0], titulo: "Painel de Vendas", enunciado: "Mostre o status das entregas dos pedidos." });
 

@@ -5,12 +5,15 @@ import { PRAZO_ANALISE_DO_DESENHO_MS } from "../contracts";
 import { aplicarGuardas, eQuaseDuplicada, eSoReacao, sobreposicao, LIMIAR_DUPLICADA, trocarIdsPorNomes } from "./guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
+import { temMudancaPrevista } from "./kits/empecilhos-genericos";
 import { montarPromptAvaliador, NOME_SCHEMA_ANALISE } from "./prompts/avaliador";
 import {
+  duracaoTotalS,
   transicionar,
   type Efeito,
   type EstadoSessao,
 } from "./sessao/estado";
+import { emGarantiaDoEmpecilho } from "../sessao/empecilho";
 import { pecasDoGrafo } from "./sessao/fechamento";
 import {
   extrairIdsDoGrafo,
@@ -55,6 +58,25 @@ export const CONVITES_SILENCIO_INICIAL = [
   "Quando quiser, me conta como está pensando em começar. Pode tirar dúvidas comigo.",
   "Pode me contar por onde está pensando em começar. Se tiver alguma dúvida, pode perguntar.",
 ] as const;
+
+/**
+ * Um ciclo de brecha por vez: depois da garantia dos 60% (ver `precisaAbrirBrechaDaMudanca`), a análise volta a
+ * abrir espaço para a mudança só depois desse intervalo. Não bloqueia perguntas indefinidamente.
+ */
+export const INTERVALO_BRECHA_EMPECILHO_MS = 60_000;
+
+/**
+ * A mudança devida ainda não entrou e a entrevista já passou da fração da garantia (decisão G): a análise responde
+ * "ok" por um ciclo para abrir a brecha. Só no meio da entrevista (ALTO_NIVEL e APROFUNDAMENTO) e com a mudança
+ * prevista (do problema ou genérica do kit). Função pura.
+ */
+export function precisaAbrirBrechaDaMudanca(estado: EstadoSessao, agora: number, mudancaPrevista: boolean): boolean {
+  if (!mudancaPrevista || estado.empecilho) return false;
+  if (estado.fase !== "ALTO_NIVEL" && estado.fase !== "APROFUNDAMENTO") return false;
+  if (!emGarantiaDoEmpecilho({ agora, iniciadaEm: estado.iniciadaEm ?? null, duracaoTotalS: duracaoTotalS(estado) })) return false;
+  const ultima = estado.brechaEmpecilhoEm;
+  return ultima === undefined || ultima === null || agora - ultima >= INTERVALO_BRECHA_EMPECILHO_MS;
+}
 
 export function respostaSilencio(): RespostaAnalise {
   return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false };
@@ -236,6 +258,15 @@ export async function analisar(
     }
   }
 
+  // Brecha da mudança (#129, decisão G): passada a garantia dos 60% e sem a mudança, a pergunta vira "ok" por um
+  // ciclo, para o quadro ter uma pausa em que a mudança possa entrar (um ciclo por vez: ver INTERVALO_BRECHA_EMPECILHO_MS).
+  const abreBrecha = (resposta.status === "duvida" || resposta.status === "dica")
+    && precisaAbrirBrechaDaMudanca(estado, agora, temMudancaPrevista(deps.kit, deps.problema));
+  if (abreBrecha) {
+    ajustes.push("abre_brecha_empecilho");
+    resposta = { ...resposta, status: "ok" };
+  }
+
   const filtrada = filtrarResposta(estado, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS: pedido.parado_ha_s });
   if (resposta.status !== "ok" && filtrada.status === "ok") ajustes.push("rebaixada_pela_politica");
 
@@ -250,7 +281,7 @@ export async function analisar(
   });
   return {
     resposta: filtrada,
-    estado: t.estado,
+    estado: abreBrecha ? { ...t.estado, brechaEmpecilhoEm: agora } : t.estado,
     efeitos: t.efeitos,
     diagnostico: { origem: "llm", ajustes, ms, uso },
   };

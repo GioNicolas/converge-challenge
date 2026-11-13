@@ -9,7 +9,7 @@ import { pedirEmpecilho, pedirFechamento, perguntar } from "@/lib/sessao/servido
 import { DESPEDIDAS, TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
 import { criarDespedida } from "@/lib/voz/despedida";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
-import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
+import { contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
@@ -39,6 +39,7 @@ import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
 import { interrupcaoAtrasada, motivoDoMomento, pausaDasMaosParaFalarMs, RITMO } from "@/lib/interrupcao/politica";
 import { LICENCA_DE_NOVO_MS, LICENCA_SEM_RESPOSTA_MS, liberouAPergunta, pedeParaEncerrar } from "@/lib/conversa/licenca";
 import {
+  DURACAO_PADRAO_MIN,
   estadoInicial,
   marcoDoCliente,
   podeAnalisar,
@@ -777,7 +778,8 @@ export function useEntrevista(
       if (encerrandoRef.current || estadoAtual.current.fase === "ENCERRADA" || estadoAtual.current.fechamento) return;
       const { fala, requisito } = r.empecilho;
       empecilhoAnunciadoEm.current = Date.now();
-      ultimaAtividade.current = Date.now();
+      // O anúncio é fala do Totti: o silêncio do candidato conta a partir dela, não da atividade dele.
+      ultimaFalaDoAgenteEm.current = Date.now();
       revisaoDaConversa.current++;
       conversa.current.push({ quem: "agente", texto: fala });
       if (!requisitosCombinados.current.includes(requisito)) requisitosCombinados.current.push(requisito);
@@ -800,13 +802,19 @@ export function useEntrevista(
       if (Date.now() - ultimoPedidoEmpecilho.current < INTERVALO_PEDIDO_EMPECILHO_MS) return;
       const e = estadoAtual.current;
       const agora = Date.now();
+      // Garantia dos 60% do tempo total (decisão G, lib/sessao/empecilho.ts): depois dela a mudança sai com pausa
+      // curta e sem pergunta ativa, sem exigir a fração da fase nem o quadro livre.
+      const duracaoTotalS = (e.duracaoMin ?? DURACAO_PADRAO_MIN) * 60;
+      const garantia = emGarantiaDoEmpecilho({ agora, iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS });
       // Sem cortar ninguém: pausa do candidato, agente quieto, nada pendente, nenhuma pergunta no ar.
-      if (motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current }) !== null) return;
-      if (e.plin !== "LIVRE" || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
+      const parado = { maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current };
+      if (motivoDoMomento(garantia ? { ...parado, marco: true } : parado) !== null) return;
+      if ((garantia ? e.plin === "PERGUNTA_ATIVA" : e.plin !== "LIVRE") || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 })) return;
       const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS: sessao.tempos[e.fase],
-        jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current };
+        jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current,
+        iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, ultimaPerguntaEm: e.ultimaPerguntaEm ?? null };
       // O grafo só é montado quando o resto já permite (é a parte cara da conta).
       if (esperaDoEmpecilho({ ...base, componentes: Number.MAX_SAFE_INTEGER })) return;
       const componentes = contarComponentes(conversor.current.converter(quadro.api.getSceneElements()).texto);

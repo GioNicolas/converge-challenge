@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { kitFalso } from "../falso";
 import type { Kit } from "../tipos";
-import { paraSlug, validarKit } from "../validar";
+import { empecilhoGerado, errosDoEmpecilho, idEmpecilhoDoProblema, paraSlug, validarKit } from "../validar";
 
 const base = (): Kit => ({ ...kitFalso("coordenação de obras"), id: "obra_x", problemas: [{ ...kitFalso().problemas[0], id: "obra_x_p1" }] });
 const clone = <T,>(x: T): T => structuredClone(x);
@@ -113,5 +113,62 @@ describe("paraSlug", () => {
     assert.match(paraSlug("123"), /^[a-z][a-z0-9_]+$/);
     assert.match(paraSlug("___"), /^[a-z][a-z0-9_]+$/);
     assert.notEqual(paraSlug("__proto__"), "__proto__");
+  });
+});
+
+describe("mudança no problema gerada (empecilho)", () => {
+  const boa = () => ({
+    tipo: "requisito_muda",
+    fala: "Uma mudança no problema: o volume dobrou. Onde isso pega primeiro?",
+    requisito: "Mudança: volume 2x",
+    exige: "Rever a escrita e o cache.",
+  });
+
+  it("uma mudança boa passa, sem erro", () => {
+    assert.deepEqual(errosDoEmpecilho(boa()), []);
+  });
+
+  it("tipo fora do enum, fala vazia, fala sem pergunta, fala longa, requisito vazio ou longo e exige vazio são erros", () => {
+    assert.match(errosDoEmpecilho({ ...boa(), tipo: "inventado" }).join(" "), /tipo/);
+    assert.match(errosDoEmpecilho({ ...boa(), fala: "   " }).join(" "), /fala vazia/);
+    assert.match(errosDoEmpecilho({ ...boa(), fala: "O volume dobrou." }).join(" "), /pergunta/);
+    assert.match(errosDoEmpecilho({ ...boa(), fala: `${"a".repeat(300)}?` }).join(" "), /301 caracteres/);
+    assert.match(errosDoEmpecilho({ ...boa(), requisito: " " }).join(" "), /requisito vazio/);
+    assert.match(errosDoEmpecilho({ ...boa(), requisito: "x".repeat(51) }).join(" "), /50/);
+    assert.match(errosDoEmpecilho({ ...boa(), exige: "" }).join(" "), /exige vazio/);
+  });
+
+  it("requisito de exatamente 50 caracteres passa", () => {
+    assert.deepEqual(errosDoEmpecilho({ ...boa(), requisito: "x".repeat(50) }), []);
+  });
+
+  it("empecilhoGerado devolve a mudança com o id dado pelo código, aparada; inválida vira undefined", () => {
+    const id = idEmpecilhoDoProblema("entregas_x");
+    assert.equal(id, "mudanca_entregas_x");
+    assert.deepEqual(empecilhoGerado({ ...boa(), requisito: "  Mudança: volume 2x  " }, id), {
+      id,
+      tipo: "requisito_muda",
+      fala: boa().fala,
+      requisito: "Mudança: volume 2x",
+      exige: "Rever a escrita e o cache.",
+    });
+    assert.equal(empecilhoGerado({ ...boa(), fala: "Sem pergunta." }, id), undefined);
+    assert.equal(empecilhoGerado(undefined, id), undefined);
+  });
+
+  it("validarKit devolve a mudança do problema (o Zod a descartaria) e avisa quando ela não passa", () => {
+    const kit = base();
+    const com = clone(kit);
+    com.problemas[0] = { ...com.problemas[0], empecilho: { id: "mudanca_x", ...boa() } } as never;
+    const r = validarKit(com);
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.ok && r.kit.problemas[0].empecilho, { id: "mudanca_x", ...boa() });
+
+    const ruim = clone(kit);
+    ruim.problemas[0] = { ...ruim.problemas[0], empecilho: { ...boa(), fala: "Sem pergunta." } } as never;
+    const r2 = validarKit(ruim);
+    assert.equal(r2.ok, true);
+    assert.equal(r2.ok && r2.kit.problemas[0].empecilho, undefined);
+    assert.equal(r2.ok && r2.avisos.some((a) => /empecilho/.test(a)), true);
   });
 });

@@ -25,7 +25,7 @@ import {
 import type { PedidoAnalise, RespostaAnalise as RespostaDoAgente } from "../lib/agente/sessao/tipos";
 import { podeTomarTurno } from "../lib/conversa/turnos";
 import type { Fase, RespostaAnalise } from "../lib/sessao/cliente";
-import { contarComponentes, esperaDoEmpecilho } from "../lib/sessao/empecilho";
+import { contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho } from "../lib/sessao/empecilho";
 import { interrupcaoAtrasada, motivoDoMomento, RITMO } from "../lib/interrupcao/politica";
 import { aceitaPlin, estadoInicial, marcoDeFase, podeAnalisar, ritmoDoCliente, transicionar, type EstadoEntrevista, type EventoEntrevista } from "../lib/sessao/estados";
 import { LIMITE_PADRAO_MS, PAUSA_PADRAO_MS } from "../lib/sessao/gatilho";
@@ -196,7 +196,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
   let respondendo: { falaAte: number } | null = null;
 
   const interrupcoes: Interrupcao[] = [];
-  const contagem = { analises: 0, querPerguntar: 0, barradasServidor: 0, barradasConteudo: 0, barradasQuadro: 0, descartadasPorFala: 0, lentas: 0, canceladasPorFala: 0, licencas: 0 };
+  const contagem = { analises: 0, querPerguntar: 0, barradasServidor: 0, barradasConteudo: 0, barradasQuadro: 0, descartadasPorFala: 0, lentas: 0, canceladasPorFala: 0, licencas: 0, brechasDaMudanca: 0 };
 
   const grafo = () => `COMPONENTES E CONEXÕES\n${LINHAS.slice(0, desenhadas).join("\n")}`;
 
@@ -238,6 +238,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
       motivo,
       ajustes: r.diagnostico.ajustes,
     };
+    if (r.diagnostico.ajustes.includes("abre_brecha_empecilho")) contagem.brechasDaMudanca++;
     if (r.diagnostico.ajustes.includes("rebaixada_pela_politica")) contagem.barradasServidor++;
     if (r.diagnostico.ajustes.some((a) => a === "piso_entre_perguntas" || a === "sem_parte_fechada")) contagem.barradasConteudo++;
     if (r.resposta.status !== "ok" || r.diagnostico.ajustes.includes("rebaixada_pela_politica")) contagem.querPerguntar++;
@@ -406,11 +407,17 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
     }
 
     // Mudança no problema (empecilho): uma vez, numa pausa, sem pergunta no ar.
-    if (!empecilhoFeito && cliente.plin === "LIVRE" && podeFalar && motivoDoMomento(parado) === null && t - ultimoPedidoEmpecilho >= 15_000) {
+    // Mesma regra do navegador (useEntrevista.ts): depois da garantia dos 60% (GARANTIA_A_PARTIR_DA_FRACAO), sai com
+    // pausa curta e sem pergunta ativa; antes, com o quadro livre e a pausa de sempre.
+    const garantia = emGarantiaDoEmpecilho({ agora: t, iniciadaEm: cliente.iniciadaEm ?? null, duracaoTotalS: opcoes.duracaoMin * 60 });
+    const plinOk = garantia ? cliente.plin !== "PERGUNTA_ATIVA" : cliente.plin === "LIVRE";
+    const pausaOk = motivoDoMomento(garantia ? { ...parado, marco: true } : parado) === null;
+    if (!empecilhoFeito && plinOk && podeFalar && pausaOk && t - ultimoPedidoEmpecilho >= 15_000) {
       ultimoPedidoEmpecilho = t;
       const espera = esperaDoEmpecilho({
         agora: t, fase: cliente.fase, faseIniciadaEm: cliente.faseIniciadaEm, duracaoDaFaseS: tempos[cliente.fase as keyof typeof tempos],
         jaAnunciado: false, respondendoPergunta: false, componentes: contarComponentes(grafo()), ultimaFalaDoAgenteEm,
+        iniciadaEm: cliente.iniciadaEm ?? null, duracaoTotalS: opcoes.duracaoMin * 60, ultimaPerguntaEm: cliente.ultimaPerguntaEm ?? null,
       });
       if (espera === null) {
         empecilhoFeito = true;
@@ -428,6 +435,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
 }
 
 export function resumo(r: Awaited<ReturnType<typeof simularQuadro>>): string {
+  const mudanca = r.interrupcoes.find((i) => i.tipo === "empecilho");
   const porFase = new Map<string, number>();
   for (const i of r.interrupcoes) porFase.set(i.fase, (porFase.get(i.fase) ?? 0) + 1);
   const gaps = r.interrupcoes.slice(1).map((i, k) => (i.t - r.interrupcoes[k].t) / 1000).sort((a, b) => a - b);
@@ -435,6 +443,7 @@ export function resumo(r: Awaited<ReturnType<typeof simularQuadro>>): string {
   return [
     `${r.persona} (${r.duracaoMin} min): ${r.interrupcoes.length} interrupções · ${[...porFase].map(([f, n]) => `${f} ${n}`).join(", ")}`,
     `  intervalo entre elas: mín ${gaps[0] ?? "–"} s, mediana ${mediana ?? "–"} s · no meio do desenho: ${r.interrupcoes.filter((i) => i.desenhando).length}`,
+    `  mudança no problema: ${mudanca ? `entrou aos ${mmss(mudanca.t)} (${mudanca.fase}, ${Math.round((mudanca.t / (r.duracaoMin * 60_000)) * 100)}% do tempo)` : "não entrou"} · brechas abertas pela análise ${r.contagem.brechasDaMudanca}`,
     `  análises ${r.contagem.analises}, quis perguntar ${r.contagem.querPerguntar}, barradas no servidor ${r.contagem.barradasServidor}, pelo conteúdo (sem parte fechada ou piso) ${r.contagem.barradasConteudo}, no quadro ${r.contagem.barradasQuadro}, descartadas por fala ${r.contagem.descartadasPorFala}, canceladas por fala ${r.contagem.canceladasPorFala}, lentas ${r.contagem.lentas}, licenças pedidas ${r.contagem.licencas}`,
   ].join("\n");
 }
