@@ -20,7 +20,7 @@ const INTERVALO = intervaloMinimoMs(35);
 
 function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
-    status: "duvida", parteFechada: true,
+    status: "duvida", parteFechada: true, escopo: false,
     pergunta: "Onde fica o gargalo?",
     nota: "Gargalo?",
     elementos: ["e1"],
@@ -191,7 +191,7 @@ describe("ciclo do plin", () => {
 
   it("ok cancela a pendente", () => {
     const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
-    const ok: RespostaAnalise = { status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+    const ok: RespostaAnalise = { status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
     const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000);
     assert.equal(r.estado.plin, "LIVRE");
     assert.equal(r.estado.perguntaPendente, null);
@@ -290,7 +290,7 @@ describe("registros", () => {
     const base = estadoInicial({ criterios: ["escalabilidade", "dados", "trade-offs"] });
     let e = aplicar(base, { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" }, { tipo: "CANDIDATO_DESENHOU" });
     const ok: RespostaAnalise = {
-      status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
+      status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [
         { criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" },
         { criterio: "cache", sinal: "positivo", espontaneo: true, evidencia: "citou Redis" },
@@ -385,7 +385,7 @@ describe("critérios do plano na cobertura (#129, bloco D)", () => {
     e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
     e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
     const ok: RespostaAnalise = {
-      status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
+      status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [{ criterio: "Idempotência", sinal: "positivo", espontaneo: true, evidencia: "chave por pedido" }],
     };
     e = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000).estado;
@@ -448,5 +448,58 @@ describe("PLIN_CLICADO sem dúvida pendente (corrida: o quadro disse que fez a p
     const r = transicionar(e, { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
     assert.equal(r.estado.perguntasFeitas, 0);
     assert.equal(r.estado.conviteFeito, true);
+  });
+});
+
+describe("redirecionamento de escopo gravado no clique (#129, decisão I)", () => {
+  const redireciona = (extra: Partial<RespostaAnalise> = {}) => duvida({ status: "redirecionar", parteFechada: false, escopo: true, ...extra });
+
+  /** Uma análise que vira pergunta de redirecionamento de escopo, clicada no instante `em`. */
+  function clicar(estado: EstadoSessao, resposta: RespostaAnalise, em: number): EstadoSessao {
+    const pendente = transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta, pecas: ["r1", "e1"] }, em - 1000).estado;
+    return transicionar(pendente, { tipo: "PLIN_CLICADO" }, em).estado;
+  }
+
+  it("o primeiro redirecionamento de escopo grava a hora e conta 1", () => {
+    const e = clicar(emFase("APROFUNDAMENTO"), redireciona(), T0 + MIN);
+    assert.equal(e.escopoProvocadoEm, T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 1);
+  });
+
+  it("o segundo conta 2 e mantém a hora do primeiro", () => {
+    let e = clicar(emFase("APROFUNDAMENTO"), redireciona(), T0 + MIN);
+    e = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "ok", fimDeResposta: true }, T0 + 2 * MIN).estado;
+    e = clicar(e, redireciona(), T0 + 10 * MIN);
+    assert.equal(e.escopoProvocadoEm, T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 2);
+  });
+
+  it("pergunta comum, sem escopo, não grava nada", () => {
+    const e = clicar(emFase("APROFUNDAMENTO"), duvida(), T0 + MIN);
+    assert.equal(e.escopoProvocadoEm, undefined);
+    assert.equal(e.escopoRedirecionamentos, undefined);
+  });
+
+  it("estado antigo, sem os campos, funciona", () => {
+    const antigo = emFase("APROFUNDAMENTO");
+    delete (antigo as { escopoProvocadoEm?: number | null }).escopoProvocadoEm;
+    const e = clicar(antigo, redireciona(), T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 1);
+  });
+});
+
+describe("redirecionamento de escopo falado, sem pendente (corrida, #129, decisão I)", () => {
+  const registro = (extra: Record<string, unknown> = {}) => ({ pergunta: "O problema pede outra coisa. Por onde começar?", status: "redirecionar" as const, elementos: [], ...extra });
+
+  it("grava a hora do primeiro e conta, como o clique com pendente", () => {
+    const e = transicionar(emFase("APROFUNDAMENTO"), { tipo: "PLIN_CLICADO", registro: registro({ escopo: true }) }, T0 + MIN).estado;
+    assert.equal(e.escopoProvocadoEm, T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 1);
+  });
+
+  it("registro sem escopo não grava os campos", () => {
+    const e = transicionar(emFase("APROFUNDAMENTO"), { tipo: "PLIN_CLICADO", registro: registro({ status: "duvida" }) }, T0 + MIN).estado;
+    assert.equal(e.escopoProvocadoEm, undefined);
+    assert.equal(e.escopoRedirecionamentos, undefined);
   });
 });

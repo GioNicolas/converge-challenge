@@ -141,7 +141,7 @@ describe("onde a pergunta de condução é a pergunta da vez", () => {
 describe("a pergunta da análise também passa pelas travas", () => {
   const pedido: PedidoAnalise = { sessao_id: "s-1", fase: "APROFUNDAMENTO", grafo: "COMPONENTES\n- [r1] API (retângulo)", mudancas: "", conversa_recente: [], perguntas_feitas: 0, imagem_url: null, parado_ha_s: 30 };
   const estado: EstadoSessao = { ...estadoInicial(), fase: "APROFUNDAMENTO", faseIniciadaEm: AGORA - 5 * 60_000, iniciadaEm: AGORA - 8 * 60_000 };
-  const resposta = (pergunta: string): RespostaAnalise => ({ status: "duvida", parteFechada: true, pergunta, nota: "abordagem", elementos: [], degrau: null, observacoes: [] });
+  const resposta = (pergunta: string): RespostaAnalise => ({ status: "duvida", parteFechada: true, escopo: false, pergunta, nota: "abordagem", elementos: [], degrau: null, observacoes: [] });
 
   it("quadro: o caso real da #83 perde o cumprimento antes de virar pergunta", async () => {
     const llm = criarClienteFalso([resposta("Oi, tudo bem? Como você está pensando em abordar esse problema?")]);

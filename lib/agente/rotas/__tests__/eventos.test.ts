@@ -43,4 +43,13 @@ describe("evento 'pergunta' da linha do tempo", () => {
     );
     assert.deepEqual(eventosDaMaquina("pergunta", { numero: 1 }), [{ tipo: "PLIN_CLICADO" }]);
   });
+
+  it("o escopo falado (decisão I) chega ao registro; sem ele, o registro não ganha o campo", () => {
+    assert.deepEqual(
+      eventosDaMaquina("pergunta", { pergunta: "O problema pede outra coisa. Por onde começar?", status: "redirecionar", escopo: true }),
+      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "O problema pede outra coisa. Por onde começar?", nota: null, elementos: [], status: "redirecionar", escopo: true } }],
+    );
+    const semEscopo = eventosDaMaquina("pergunta", { pergunta: "Por quê?", status: "duvida" });
+    assert.equal("escopo" in (semEscopo[0] as { registro: object }).registro, false);
+  });
 });

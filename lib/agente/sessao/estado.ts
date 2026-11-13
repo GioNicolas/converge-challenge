@@ -128,6 +128,13 @@ export type EstadoSessao = {
   pediuTempoEm?: number | null;
   /** O Totti já respondeu ao primeiro pedido de tempo da entrevista (depois disso, ele fica calado nesses pedidos). */
   reacaoAoPensarDita?: boolean;
+  /**
+   * Quando o Totti fez a primeira pergunta de redirecionamento de escopo (#129, decisão I). Null/ausente: ainda não puxou
+   * o escopo. Contrato com o scorecard (Pessoa 5), ver lib/agente/sessao/tipos.ts.
+   */
+  escopoProvocadoEm?: number | null;
+  /** Quantos redirecionamentos de escopo já foram feitos (0 a LIMITE_REDIRECIONAMENTOS_DE_ESCOPO). Ausente = 0. */
+  escopoRedirecionamentos?: number;
 
   /** Todas as perguntas feitas, com os elementos citados. */
   perguntas: PerguntaFeita[];
@@ -174,6 +181,8 @@ export type RegistroDaPergunta = {
   nota?: string | null;
   elementos?: string[];
   status?: RespostaAnalise["status"];
+  /** A pergunta falada era de redirecionamento de escopo (decisão I): conta no limite e grava a hora. */
+  escopo?: boolean;
 };
 
 export type EventoSessao =
@@ -251,6 +260,7 @@ function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, 
     fase: estado.fase,
     feitaEm: agora,
   };
+  const redirecionouEscopo = pergunta.status === "redirecionar" && r.escopo === true;
   return {
     estado: {
       ...estado,
@@ -263,6 +273,10 @@ function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, 
       ultimaPerguntaEm: agora,
       perguntas: [...estado.perguntas, pergunta],
       conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
+      // Redirecionamento de escopo falado (decisão I): mesma conta do clique com pendente.
+      ...(redirecionouEscopo
+        ? { escopoProvocadoEm: estado.escopoProvocadoEm ?? agora, escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1 }
+        : {}),
     },
     efeitos: [{ tipo: "PERGUNTA_INICIADA", pergunta }],
   };
@@ -574,6 +588,13 @@ export function transicionar(
           ultimaPerguntaEm: agora,
           // O desenho que gerou esta pergunta: a próxima só pelo teto se houver peça nova depois dele.
           ...(pendente.pecas !== undefined ? { desenhoNaUltimaPergunta: pendente.pecas } : {}),
+          // Redirecionamento de escopo feito (#129, decisão I): a hora do primeiro fica para o scorecard.
+          ...(pendente.status === "redirecionar" && pendente.escopo === true
+            ? {
+              escopoProvocadoEm: estado.escopoProvocadoEm ?? agora,
+              escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1,
+            }
+            : {}),
           perguntas: [...estado.perguntas, pergunta],
           conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
         },

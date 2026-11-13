@@ -14,14 +14,14 @@ const estadoEm = (extra: Partial<EstadoSessao> = {}): EstadoSessao =>
   ({ ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: AGORA - 5 * 60_000, iniciadaEm: AGORA - 12 * 60_000, ...extra });
 /** Uma observação positiva no critério: passa a ter evidência suficiente. */
 const comEvidencia = (estado: EstadoSessao, criterio: string): EstadoSessao => transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta: {
-  status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
+  status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null,
   observacoes: [{ criterio, sinal: "positivo", espontaneo: true, evidencia: `Mostrou ${criterio} no desenho.` }],
 } }, AGORA).estado;
 
 describe("candidatas a pergunta final do quadro", () => {
   it("a pergunta da análise que esperava a vez vem primeiro, com as peças e as marcas dela", () => {
     const pendente: EstadoSessao["perguntaPendente"] = {
-      status: "duvida", parteFechada: true, pergunta: "Por que o app fala direto com o banco?", nota: "Direto no banco?", elementos: ["s3"],
+      status: "duvida", parteFechada: true, escopo: false, pergunta: "Por que o app fala direto com o banco?", nota: "Direto no banco?", elementos: ["s3"],
       visual: [{ tipo: "circular", alvo: "s3" }], degrau: null, observacoes: [], criadoEm: AGORA - 10_000,
     };
     const candidatas = candidatasDoQuadro(kit, problema, estadoEm({ perguntaPendente: pendente }), AGORA);

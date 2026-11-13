@@ -19,6 +19,9 @@ import {
   podeLevantarPlin,
   podeOferecerEncerrar,
   REGRAS_PADRAO,
+  aplicarRegraDoEscopo,
+  ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS,
+  motivoRedirecionamentoDeEscopo,
   statusPermitido,
 } from "../politica";
 import { FASES, STATUS_ANALISE, type Fase, type RespostaAnalise } from "../tipos";
@@ -35,7 +38,7 @@ function estadoEm(fase: Fase, extra: Partial<EstadoSessao> = {}): EstadoSessao {
 
 function resposta(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
-    status: "duvida", parteFechada: true,
+    status: "duvida", parteFechada: true, escopo: false,
     pergunta: "Onde fica o gargalo?",
     nota: "Gargalo?",
     elementos: ["e1"],
@@ -537,5 +540,79 @@ describe("quando o quadro pode oferecer o encerramento (#129, decisão F)", () =
     assert.equal(conclusaoBarradaRecente(concluiu(10_000, "REQUISITOS"), AGORA, COM_MUDANCA), null, "fora do desenho não conta");
     assert.equal(conclusaoBarradaRecente(quadroEm(), AGORA, COM_MUDANCA), null, "sem conclusão, não há o que puxar");
     assert.equal(conclusaoBarradaRecente(comCriteriosCobertos(concluiu(10_000)), AGORA, COM_MUDANCA), "falta_mudanca");
+  });
+});
+
+describe("redirecionamento de escopo (#129, decisão I)", () => {
+  const PECAS = ["r1", "e1", "s1"];
+  const ESPERA = ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS;
+  const alto = (extra: Partial<EstadoSessao> = {}) => estadoEm("ALTO_NIVEL", extra);
+  const redireciona = (extra: Partial<RespostaAnalise> = {}) => resposta({ status: "redirecionar", escopo: true, parteFechada: false, ...extra });
+
+  it("só em ALTO_NIVEL e APROFUNDAMENTO", () => {
+    assert.equal(motivoRedirecionamentoDeEscopo(alto(), AGORA, PECAS), null);
+    assert.equal(motivoRedirecionamentoDeEscopo(estadoEm("APROFUNDAMENTO"), AGORA, PECAS), null);
+    assert.equal(motivoRedirecionamentoDeEscopo(estadoEm("REQUISITOS"), AGORA, PECAS), "escopo_fora_da_fase");
+    assert.equal(motivoRedirecionamentoDeEscopo(estadoEm("FECHAMENTO"), AGORA, PECAS), "escopo_fora_da_fase");
+  });
+
+  it("sem peça desenhada não julga o escopo; grafo grande demais para comparar conta como desenho", () => {
+    assert.equal(motivoRedirecionamentoDeEscopo(alto(), AGORA, []), "escopo_sem_desenho");
+    assert.equal(motivoRedirecionamentoDeEscopo(alto(), AGORA, null), null);
+  });
+
+  it("o primeiro sai; o segundo só depois de 5 min do primeiro; o terceiro nunca", () => {
+    assert.equal(motivoRedirecionamentoDeEscopo(alto({ escopoRedirecionamentos: 1, escopoProvocadoEm: AGORA - ESPERA + 1 }), AGORA, PECAS), "escopo_espera_lembrete");
+    assert.equal(motivoRedirecionamentoDeEscopo(alto({ escopoRedirecionamentos: 1, escopoProvocadoEm: AGORA - ESPERA }), AGORA, PECAS), null);
+    assert.equal(motivoRedirecionamentoDeEscopo(alto({ escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 10 * ESPERA }), AGORA, PECAS), "escopo_ja_redirecionado");
+  });
+
+  it("aplicarRegraDoEscopo: fora da regra vira ok com o motivo; dentro passa; sem escopo, escopo cai fora de redirecionar", () => {
+    const barrada = aplicarRegraDoEscopo(estadoEm("REQUISITOS"), redireciona(), AGORA, PECAS);
+    assert.equal(barrada.motivo, "escopo_fora_da_fase");
+    assert.equal(barrada.resposta.status, "ok");
+    assert.equal(barrada.resposta.escopo, false);
+    const passa = aplicarRegraDoEscopo(alto(), redireciona(), AGORA, PECAS);
+    assert.equal(passa.motivo, null);
+    assert.equal(passa.resposta.status, "redirecionar");
+    assert.equal(passa.resposta.escopo, true);
+    const duvidaComEscopo = aplicarRegraDoEscopo(alto(), resposta({ status: "duvida", escopo: true }), AGORA, PECAS);
+    assert.equal(duvidaComEscopo.resposta.escopo, false);
+    assert.equal(duvidaComEscopo.motivo, null);
+  });
+
+  it("fura o intervalo e o respiro entre perguntas, mas só com escopo", () => {
+    const recente = alto({ ultimaPerguntaEm: AGORA - 10_000, ultimaRespostaEm: AGORA - 5_000 });
+    assert.equal(filtrarResposta(recente, redireciona({ escopo: false }), IDS, AGORA).status, "ok", "sem escopo, o ritmo comum barra");
+    const comEscopo = filtrarResposta(recente, redireciona(), IDS, AGORA);
+    assert.equal(comEscopo.status, "redirecionar");
+    assert.equal(comEscopo.pergunta, "Onde fica o gargalo?");
+  });
+
+  it("a cota de perguntas não barra o escopo (revisado, decisão I)", () => {
+    const cedo = alto({ iniciadaEm: AGORA, perguntasFeitas: 1 });
+    assert.equal(filtrarResposta(cedo, redireciona(), IDS, AGORA).status, "redirecionar");
+  });
+
+  it("o orçamento de perguntas continua valendo para o escopo", () => {
+    const sem = alto({ perguntasFeitas: LIMITE, ultimaPerguntaEm: AGORA - 10_000 });
+    assert.equal(filtrarResposta(sem, redireciona(), IDS, AGORA).status, "ok");
+    assert.equal(motivoBloqueioPlin(sem, AGORA, REGRAS_PADRAO, { escopo: true }), "LIMITE_DE_PERGUNTAS");
+  });
+
+  it("a regra da bola continua valendo: fala do Totti sem ação do candidato segura o escopo", () => {
+    const bola = alto({ ultimaFalaDoAgenteEm: AGORA - 10_000 });
+    assert.equal(filtrarResposta(bola, redireciona(), IDS, AGORA, REGRAS_PADRAO, { paradoHaS: 60 }).status, "ok");
+  });
+});
+
+describe("cota e escopo (#129, decisão I, revisado)", () => {
+  it("a cota não barra o redirecionamento de escopo; o orçamento total continua barrando", () => {
+    // Início da entrevista (fração 0): a cota é 1, e uma pergunta já feita a esgota.
+    const cedo = estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA, perguntasFeitas: 1 });
+    assert.equal(motivoBloqueioPlin(cedo, AGORA), "COTA_DO_TEMPO");
+    assert.equal(motivoBloqueioPlin(cedo, AGORA, REGRAS_PADRAO, { escopo: true }), null);
+    const cheio = estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA, perguntasFeitas: LIMITE });
+    assert.equal(motivoBloqueioPlin(cheio, AGORA, REGRAS_PADRAO, { escopo: true }), "LIMITE_DE_PERGUNTAS");
   });
 });

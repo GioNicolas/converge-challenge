@@ -53,6 +53,7 @@ function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
     observacoes: [{ criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" }],
     // A pergunta fala do banco, uma parte fechada do desenho (ritmo por conteúdo, #129 bloco B).
     parteFechada: true,
+    escopo: false,
     ...extra,
   };
 }
@@ -97,13 +98,13 @@ describe("analisar", () => {
     const json = JSON.stringify(r.resposta);
     for (const f of problema.ficha) assert.ok(!json.includes(f.resposta));
     for (const c of kitDemo.criterios) for (const n of [1, 2, 3, 4] as const) assert.ok(!json.includes(c.niveis[n]));
-    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "parteFechada", "pergunta", "status", "visual"]);
+    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "escopo", "nota", "observacoes", "parteFechada", "pergunta", "status", "visual"]);
   });
 
   it("ok cancela a dúvida pendente", async () => {
     const pend = transicionar(estadoEm("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, AGORA).estado;
     assert.equal(pend.plin, "PLIN_PENDENTE");
-    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false };
+    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false, escopo: false };
     const r = await analisar(deps(criarClienteFalso([ok])), pend, pedido(), AGORA + 1000);
     assert.equal(r.estado.plin, "LIVRE");
     assert.deepEqual(r.efeitos, [{ tipo: "PLIN_CANCELADO", motivo: "ok" }]);
@@ -435,5 +436,60 @@ describe("analisar: a pergunta da análise sai em português claro (#129, decis�
     const llm = criarClienteFalso([duvida({ pergunta: "Quando o courier perde o sinal, o que acontece?" })]);
     const r = await analisar(deps(llm), comVaga("Entregas com courier próprio."), pedido(), AGORA);
     assert.equal(r.resposta.pergunta, "Quando o courier perde o sinal, o que acontece?");
+  });
+});
+
+describe("analisar: redirecionamento de escopo (#129, decisão I)", () => {
+  const redireciona = (extra: Partial<RespostaAnalise> = {}): RespostaAnalise =>
+    duvida({ status: "redirecionar", parteFechada: false, escopo: true, pergunta: "O problema pede a arquitetura, não as telas. Por onde você começaria?", ...extra });
+  const semDesenho: PedidoAnalise = { ...pedido(), grafo: "" };
+
+  it("primeiro redirecionamento de escopo com desenho vira plin", async () => {
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "redirecionar");
+    assert.equal(r.resposta.escopo, true);
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.length, 0);
+  });
+
+  it("sem desenho, o escopo vira ok com o ajuste escopo_sem_desenho", async () => {
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), estadoEm("APROFUNDAMENTO"), semDesenho, AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.resposta.escopo, false);
+    assert.ok(r.diagnostico.ajustes.includes("escopo_sem_desenho"));
+  });
+
+  it("na fase de REQUISITOS, o escopo vira ok com o ajuste escopo_fora_da_fase", async () => {
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), estadoEm("REQUISITOS"), pedido("REQUISITOS"), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.ok(r.diagnostico.ajustes.includes("escopo_fora_da_fase"));
+  });
+
+  it("segundo redirecionamento antes de 5 min vira ok; depois de 5 min passa", async () => {
+    const e = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 1, escopoProvocadoEm: AGORA - 4 * 60_000 });
+    const cedo = await analisar(deps(criarClienteFalso([redireciona()])), e, pedido(), AGORA);
+    assert.equal(cedo.resposta.status, "ok");
+    assert.ok(cedo.diagnostico.ajustes.includes("escopo_espera_lembrete"));
+    const tarde = await analisar(deps(criarClienteFalso([redireciona()])), { ...e, escopoProvocadoEm: AGORA - 5 * 60_000 }, pedido(), AGORA);
+    assert.equal(tarde.resposta.status, "redirecionar");
+  });
+
+  it("terceiro redirecionamento nunca sai", async () => {
+    const e = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 60 * 60_000 });
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), e, pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.ok(r.diagnostico.ajustes.includes("escopo_ja_redirecionado"));
+  });
+
+  it("escopo fora de redirecionar (ex.: duvida) é descartado sem mudar o status", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida({ escopo: true })])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.resposta.escopo, false);
+  });
+
+  it("refiltragem com o estado de agora também barra o terceiro", () => {
+    const atual = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 60 * 60_000 });
+    const r = refiltrarComEstadoAtual(atual, redireciona(), pedido(), AGORA, AGORA);
+    assert.equal(r.status, "ok");
   });
 });

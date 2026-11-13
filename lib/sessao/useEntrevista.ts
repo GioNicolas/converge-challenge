@@ -678,7 +678,7 @@ export function useEntrevista(
       .map((curto) => conversor.current.idReal(curto))
       .filter((id): id is string => !!id);
 
-    registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos, status: p.status });
+    registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos, status: p.status, escopo: p.escopo === true });
     void descarregarJa();
     const controle = new AbortController();
     let coreografia: Promise<void> | null = null;

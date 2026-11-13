@@ -59,6 +59,8 @@ export type PedidoAnalise = z.infer<typeof EsquemaPedidoAnalise>;
 // Contrato com o scorecard (Pessoa 5): `criterio` é o id de um critério da rubrica do kit OU o nome exato de um critério
 // do plano da recrutadora (`plano.criterios[].nome`). Observação com o nome do plano é evidência daquele critério da
 // recrutadora, e a cobertura do estado tem uma chave por nome (ver `estadoInicial` e `criteriosDoPlanoSemEvidencia`).
+// Escopo (#129, decisão I): `escopoProvocadoEm` (hora do primeiro redirecionamento de escopo; null = o Totti não precisou
+// puxar o escopo) e `escopoRedirecionamentos` (0 a 2) ficam no estado da sessão (`EstadoSessao`, sessao/estado.ts).
 export const EsquemaObservacao = z.object({
   criterio: z.string(),
   sinal: z.enum(["positivo", "negativo", "neutro"]),
@@ -94,5 +96,11 @@ export const EsquemaRespostaAnalise = z.object({
    * ALTO_NIVEL e APROFUNDAMENTO a pergunta só sai no teto (ver `motivoDoConteudo`, sessao/politica.ts). Ausente = false.
    */
   parteFechada: z.boolean().default(false),
+  /**
+   * Com `status` "redirecionar": o desenho não ataca o escopo que o problema pede (resolve outro problema, ignora o fluxo
+   * central, assume escala ou alcance muito diferentes do enunciado). Só vale com desenho e nas fases de conteúdo; o
+   * servidor limita a duas vezes (ver `aplicarRegraDoEscopo`, sessao/politica.ts). Ausente = false.
+   */
+  escopo: z.boolean().default(false),
 });
 export type RespostaAnalise = z.infer<typeof EsquemaRespostaAnalise>;

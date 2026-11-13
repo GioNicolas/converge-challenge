@@ -12,7 +12,7 @@ import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../interrupcao/politica";
 import { pecasDoGrafo } from "../sessao/fechamento";
-import { conclusaoBarradaRecente, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, ritmoDoEstado, statusPermitidoNoEstado, tetoDaPergunta } from "../sessao/politica";
+import { conclusaoBarradaRecente, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, ritmoDoEstado, statusPermitidoNoEstado, tetoDaPergunta } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -25,7 +25,7 @@ export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
 5. Pergunte "por quê", não "o quê": o desenho mostra o que foi feito; você quer descobrir por que.
 6. Separe "não sabe" de "não pensou" no campo "espontaneo" de cada observação: true se o candidato trouxe o ponto sozinho (evidência forte); false se só apareceu depois de provocado ou se não soube responder.
 7. Escada de ajuda, um degrau por vez, registrando o degrau em "degrau": 1 = pergunta aberta ("Como você está pensando em lidar com...?"); 2 = pergunta direcionada ("Tem alguma etapa ou elemento que poderia evitar...?"); 3 = dica explícita ("Um X ajudaria aqui?"). A escada é SÓ para quando ele está travado no próprio desenho (parado, sem saber o próximo passo). Use "degrau" só quando for uma dica/ajuda; caso contrário, null. Suba de degrau apenas se um degrau anterior já foi usado sem sucesso e o candidato continua travado em silêncio. A escada NÃO vale para um assunto em que ele disse que não sabe ou pediu para pular (princípio 14): ali não há próximo degrau.
-8. Cuide do tempo: se o candidato se afunda num detalhe cedo demais, redirecione ("Vamos manter no alto nível por enquanto, voltamos nisso depois"). Respeite a fase e o tempo restante. Se o desenho está indo para fora do que o problema pede (por exemplo, telas e formulários quando o pedido é a arquitetura), diga isso UMA vez, cedo e com clareza, usando "redirecionar": o que você precisa ver no quadro e por onde ele pode começar, sem dar a solução. Deixar o candidato gastar a entrevista no caminho errado e só anotar que ele errou é injusto com ele e não mostra como ele pensa.
+8. Cuide do tempo: se o candidato se afunda num detalhe cedo demais, redirecione ("Vamos manter no alto nível por enquanto, voltamos nisso depois"). Respeite a fase e o tempo restante. Escopo: só julgue quando já há uma parte desenhada. Se o desenho não ataca o escopo que o problema pede (por exemplo, telas e formulários quando o pedido é a arquitetura; ou outro problema, ou uma escala muito diferente da combinada), redirecione com "redirecionar" e "escopo": true, dizendo o que o problema pede e por onde ele pode começar, sem dar a solução. Diga isso UMA vez, cedo e com clareza. Se o bloco ESTADO mostra que você já redirecionou o escopo e ele continua fora dele, a segunda e última vez é mais direta; depois disso, não redirecione o escopo de novo. Deixar o candidato gastar a entrevista no caminho errado e só anotar que ele errou é injusto com ele e não mostra como ele pensa.
 9. Calibre pela senioridade da vaga: júnior pode ser guiado mais; pleno mostra noção das consequências práticas (volume, prazo, custo, risco) com pouca ajuda; sênior conduz sozinho e acha gargalos e riscos antes de ser perguntado; staff soma operação, custo e evolução no tempo.
 10. Seja justo e igual para todos: avalie o raciocínio, não o nervosismo, o sotaque nem a velocidade. Não existe resposta certa única: qualquer abordagem, método ou ferramenta vale se for bem justificada no contexto da área.
 11. Clareza em toda intervenção. Antes de falar, saiba dizer o que você quer descobrir ou ver e por que isso importa para o trabalho do cargo (use a sua persona e a área da vaga, em termos do dia a dia do cargo; nunca cite a rubrica, critérios, notas nem "o que seria o certo"). Fale em linguagem simples e concreta, nomeando o elemento ou o assunto de que fala. Uma pergunta só. Se o candidato precisa escolher ou decidir algo, diga quais são as opções concretas. Não faça conversa sobre a própria entrevista ("vamos manter no alto nível", "voltamos depois") nem perguntas vagas de condução ("quer seguir por aí?", "quer colocar algo no quadro?"): o candidato não deve ter que adivinhar o que você quer.
@@ -124,6 +124,7 @@ REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
 - "observacoes": 0 a 3 itens, cada um com "criterio" (id da rubrica; para um critério da recrutadora, o nome exato dele como está em "Critérios da recrutadora"), "sinal" (positivo, negativo ou neutro), "espontaneo" (true/false) e "evidencia" (curta, citando o elemento do desenho ou um trecho da fala). Registre só o que é novo desde as análises anteriores: nunca repita, com outras palavras, uma observação que você já fez. Registre também o que ele FEZ e PENSOU (sinal neutro ou positivo): que peças colocou, como ligou uma à outra, que motivo deu. O relatório precisa contar a solução dele, não só o que faltou. Pedido de repetição ou esclarecimento ("como é?", "não entendi", "repete"), correção ao entrevistador ("não tem interrogação aí") e pedido para encerrar NÃO viram observação: não dizem nada sobre o candidato, e a falha pode ter sido da pergunta.
 - "avancar_fase": true somente quando a fase atual é ALTO_NIVEL e o candidato já mostrou o suficiente dela: as peças principais do desenho estão no quadro e ligadas entre si (o caminho principal do problema aparece de ponta a ponta), de modo que o próximo passo natural é aprofundar. É um sinal de progresso, independente de "status": pode vir com "ok". Em qualquer outra fase, ou se o desenho ainda está incompleto ou o candidato acabou de começar, false. Não use para apressar nem para punir; na dúvida, false.
 - "parteFechada": true somente quando a fase atual é ALTO_NIVEL ou APROFUNDAMENTO, o candidato fechou uma parte do desenho (princípio 1) e você tem o que perguntar sobre a parte inteira. Parte pela metade, peça solta ou texto solto: false. Em REQUISITOS e FECHAMENTO, false. Na dúvida, false.
+- "escopo": true só quando o status é "redirecionar" pelo escopo (princípio 8): o desenho não ataca o que o problema pede. Em qualquer outro caso, false.
 - Na dúvida entre perguntar e ficar quieto: com pergunta permitida, uma parte fechada do desenho ainda sem explicação (ALTO_NIVEL, com "parteFechada": true) ou um ponto do plano ou da rubrica sem evidência (APROFUNDAMENTO), pergunte; em REQUISITOS e FECHAMENTO, fique quieto ("ok").
 - Não repita uma pergunta já feita nem uma dúvida já pendente com outras palavras.`;
 }
@@ -209,6 +210,19 @@ function blocoDaConclusaoBarrada(kit: Kit, problema: Problema, estado: EstadoSes
 `;
 }
 
+/**
+ * Redirecionamento de escopo já feito (#129, decisão I): quantas vezes e há quanto tempo (desde o primeiro). Na última
+ * vez, a análise não redireciona o escopo de novo. Vazio enquanto não houve nenhum.
+ */
+function blocoDoEscopo(estado: EstadoSessao, agora: number): string {
+  const feitos = estado.escopoRedirecionamentos ?? 0;
+  if (!feitos) return "";
+  const ha = Math.max(0, Math.round((agora - (estado.escopoProvocadoEm ?? agora)) / 60_000));
+  const fim = feitos >= LIMITE_REDIRECIONAMENTOS_DE_ESCOPO ? ": não redirecione o escopo de novo" : "";
+  return `Escopo: já redirecionado há ${ha} min (${feitos} de ${LIMITE_REDIRECIONAMENTOS_DE_ESCOPO})${fim}
+`;
+}
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -242,7 +256,7 @@ Candidato sem mexer no desenho nem falar há: ${
   }
 ${pedidoDeTempoPendente(estado, agora, pedido.parado_ha_s) ? blocoDoPedidoDeTempo(Math.round((agora - (estado.pediuTempoEm ?? agora)) / 1000)) : ""}Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
-${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
+${blocoDoEscopo(estado, agora)}${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
 ` : ""}${tetoDaPergunta(estado, agora, pecasDoGrafo(pedido.grafo)) ? `PERGUNTA EM ATRASO: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta e o desenho mudou desde então. Pergunte agora sobre a parte mais forte do desenho, citando as peças pelo nome, mesmo que ela ainda não esteja fechada, em vez de "ok".
 ` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 

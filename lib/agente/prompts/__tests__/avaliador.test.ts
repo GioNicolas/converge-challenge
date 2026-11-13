@@ -154,7 +154,7 @@ describe("bloco dinâmico", () => {
     const comPendente: EstadoSessao = {
       ...estado,
       plin: "PLIN_PENDENTE",
-      perguntaPendente: { status: "duvida", parteFechada: true, pergunta: "E se o cache cair?", nota: null, elementos: ["e1"], degrau: null, observacoes: [], criadoEm: AGORA - 1000 },
+      perguntaPendente: { status: "duvida", parteFechada: true, escopo: false, pergunta: "E se o cache cair?", nota: null, elementos: ["e1"], degrau: null, observacoes: [], criadoEm: AGORA - 1000 },
     };
     const dp = montarPromptAvaliador(kitDemo, problema, comPendente, pedido(), AGORA).sistema.dinamico;
     assert.ok(dp.includes('"E se o cache cair?"'));
@@ -329,5 +329,33 @@ describe("português claro no prompt da análise (#129, decisão H)", () => {
     const sistema = montarSistemaEstatico(kitDemo, problema);
     assert.match(sistema, /Português claro: termo do domínio em português \("entregador"/);
     assert.match(sistema, /inglês só quando é o nome usual da área ou quando a descrição da vaga usa o termo/);
+  });
+});
+
+describe("redirecionamento de escopo no prompt (#129, decisão I)", () => {
+  const e = montarSistemaEstatico(kitDemo, problema);
+  const comRedirecionamentos = (escopoRedirecionamentos: number, escopoProvocadoEm: number) =>
+    montarPromptAvaliador(kitDemo, problema, { ...estadoInicial(), fase: "APROFUNDAMENTO", escopoRedirecionamentos, escopoProvocadoEm }, pedido(), AGORA).sistema.dinamico;
+
+  it("o princípio 8 julga o escopo só com parte desenhada, redireciona com escopo true e pede a segunda vez mais direta", () => {
+    for (const trecho of ["Escopo: só julgue quando já há uma parte desenhada", "\"escopo\": true", "a segunda e última vez é mais direta"]) {
+      assert.ok(e.includes(trecho), `faltou: ${trecho}`);
+    }
+  });
+
+  it("a regra de saída do campo escopo está no prompt estático", () => {
+    assert.ok(e.includes("\"escopo\": true só quando o status é \"redirecionar\""));
+  });
+
+  it("sem redirecionamento de escopo, a linha não aparece", () => {
+    assert.ok(!comRedirecionamentos(0, AGORA).includes("Escopo: já redirecionado"));
+  });
+
+  it("depois do primeiro, a linha diz 1 de 2; depois do segundo, diz 2 de 2 e proíbe de novo", () => {
+    const primeiro = comRedirecionamentos(1, AGORA - 2 * 60_000);
+    assert.ok(primeiro.includes("Escopo: já redirecionado há 2 min (1 de 2)\n"), primeiro);
+    assert.ok(!primeiro.includes("não redirecione o escopo de novo"));
+    const segundo = comRedirecionamentos(2, AGORA - 7 * 60_000);
+    assert.ok(segundo.includes("Escopo: já redirecionado há 7 min (2 de 2): não redirecione o escopo de novo"), segundo);
   });
 });

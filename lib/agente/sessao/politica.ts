@@ -2,7 +2,7 @@
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
 import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../contracts";
-import { motivoDoRitmo, RITMO, RITMO_QUADRO, type Ritmo } from "../../interrupcao/politica";
+import { motivoDoRitmo, orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import { limiarDoFechamentoNoQuadro } from "../../totti/fechamento";
 import type { Kit, Problema } from "../kits/tipos";
@@ -176,6 +176,51 @@ export function motivoDoConteudo(
   return resposta.parteFechada ? "PISO_ENTRE_PERGUNTAS" : "SEM_PARTE_FECHADA";
 }
 
+/** Quantos redirecionamentos de escopo a entrevista aceita (#129, decisão I). */
+export const LIMITE_REDIRECIONAMENTOS_DE_ESCOPO = 2;
+/** Entre o primeiro redirecionamento de escopo e o segundo (o último, mais direto), passam pelo menos isto (#129, decisão I). */
+export const ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS = 300_000;
+
+/** Por que um redirecionamento de escopo não sai agora. São os ajustes da análise (ver lib/agente/analisar.ts). */
+export type MotivoEscopo = "escopo_fora_da_fase" | "escopo_sem_desenho" | "escopo_ja_redirecionado" | "escopo_espera_lembrete";
+
+/**
+ * Redirecionamento de escopo (#129, decisão I): por que não pode virar plin agora (null = pode). Pode só em ALTO_NIVEL e
+ * APROFUNDAMENTO, com alguma peça desenhada para julgar (`pecas` null = grafo grande demais para comparar, então é desenho);
+ * até LIMITE_REDIRECIONAMENTOS_DE_ESCOPO vezes, e a segunda só ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS depois da primeira.
+ * O intervalo entre perguntas não entra aqui: ele é furado em `motivoBloqueioPlin` (ver `ContextoDoCandidato.escopo`).
+ */
+export function motivoRedirecionamentoDeEscopo(
+  estado: EstadoSessao,
+  agora: number,
+  pecas: string[] | null | undefined,
+): MotivoEscopo | null {
+  if (!FASES_DO_CONTEUDO.includes(estado.fase)) return "escopo_fora_da_fase";
+  if (pecas !== null && pecas !== undefined && pecas.length === 0) return "escopo_sem_desenho";
+  const feitos = estado.escopoRedirecionamentos ?? 0;
+  if (feitos >= LIMITE_REDIRECIONAMENTOS_DE_ESCOPO) return "escopo_ja_redirecionado";
+  // Com um feito, a segunda vez espera o lembrete (contado desde o primeiro).
+  if (feitos > 0 && agora - (estado.escopoProvocadoEm ?? agora) < ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS) return "escopo_espera_lembrete";
+  return null;
+}
+
+/**
+ * Aplica a regra do escopo a uma resposta da análise. Fora dela, o redirecionamento vira "ok" e `escopo` cai, e o motivo
+ * sai junto para os ajustes. Resposta sem escopo (ou com escopo fora de "redirecionar") passa só com `escopo` normalizado.
+ */
+export function aplicarRegraDoEscopo(
+  estado: EstadoSessao,
+  resposta: RespostaAnalise,
+  agora: number,
+  pecas: string[] | null | undefined,
+): { resposta: RespostaAnalise; motivo: MotivoEscopo | null } {
+  if (!resposta.escopo) return { resposta, motivo: null };
+  if (resposta.status !== "redirecionar") return { resposta: { ...resposta, escopo: false }, motivo: null };
+  const motivo = motivoRedirecionamentoDeEscopo(estado, agora, pecas);
+  if (!motivo) return { resposta, motivo: null };
+  return { resposta: { ...resposta, status: "ok", escopo: false }, motivo };
+}
+
 const CODIGO_DO_RITMO = {
   orcamento: "LIMITE_DE_PERGUNTAS",
   cota: "COTA_DO_TEMPO",
@@ -238,6 +283,11 @@ export type ContextoDoCandidato = {
   paradoHaS?: number;
   /** O grafo recebido contém elementos do candidato (inclusive texto e traços). */
   temDesenho?: boolean;
+  /**
+   * A resposta é um redirecionamento de escopo (#129, decisão I): fura intervalo, respiro e cota. Só o orçamento total,
+   * a regra da bola e o limite de duas vezes continuam valendo.
+   */
+  escopo?: boolean;
 };
 
 /**
@@ -296,8 +346,15 @@ export function motivoBloqueioPlin(
   // tempo, intervalo e respiro. Igual no quadro (lib/sessao/estados.ts) e no live coding.
   const ritmo = ritmoDoEstado(estado, agora);
   const extra = estado.fase === "REQUISITOS" || estado.fase === "FECHAMENTO";
-  const motivo = motivoDoRitmo(extra ? { ...ritmo, feitas: 0, marco: true } : ritmo);
-  if (motivo) return CODIGO_DO_RITMO[motivo.codigo];
+  const ritmoDaFase = extra ? { ...ritmo, feitas: 0, marco: true } : ritmo;
+  // Redirecionamento de escopo (#129, decisão I, revisado): fora do intervalo, do respiro e da cota ("quanto antes
+  // melhor"). Só o orçamento total da entrevista continua valendo.
+  if (candidato.escopo) {
+    if (ritmoDaFase.feitas >= orcamentoDeInterrupcoes(ritmoDaFase.duracaoMin)) return "LIMITE_DE_PERGUNTAS";
+  } else {
+    const motivo = motivoDoRitmo(ritmoDaFase);
+    if (motivo) return CODIGO_DO_RITMO[motivo.codigo];
+  }
   // A bola está com o candidato: depois de qualquer fala solta do agente (resposta, comentário, continuação) ele
   // não pergunta de novo até o candidato agir (falar ou mexer no desenho). Sem ação dele, só um silêncio total de
   // SILENCIO_SEM_ACAO_S libera a pergunta (em todas as fases). O pedido de tempo para pensar conta como essa fala.
@@ -373,7 +430,9 @@ export function filtrarResposta(
   candidato: ContextoDoCandidato = {},
 ): RespostaAnalise {
   const filtrada = filtrarPlin(estado, resposta, idsDoGrafo, agora, regras, {
-    ...candidato, temDesenho: candidato.temDesenho || idsDoGrafo.size > 0,
+    ...candidato,
+    temDesenho: candidato.temDesenho || idsDoGrafo.size > 0,
+    escopo: resposta.status === "redirecionar" && resposta.escopo === true,
   });
   // O sinal de prontidão independe do plin, mas só vale em ALTO_NIVEL.
   return { ...filtrada, avancar_fase: resposta.avancar_fase === true && estado.fase === "ALTO_NIVEL" };

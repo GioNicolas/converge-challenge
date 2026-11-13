@@ -216,7 +216,7 @@ describe("POST /api/sessoes/[id]/analisar", () => {
     const r = await analisarPost(post(`/api/sessoes/${sessao_id}/analisar`, pedido(sessao_id)), params(sessao_id));
     assert.equal(r.status, 200);
     const c = await r.json();
-    assert.deepEqual(Object.keys(c).sort(), ["degrau", "elementos", "nota", "observacoes", "parteFechada", "pergunta", "status", "visual"]);
+    assert.deepEqual(Object.keys(c).sort(), ["degrau", "elementos", "escopo", "nota", "observacoes", "parteFechada", "pergunta", "status", "visual"]);
     assert.deepEqual(c.visual, [{ tipo: "marcar", alvo: "e1" }]);
     assert.equal(c.status, "duvida");
     assert.deepEqual(c.elementos, ["e1"]);

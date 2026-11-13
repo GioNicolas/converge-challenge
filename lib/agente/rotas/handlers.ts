@@ -290,6 +290,8 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     observacoes: resposta.observacoes,
     ...(resposta.avancar_fase ? { avancar_fase: true } : {}),
     parteFechada: resposta.parteFechada,
+    // O quadro precisa dele para o mesmo ritmo do servidor (intervalo furado no redirecionamento de escopo).
+    escopo: resposta.escopo,
   } satisfies RespostaAnalise;
   // Mais a etapa do fechamento comum, quando ele está em andamento: sem ela, o quadro sabe que ele foi suspenso.
   const fechamento = etapaDoFechamento(novo);
@@ -616,6 +618,7 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
           nota: typeof d.nota === "string" ? d.nota : null,
           elementos,
           ...(status ? { status } : {}),
+          ...(d.escopo === true ? { escopo: true } : {}),
         },
       }];
     }

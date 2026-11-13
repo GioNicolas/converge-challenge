@@ -17,6 +17,7 @@ import {
 import { emGarantiaDoEmpecilho } from "../sessao/empecilho";
 import { pecasDoGrafo } from "./sessao/fechamento";
 import {
+  aplicarRegraDoEscopo,
   extrairIdsDoGrafo,
   filtrarResposta,
   motivoDoConteudo,
@@ -80,7 +81,7 @@ export function precisaAbrirBrechaDaMudanca(estado: EstadoSessao, agora: number,
 }
 
 export function respostaSilencio(): RespostaAnalise {
-  return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false };
+  return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false, escopo: false };
 }
 
 /** Hash estável do grafo e quantidade de falas; conteúdo da conversa não é persistido nesta assinatura. */
@@ -124,7 +125,9 @@ export function refiltrarComEstadoAtual(
   const porConteudo = resposta.status !== "ok" && motivoDoConteudo(atual, resposta, agora, { paradoHaS, pecas })
     ? { ...resposta, status: "ok" as const }
     : resposta;
-  return filtrarResposta(atual, porConteudo, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS });
+  // A regra do escopo (#129, decisão I) vale contra o estado atual: o primeiro redirecionamento pode ter saído na análise.
+  const porEscopo = aplicarRegraDoEscopo(atual, porConteudo, agora, pecas).resposta;
+  return filtrarResposta(atual, porEscopo, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS });
 }
 
 export async function analisar(
@@ -258,6 +261,12 @@ export async function analisar(
       resposta = { ...resposta, status: "ok" };
     }
   }
+
+  // Redirecionamento de escopo (#129, decisão I): só com desenho, nas fases de conteúdo, até duas vezes (a segunda depois
+  // de 5 min). Fora disso vira "ok" com o motivo nos ajustes. Não passa pelo piso de 2 min: o intervalo é furado em `filtrarResposta`.
+  const porEscopo = aplicarRegraDoEscopo(estado, resposta, agora, pecas);
+  if (porEscopo.motivo) ajustes.push(porEscopo.motivo);
+  resposta = porEscopo.resposta;
 
   // Brecha da mudança (#129, decisão G): passada a garantia dos 60% e sem a mudança, a pergunta vira "ok" por um
   // ciclo, para o quadro ter uma pausa em que a mudança possa entrar (um ciclo por vez: ver INTERVALO_BRECHA_EMPECILHO_MS).
