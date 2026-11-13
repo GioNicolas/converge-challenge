@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   aceitaEncerrar, aindaPensando, aoVoltarATrabalhar, DESPEDIDAS, escolherPerguntasFinais, FRACAO_PARA_FECHAR, gatilhoDoFechamento, iniciarFechamento,
-  duracaoEfetivaDaFaseS, FRACAO_DO_FIM_DO_APROFUNDAMENTO, msAteFimDaFase, limiarDoFechamentoNoQuadro, MIN_APROFUNDAMENTO_S, perguntasQueCabem, proximoPasso, TEMPO_PARA_FECHAR_MS, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
+  duracaoEfetivaDaFaseS, FRACAO_DO_FIM_DO_APROFUNDAMENTO, msAteFimDaFase, limiarDoFechamentoNoQuadro, MAX_PERGUNTAS_AO_PEDIR_FIM, MIN_APROFUNDAMENTO_S, perguntasQueCabem, proximoPasso, TEMPO_PARA_FECHAR_MS, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
 } from "../fechamento";
 import { comVezDevolvida, convitesPara, escolherConvite, semConviteDeSeguir, semPerguntaNoFim, semPerguntaNoFimSeSobrar } from "../guardas";
 import type { LeituraDoTurno } from "../turno";
@@ -479,5 +479,74 @@ describe("espera até o fim da fase, contada de agora (#129, decisão F): o time
   it("sem dados de início, o APROFUNDAMENTO vale a duração de `tempos`; sem nada, sem timer", () => {
     assert.equal(msAteFimDaFase("APROFUNDAMENTO", 0, { faseIniciadaEm: 0, duracaoFaseS: 900 }), 900_000);
     assert.equal(msAteFimDaFase("APROFUNDAMENTO", 0, { faseIniciadaEm: 0 }), undefined);
+  });
+});
+
+describe("pedido de encerrar com perguntas finais (#129, decisão revisada): a sala pede, até duas, e depois a última palavra", () => {
+  const ANUNCIO_UM = "Claro, vamos fechar. Antes, uma coisa rápida:";
+  const ANUNCIO_VARIAS = "Beleza. Só mais umas coisas antes de terminar:";
+  const ULTIMA = "Era isso da minha parte. Quer acrescentar alguma coisa antes de encerrar?";
+  const pedido = (extra: Partial<Parameters<typeof iniciarFechamento>[0]> = {}) =>
+    iniciarFechamento({ sala: "quadro", gatilho: "pediu_encerrar", candidatas: CANDIDATAS, tempoRestanteMs: 15 * MIN, perguntasNoPedidoDeFim: true, ...extra });
+
+  it("começa pelo anúncio do pedido, com as duas primeiras candidatas (MAX_PERGUNTAS_AO_PEDIR_FIM)", () => {
+    assert.equal(MAX_PERGUNTAS_AO_PEDIR_FIM, 2);
+    const inicio = pedido();
+    assert.equal(inicio.etapa, "anuncio");
+    assert.deepEqual(inicio.fila.map((p) => p.pergunta), [P1, P2]);
+    const passos = rodar(inicio, []);
+    assert.equal(passos[0].fala, `${ANUNCIO_VARIAS} ${P1}`);
+    assert.equal(passos[0].etapa, "perguntas_finais");
+  });
+
+  it("com uma pergunta só, o anúncio é o do singular", () => {
+    const passo = proximoPasso(pedido({ candidatas: [{ pergunta: P1 }] }));
+    assert.equal(passo.fala, `${ANUNCIO_UM} ${P1}`);
+  });
+
+  it("a fila para nas duas perguntas, depois a última palavra; 'não' despede", () => {
+    const passos = rodar(pedido(), [
+      ["Usaria um cache.", lida({ texto: "Saquei." })],
+      ["Acho que sim.", lida({ responder: false, texto: "" })],
+      ["não", lida({ responder: false, texto: "", intencao: "respondeu" })],
+    ]);
+    assert.equal(passos[1].fala.endsWith(P2), true, passos[1].fala);
+    assert.equal(passos[1].etapa, "perguntas_finais");
+    assert.equal(passos[2].etapa, "ultima_palavra");
+    assert.ok(passos[2].fala.endsWith(ULTIMA), passos[2].fala);
+    assert.ok(DESPEDIDAS.includes(passos[3].fala), passos[3].fala);
+    assert.equal(passos[3].encerrar, true);
+  });
+
+  it("sem candidatas, vai à última palavra direto; 'não' despede", () => {
+    const passos = rodar(pedido({ candidatas: [] }), [["não", lida({ responder: false, texto: "", intencao: "respondeu" })]]);
+    assert.equal(passos[0].fala, "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?");
+    assert.equal(passos[0].etapa, "ultima_palavra");
+    assert.ok(DESPEDIDAS.includes(passos[1].fala), passos[1].fala);
+  });
+
+  it("o tempo que resta limita as perguntas: com 2 min cabe uma", () => {
+    const passo = proximoPasso(pedido({ tempoRestanteMs: 2 * MIN }));
+    assert.equal(passo.fala, `${ANUNCIO_UM} ${P1}`);
+    assert.equal(passo.estado.fila.length, 0, "a fila guarda só o que sai");
+  });
+
+  it("ele pede para encerrar de novo no meio das perguntas: despede, sem terminar a fila", () => {
+    const passos = rodar(pedido(), [["pode encerrar", lida({ responder: false, texto: "", encerrar: true })]]);
+    assert.ok(DESPEDIDAS.includes(passos[1].fala), passos[1].fala);
+    assert.equal(passos[1].encerrar, true);
+  });
+
+  it("sem o parâmetro (live coding), o pedido segue direto à despedida", () => {
+    const passo = proximoPasso(iniciarFechamento({ sala: "codigo", gatilho: "pediu_encerrar", candidatas: CANDIDATAS }));
+    assert.ok(DESPEDIDAS.includes(passo.fala), passo.fala);
+    assert.equal(passo.encerrar, true);
+    const explicito = proximoPasso(iniciarFechamento({ sala: "quadro", gatilho: "pediu_encerrar", candidatas: CANDIDATAS, perguntasNoPedidoDeFim: false }));
+    assert.equal(explicito.encerrar, true);
+  });
+
+  it("o anúncio do pedido não é o do fechamento por conclusão", () => {
+    const concluiu = proximoPasso(iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: [{ pergunta: P1 }] }));
+    assert.equal(concluiu.fala, `Beleza. Só preciso fechar um ponto com você antes de encerrar. ${P1}`);
   });
 });

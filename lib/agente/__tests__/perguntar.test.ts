@@ -496,11 +496,16 @@ describe("pergunta dele no fechamento do quadro: o modelo lê a pergunta (candid
     assert.equal(r.fechamento, "ultima_palavra");
   });
 
-  it("sem pergunta, pedir para encerrar continua indo direto à despedida", async () => {
+  it("sem critérios no plano, pedir para encerrar vai à última palavra (nada a perguntar); depois de 'não' despede", async () => {
+    // Antes (#129, decisão F) ia direto à despedida; a decisão revisada faz as perguntas finais, e sem candidatas, a última palavra.
     const llm = criarClienteFalso(() => ({ responder: false, texto: "", requisito: null, concluiu: false, encerrar: true }));
     const r = await perguntar(comV2(llm), emALTO, { fase: "ALTO_NIVEL", texto: "pode encerrar", grafo: GRAFO }, AGORA);
-    assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
-    assert.equal(r.encerrar, true);
+    assert.equal(r.texto, "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?");
+    assert.equal(r.encerrar, undefined);
+    assert.equal(r.fechamento, "ultima_palavra");
+    const fim = await perguntar(comV2(criarClienteFalso(modelo)), r.estado, { fase: "ALTO_NIVEL", texto: "não", grafo: GRAFO }, AGORA);
+    assert.ok(DESPEDIDAS.includes(fim.texto), fim.texto);
+    assert.equal(fim.encerrar, true);
   });
 
   it("primeiro modelo calado e a segunda geração responde (pergunta sem \"?\"): sai a resposta, fora do fechamento", async () => {
@@ -590,11 +595,73 @@ describe("quando o quadro fecha: vaga com plano e mudança de cenário (#129, de
     assert.equal(cinco.fechamento, undefined);
   });
 
-  it("'tenho que sair' encerra mesmo com critérios e mudança pendentes", async () => {
-    const r = await turno(vaga(9), "Tenho que sair agora, pode encerrar.", { responder: false, texto: "", encerrar: true });
+  it("'tenho que sair' encerra mesmo com critérios e mudança pendentes (com urgência, o pedido vai direto à despedida)", async () => {
+    const r = await turno(vaga(9), "Tenho que sair agora, pode encerrar.", { responder: false, texto: "", encerrar: true, urgente: true });
     assert.equal(r.encerrar, true);
     assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
     assert.equal(r.fechamento, "encerrada");
+  });
+
+  // O modelo escreve as perguntas finais no mesmo turno (`perguntasFinais`): o código só as enfileira.
+  const PERGUNTAS = ["Como o pedido repetido é tratado no seu desenho?", "E se o gateway cair, quem já pagou fica como?"];
+
+  it("pedir para encerrar com critérios do plano sem evidência: anúncio e a 1ª pergunta que o modelo escreveu; a mudança pendente não entra", async () => {
+    const r = await turno(vaga(9), "Pode encerrar, já falei o que tinha.", { responder: false, texto: "", encerrar: true, perguntasFinais: PERGUNTAS });
+    assert.equal(r.encerrar, undefined);
+    assert.equal(r.fechamento, "perguntas_finais");
+    assert.equal(r.texto, `Beleza. Só mais umas coisas antes de terminar: ${PERGUNTAS[0]}`);
+    assert.doesNotMatch(r.texto, /Mudança|volume|dez vezes/);
+    // A resposta dele leva à segunda pergunta, e depois à última palavra (não à mudança de cenário).
+    let s = await turno(r.estado, "Eu usaria uma chave de idempotência.", { responder: true, texto: "Entendi." });
+    assert.equal(s.fechamento, "perguntas_finais");
+    assert.equal(s.texto, `Entendi. ${PERGUNTAS[1]}`);
+    s = await turno(s.estado, "Se o gateway cair, a fila segura.", { responder: true, texto: "Entendi." });
+    assert.equal(s.fechamento, "ultima_palavra");
+    assert.match(s.texto, /Era isso da minha parte\. Quer acrescentar alguma coisa antes de encerrar\?$/);
+    const despedida = await turno(s.estado, "não, só isso", { responder: false, texto: "" });
+    assert.equal(despedida.encerrar, true);
+    assert.ok(DESPEDIDAS.includes(despedida.texto), despedida.texto);
+  });
+
+  it("pedir para encerrar faz no máximo duas perguntas finais, mesmo com três escritas pelo modelo", async () => {
+    const tres = [...PERGUNTAS, "O que muda com dez vezes mais acessos?"];
+    const r0 = await turno(vaga(9), "Pode encerrar.", { responder: false, texto: "", encerrar: true, perguntasFinais: tres });
+    const falas = [r0.texto];
+    let s = r0.estado;
+    for (const fala of ["Certo, uma.", "Certo, duas."]) {
+      const r = await turno(s, fala, { responder: true, texto: "Entendi." });
+      falas.push(r.texto);
+      s = r.estado;
+    }
+    assert.equal(falas.filter((t) => tres.some((p) => t.includes(p))).length, 2, falas.join(" | "));
+    assert.doesNotMatch(falas.join(" "), /dez vezes/);
+    assert.equal(s.fechamento?.nucleo.etapa, "ultima_palavra");
+  });
+
+  it("uma pergunta que ele já ouviu não volta: sai só a outra (o anúncio é o do singular)", async () => {
+    const jaOuviu = { ...vaga(9), conversa: [{ quem: "agente" as const, texto: PERGUNTAS[0], em: AGORA - 60_000 }] };
+    const r = await turno(jaOuviu, "Pode encerrar.", { responder: false, texto: "", encerrar: true, perguntasFinais: PERGUNTAS });
+    assert.equal(r.texto, `Claro, vamos fechar. Antes, uma coisa rápida: ${PERGUNTAS[1]}`);
+  });
+
+  it("sem critério do plano pendente, as perguntas do modelo não entram: vai à última palavra", async () => {
+    const r = await turno(vaga(9, { cobertura: COBERTOS, empecilho: MUDANCA_ANUNCIADA }), "Pode encerrar.", { responder: false, texto: "", encerrar: true, perguntasFinais: PERGUNTAS });
+    assert.equal(r.texto, "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?");
+    assert.equal(r.fechamento, "ultima_palavra");
+  });
+
+  it("critério pendente, mas o modelo não escreveu perguntas: última palavra", async () => {
+    const r = await turno(vaga(9), "Pode encerrar.", { responder: false, texto: "", encerrar: true, perguntasFinais: [] });
+    assert.equal(r.texto, "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?");
+    assert.equal(r.fechamento, "ultima_palavra");
+  });
+
+  it("o prompt v2: repetir que terminou ou dizer que não tem mais nada é encerrar (não concluiu), e pede as perguntas finais", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null, concluiu: false }]);
+    await perguntar({ llm, kit: kitDemo, problema, log: () => {}, versao: "v2" as const }, vaga(9), { fase: "ALTO_NIVEL", texto: "Já falei, nada mais.", grafo: DESENHO }, AGORA);
+    const estatico = llm.chamadas[0].sistema.estatico;
+    assert.match(estatico, /Ele repete que terminou[^\n]*"encerrar" true/);
+    assert.match(estatico, /perguntasFinais: com encerrar true/);
   });
 });
 

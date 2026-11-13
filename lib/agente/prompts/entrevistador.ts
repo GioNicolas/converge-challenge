@@ -31,6 +31,10 @@ export const EsquemaSaidaPerguntar = z.object({
   aprofundar: z.boolean().nullable().optional(),
   /** Ele pediu para encerrar a entrevista inteira (item j). */
   encerrar: z.boolean().optional(),
+  /** Ele precisa sair agora (urgência): no quadro, o pedido de encerrar vai direto à despedida, sem as perguntas finais. */
+  urgente: z.boolean().optional(),
+  /** Com encerrar, até duas perguntas finais sobre os critérios ainda sem sinal (só no quadro, v2). O código corta. */
+  perguntasFinais: z.array(z.string()).optional(),
   /** Ele fez uma pergunta ou pediu esclarecimento que espera resposta, mesmo sem "?" (só o v2 pede; ver entrevistador-v2). */
   candidatoPerguntou: z.boolean().optional(),
   visual: EsquemaVisualOpcional,

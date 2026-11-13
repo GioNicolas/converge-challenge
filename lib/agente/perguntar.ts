@@ -31,7 +31,7 @@ import {
   type ContextoDoFechamento, type NomeDoBloco,
 } from "./prompts/entrevistador-v2";
 import { historicoDaConversa } from "./prompts/contexto";
-import { MAX_SEGUIMENTOS, tempoRestanteMs, transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
+import { criteriosDoPlanoSemEvidencia, MAX_SEGUIMENTOS, tempoRestanteMs, transicionar, type Desfecho, type EstadoSessao } from "./sessao/estado";
 import type { Fase, FalaRecente } from "./sessao/tipos";
 import { logPadrao, type LogMeta } from "./analisar";
 
@@ -459,10 +459,25 @@ async function responderFala(
     ...(FASES_DA_ENTREVISTA.includes(entrada.fase) ? { tempoRestanteMs: restanteMs } : {}),
   });
   if (gatilho) {
+    // Pedido para encerrar faz as perguntas finais dos critérios do plano que faltam, antes da última palavra (decisão
+    // revisada, #129). Com urgência ("tenho que sair agora") ou sem o que perguntar, vai direto à despedida. O núcleo
+    // corta pelo tempo e por MAX_PERGUNTAS_AO_PEDIR_FIM.
+    const comPerguntasDoPedido = gatilho === "pediu_encerrar" && saida.urgente !== true;
+    // As perguntas finais são as que o modelo escreveu no mesmo turno (`perguntasFinais`), e só valem enquanto há critério
+    // do plano sem sinal. Cada uma passa pelas travas da fala (eco, repetição, condução); a que as travas mexeram cai.
+    const perguntasDoModelo = comPerguntasDoPedido && criteriosDoPlanoSemEvidencia(estado).length > 0
+      ? (saida.perguntasFinais ?? []).flatMap((p) => {
+        const guardada = aplicarGuardas(p, { falaDoCandidato: entrada.texto, falasDoTotti: jaDitas, perguntasJaFeitas: perguntasJaOuvidas(estado) });
+        return guardada.travas.length === 0 && guardada.texto.trim().endsWith("?")
+          ? [{ pergunta: emPortugues(guardada.texto, estado.plano?.descricaoVaga), origem: "modelo" }]
+          : [];
+      })
+      : [];
     const inicial = iniciarFechamento({
       sala: "quadro", gatilho, tempoRestanteMs: restanteMs,
-      candidatas: candidatasDoQuadro(deps.kit, deps.problema, estado, agora),
+      candidatas: comPerguntasDoPedido ? perguntasDoModelo : candidatasDoQuadro(deps.kit, deps.problema, estado, agora),
       perguntasJaFeitas: perguntasJaOuvidas(estado),
+      perguntasNoPedidoDeFim: comPerguntasDoPedido,
     });
     const passo = proximoPasso(inicial, undefined, "", { tempoRestanteMs: restanteMs });
     // O tempo acabou no meio de uma pergunta dele: a resposta vem antes do anúncio, para ela não ficar no ar.

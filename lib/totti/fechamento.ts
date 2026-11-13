@@ -131,6 +131,11 @@ export const TEMPO_POR_PERGUNTA_FINAL_MS = 60_000;
 /** O que a última palavra e a despedida precisam. */
 export const RESERVA_PARA_A_DESPEDIDA_MS = 45_000;
 export const MAX_PERGUNTAS_FINAIS = 4;
+/**
+ * Quando ele pede para encerrar, o quadro (#129, decisão revisada) faz até estas perguntas antes da última palavra, se o
+ * plano ainda tem critérios sem evidência. Pedido com urgência, ou sem candidatas, vai direto (ou à última palavra).
+ */
+export const MAX_PERGUNTAS_AO_PEDIR_FIM = 2;
 
 /** O que a sala sabe dizer sobre o momento, para o núcleo decidir se é hora de fechar. */
 export type SinalDeFechamento = {
@@ -194,8 +199,10 @@ export function escolherPerguntasFinais(candidatas: PerguntaFinal[], tempoRestan
 }
 
 /**
- * Começa o fechamento. Pedido para encerrar vai direto à despedida; os outros gatilhos começam pelo anúncio. A
- * primeira fala sai do `proximoPasso` (sem leitura, ou com a do turno em que ele disse que terminou).
+ * Começa o fechamento. Pedido para encerrar vai direto à despedida, a não ser que a sala peça as perguntas finais
+ * (`perguntasNoPedidoDeFim`): aí começa pelo anúncio do pedido, com até MAX_PERGUNTAS_AO_PEDIR_FIM perguntas. Os outros
+ * gatilhos começam pelo anúncio. A primeira fala sai do `proximoPasso` (sem leitura, ou com a do turno em que ele disse
+ * que terminou).
  */
 export function iniciarFechamento(inicio: {
   sala: Sala;
@@ -205,13 +212,17 @@ export function iniciarFechamento(inicio: {
   tempoRestanteMs?: number;
   /** O que o candidato já ouviu nesta entrevista (para não perguntar de novo). */
   perguntasJaFeitas?: string[];
+  /** Pedido para encerrar com perguntas finais antes da última palavra (ausente: vai direto à despedida, como no live coding). */
+  perguntasNoPedidoDeFim?: boolean;
 }): EstadoFechamento {
-  const direto = inicio.gatilho === "pediu_encerrar";
+  const pedido = inicio.gatilho === "pediu_encerrar";
+  const direto = pedido && !inicio.perguntasNoPedidoDeFim;
+  const escolhidas = direto ? [] : escolherPerguntasFinais(inicio.candidatas ?? [], inicio.tempoRestanteMs, inicio.perguntasJaFeitas);
   return {
     etapa: direto ? "despedida" : "anuncio",
     gatilho: inicio.gatilho,
     sala: inicio.sala,
-    fila: direto ? [] : escolherPerguntasFinais(inicio.candidatas ?? [], inicio.tempoRestanteMs, inicio.perguntasJaFeitas),
+    fila: pedido && !direto ? escolhidas.slice(0, MAX_PERGUNTAS_AO_PEDIR_FIM) : escolhidas,
     atual: null,
     aprofundou: false,
     feitas: [],
@@ -238,6 +249,8 @@ const ANUNCIO = {
 };
 const ULTIMA_PALAVRA = "Era isso da minha parte. Quer acrescentar alguma coisa antes de encerrar?";
 const ULTIMA_PALAVRA_SEM_PERGUNTAS = { concluiu: "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?", tempo: "O nosso tempo está acabando. Quer acrescentar alguma coisa antes de encerrar?" };
+/** O anúncio quando ele pediu para encerrar e a sala ainda faz perguntas finais (curto: ele já disse que quer sair). */
+const ANUNCIO_DO_PEDIDO_DE_FIM = { um: "Claro, vamos fechar. Antes, uma coisa rápida:", varios: "Beleza. Só mais umas coisas antes de terminar:" };
 const VOLTA_DA_ULTIMA_PALAVRA = "Mais alguma coisa antes de encerrar?";
 const ACOLHIMENTOS = ["Tranquilo.", "Sem problema."];
 
@@ -364,7 +377,10 @@ export function proximoPasso(
 
   if (atual.etapa === "anuncio") {
     if (!atual.fila.length) return avancar(atual, "");
-    const anuncio = ANUNCIO[atual.gatilho === "tempo" ? "tempo" : "concluiu"][atual.fila.length === 1 ? "um" : "varios"];
+    const quantas = atual.fila.length === 1 ? "um" : "varios";
+    const anuncio = atual.gatilho === "pediu_encerrar"
+      ? ANUNCIO_DO_PEDIDO_DE_FIM[quantas]
+      : ANUNCIO[atual.gatilho === "tempo" ? "tempo" : "concluiu"][quantas];
     return avancar(atual, anuncio);
   }
 

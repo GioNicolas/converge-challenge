@@ -234,7 +234,9 @@ describe("#84: fechamento do quadro na sessão 4e38b42f", () => {
   });
 
   it("pedido explícito de encerrar: sai a despedida do núcleo, sem perguntas finais", async () => {
-    const r = await turno(estadoEm("APROFUNDAMENTO"), "Acho que é isso, pode encerrar a entrevista.", { responder: false, texto: "", encerrar: true }, AGORA);
+    // Com urgência ("tenho que sair agora"), o pedido vai direto à despedida. Sem urgência e sem critérios no plano, o
+    // quadro vai à última palavra (decisão revisada, #129; ver perguntar.test.ts).
+    const r = await turno(estadoEm("APROFUNDAMENTO"), "Acho que é isso, pode encerrar a entrevista.", { responder: false, texto: "", encerrar: true, urgente: true }, AGORA);
     assert.equal(r.encerrar, true);
     assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
     assert.equal(r.fechamento, "encerrada");
