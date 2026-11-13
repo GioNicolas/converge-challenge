@@ -136,12 +136,14 @@ export function desenhoNovoDesdePergunta(estado: EstadoSessao, pecas: string[] |
 
 /**
  * O teto do ritmo por conteúdo venceu: faz `tetoSemPerguntaMs` desde a última pergunta da análise (ou, sem nenhuma, desde
- * o começo da fase) e há desenho novo. Aí a pergunta sai mesmo sem parte fechada.
+ * o começo da fase). No ALTO_NIVEL exige também desenho novo desde a última pergunta. No APROFUNDAMENTO vence só pelo
+ * tempo (decisão do dono: com o desenho já pronto, a pergunta sai mesmo sem peça nova). Aí a pergunta sai sem parte fechada.
  */
 export function tetoDaPergunta(estado: EstadoSessao, agora: number, pecas: string[] | null | undefined): boolean {
   const referencia = estado.ultimaPerguntaEm ?? estado.faseIniciadaEm;
   if (referencia === null || referencia === undefined) return false;
-  return agora - referencia >= RITMO_QUADRO.tetoSemPerguntaMs && desenhoNovoDesdePergunta(estado, pecas);
+  if (agora - referencia < RITMO_QUADRO.tetoSemPerguntaMs) return false;
+  return estado.fase === "APROFUNDAMENTO" || desenhoNovoDesdePergunta(estado, pecas);
 }
 
 export type ContextoDoConteudo = {
@@ -204,8 +206,8 @@ export type ContextoDaPerguntaObrigatoria = {
 };
 
 /**
- * O teto venceu e nenhum portão bloqueia a pergunta (#129, bloco B): a análise do desenho é OBRIGADA a perguntar, e
- * "ok" não vale nela. Portões: fase de conteúdo, sem pergunta pendente, ritmo comum (orçamento, cota, intervalo, bola
+ * O teto venceu e nenhum portão bloqueia a pergunta (#129, bloco B; no APROFUNDAMENTO vale só o tempo, ver
+ * `tetoDaPergunta`): a análise do desenho é OBRIGADA a perguntar, e "ok" não vale nela. Portões: fase de conteúdo, sem pergunta pendente, ritmo comum (orçamento, cota, intervalo, bola
  * com o candidato, fechamento) e sem a brecha da mudança (decisão G), que é um "ok" de propósito.
  */
 export function perguntaObrigatoria(

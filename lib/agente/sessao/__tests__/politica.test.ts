@@ -6,6 +6,7 @@ import type { PlanoDaSessao } from "../../plano";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
   perguntaObrigatoria,
+  tetoDaPergunta,
   precisaAbrirBrechaDaMudanca,
   conclusaoBarradaRecente,
   desenhoNovoDesdePergunta,
@@ -642,8 +643,13 @@ describe("pergunta obrigatória do teto (#129, bloco B)", () => {
     assert.equal(perguntaObrigatoria(vencida({ ultimaPerguntaEm: AGORA_OB - TETO + 1 }), AGORA_OB, PECAS, ctx), false);
   });
 
-  it("sem desenho novo, não é obrigatória", () => {
-    assert.equal(perguntaObrigatoria(vencida({ desenhoNaUltimaPergunta: ["r1", "e1"] }), AGORA_OB, PECAS, ctx), false);
+  it("no ALTO_NIVEL, sem desenho novo, não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ fase: "ALTO_NIVEL", desenhoNaUltimaPergunta: ["r1", "e1"] }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("no APROFUNDAMENTO, sem desenho novo, o teto vence pelo tempo (decisão do dono)", () => {
+    assert.equal(perguntaObrigatoria(vencida({ desenhoNaUltimaPergunta: ["r1", "e1"] }), AGORA_OB, PECAS, ctx), true);
+    assert.equal(perguntaObrigatoria(vencida({ desenhoNaUltimaPergunta: ["r1", "e1"], ultimaPerguntaEm: AGORA_OB - TETO + 1 }), AGORA_OB, PECAS, ctx), false);
   });
 
   it("fora das fases de conteúdo (REQUISITOS), não é obrigatória", () => {
@@ -671,5 +677,31 @@ describe("pergunta obrigatória do teto (#129, bloco B)", () => {
     const recente = vencida({ iniciadaEm: AGORA_OB - 23 * 60_000, brechaEmpecilhoEm: AGORA_OB - 1000 });
     assert.equal(precisaAbrirBrechaDaMudanca(recente, AGORA_OB, true), false);
     assert.equal(perguntaObrigatoria(recente, AGORA_OB, PECAS, { mudancaPrevista: true }), true);
+  });
+});
+
+describe("teto por fase (decisão do dono): APROFUNDAMENTO vence só pelo tempo; ALTO_NIVEL exige desenho novo", () => {
+  const TETO_MS = RITMO_QUADRO.tetoSemPerguntaMs;
+  const AG = 10_000_000;
+  const pecas = ["r1", "e1"];
+
+  it("APROFUNDAMENTO com 3 min sem pergunta e sem desenho novo: o teto vence", () => {
+    const e = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AG - TETO_MS, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(tetoDaPergunta(e, AG, pecas), true);
+  });
+
+  it("ALTO_NIVEL com 3 min sem pergunta e sem desenho novo: o teto não vence", () => {
+    const e = estadoEm("ALTO_NIVEL", { ultimaPerguntaEm: AG - TETO_MS, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(tetoDaPergunta(e, AG, pecas), false);
+  });
+
+  it("antes dos 3 min, nem o APROFUNDAMENTO vence", () => {
+    const e = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AG - TETO_MS + 1, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(tetoDaPergunta(e, AG, pecas), false);
+  });
+
+  it("no APROFUNDAMENTO sem desenho novo, motivoDoConteudo deixa a pergunta sair (sem parte fechada)", () => {
+    const e = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AG - TETO_MS, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(motivoDoConteudo(e, { status: "duvida", parteFechada: false }, AG, { pecas }), null);
   });
 });

@@ -13,7 +13,7 @@ import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../interrupcao/politica";
 import { pecasDoGrafo } from "../sessao/fechamento";
-import { conclusaoBarradaRecente, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, perguntaObrigatoria, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
+import { conclusaoBarradaRecente, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, desenhoNovoDesdePergunta, pedidoDeTempoPendente, perguntaObrigatoria, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -252,6 +252,9 @@ export function montarSistemaDinamico(
   const bloqueio = motivoBloqueioPlin(estado, agora, undefined, { paradoHaS: pedido.parado_ha_s });
   // Mesma conta de `analisar` (ver perguntaObrigatoria): o prompt só cobra a pergunta quando a análise vai aceitá-la.
   const obrigaPergunta = perguntaObrigatoria(estado, agora, pecasDoGrafo(pedido.grafo), { paradoHaS: pedido.parado_ha_s, mudancaPrevista });
+  // Com desenho novo desde a última pergunta, o aviso manda perguntar sobre a parte nova; sem ele (só no APROFUNDAMENTO,
+  // pelo tempo), sobre o que ainda não foi explorado (ver tetoDaPergunta).
+  const desenhoNovo = desenhoNovoDesdePergunta(estado, pecasDoGrafo(pedido.grafo));
   const semEvidencia = criteriosSemEvidencia(estado);
   // A linha da rubrica deixa de fora os critérios do plano (eles têm a própria linha, ver `blocoDosCriteriosDoPlano`).
   const doPlano = nomesDosCriteriosDoPlano(estado.plano);
@@ -274,7 +277,9 @@ Candidato sem mexer no desenho nem falar há: ${
 ${pedidoDeTempoPendente(estado, agora, pedido.parado_ha_s) ? blocoDoPedidoDeTempo(Math.round((agora - (estado.pediuTempoEm ?? agora)) / 1000)) : ""}Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEscopo(estado, agora)}${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
-` : ""}${obrigaPergunta ? `PERGUNTA OBRIGATÓRIA: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta e o desenho mudou desde então. Nesta análise "ok" não vale: pergunte agora sobre a parte mais forte ou a mais recente do desenho dele, concreta, citando as peças pelo nome (princípio 1), mesmo que ela ainda não esteja fechada.
+` : ""}${obrigaPergunta ? `PERGUNTA OBRIGATÓRIA: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta${desenhoNovo ? " e o desenho mudou desde então" : ""}. Nesta análise "ok" não vale: ${desenhoNovo
+  ? "pergunte agora sobre a parte mais forte ou a mais recente do desenho dele, concreta, citando as peças pelo nome (princípio 1), mesmo que ela ainda não esteja fechada."
+  : "pergunte sobre uma decisão dele ainda não explorada, um critério da recrutadora sem evidência, ou uma variação (escala, falha, custo) do que ele já desenhou: concreta, citando as peças pelo nome e sem repetir pergunta já feita."}
 ` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${rubricaSemEvidencia.length ? rubricaSemEvidencia.join(", ") : "nenhum"}

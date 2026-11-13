@@ -207,10 +207,21 @@ describe("ritmo por conteúdo no prompt (#129, bloco B)", () => {
     assert.ok(!d.includes("PERGUNTA EM ATRASO"));
   });
 
-  it("sem desenho novo, o aviso do teto não aparece", () => {
-    const parado = { ...estado, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1", "e1", "s1"] };
+  it("no ALTO_NIVEL, sem desenho novo, o aviso do teto não aparece", () => {
+    const parado = { ...estado, fase: "ALTO_NIVEL" as const, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1", "e1", "s1"] };
     const d = montarPromptAvaliador(kitDemo, problema, parado, pedido(), AGORA).sistema.dinamico;
     assert.ok(!d.includes("PERGUNTA OBRIGATÓRIA"));
+  });
+
+  it("no APROFUNDAMENTO, sem desenho novo, o teto obriga pelo tempo com o texto de decisão não explorada", () => {
+    const parado = { ...estado, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1", "e1", "s1"] };
+    const d = montarPromptAvaliador(kitDemo, problema, parado, pedido(), AGORA).sistema.dinamico;
+    assert.ok(d.includes("PERGUNTA OBRIGATÓRIA: faz 3 min que você não pergunta. Nesta análise \"ok\" não vale"));
+    assert.ok(d.includes("decisão dele ainda não explorada"));
+    assert.ok(d.includes("critério da recrutadora sem evidência"));
+    assert.ok(d.includes("(escala, falha, custo)"));
+    assert.ok(d.includes("sem repetir pergunta já feita"));
+    assert.ok(!d.includes("e o desenho mudou desde então"));
   });
 
   it("antes dos 3 min, o aviso do teto não aparece", () => {
