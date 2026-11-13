@@ -8,6 +8,7 @@ import type { DepsDoTurno } from "../turno";
 import type { FocusArea } from "@/lib/contracts";
 import type { Turno } from "../rascunho";
 import { criarSessao, type Sessao } from "../sessoes";
+import { aplicarPasso } from "../planejador";
 import { abrirConversa } from "../turno";
 
 export const CLASSIFICACAO: Classificacao = {
@@ -25,10 +26,24 @@ export const CLASSIFICACAO: Classificacao = {
 export const VAGA = { roleTitle: "Backend Pleno", jobDescription: "APIs em Node e Postgres." };
 export const COMPETENCIAS: ResultadoCompetencias = { competencias: [], ms: 0, mensagens: [], tentativas: [] };
 
-/** Sessão já aberta (a abertura sai sem modelo), com as falas seguintes acrescentadas à transcrição. */
-export function sessaoAberta(falas: Turno[] = [], classificacao: Classificacao = CLASSIFICACAO): Sessao {
+/**
+ * Sessão recém-aberta: só a abertura sem modelo, que não propõe formato, nível nem foco (issue #127). O primeiro passo
+ * depois da primeira fala dela é a proposta (`confirmar_inicio`), a pergunta de nível ou a oferta de troca.
+ */
+export function sessaoRecemAberta(falas: Turno[] = [], classificacao: Classificacao = CLASSIFICACAO): Sessao {
   const sessao = criarSessao(VAGA, classificacao, Date.now(), COMPETENCIAS);
   abrirConversa(sessao);
+  sessao.transcricao.push(...falas);
+  return sessao;
+}
+
+/**
+ * Sessão aberta e com a proposta do início já feita (`confirmar_inicio` contado): o ponto de partida dos testes das
+ * etapas seguintes da conversa. A abertura é a mesma de `sessaoRecemAberta`.
+ */
+export function sessaoAberta(falas: Turno[] = [], classificacao: Classificacao = CLASSIFICACAO): Sessao {
+  const sessao = sessaoRecemAberta([], classificacao);
+  sessao.plano = aplicarPasso(sessao.plano, { tipo: "confirmar_inicio" });
   sessao.transcricao.push(...falas);
   return sessao;
 }
@@ -78,4 +93,25 @@ export function jevFalso(...leituras: LeituraFalsa[]): Pick<DepsDoTurno, "avalia
     },
     avaliarEnfaseDaFala: async (): Promise<EnfaseFala> => ({ ...chamada, niveis: leituras[turno]?.niveis ?? {}, ms: 0 }),
   };
+}
+
+/**
+ * Sessão aberta com a decisão que antes a abertura já pedia, para os testes de decisão pendente: a oferta de troca (IA
+ * aplicada pesa mais e live coding não a mede) ou a pergunta de nível (a vaga não diz o nível). No fluxo real, essas
+ * perguntas vêm no passo seguinte à abertura (`oferecer_tradeoff`, `perguntar_nivel`).
+ */
+export function sessaoComDecisaoAberta(falas: Turno[] = [], classificacao: Classificacao = CLASSIFICACAO): Sessao {
+  const sessao = sessaoAberta([], classificacao);
+  const maiorPeso = [...sessao.rascunho.focus].sort((a, b) => b.weight - a.weight)[0]?.area;
+  if (maiorPeso === "uso_ia" && sessao.rascunho.mode === "live_coding") {
+    const oferta = { tipo: "oferecer_tradeoff", area: "uso_ia", modoAlternativo: "system_design" } as const;
+    sessao.transcricao.push(
+      totti("Live coding não mede se a pessoa sabe construir com IA; se isso for central, system design avalia melhor. O que prefere?"),
+    );
+    sessao.plano = aplicarPasso(sessao.plano, oferta);
+  } else if (classificacao.confirmar.includes("seniority")) {
+    sessao.transcricao.push(totti("O nível não está claro na vaga: é júnior, pleno ou sênior?"));
+  }
+  sessao.transcricao.push(...falas);
+  return sessao;
 }

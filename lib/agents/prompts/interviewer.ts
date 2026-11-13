@@ -8,6 +8,7 @@ import type { ChatMessage, InterviewConfig } from "@/lib/contracts";
 import type { QuestionKind } from "@/lib/session/types";
 import type { Problem } from "@/lib/problems/types";
 import { buildVagaContext } from "./vaga";
+import { blocoDeConducao } from "./conducao";
 import { dado, dadoEmLinha, REGRA_DADOS } from "@/lib/seguranca/injecao";
 import { blocoDaPersona } from "@/lib/totti/persona";
 import { avisoDeFalaCortada } from "@/lib/totti/interrupcao";
@@ -17,6 +18,7 @@ export function buildInterviewerSystem(config: InterviewConfig, problem: Problem
   const pub = problem.public;
   const priv = problem.private;
   const criteria = config.criteria.map((c) => `- ${c.id}: ${c.name} — ${c.description}`).join("\n");
+  const conducao = blocoDeConducao(config.conductNotes);
   const clarifications = priv.clarifications.map((c) => `- "${c.question}" → ${c.answer}`).join("\n");
   // De propósito o entrevistador NÃO recebe abordagens, erros comuns nem linhas suspeitas:
   // nos testes, quando sabia onde estava o bug, ele "ajudava" apontando o bug.
@@ -29,7 +31,7 @@ Seu papel é OUVIR e EXPLORAR o raciocínio dele: fazer ele explicar, justificar
 
 ${buildVagaContext(config, { modo: "perguntar" })}
 Use isso para escolher o tom e o ângulo das suas perguntas e aprofundamentos, nunca para dar pistas sobre o código.
-
+${conducao ? `\n${conducao}\n` : ""}
 # Problema que o candidato vê
 ${pub.title}: ${pub.statement}
 Restrições: ${pub.constraints.join("; ")}

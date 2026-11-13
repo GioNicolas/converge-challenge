@@ -7,7 +7,7 @@ import { neutralizar } from "../../seguranca/injecao";
 import { blocoDaPersona } from "../../totti/persona";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import type { Kit, Problema } from "../kits/tipos";
-import { blocoDoPlano } from "../plano";
+import { blocoDoPlanoParaEntrevistar } from "../plano";
 import { criteriosSemEvidencia, type EstadoSessao } from "../sessao/estado";
 import type { FalaRecente, Fase } from "../sessao/tipos";
 import { blocoDaEntrevista, conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
@@ -154,7 +154,7 @@ export function blocosDoSistemaDinamicoPerguntarV2(
   // ficou para trás e importa para não repetir são as perguntas, que já vão em bloco próprio (ritmo e perguntas feitas).
   const historico = historicoDaConversa(estado.conversa, conversaDoQuadro, Infinity);
   const conversa = historico.slice(-falasNoPrompt);
-  const plano = blocoDoPlano(estado.plano);
+  const plano = blocoDoPlanoParaEntrevistar(estado.plano);
   const nomes = new Map(kit.criterios.map((c) => [c.id, c.nome]));
   const semSinal = criteriosSemEvidencia(estado).map((id) => nomes.get(id) ?? id);
   const minhasFalas = conversa.filter((f) => f.quem === "agente").slice(-6).map((f) => f.texto);
