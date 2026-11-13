@@ -7,7 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // `copia`: a sessão como a tela a guardou, para reconstruir se esta instância não a tiver (ver `sincronizarSessao`).
-const Corpo = z.object({ rascunho: Rascunho, copia: z.unknown().optional() });
+// `base`: o rascunho de que ela partiu ao abrir a revisão; o servidor compara o editado com ele (e não com o atual) para
+// fixar só o que ela mudou. Corpo sem `base` (versão antiga da tela) vale como antes.
+const Corpo = z.object({ rascunho: Rascunho, base: Rascunho.optional(), copia: z.unknown().optional() });
 
 /**
  * Guarda o rascunho editado na revisão quando ela volta à conversa, sem gerar config. O que mudou fica fixado: a
@@ -29,6 +31,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const erros = lido.error.issues.map((i) => `${i.path.join(".") || "(raiz)"}: ${i.message}`);
     return NextResponse.json({ ok: false, erros }, { status: 422 });
   }
-  const fixados = salvarRevisao(sessao, lido.data.rascunho);
+  const fixados = salvarRevisao(sessao, lido.data.rascunho, lido.data.base);
   return NextResponse.json({ ok: true, fixados, estado: estadoDaSessao(sessao) });
 }

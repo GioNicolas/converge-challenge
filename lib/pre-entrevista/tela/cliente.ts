@@ -107,9 +107,10 @@ export async function buscarSessao(sessaoId: string): Promise<EstadoSessao | nul
 
 /**
  * Guarda no servidor o que ela editou na revisão ao voltar à conversa (sem publicar). O que mudou fica fixado: só
- * muda de novo se ela falar daquilo com o Totti. Devolve o estado da sessão com o rascunho guardado.
+ * muda de novo se ela falar daquilo com o Totti. `base` é o rascunho de que ela partiu ao editar (o servidor só fixa o
+ * que mudou em relação a ele). Devolve o estado da sessão com o rascunho guardado.
  */
-export async function salvarRascunho(sessaoId: string, rascunho: Rascunho): Promise<EstadoSessao> {
+export async function salvarRascunho(sessaoId: string, rascunho: Rascunho, base?: Rascunho): Promise<EstadoSessao> {
   if (!usarServidor()) {
     const anterior = sessoesDemo.get(sessaoId);
     if (!anterior) throw new Error("Sessão de demonstração não encontrada.");
@@ -120,7 +121,7 @@ export async function salvarRascunho(sessaoId: string, rascunho: Rascunho): Prom
   const r = await fetch(`${API}/${sessaoId}/rascunho`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rascunho, copia: copiaDe(sessaoId) }),
+    body: JSON.stringify({ rascunho, ...(base ? { base } : {}), copia: copiaDe(sessaoId) }),
   });
   if (!r.ok) throw new Error(await erroDe(r));
   const j = (await r.json()) as { estado: EstadoSessao };

@@ -76,12 +76,7 @@ import type { FocusArea, InterviewMode } from "@/lib/contracts";
 import { camposFalados, reaplicarFixados, soltarCampos } from "./fixados";
 import { aplicarDecisoesTradeoff, areasFora, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
-import { aplicarPesosNaSessao, desfazerUltimaFala, falasParaLer, registrarFala, type Sessao } from "./sessoes";
-
-/** O Totti já propôs o formato, o nível e o foco (passo `confirmar_inicio`)? A abertura não propõe (ver `abrirConversa`). */
-function propostaFeita(sessao: Sessao): boolean {
-  return (sessao.plano.perguntasPorTopico.confirmou_inicio ?? 0) > 0;
-}
+import { aplicarPesosNaSessao, desfazerUltimaFala, falasParaLer, propostaFeita, registrarFala, type Sessao } from "./sessoes";
 
 /**
  * Estado que o planejador enxerga: o plano da sessão mais o foco, a cobertura e o formato do rascunho.

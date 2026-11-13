@@ -24,7 +24,7 @@ type Props = {
   erros: string[];
   onConfirmar: (rascunho: Rascunho) => void;
   /** Avisa a cada mudança: o rascunho editado, ou null se está igual ao original (para quem volta fora daqui). */
-  onMudar?: (rascunhoEditado: Rascunho | null) => void;
+  onMudar?: (rascunhoEditado: Rascunho | null, base: Rascunho) => void;
 };
 
 const campo =
@@ -137,7 +137,8 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
     const pesos = pesosDoFormato(base, rascunho.mode);
     const mudou = FocusArea.options.some((a) => pesos[a] !== base[a]);
     const r = structuredClone(rascunho);
-    return { pesos, r: mudou ? { ...r, criteria: ajustarCriterios(r.mode, ativas(pesos), r.criteria) } : r };
+    // `base`: de onde ela partiu. O que ela mudou se mede contra ele, não contra a prop, que a extração em segundo plano atualiza.
+    return { pesos, base: structuredClone(rascunho), r: mudou ? { ...r, criteria: ajustarCriterios(r.mode, ativas(pesos), r.criteria) } : r };
   });
   const [r, setR] = useState<Rascunho>(inicial.r);
   const [pesos, setPesos] = useState<Pesos>(inicial.pesos);
@@ -192,13 +193,13 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
   // O que ela mudou em relação ao que chegou (null: nada). Só vale com algum critério e peso, como no publicar.
   const tela = rascunhoDaTela();
   const mudou =
-    camposMudados(rascunho, tela).length > 0 ||
-    tela.roleTitle !== rascunho.roleTitle ||
-    tela.conducao.join("\n") !== rascunho.conducao.join("\n");
+    camposMudados(inicial.base, tela).length > 0 ||
+    tela.roleTitle !== inicial.base.roleTitle ||
+    (tela.conducao ?? []).join("\n") !== (inicial.base.conducao ?? []).join("\n");
   const editado = mudou && soma > 0 && tela.criteria.length > 0 ? tela : null;
   const chaveEditado = JSON.stringify(editado);
   useEffect(() => {
-    onMudar?.(editado);
+    onMudar?.(editado, inicial.base);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chaveEditado]);
 
@@ -435,9 +436,9 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
           {/* Instruções de comportamento do Totti: não viram critério nem entram na nota. Uma por linha. */}
           <Cartao titulo="Como o Totti deve conduzir" dica="O que ele faz na entrevista. Não entra na nota. Uma instrução por linha.">
             <textarea
-              value={r.conducao.join("\n")}
+              value={(r.conducao ?? []).join("\n")}
               onChange={(e) => setR({ ...r, conducao: e.target.value.split("\n") })}
-              rows={Math.max(2, r.conducao.length)}
+              rows={Math.max(2, (r.conducao ?? []).length)}
               placeholder="Ex.: redirecione o candidato se ele errar o escopo."
               className={`${campo} resize-y leading-relaxed`}
               aria-label="Como o Totti deve conduzir"

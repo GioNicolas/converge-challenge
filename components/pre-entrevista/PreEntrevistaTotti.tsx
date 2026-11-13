@@ -95,22 +95,35 @@ export default function PreEntrevistaTotti({
   // Do plano de volta à conversa: ela nunca desmonta (só se esconde), então reabre em silêncio, com o texto e a
   // rolagem de antes. `seguirConversando` tira o cartão de "plano pronto" de cima do campo de texto.
   // O que ela editou na revisão é guardado no servidor ao voltar (fica fixado até ela falar daquilo de novo).
-  const editadoNaRevisao = useRef<Rascunho | null>(null);
+  // `base` é o rascunho de que ela partiu ao abrir a revisão: o servidor fixa só o que mudou em relação a ele.
+  const editadoNaRevisao = useRef<{ editado: Rascunho; base: Rascunho } | null>(null);
+  // A edição que o servidor ainda não confirmou (salvando ou com falha). Enquanto existir, o que chega do servidor (a
+  // busca de 1,5 s, a resposta do Totti) não troca o rascunho da tela: senão a edição sumia sem ela ver.
+  const edicaoPendente = useRef<Rascunho | null>(null);
+  const comPendente = useCallback((e: EstadoSessao): EstadoSessao => (edicaoPendente.current ? { ...e, rascunho: edicaoPendente.current } : e), []);
   const sessaoId = estado?.id;
   const voltarParaConversa = useCallback(() => {
     setSeguirConversando(true);
     setEtapa("conversa");
-    const editado = editadoNaRevisao.current;
+    const guardado = editadoNaRevisao.current;
     editadoNaRevisao.current = null;
-    if (!editado || !sessaoId) return;
+    if (!guardado || !sessaoId) return;
+    const { editado, base } = guardado;
+    edicaoPendente.current = editado;
     // Já na tela: se ela reabrir o plano antes da resposta, vê o que editou.
     setEstado((atual) => (atual ? { ...atual, rascunho: editado } : atual));
-    salvarRascunho(sessaoId, editado)
-      .then((novo) => setEstado((atual) => (atual?.id === novo.id ? { ...atual, rascunho: novo.rascunho } : atual)))
-      .catch(() => {
-        // Falha ao guardar não trava a volta: a edição continua na tela e vai junto ao publicar.
+    // Uma segunda tentativa se a primeira falhar; se também falhar, a edição fica na tela (e vai ao publicar) com um aviso.
+    salvarRascunho(sessaoId, editado, base)
+      .catch(() => salvarRascunho(sessaoId, editado, base))
+      .then((novo) => {
+        // Outra edição pode ter entrado enquanto esta salvava: só esta limpa o pendente.
+        if (edicaoPendente.current === editado) edicaoPendente.current = null;
+        setEstado((atual) => (atual?.id === novo.id ? comPendente({ ...atual, rascunho: novo.rascunho }) : atual));
+      })
+      .catch((e) => {
+        setErro(`Não consegui guardar o que você mudou no plano: ${e instanceof Error ? e.message : String(e)}. A edição continua na tela e vai ao publicar.`);
       });
-  }, [sessaoId]);
+  }, [sessaoId, comPendente]);
 
   // Workspace: retoma a sessão salva (se ainda existir) ou começa a leitura da vaga. Roda uma vez só.
   const iniciou = useRef(false);
@@ -135,7 +148,7 @@ export default function PreEntrevistaTotti({
     setEstado({ ...estado, transcricao: [...estado.transcricao, { role: "recrutadora", text: texto }] });
     try {
       const [novo] = await Promise.all([enviarFala(estado.id, texto), esperar(RESPOSTA_MINIMA_MS)]);
-      setEstado(novo);
+      setEstado(comPendente(novo));
     } catch (e) {
       setEstado(estado);
       setErro(`O Totti não respondeu: ${e instanceof Error ? e.message : String(e)}`);
@@ -157,7 +170,7 @@ export default function PreEntrevistaTotti({
             atual &&
             (novo.transcricao.length > atual.transcricao.length ||
               (novo.transcricao.length === atual.transcricao.length && novo.status.versaoExtraida >= atual.status.versaoExtraida))
-              ? novo
+              ? comPendente(novo)
               : atual,
           );
       } catch {
@@ -165,7 +178,7 @@ export default function PreEntrevistaTotti({
       }
     }, 1500);
     return () => clearInterval(t);
-  }, [etapa, estado?.id]);
+  }, [etapa, estado?.id, comPendente]);
 
   async function confirmar(rascunho: Rascunho) {
     if (!estado) return;
@@ -384,7 +397,7 @@ export default function PreEntrevistaTotti({
                   publicado={!!(posPublicacao && config)}
                   erros={errosRevisao}
                   onConfirmar={confirmar}
-                  onMudar={(r) => { editadoNaRevisao.current = r; }}
+                  onMudar={(r, base) => { editadoNaRevisao.current = r ? { editado: r, base } : null; }}
                 />
                 <AnimatePresence>{posPublicacao && config && posPublicacao(config)}</AnimatePresence>
               </div>

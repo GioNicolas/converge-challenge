@@ -4,17 +4,23 @@
  * Na dúvida, a edição manual vence: sinal que não aponta um campo não solta nada.
  *
  * Mapeamento sinal -> campo solto (ver `camposFalados`):
- *  - quer_<área>, dispensa_<área>, disse_equilibrio, disse_divisao, pediu_equilibrio, decisão de troca de formato
- *    (escolheu_trocar_formato, escolheu_proxima_etapa, escolheu_seguir_sem)      -> focus e criteria
- *  - pediu_system_design, pediu_live_coding (e formato lido da fala)               -> mode, focus e criteria
+ *  - quer_<área>, dispensa_<área>, disse_equilibrio, disse_divisao, pediu_equilibrio, escolheu_proxima_etapa,
+ *    escolheu_seguir_sem                                                           -> focus e criteria
+ *  - escolheu_trocar_formato (aceitar a troca muda o formato), pediu_system_design,
+ *    pediu_live_coding (e formato lido da fala)                                    -> mode, focus e criteria
+ *  - pediu_mudanca (mudança sem dizer o quê: o mais provável é um critério)        -> criteria
  *  - quer_tom_*, quer_sem_dicas, quer_dicas, disse_eliminatorio                    -> recruiterNotes (o guia traz tom, dicas e eliminatório)
  *  - nível dito na fala (`nivelDito`, vira `seniority` no rascunho)                -> seniority
  *  - duração dita na fala (`lerDuracao`)                                           -> durationMin
- *  - pediu_mudanca sozinho não aponta campo nenhum: não solta nada.
+ *  - soltar mode, focus ou criteria solta também recruiterNotes: o guia (O que mais importa, Menos importante,
+ *    Não avaliado) é refeito a partir deles, e notas fixadas ficariam contradizendo o foco novo.
+ *  - conducao nunca é solta pela fala: o que ela apagou ou reescreveu não volta, e instrução nova ainda entra
+ *    (ver `reaplicarFixados`).
  */
+import { normalizarTexto } from "./frases";
 import { alinharPesos, type CampoFixado, type Rascunho } from "./rascunho";
 
-const CAMPOS: CampoFixado[] = ["mode", "seniority", "focus", "criteria", "recruiterNotes", "durationMin"];
+const CAMPOS: CampoFixado[] = ["mode", "seniority", "focus", "criteria", "recruiterNotes", "durationMin", "conducao"];
 const AREAS = ["tecnico", "escala_produto", "pressao", "uso_ia"];
 
 /** Recorte comparável de cada campo (pesos em 2 casas, para a tela e o servidor concordarem). */
@@ -44,9 +50,26 @@ export function camposMudados(atual: Rascunho, novo: Rascunho): CampoFixado[] {
   return CAMPOS.filter((c) => mudou.has(c));
 }
 
+/** Junta listas de instruções sem repetir (compara sem acento, maiúscula nem pontuação), mantendo a ordem. */
+export function somarVistas(...listas: string[][]): string[] {
+  const vistas = new Set<string>();
+  const saida: string[] = [];
+  for (const s of listas.flat()) {
+    const k = normalizarTexto(s);
+    if (!k || vistas.has(k)) continue;
+    vistas.add(k);
+    saida.push(s);
+  }
+  return saida;
+}
+
 /** Soma `campos` aos fixados do rascunho. Função pura. */
 export function fixarCampos(r: Rascunho, campos: CampoFixado[]): Rascunho {
-  return { ...r, fixados: CAMPOS.filter((c) => r.fixados.includes(c) || campos.includes(c)) };
+  return {
+    ...r,
+    fixados: CAMPOS.filter((c) => r.fixados.includes(c) || campos.includes(c)),
+    conducaoVista: somarVistas(r.conducaoVista, r.conducao),
+  };
 }
 
 /** Do que ela falou nesta fala, fora dos sinais: o nível dito e a duração dita. */
@@ -62,14 +85,19 @@ export function camposFalados(sinais: Record<string, number>, fala: FalaDela, li
   const soltar = (...c: CampoFixado[]) => c.forEach((x) => soltos.add(x));
   if (
     AREAS.some((a) => tem(`quer_${a}`) || tem(`dispensa_${a}`)) ||
-    ["disse_equilibrio", "disse_divisao", "pediu_equilibrio", "escolheu_trocar_formato", "escolheu_proxima_etapa", "escolheu_seguir_sem"].some(tem)
+    ["disse_equilibrio", "disse_divisao", "pediu_equilibrio", "escolheu_proxima_etapa", "escolheu_seguir_sem"].some(tem)
   ) {
     soltar("focus", "criteria");
   }
-  if (tem("pediu_system_design") || tem("pediu_live_coding")) soltar("mode", "focus", "criteria");
+  // Aceitar a troca de formato muda o modo do plano (ver `aplicarTroca`); pedir o formato também.
+  if (tem("escolheu_trocar_formato") || tem("pediu_system_design") || tem("pediu_live_coding")) soltar("mode", "focus", "criteria");
+  // Mudança sem dizer o quê: o Totti confirma uma mudança de critério, que não pode ser desfeita em silêncio.
+  if (tem("pediu_mudanca")) soltar("criteria");
   if (["quer_tom_desafiador", "quer_tom_amigavel", "quer_sem_dicas", "quer_dicas", "disse_eliminatorio"].some(tem)) soltar("recruiterNotes");
   if (fala.nivelDito) soltar("seniority");
   if (fala.duracaoDita) soltar("durationMin");
+  // As notas são geradas do foco, dos pesos e do modo: se algum deles volta a ser automático, elas também.
+  if (soltos.has("mode") || soltos.has("focus") || soltos.has("criteria")) soltar("recruiterNotes");
   return soltos;
 }
 
@@ -86,8 +114,11 @@ export function soltarCampos(r: Rascunho, soltos: Set<CampoFixado>): Rascunho {
  */
 export function reaplicarFixados(base: Rascunho, novo: Rascunho): Rascunho {
   const fixados = base.fixados;
-  if (fixados.length === 0) return { ...novo, fixados: [] };
-  const r: Rascunho = { ...novo, fixados };
+  // Toda instrução que o automático já produziu fica registrada, para separar depois a que ela apagou ou reescreveu na
+  // revisão (não volta) da que o extrator traz de novo numa fala seguinte (entra).
+  const conducaoVista = somarVistas(base.conducaoVista, base.conducao, novo.conducao);
+  if (fixados.length === 0) return { ...novo, fixados: [], conducaoVista };
+  const r: Rascunho = { ...novo, fixados, conducaoVista };
   if (fixados.includes("mode")) {
     r.mode = base.mode;
     if (base.mode !== novo.mode) {
@@ -98,6 +129,12 @@ export function reaplicarFixados(base: Rascunho, novo: Rascunho): Rascunho {
   if (fixados.includes("seniority")) r.seniority = base.seniority;
   if (fixados.includes("recruiterNotes")) r.recruiterNotes = base.recruiterNotes;
   if (fixados.includes("durationMin")) r.durationMin = base.durationMin;
+  if (fixados.includes("conducao")) {
+    // A lista dela vale. Do extrator só entra o que ela não tinha e que o automático ainda não tinha produzido antes da
+    // edição: linha apagada ou reescrita na revisão está em `conducaoVista` e não volta; instrução nova entra.
+    const conhecidas = new Set([...base.conducaoVista, ...base.conducao].map(normalizarTexto));
+    r.conducao = somarVistas(base.conducao, novo.conducao.filter((l) => !conhecidas.has(normalizarTexto(l))));
+  }
   if (fixados.includes("focus")) r.focus = base.focus;
   if (fixados.includes("criteria")) {
     const areas = new Set(r.focus.map((f) => f.area));

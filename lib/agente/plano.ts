@@ -3,6 +3,12 @@
 import type { FocusArea, InterviewConfig, SquadRule } from "../contracts";
 import { blocoDasRegras } from "../squad-memory/prompt";
 import type { Tempos } from "./sessao/estado";
+import { blocoDeConducao, notasDeConducao } from "../agents/prompts/conducao";
+
+/** Plano + condução da recrutadora: o que as salas do entrevistador leem. O avaliador usa só `blocoDoPlano`. */
+export function blocoDoPlanoParaEntrevistar(plano: PlanoDaSessao | null | undefined): string {
+  return [blocoDoPlano(plano), blocoDeConducao(plano?.conducao)].filter(Boolean).join("\n\n");
+}
 
 export type PlanoDaSessao = {
   cargo: string;
@@ -16,6 +22,8 @@ export type PlanoDaSessao = {
   descricaoVaga?: string;
   /** O que a recrutadora quer avaliar, como a pré-entrevista definiu (nome e o que conta como bom). */
   criterios?: { nome: string; descricao: string; peso: number }[];
+  /** Instruções de condução da recrutadora (já aparadas e com corte). Só o entrevistador lê: o avaliador não, nota não muda. */
+  conducao?: string[];
   duracaoMin: number;
   /** Regras ativas da squad quando a sessão começou (Memória Viva da Squad). */
   regrasSquad?: SquadRule[];
@@ -43,6 +51,7 @@ export function planoDaConfig(config: InterviewConfig): PlanoDaSessao {
           peso: c.weight,
         })) }
       : {}),
+    ...(notasDeConducao(config.conductNotes).length ? { conducao: notasDeConducao(config.conductNotes) } : {}),
     duracaoMin: config.durationMin,
     ...(config.squadRules?.length ? { regrasSquad: config.squadRules } : {}),
   };

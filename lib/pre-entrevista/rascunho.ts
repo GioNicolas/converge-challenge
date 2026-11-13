@@ -70,7 +70,7 @@ export type Origem = z.infer<typeof Origem>;
  * Campos que a recrutadora pode editar na revisão. Um campo editado fica "fixado": a extração e os pesos
  * automáticos não o sobrescrevem até ela falar daquele campo de novo (ver `fixados.ts`).
  */
-export const CampoFixado = z.enum(["mode", "seniority", "focus", "criteria", "recruiterNotes", "durationMin"]);
+export const CampoFixado = z.enum(["mode", "seniority", "focus", "criteria", "recruiterNotes", "durationMin", "conducao"]);
 export type CampoFixado = z.infer<typeof CampoFixado>;
 
 export const Rascunho = z.object({
@@ -113,6 +113,11 @@ export const Rascunho = z.object({
   fixados: z.array(CampoFixado).default([]),
   /** Instruções de como o Totti conduz a entrevista (vão para `conductNotes` da config; não entram na nota). */
   conducao: z.array(z.string()).default([]),
+  /**
+   * Instruções de condução que o automático já produziu, mesmo as que ela depois apagou ou reescreveu na revisão (interno).
+   * Serve para a extração não trazer de volta o que ela tirou, sem barrar instrução nova (ver `reaplicarFixados`).
+   */
+  conducaoVista: z.array(z.string()).default([]),
 });
 export type Rascunho = z.infer<typeof Rascunho>;
 
@@ -272,6 +277,7 @@ export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
     contexto: "",
     fixados: [],
     conducao: [],
+    conducaoVista: [],
   };
 }
 

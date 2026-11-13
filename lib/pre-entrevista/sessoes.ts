@@ -25,9 +25,9 @@ import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
 import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
 import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
-import { criarRascunho, rascunhoNoFormatoAtivo, type CampoFixado, type Rascunho, type Turno } from "./rascunho";
+import { criarRascunho, rascunhoNoFormatoAtivo, Rascunho as RascunhoSchema, type CampoFixado, type Rascunho, type Turno } from "./rascunho";
 import { estadoInicialEnfase, type EstadoEnfase } from "./enfase";
-import { camposMudados, fixarCampos, reaplicarFixados } from "./fixados";
+import { camposMudados, fixarCampos, reaplicarFixados, somarVistas } from "./fixados";
 import { recalcularRascunho, type DetalhePeso } from "./pesos";
 
 export interface Sessao {
@@ -73,7 +73,16 @@ export interface Sessao {
   /** Último detalhamento dos pesos por área (ver `pesosPelaEnfase`). */
   pesosDetalhe: DetalhePeso[];
   logs: EventoLog[];
-  status: { extraindo: boolean; versaoExtraida: number };
+  status: {
+    extraindo: boolean;
+    versaoExtraida: number;
+    /**
+     * Quantas revisões manuais já foram guardadas (`salvarRevisao`). A revisão muda só o rascunho, que `maisNova` não
+     * enxerga pela transcrição nem pela extração: sem este contador, uma instância com a sessão mais velha descartava
+     * a edição. Ausente em cópias de antes: conta como 0.
+     */
+    versaoRevisao?: number;
+  };
   configFinal?: InterviewConfig;
   /**
    * Critérios que o Totti aprendeu com o Tech Lead desta empresa (Memória Viva da Squad), ativos quando a
@@ -140,6 +149,20 @@ const store: Store = (globalComStore[CHAVE_STORE] ??= {
 const ID_VALIDO = /^[A-Za-z0-9_-]{1,100}$/;
 
 const trecho = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+/** O Totti já propôs o formato, o nível e o foco (passo `confirmar_inicio`)? A abertura não propõe (ver `abrirConversa`). */
+export function propostaFeita(sessao: Sessao): boolean {
+  return (sessao.plano.perguntasPorTopico.confirmou_inicio ?? 0) > 0;
+}
+
+/**
+ * O Totti só propõe o início depois da primeira fala dela; a resposta que o confirma vem depois da proposta. Uma rodada
+ * de segundo plano só pode confirmar o início se a proposta já existia quando ela começou e a transcrição lida termina
+ * numa fala dela (a resposta), e não na própria proposta. Mesma regra do turno síncrono (ver `propostaFeita`).
+ */
+export function rodadaPodeConfirmarInicio(sessao: Sessao, transcricaoLida: Turno[]): boolean {
+  return propostaFeita(sessao) && transcricaoLida.at(-1)?.role === "recrutadora";
+}
 
 export function getSessao(id: string): Sessao | undefined {
   return store.sessoes.get(id);
@@ -326,16 +349,52 @@ export function substituirRascunho(sessao: Sessao, novo: Rascunho, origem: strin
 }
 
 /**
- * Guarda a revisão editada à mão ao voltar à conversa, sem gerar config. O que mudou em relação ao rascunho atual
- * fica fixado (ver `fixados.ts`): a extração e os pesos não o sobrescrevem enquanto ela não falar daquilo de novo.
+ * Guarda a revisão editada à mão ao voltar à conversa, sem gerar config. O que mudou fica fixado (ver `fixados.ts`):
+ * a extração e os pesos não o sobrescrevem enquanto ela não falar daquilo de novo.
  * Cobertura e pendências são do servidor (a tela pode estar atrás); duração dita na revisão vale também nas preferências.
+ *
+ * Com `base` (o rascunho de que ela partiu ao abrir a revisão), só vale o que ela mudou em relação a ele, aplicado sobre
+ * o rascunho ATUAL do servidor: o que a extração trouxe enquanto ela editava (eliminatórios, contexto, campos que ela
+ * não tocou) não é desfeito por uma cópia velha da tela. Sem `base` (corpo antigo), vale o rascunho editado inteiro,
+ * comparado com o atual.
  */
-export function salvarRevisao(sessao: Sessao, editado: Rascunho): CampoFixado[] {
+export function salvarRevisao(sessao: Sessao, editado: Rascunho, base?: Rascunho): CampoFixado[] {
   const atual = sessao.rascunho;
-  const mudados = camposMudados(atual, editado);
-  const novo = fixarCampos({ ...editado, fixados: atual.fixados, cobertura: atual.cobertura, pendencias: atual.pendencias }, mudados);
+  const mudados = camposMudados(base ?? atual, editado);
+  // `conducaoVista` nunca vem da tela: é o que já havia no servidor mais as linhas de condução do rascunho atual e do
+  // de que ela partiu. Assim, a linha que ela apagou na revisão fica registrada e a extração não a traz de volta.
+  const vistas = somarVistas(atual.conducaoVista, atual.conducao, (base ?? atual).conducao);
+  let novo: Rascunho;
+  if (base) {
+    novo = { ...atual };
+    if (mudados.includes("mode")) {
+      novo.mode = editado.mode;
+      novo.problemId = editado.problemId;
+      novo.pedidoProblema = editado.pedidoProblema;
+    }
+    if (mudados.includes("seniority")) novo.seniority = editado.seniority;
+    if (mudados.includes("focus")) novo.focus = editado.focus;
+    if (mudados.includes("criteria")) {
+      novo.criteria = editado.criteria;
+      const doEditado = Object.fromEntries(editado.criteria.filter((c) => editado.origens[c.id]).map((c) => [c.id, editado.origens[c.id]]));
+      novo.origens = { ...atual.origens, ...doEditado };
+    }
+    if (mudados.includes("recruiterNotes")) novo.recruiterNotes = editado.recruiterNotes;
+    if (mudados.includes("durationMin")) novo.durationMin = editado.durationMin;
+    // O título não passa pelo automático: não fixa nada.
+    if (editado.roleTitle !== base.roleTitle) novo.roleTitle = editado.roleTitle;
+    if (mudados.includes("conducao")) novo.conducao = editado.conducao;
+    novo = fixarCampos({ ...novo, conducaoVista: vistas }, mudados);
+  } else {
+    novo = fixarCampos(
+      { ...editado, fixados: atual.fixados, cobertura: atual.cobertura, pendencias: atual.pendencias, conducaoVista: vistas },
+      mudados,
+    );
+  }
   if (mudados.includes("durationMin")) sessao.preferencias = { ...sessao.preferencias, duracaoMin: novo.durationMin };
   substituirRascunho(sessao, novo, "revisão manual");
+  // Mesmo sem campo mudado (só título ou condução) a revisão conta: a cópia da tela precisa vencer a de outra instância.
+  sessao.status.versaoRevisao = (sessao.status.versaoRevisao ?? 0) + 1;
   return mudados;
 }
 
@@ -356,6 +415,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
     store.ocupadas.has(sessao.id) && ultima?.role === "recrutadora" ? sessao.transcricao.length - 1 : sessao.transcricao.length;
   const transcricao = falasParaLer(sessao.transcricao.slice(0, versaoTranscricao));
   const antes = sessao.rascunho;
+  const podeConfirmarInicio = rodadaPodeConfirmarInicio(sessao, transcricao);
   let etapa = "extracao";
   try {
     const ext = await extrair(antes, transcricao, { modoEscolhido: sessao.plano.modoEscolhido });
@@ -421,7 +481,7 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
       ...extraido,
       ...nivelDeVolta,
       ...pedidoDeVolta,
-      cobertura: mesclarCobertura(atual.cobertura, cob.cobertura),
+      cobertura: mesclarCobertura(atual.cobertura, podeConfirmarInicio ? cob.cobertura : { ...cob.cobertura, confirmou_inicio: 0 }),
     });
     aplicarPesosNaSessao(sessao, "segundo plano");
     const mudancas = diff(antes, sessao.rascunho);
@@ -562,9 +622,14 @@ function pareceCopia(c: unknown, id: string): c is CopiaSessao {
 }
 
 /** A cópia está à frente da sessão desta instância: mais falas ou uma extração mais recente. */
-const maisNova = (c: CopiaSessao, s: Sessao) =>
-  c.transcricao.length > s.transcricao.length ||
-  (c.transcricao.length === s.transcricao.length && c.status.versaoExtraida > s.status.versaoExtraida);
+export const maisNova = (c: CopiaSessao, s: Sessao) => {
+  if (c.transcricao.length !== s.transcricao.length) return c.transcricao.length > s.transcricao.length;
+  // A revisão manual (só o rascunho muda) vale mais que uma extração: o que ela editou não se perde.
+  const revisaoC = c.status.versaoRevisao ?? 0;
+  const revisaoS = s.status.versaoRevisao ?? 0;
+  if (revisaoC !== revisaoS) return revisaoC > revisaoS;
+  return c.status.versaoExtraida > s.status.versaoExtraida;
+};
 
 /**
  * A sessão desta instância, reconstruída da `copia` da tela quando faltar ou estiver atrás.
@@ -574,11 +639,16 @@ export function sincronizarSessao(id: string, copia?: unknown): Sessao | undefin
   const atual = store.sessoes.get(id);
   if (!pareceCopia(copia, id)) return atual;
   if (atual && (store.ocupadas.has(id) || atual.status.extraindo || !maisNova(copia, atual))) return atual;
+  // Cópia guardada antes de campos novos (`fixados`, `conducao`...) não os tem: o schema põe os padrões. Se nem assim
+  // vale, a cópia é inválida e a instância fica com o que tem.
+  const rascunho = RascunhoSchema.safeParse(copia.rascunho);
+  if (!rascunho.success) return atual;
   const sessao: Sessao = {
     ...structuredClone(copia),
+    rascunho: rascunho.data,
     logs: atual?.logs ?? [],
     // A extração que rodava em outra instância não roda aqui: a finalização refaz se estiver atrás.
-    status: { extraindo: false, versaoExtraida: copia.status.versaoExtraida },
+    status: { extraindo: false, versaoExtraida: copia.status.versaoExtraida, versaoRevisao: copia.status.versaoRevisao ?? 0 },
   };
   store.sessoes.set(id, sessao);
   registrarEvento(sessao, {

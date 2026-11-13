@@ -137,6 +137,7 @@ export function estadoInicialDemo(vaga: Vaga): EstadoSessao {
       cobertura: {},
       pendencias: TOPICOS.filter((t) => !t.opcional).map((t) => t.id),
       origens: {},
+      conducaoVista: [],
       eliminatorios: [],
       contexto: "",
       fixados: [],
