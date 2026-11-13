@@ -22,6 +22,7 @@ import { perguntar, type PassoNaSessao } from "../perguntar";
 import { gatilhoDoFechamento, iniciarFechamento, proximoPasso, type EtapaDoFechamento } from "../../totti/fechamento";
 import { candidatasDoQuadro, perguntasJaOuvidas } from "../fechamento";
 import { pecasDoGrafo } from "../sessao/fechamento";
+import { parametrosDoFechamentoNoQuadro } from "../sessao/politica";
 import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, criteriosSemEvidencia, duracaoTotalS, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
@@ -35,7 +36,7 @@ import {
 import { kvPadrao } from "@/lib/storage/kv";
 import { PRAZO_ANALISE_DO_DESENHO_MS } from "@/lib/contracts";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
-import { contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
+import { concluiuHaPouco, contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
 import { registrarNoIndice } from "../resultados";
 import { contexto } from "./contexto";
 import { devHabilitado, finalizarEmSegundoPlano } from "./scorecard";
@@ -362,7 +363,9 @@ export async function fechamentoHandler(req: Request, { params }: ParamsId): Pro
     return json({ ...silencio, responder: !!texto, texto, fechamento: nucleo.etapa, encerrar: nucleo.etapa === "encerrada" });
   }
   const restante = tempoRestanteMs(estado, agora);
-  const gatilho = gatilhoDoFechamento({ pediuEncerrar: corpo.dados.gatilho === "pediu_encerrar", tempoRestanteMs: restante });
+  // O mesmo critério do quadro (decisão F): o relógio fecha no limiar da vaga, e o botão sem a barra da sala.
+  const gatilho = gatilhoDoFechamento({ pediuEncerrar: corpo.dados.gatilho === "pediu_encerrar", tempoRestanteMs: restante,
+    ...parametrosDoFechamentoNoQuadro(estado, agora, alvo) });
   if (!gatilho || estado.fase === "AGUARDANDO" || estado.fase === "APRESENTACAO") return json(silencio);
   const inicial = iniciarFechamento({ sala: "quadro", gatilho, tempoRestanteMs: restante,
     candidatas: candidatasDoQuadro(alvo.kit, alvo.problema, estado, agora), perguntasJaFeitas: perguntasJaOuvidas(estado) });
@@ -503,6 +506,8 @@ function motivoDoEmpecilho(estado: EstadoSessao, grafo: string, forcar: boolean,
     iniciadaEm: estado.iniciadaEm ?? null,
     duracaoTotalS: duracaoTotalS(estado),
     ultimaPerguntaEm: estado.ultimaPerguntaEm,
+    // Ele disse que terminou há pouco: a conclusão conta como brecha para a mudança (decisão F).
+    conclusaoRecente: concluiuHaPouco(estado.ultimaConclusaoEm, agora),
   });
 }
 

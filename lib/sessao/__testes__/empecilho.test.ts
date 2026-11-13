@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho, esperaDoEmpecilhoForcado, REGRAS_EMPECILHO, type SituacaoEmpecilho } from "../empecilho";
+import { concluiuHaPouco, contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho, esperaDoEmpecilhoForcado, relaxaPreChecagens, REGRAS_EMPECILHO, type SituacaoEmpecilho } from "../empecilho";
 
 const base: SituacaoEmpecilho = {
   agora: 1_000_000,
@@ -104,5 +104,35 @@ describe("garantia dos 60% do tempo total (#129, decisão G)", () => {
   it("sem os campos novos, as regras de antes valem como estavam", () => {
     assert.equal(esperaDoEmpecilho({ ...base, faseIniciadaEm: base.agora - 10_000 }), "cedo");
     assert.equal(esperaDoEmpecilho({ ...base, componentes: 2 }), "pouco desenho para adaptar");
+  });
+});
+
+describe("conclusão recente como brecha para a mudança (#129, decisão F)", () => {
+  it("'terminei' há pouco relaxa como a garantia: sai sem a fração da fase nem o mínimo de peças", () => {
+    assert.equal(esperaDoEmpecilho({ ...base, faseIniciadaEm: base.agora - 10_000 }), "cedo");
+    assert.equal(esperaDoEmpecilho({ ...base, faseIniciadaEm: base.agora - 10_000, conclusaoRecente: true }), null);
+    assert.equal(esperaDoEmpecilho({ ...base, componentes: 1, conclusaoRecente: true }), null);
+    assert.equal(esperaDoEmpecilho({ ...base, componentes: 0, conclusaoRecente: true }), "sem desenho para adaptar");
+  });
+
+  it("o piso entre perguntas continua valendo, e o respiro e a pergunta ativa também", () => {
+    const c = { ...base, conclusaoRecente: true };
+    assert.equal(esperaDoEmpecilho({ ...c, ultimaPerguntaEm: base.agora - 60_000 }), "piso entre perguntas");
+    assert.equal(esperaDoEmpecilho({ ...c, ultimaFalaDoAgenteEm: base.agora - 5_000 }), "respiro depois da última fala");
+    assert.equal(esperaDoEmpecilho({ ...c, respondendoPergunta: true }), "candidato respondendo uma pergunta");
+  });
+
+  it("relaxaPreChecagens: garantia ou conclusão recente relaxam; nenhuma das duas é a regra de antes", () => {
+    assert.equal(relaxaPreChecagens({ garantia: true, ultimaConclusaoEm: null, agora: base.agora }), true, "garantia");
+    assert.equal(relaxaPreChecagens({ garantia: false, ultimaConclusaoEm: base.agora - 10_000, agora: base.agora }), true, "conclusão recente");
+    assert.equal(relaxaPreChecagens({ garantia: false, ultimaConclusaoEm: base.agora - 120_000, agora: base.agora }), false, "conclusão antiga");
+    assert.equal(relaxaPreChecagens({ garantia: false, agora: base.agora }), false, "sem conclusão");
+  });
+
+  it("concluiuHaPouco: dentro do marco de conclusão, e nunca sem conclusão", () => {
+    assert.equal(concluiuHaPouco(base.agora - 10_000, base.agora), true);
+    assert.equal(concluiuHaPouco(base.agora - 120_000, base.agora), false);
+    assert.equal(concluiuHaPouco(null, base.agora), false);
+    assert.equal(concluiuHaPouco(undefined, base.agora), false);
   });
 });

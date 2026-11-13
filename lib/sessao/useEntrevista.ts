@@ -6,10 +6,10 @@ import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import { pedirEmpecilho, pedirFechamento, perguntar } from "@/lib/sessao/servidor";
-import { DESPEDIDAS, TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
+import { DESPEDIDAS, limiarDoFechamentoNoQuadro } from "@/lib/totti/fechamento";
 import { criarDespedida } from "@/lib/voz/despedida";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
-import { contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
+import { concluiuHaPouco, contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho, relaxaPreChecagens } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
@@ -806,15 +806,19 @@ export function useEntrevista(
       // curta e sem pergunta ativa, sem exigir a fração da fase nem o quadro livre.
       const duracaoTotalS = (e.duracaoMin ?? DURACAO_PADRAO_MIN) * 60;
       const garantia = emGarantiaDoEmpecilho({ agora, iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS });
+      // Conclusão recente (decisão F) relaxa as mesmas pré-checagens que a garantia (ver relaxaPreChecagens).
+      const relaxa = relaxaPreChecagens({ garantia, ultimaConclusaoEm: e.ultimaConclusaoEm, agora });
       // Sem cortar ninguém: pausa do candidato, agente quieto, nada pendente, nenhuma pergunta no ar.
       const parado = { maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current };
-      if (motivoDoMomento(garantia ? { ...parado, marco: true } : parado) !== null) return;
-      if ((garantia ? e.plin === "PERGUNTA_ATIVA" : e.plin !== "LIVRE") || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
+      if (motivoDoMomento(relaxa ? { ...parado, marco: true } : parado) !== null) return;
+      if ((relaxa ? e.plin === "PERGUNTA_ATIVA" : e.plin !== "LIVRE") || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 })) return;
       const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS: sessao.tempos[e.fase],
         jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current,
-        iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, ultimaPerguntaEm: e.ultimaPerguntaEm ?? null };
+        iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, ultimaPerguntaEm: e.ultimaPerguntaEm ?? null,
+        // Ele disse que terminou há pouco: a conclusão conta como brecha para a mudança (decisão F).
+        conclusaoRecente: concluiuHaPouco(e.ultimaConclusaoEm, agora) };
       // O grafo só é montado quando o resto já permite (é a parte cara da conta).
       if (esperaDoEmpecilho({ ...base, componentes: Number.MAX_SAFE_INTEGER })) return;
       const componentes = contarComponentes(conversor.current.converter(quadro.api.getSceneElements()).texto);
@@ -1213,12 +1217,14 @@ export function useEntrevista(
   useEffect(() => {
     if (!sessao || !iniciadaEm || !usarServidor()) return;
     const duracaoMs = Object.values(sessao.tempos).reduce<number>((s, t) => s + (t ?? 0), 0) * 1000;
+    // O mesmo limiar do servidor (decisão F): uma fração da duração da vaga (lib/totti/fechamento.ts).
+    const limiarMs = limiarDoFechamentoNoQuadro(duracaoMs);
     let ultimaTentativa = 0;
     const timer = setInterval(() => {
       const e = estadoAtual.current;
       if (encerrandoRef.current || e.fase === "ENCERRADA" || e.fechamento || e.plin !== "LIVRE" || pedindoFechamento.current) return;
       const agora = Date.now();
-      if (duracaoMs - (agora - iniciadaEm) > TEMPO_PARA_FECHAR_MS || agora - ultimaTentativa < 5000) return;
+      if (duracaoMs - (agora - iniciadaEm) > limiarMs || agora - ultimaTentativa < 5000) return;
       if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current, falaParcial: falaParcial.current,
         agenteFalando: agenteFalandoRef.current, aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) return;
       pedindoFechamento.current = true;

@@ -17,7 +17,7 @@ import {
 } from "../totti/turno";
 import { garantirMarca, mapearAcoesVisuais, pecasCitadas, type AcaoVisual } from "../presenca/acoesVisuais";
 import { caminhoPrincipalDesenhado } from "./sessao/fechamento";
-import { extrairIdsDoGrafo } from "./sessao/politica";
+import { extrairIdsDoGrafo, parametrosDoFechamentoNoQuadro } from "./sessao/politica";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import {
@@ -446,12 +446,15 @@ async function responderFala(
   // para encerrar vai direto à despedida; "terminei" com o caminho principal desenhado fecha na primeira vez, e sem
   // ele, na segunda; tempo acabando fecha de qualquer jeito. A fala do turno passa a ser a do fechamento (o anúncio
   // já com a primeira pergunta final), no lugar do aviso de que vai olhar e da oferta de encerrar de antes.
+  // Decisão F (#129): "terminei" só fecha se a sala não barrou (faltam critérios do plano ou a mudança de cenário), e
+  // o tempo que fecha é a fração da duração da vaga (`parametrosDoFechamentoNoQuadro`).
   const restanteMs = tempoRestanteMs(estado, agora);
   const gatilho = gatilhoDoFechamento({
     pediuEncerrar: saida.encerrar === true,
     concluiu,
     conclusoesAntes,
     materialPronto: fasesDeDesenho && caminhoPrincipalDesenhado(entrada.grafo),
+    ...parametrosDoFechamentoNoQuadro(estado, agora, deps),
     ...(FASES_DA_ENTREVISTA.includes(entrada.fase) ? { tempoRestanteMs: restanteMs } : {}),
   });
   if (gatilho) {

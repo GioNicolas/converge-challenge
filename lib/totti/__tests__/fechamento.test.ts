@@ -5,8 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
-  aceitaEncerrar, aindaPensando, aoVoltarATrabalhar, DESPEDIDAS, escolherPerguntasFinais, gatilhoDoFechamento, iniciarFechamento,
-  perguntasQueCabem, proximoPasso, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
+  aceitaEncerrar, aindaPensando, aoVoltarATrabalhar, DESPEDIDAS, escolherPerguntasFinais, FRACAO_PARA_FECHAR, gatilhoDoFechamento, iniciarFechamento,
+  limiarDoFechamentoNoQuadro, perguntasQueCabem, proximoPasso, TEMPO_PARA_FECHAR_MS, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
 } from "../fechamento";
 import { comVezDevolvida, convitesPara, escolherConvite, semConviteDeSeguir, semPerguntaNoFim, semPerguntaNoFimSeSobrar } from "../guardas";
 import type { LeituraDoTurno } from "../turno";
@@ -43,6 +43,33 @@ describe("quando o fechamento começa", () => {
     assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 2 * MIN }), "tempo");
     assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 10 * MIN }), null);
     assert.equal(gatilhoDoFechamento({}), null);
+  });
+});
+
+describe("quando o fechamento começa no quadro (#129, decisão F)", () => {
+  it("sem os parâmetros novos, o comportamento é o de sempre (live coding)", () => {
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 3 * MIN }), "tempo", "3 min é o limiar fixo");
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 3 * MIN + 1 }), null);
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, tempoRestanteMs: 20 * MIN, podeFecharPorConclusao: true }), "concluiu");
+  });
+  it("o limiar de tempo substitui os 3 min", () => {
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 4 * MIN, limiarTempoMs: 4.5 * MIN }), "tempo");
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 5 * MIN, limiarTempoMs: 4.5 * MIN }), null);
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 5 * MIN, limiarTempoMs: 6 * MIN }), "tempo");
+  });
+  it("com a conclusão barrada, \"terminei\" não fecha, nem na primeira vez nem na segunda", () => {
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, conclusoesAntes: 0, podeFecharPorConclusao: false }), null);
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, conclusoesAntes: 1, podeFecharPorConclusao: false }), null);
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, conclusoesAntes: 2, podeFecharPorConclusao: false, tempoRestanteMs: 20 * MIN }), null);
+  });
+  it("o limiar do quadro é 15% da duração da vaga; sem duração conhecida, os 3 min", () => {
+    assert.equal(FRACAO_PARA_FECHAR, 0.15);
+    assert.equal(limiarDoFechamentoNoQuadro(30 * MIN), 4.5 * MIN);
+    assert.equal(limiarDoFechamentoNoQuadro(0), TEMPO_PARA_FECHAR_MS);
+  });
+  it("a barra não afeta o pedido de encerrar nem o tempo acabando", () => {
+    assert.equal(gatilhoDoFechamento({ pediuEncerrar: true, podeFecharPorConclusao: false, tempoRestanteMs: 20 * MIN }), "pediu_encerrar");
+    assert.equal(gatilhoDoFechamento({ podeFecharPorConclusao: false, tempoRestanteMs: 2 * MIN }), "tempo");
   });
 });
 

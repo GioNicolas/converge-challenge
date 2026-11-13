@@ -1,7 +1,7 @@
 // Quando o Totti pode trazer a mudança no problema (o "empecilho") no quadro.
 // Lógica pura, sem React: o navegador usa para saber a hora de pedir, e o servidor repete a checagem.
 // O conteúdo da mudança fica no problema (kit ou gerado) no servidor; aqui só se decide o momento.
-import { RITMO_QUADRO } from "../interrupcao/politica";
+import { RITMO, RITMO_QUADRO } from "../interrupcao/politica";
 
 export const REGRAS_EMPECILHO = {
   /** Visão geral: só depois dessa fração do tempo da fase (o candidato já montou uma direção). */
@@ -37,7 +37,25 @@ export type SituacaoEmpecilho = {
   duracaoTotalS?: number;
   /** Quando a última pergunta do Totti saiu. Ausente/null: o piso entre perguntas não é checado. */
   ultimaPerguntaEm?: number | null;
+  /**
+   * Ele disse que terminou há pouco (ver `concluiuHaPouco`). Com a mudança ainda não anunciada, a conclusão conta como
+   * brecha para ela: relaxa como a garantia dos 60% (#129, decisão F). O piso entre perguntas continua valendo.
+   */
+  conclusaoRecente?: boolean;
 };
+
+/** Ele disse que terminou no marco de conclusão (RITMO.marcoDeConclusaoMs): a hora natural para trazer a mudança. */
+export function concluiuHaPouco(ultimaConclusaoEm: number | null | undefined, agora: number): boolean {
+  return ultimaConclusaoEm != null && agora - ultimaConclusaoEm < RITMO.marcoDeConclusaoMs;
+}
+
+/**
+ * O laço do navegador relaxa as pré-checagens da mudança (pausa com marco, nenhuma pergunta ativa) quando vale a
+ * garantia dos 60% ou quando ele acabou de dizer que terminou (#129, decisão F). Nenhuma das duas: a regra de antes.
+ */
+export function relaxaPreChecagens(s: { garantia: boolean; ultimaConclusaoEm?: number | null; agora: number }): boolean {
+  return s.garantia || concluiuHaPouco(s.ultimaConclusaoEm, s.agora);
+}
 
 /** Fases em que um empecilho forçado (demo) pode entrar: a entrevista precisa estar em andamento. */
 export const FASES_EMPECILHO_FORCADO = ["REQUISITOS", "ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
@@ -61,7 +79,7 @@ export function esperaDoEmpecilho(s: SituacaoEmpecilho, regras = REGRAS_EMPECILH
   if (s.ultimaPerguntaEm !== undefined && s.ultimaPerguntaEm !== null && s.agora - s.ultimaPerguntaEm < RITMO_QUADRO.pisoEntrePerguntasMs) {
     return "piso entre perguntas";
   }
-  const garantia = emGarantiaDoEmpecilho(s, regras);
+  const garantia = emGarantiaDoEmpecilho(s, regras) || s.conclusaoRecente === true;
   if (!garantia && s.componentes < regras.minimoComponentes) return "pouco desenho para adaptar";
   if (garantia && s.componentes < 1) return "sem desenho para adaptar";
   if (s.ultimaFalaDoAgenteEm !== null && s.agora - s.ultimaFalaDoAgenteEm < regras.respiroMs) return "respiro depois da última fala";

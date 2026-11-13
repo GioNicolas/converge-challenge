@@ -5,13 +5,14 @@
 import { blocoDoBriefing } from "../briefing";
 import type { Kit, Problema } from "../kits/tipos";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
-import { criteriosDoPlanoSemEvidencia, criteriosSemEvidencia, nomesDosCriteriosDoPlano, tempoDaEntrevista, type EstadoSessao } from "../sessao/estado";
+import { temMudancaPrevista } from "../kits/empecilhos-genericos";
+import { criteriosDoPlanoSemEvidencia, criteriosSemEvidencia, nomesDosCriteriosDoPlano, tempoDaEntrevista, tempoRestanteMs, type EstadoSessao } from "../sessao/estado";
 import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../interrupcao/politica";
 import { pecasDoGrafo } from "../sessao/fechamento";
-import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, ritmoDoEstado, statusPermitidoNoEstado, tetoDaPergunta } from "../sessao/politica";
+import { conclusaoBarradaRecente, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, ritmoDoEstado, statusPermitidoNoEstado, tetoDaPergunta } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -193,6 +194,21 @@ function blocoDoPedidoDeTempo(segundos: number): string {
 `;
 }
 
+/**
+ * Ele disse que terminou há pouco e o quadro barrou o encerramento (#129, decisão F): a análise puxa uma parte do
+ * problema, um porquê ou um critério sem evidência, em vez de encerrar. Os nomes dos critérios vêm da recrutadora: dado.
+ */
+function blocoDaConclusaoBarrada(kit: Kit, problema: Problema, estado: EstadoSessao, agora: number): string {
+  if (conclusaoBarradaRecente(estado, agora, { kit, problema }) === null) return "";
+  const partes: string[] = [];
+  const pendentes = criteriosDoPlanoSemEvidencia(estado);
+  if (pendentes.length) partes.push(`critérios da recrutadora sem evidência: ${dadoEmLinha("criterios", pendentes.join(" | "))}`);
+  if (!estado.empecilho && temMudancaPrevista(kit, problema)) partes.push("a mudança de cenário ainda não veio");
+  const faltaMin = Math.floor(tempoRestanteMs(estado, agora) / 60_000);
+  return `CONCLUSÃO BARRADA: ele disse que terminou, mas ainda faltam ${faltaMin} min e: ${partes.join(" e ")}. Puxe uma destas: a parte do problema que ainda não está no desenho, uma decisão dele que merece um porquê, ou um critério da recrutadora sem evidência.
+`;
+}
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -200,6 +216,8 @@ export function montarSistemaDinamico(
   agora: number,
   /** Briefing da entrevista (ver `blocoDoBriefing`): o que já temos do candidato e o que falta. */
   briefing = "",
+  /** Linha da conclusão barrada (ver `blocoDaConclusaoBarrada`); vazia quando não há. */
+  conclusaoBarrada = "",
 ): string {
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
   const bloqueio = motivoBloqueioPlin(estado, agora, undefined, { paradoHaS: pedido.parado_ha_s });
@@ -229,7 +247,7 @@ ${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perg
 ` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${rubricaSemEvidencia.length ? rubricaSemEvidencia.join(", ") : "nenhum"}
-${blocoDosCriteriosDoPlano(estado, total)}${blocoDaAgenda(estado, pedido, semEvidencia, agora)}${briefing ? `
+${blocoDosCriteriosDoPlano(estado, total)}${blocoDaAgenda(estado, pedido, semEvidencia, agora)}${conclusaoBarrada}${briefing ? `
 ${briefing}
 ` : ""}
 Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):
@@ -269,7 +287,7 @@ export function montarPromptAvaliador(
   return {
     sistema: {
       estatico: `${montarSistemaEstatico(kit, problema)}\n\n${REGRA_DADOS}`,
-      dinamico: montarSistemaDinamico(estado, pedido, agora, blocoDoBriefing(kit, estado, agora)),
+      dinamico: montarSistemaDinamico(estado, pedido, agora, blocoDoBriefing(kit, estado, agora), blocoDaConclusaoBarrada(kit, problema, estado, agora)),
     },
     mensagens: [{ role: "user", content: "Analise o quadro agora e responda somente com o JSON da decisão." }],
   };

@@ -3,14 +3,21 @@ import { describe, it } from "node:test";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { DESPEDIDAS } from "../../totti/fechamento";
 import { criarClienteFalso, ErroLlm, type LlmArgs } from "../llm/cliente";
-import { perguntar } from "../perguntar";
-import { estadoInicial } from "../sessao/estado";
+import { AVISOS_DE_QUE_VAI_OLHAR, perguntar } from "../perguntar";
+import { estadoInicial, type EstadoSessao } from "../sessao/estado";
+import { conclusaoBarradaRecente } from "../sessao/politica";
+import type { PlanoDaSessao } from "../plano";
 
 const AGORA = 1_000_000;
 const problema = kitDemo.problemas[0];
 const estado = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm: AGORA };
 // A maior parte destes testes é das regras do v1; o v2 tem os seus no bloco "Totti 2 no quadro".
 const deps = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {}, versao: "v1" as const });
+/** A mudança de cenário que já saiu na entrevista (ver `podeOferecerEncerrar`, decisão F). */
+const MUDANCA_ANUNCIADA: NonNullable<EstadoSessao["empecilho"]> = {
+  id: "teste_mudanca", fala: "Uma mudança no problema: o volume cresceu dez vezes.", requisito: "Mudança: volume 10x", exige: "Rever gargalos.",
+  anunciadoEm: AGORA - 5 * 60_000, fase: "ALTO_NIVEL", forcado: false,
+};
 
 describe("perguntar", () => {
   it("segunda reação vazia seguida (\"Hm.\" depois de \"Hm.\") vira silêncio; a primeira passa", async () => {
@@ -451,7 +458,8 @@ describe("pergunta dele no fechamento do quadro: o modelo lê a pergunta (candid
   // Três peças ligadas: "terminei" com isto no quadro fecha na primeira vez.
   const GRAFO = "COMPONENTES\n- [r1] Cliente (retângulo)\n- [r2] API (retângulo)\n- [r3] Banco (retângulo)\nCONEXÕES\n- [s1] Cliente → API\n- [s2] API → Banco";
   const VOLTA = "Mais alguma coisa antes de encerrar?";
-  const emALTO = { ...estadoInicial(), fase: "ALTO_NIVEL" as const, faseIniciadaEm: AGORA - 5 * 60_000, iniciadaEm: AGORA - 12 * 60_000 };
+  // A mudança de cenário já saiu: sem ela, "terminei" é barrado (decisão F, #129) e estes testes são do fechamento.
+  const emALTO = { ...estadoInicial(), fase: "ALTO_NIVEL" as const, faseIniciadaEm: AGORA - 5 * 60_000, iniciadaEm: AGORA - 12 * 60_000, empecilho: MUDANCA_ANUNCIADA };
   const comV2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {}, versao: "v2" as const });
   /** O modelo do teste, pela fala: conclui, pede para encerrar com pergunta, pergunta, ou fica quieto ao "só isso". */
   const modelo = (args: LlmArgs<unknown>) => {
@@ -524,5 +532,68 @@ describe("pergunta dele no fechamento do quadro: o modelo lê a pergunta (candid
     assert.equal(llm.chamadas.length - antes, 2, "a primeira leitura veio calada e a segunda respondeu");
     r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "não, só isso", grafo: GRAFO }, AGORA);
     assert.equal(r.encerrar, true);
+  });
+});
+
+describe("quando o quadro fecha: vaga com plano e mudança de cenário (#129, decisão F)", () => {
+  // Três peças ligadas: o caminho principal está desenhado, então sem a barra "terminei" fecharia na primeira vez.
+  const DESENHO = "COMPONENTES\n- [r1] Cliente (retângulo)\n- [r2] API (retângulo)\n- [r3] Banco (retângulo)\nCONEXÕES\n- [s1] Cliente → API\n- [s2] API → Banco";
+  const PLANO: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [
+      { nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 },
+      { nome: "Falha no gateway", descricao: "o que acontece se o gateway cair", peso: 1 },
+    ],
+  };
+  const COBERTOS: EstadoSessao["cobertura"] = {
+    Idempotência: { positivo: 1, negativo: 0, neutro: 0 }, "Falha no gateway": { positivo: 1, negativo: 0, neutro: 0 },
+  };
+  const MIN = 60_000;
+  /** Vaga de 30 min, começada `decorridos` minutos atrás, no alto nível, com o plano. */
+  const vaga = (decorridos: number, extra: Partial<EstadoSessao> = {}): EstadoSessao => ({
+    ...estadoInicial({ plano: PLANO }), fase: "ALTO_NIVEL", faseIniciadaEm: AGORA - 5 * MIN, iniciadaEm: AGORA - decorridos * MIN, ...extra,
+  });
+  const turno = (estado: EstadoSessao, texto: string, saida: Record<string, unknown>, agora = AGORA) => {
+    const llm = criarClienteFalso(() => ({ requisito: null, desfecho: null, ...saida }));
+    return perguntar({ llm, kit: kitDemo, problema, log: () => {}, versao: "v2" as const }, estado, { fase: "ALTO_NIVEL", texto, grafo: DESENHO }, agora);
+  };
+  const terminei = { responder: true, texto: "Beleza, vou olhar.", concluiu: true };
+
+  it("vaga de 30 min, 'terminei' aos 9 min com critérios do plano sem evidência: não fecha, avisa que vai olhar e a análise fica liberada", async () => {
+    const r = await turno(vaga(9), "Pronto, terminei.", terminei);
+    assert.equal(r.fechamento, undefined);
+    assert.ok(!r.estado.fechamento, "o fechamento não começou");
+    assert.ok(AVISOS_DE_QUE_VAI_OLHAR.includes(r.texto), r.texto);
+    assert.equal(conclusaoBarradaRecente(r.estado, AGORA, { kit: kitDemo, problema }), "faltam_criterios", "a análise recebe a linha da conclusão barrada");
+  });
+
+  it("a segunda e a terceira conclusão também não fecham enquanto a barra segurar", async () => {
+    let r = await turno(vaga(9), "Pronto, terminei.", terminei);
+    r = await turno(r.estado, "Já falei, pronto.", terminei, AGORA + 30_000);
+    assert.equal(r.fechamento, undefined);
+    assert.ok(AVISOS_DE_QUE_VAI_OLHAR.includes(r.texto), r.texto);
+    r = await turno(r.estado, "Eu já terminei mesmo.", terminei, AGORA + 60_000);
+    assert.equal(r.fechamento, undefined);
+    assert.equal(r.estado.conclusoes, 3);
+  });
+
+  it("critérios cobertos e mudança já feita: 'terminei' fecha", async () => {
+    const r = await turno(vaga(9, { cobertura: COBERTOS, empecilho: MUDANCA_ANUNCIADA }), "Pronto, terminei.", terminei);
+    assert.notEqual(r.fechamento, undefined);
+    assert.equal(r.estado.fechamento?.nucleo.gatilho, "concluiu");
+  });
+
+  it("faltando 15% da vaga (4 min de 30), fecha por tempo mesmo sem ele dizer que terminou; com 5 min, não", async () => {
+    const quatro = await turno(vaga(26), "Posso assumir que o grupo tem no máximo 256 pessoas?", { responder: true, texto: "Pode." });
+    assert.equal(quatro.estado.fechamento?.nucleo.gatilho, "tempo");
+    const cinco = await turno(vaga(25), "Posso assumir que o grupo tem no máximo 256 pessoas?", { responder: true, texto: "Pode." });
+    assert.equal(cinco.fechamento, undefined);
+  });
+
+  it("'tenho que sair' encerra mesmo com critérios e mudança pendentes", async () => {
+    const r = await turno(vaga(9), "Tenho que sair agora, pode encerrar.", { responder: false, texto: "", encerrar: true });
+    assert.equal(r.encerrar, true);
+    assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
+    assert.equal(r.fechamento, "encerrada");
   });
 });

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../../contracts";
 import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../../interrupcao/politica";
+import type { PlanoDaSessao } from "../../plano";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
+  conclusaoBarradaRecente,
   desenhoNovoDesdePergunta,
   extrairIdsDoGrafo,
   filtrarResposta,
@@ -11,9 +13,11 @@ import {
   motivoDoConteudo,
   falaQueContaParaABola,
   motivoBloqueioPlin,
+  parametrosDoFechamentoNoQuadro,
   pedidoDeTempoPendente,
   podeAnalisar,
   podeLevantarPlin,
+  podeOferecerEncerrar,
   REGRAS_PADRAO,
   statusPermitido,
 } from "../politica";
@@ -471,5 +475,67 @@ describe("ritmo por conteúdo do quadro (#129, bloco B)", () => {
     assert.deepEqual(feita.desenhoNaUltimaPergunta, ["r1", "e1"]);
     const semPecas = transicionar(transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: resposta() }, AGORA).estado, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
     assert.equal(semPecas.desenhoNaUltimaPergunta, undefined, "sem peças na análise, o campo fica ausente");
+  });
+});
+
+describe("quando o quadro pode oferecer o encerramento (#129, decisão F)", () => {
+  const PLANO: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [
+      { nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 },
+      { nome: "Falha no gateway", descricao: "o que acontece se o gateway cair", peso: 1 },
+    ],
+  };
+  /** Vaga de 30 min, começada 9 min atrás: faltam 21 min, longe do limiar de 15%. */
+  const quadroEm = (extra: Partial<EstadoSessao> = {}): EstadoSessao => ({
+    ...estadoInicial({ plano: PLANO }), fase: "ALTO_NIVEL", faseIniciadaEm: AGORA - 5 * MIN, iniciadaEm: AGORA - 9 * MIN, ...extra,
+  });
+  const comCriteriosCobertos = (e: EstadoSessao): EstadoSessao => ({
+    ...e,
+    cobertura: { ...e.cobertura, Idempotência: { positivo: 1, negativo: 0, neutro: 0 }, "Falha no gateway": { positivo: 1, negativo: 0, neutro: 0 } },
+  });
+  const anunciada: EstadoSessao["empecilho"] = { id: "x", fala: "Mudou.", requisito: "Mudança", exige: "Rever.", anunciadoEm: AGORA - MIN, fase: "ALTO_NIVEL", forcado: false };
+  const COM_MUDANCA = { kit: { id: "system_design" }, problema: {} };
+  const SEM_MUDANCA = { kit: { id: "design_produto" }, problema: {} };
+
+  it("com critério do plano sem evidência, barra (faltam_criterios), mesmo com a mudança anunciada", () => {
+    assert.equal(podeOferecerEncerrar(quadroEm(), AGORA, COM_MUDANCA), "faltam_criterios");
+    assert.equal(podeOferecerEncerrar(quadroEm({ empecilho: anunciada }), AGORA, COM_MUDANCA), "faltam_criterios");
+  });
+
+  it("critérios cobertos mas a mudança ainda não saiu: barra (falta_mudanca)", () => {
+    assert.equal(podeOferecerEncerrar(comCriteriosCobertos(quadroEm()), AGORA, COM_MUDANCA), "falta_mudanca");
+  });
+
+  it("critérios cobertos e mudança anunciada: pode", () => {
+    assert.equal(podeOferecerEncerrar(comCriteriosCobertos(quadroEm({ empecilho: anunciada })), AGORA, COM_MUDANCA), null);
+  });
+
+  it("sem mudança prevista no problema, critérios cobertos bastam", () => {
+    assert.equal(podeOferecerEncerrar(comCriteriosCobertos(quadroEm()), AGORA, SEM_MUDANCA), null);
+  });
+
+  it("faltando 15% da duração ou menos, pode, mesmo com critério e mudança pendentes (4,5 min numa vaga de 30)", () => {
+    assert.equal(podeOferecerEncerrar(quadroEm({ iniciadaEm: AGORA - 25.5 * MIN }), AGORA, COM_MUDANCA), null, "faltam 4,5 min");
+    assert.equal(podeOferecerEncerrar(quadroEm({ iniciadaEm: AGORA - 25.4 * MIN }), AGORA, COM_MUDANCA), "faltam_criterios", "faltam 4,6 min");
+  });
+
+  it("sem duração conhecida, não barra (o comportamento de antes)", () => {
+    assert.equal(podeOferecerEncerrar(estadoInicial({ tempos: {}, plano: null }), AGORA, COM_MUDANCA), null);
+  });
+
+  it("parametrosDoFechamentoNoQuadro: limiar da vaga e a barra da conclusão", () => {
+    assert.deepEqual(parametrosDoFechamentoNoQuadro(quadroEm(), AGORA, COM_MUDANCA), { limiarTempoMs: 4.5 * MIN, podeFecharPorConclusao: false });
+    const pode = comCriteriosCobertos(quadroEm({ empecilho: anunciada }));
+    assert.deepEqual(parametrosDoFechamentoNoQuadro(pode, AGORA, COM_MUDANCA), { limiarTempoMs: 4.5 * MIN, podeFecharPorConclusao: true });
+  });
+
+  it("conclusaoBarradaRecente: só com conclusão recente, no desenho, sem fechamento, e barrada", () => {
+    const concluiu = (ha: number, fase: EstadoSessao["fase"] = "ALTO_NIVEL") => quadroEm({ fase, ultimaConclusaoEm: AGORA - ha, conclusoes: 1 });
+    assert.equal(conclusaoBarradaRecente(concluiu(10_000), AGORA, COM_MUDANCA), "faltam_criterios");
+    assert.equal(conclusaoBarradaRecente(concluiu(60_000), AGORA, COM_MUDANCA), null, "conclusão antiga não conta");
+    assert.equal(conclusaoBarradaRecente(concluiu(10_000, "REQUISITOS"), AGORA, COM_MUDANCA), null, "fora do desenho não conta");
+    assert.equal(conclusaoBarradaRecente(quadroEm(), AGORA, COM_MUDANCA), null, "sem conclusão, não há o que puxar");
+    assert.equal(conclusaoBarradaRecente(comCriteriosCobertos(concluiu(10_000)), AGORA, COM_MUDANCA), "falta_mudanca");
   });
 });

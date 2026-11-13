@@ -67,6 +67,17 @@ export type PassoDoFechamento = {
 
 /** Faltando isto, a entrevista entra em fechamento mesmo que ele não tenha dito que terminou. */
 export const TEMPO_PARA_FECHAR_MS = 3 * 60_000;
+/**
+ * No quadro, o limiar de tempo é uma fração da duração da vaga (#129, decisão F), e não os 3 min fixos: numa vaga de 30
+ * min, faltando 4,5 min ou menos, a entrevista fecha. O live coding segue com TEMPO_PARA_FECHAR_MS.
+ */
+export const FRACAO_PARA_FECHAR = 0.15;
+
+/** O limiar de tempo do quadro para uma duração total (ms). Sem duração conhecida, vale o de sempre (TEMPO_PARA_FECHAR_MS). */
+export function limiarDoFechamentoNoQuadro(duracaoTotalMs: number): number {
+  return duracaoTotalMs > 0 ? FRACAO_PARA_FECHAR * duracaoTotalMs : TEMPO_PARA_FECHAR_MS;
+}
+
 /** Quanto uma pergunta final leva, contando a resposta e a reação. */
 export const TEMPO_POR_PERGUNTA_FINAL_MS = 60_000;
 /** O que a última palavra e a despedida precisam. */
@@ -85,17 +96,25 @@ export type SinalDeFechamento = {
   materialPronto?: boolean;
   /** Quanto falta para o fim da entrevista. Ausente: a sala não sabe. */
   tempoRestanteMs?: number;
+  /** Limiar de tempo que fecha a entrevista (ms). Ausente: TEMPO_PARA_FECHAR_MS (o live coding). */
+  limiarTempoMs?: number;
+  /**
+   * Se "terminei" pode fechar agora. Falso: a sala barrou (faltam critérios ou a mudança de cenário), e a conclusão
+   * vira só uma fala. Ausente ou verdadeiro: a regra de sempre (live coding).
+   */
+  podeFecharPorConclusao?: boolean;
 };
 
 /**
  * É hora de fechar? Pedido para encerrar vai direto à despedida. "Terminei" com o material pronto fecha na primeira
- * vez; sem ele, na segunda (na primeira o Totti ainda tem o que perguntar sobre o que falta). Tempo acabando fecha
- * de qualquer jeito.
+ * vez; sem ele, na segunda (na primeira o Totti ainda tem o que perguntar sobre o que falta), e só se a sala não
+ * barrou (`podeFecharPorConclusao`). Tempo acabando fecha de qualquer jeito, no limiar da sala.
  */
 export function gatilhoDoFechamento(sinal: SinalDeFechamento): GatilhoDoFechamento | null {
   if (sinal.pediuEncerrar) return "pediu_encerrar";
-  if (sinal.concluiu && (sinal.materialPronto || (sinal.conclusoesAntes ?? 0) >= 1)) return "concluiu";
-  if (sinal.tempoRestanteMs !== undefined && sinal.tempoRestanteMs <= TEMPO_PARA_FECHAR_MS) return "tempo";
+  const podeConcluir = sinal.podeFecharPorConclusao !== false;
+  if (podeConcluir && sinal.concluiu && (sinal.materialPronto || (sinal.conclusoesAntes ?? 0) >= 1)) return "concluiu";
+  if (sinal.tempoRestanteMs !== undefined && sinal.tempoRestanteMs <= (sinal.limiarTempoMs ?? TEMPO_PARA_FECHAR_MS)) return "tempo";
   return null;
 }
 

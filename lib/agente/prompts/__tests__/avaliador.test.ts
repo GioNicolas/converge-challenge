@@ -290,3 +290,36 @@ describe("critérios da recrutadora no prompt (#129, bloco D)", () => {
     assert.equal(A_PARTIR_DA_FRACAO_CRITERIOS, 0.3);
   });
 });
+
+describe("conclusão barrada no prompt da análise (#129, decisão F)", () => {
+  const plano: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [{ nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 }],
+  };
+  /** Vaga de 30 min, começada 9 min atrás (faltam 21 min), numa fase de desenho, com o critério do plano sem evidência. */
+  const desenho: EstadoSessao = {
+    ...estadoInicial({ criterios: kitDemo.criterios.map((c) => c.id), plano }),
+    fase: "APROFUNDAMENTO", faseIniciadaEm: AGORA - 60_000, iniciadaEm: AGORA - 9 * 60_000,
+  };
+  const dinamico = (e: EstadoSessao) => montarPromptAvaliador(kitDemo, problema, e, pedido(), AGORA).sistema.dinamico;
+
+  it("terminou há pouco e a barra segurou: a linha diz o tempo, o critério e a mudança, e pede uma das três coisas", () => {
+    const p = dinamico({ ...desenho, ultimaConclusaoEm: AGORA - 10_000, conclusoes: 1 });
+    assert.match(p, /CONCLUSÃO BARRADA: ele disse que terminou, mas ainda faltam 21 min e: critérios da recrutadora sem evidência: .*Idempotência.* e a mudança de cenário ainda não veio\. Puxe uma destas: a parte do problema que ainda não está no desenho, uma decisão dele que merece um porquê, ou um critério da recrutadora sem evidência\./);
+  });
+
+  it("critério coberto e mudança ainda não veio: a linha só fala da mudança", () => {
+    const coberto = { ...desenho, cobertura: { ...desenho.cobertura, Idempotência: { positivo: 1, negativo: 0, neutro: 0 } }, ultimaConclusaoEm: AGORA - 10_000 };
+    const p = dinamico(coberto);
+    assert.match(p, /CONCLUSÃO BARRADA: .*e: a mudança de cenário ainda não veio\./);
+    assert.doesNotMatch(p, /critérios da recrutadora sem evidência: /);
+  });
+
+  it("sem conclusão recente, ou com o encerramento já permitido, não há linha", () => {
+    assert.doesNotMatch(dinamico(desenho), /CONCLUSÃO BARRADA/);
+    assert.doesNotMatch(dinamico({ ...desenho, ultimaConclusaoEm: AGORA - 120_000 }), /CONCLUSÃO BARRADA/);
+    const pode = { ...desenho, ultimaConclusaoEm: AGORA - 10_000, empecilho: { id: "x", fala: "Mudou.", requisito: "Mudança", exige: "Rever.", anunciadoEm: AGORA - 60_000, fase: "APROFUNDAMENTO" as const, forcado: false },
+      cobertura: { ...desenho.cobertura, Idempotência: { positivo: 1, negativo: 0, neutro: 0 } } };
+    assert.doesNotMatch(dinamico(pode), /CONCLUSÃO BARRADA/);
+  });
+});

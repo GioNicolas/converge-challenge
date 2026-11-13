@@ -4,7 +4,10 @@
 import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../contracts";
 import { motivoDoRitmo, RITMO, RITMO_QUADRO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
-import type { EstadoSessao } from "./estado";
+import { limiarDoFechamentoNoQuadro } from "../../totti/fechamento";
+import type { Kit, Problema } from "../kits/tipos";
+import { temMudancaPrevista } from "../kits/empecilhos-genericos";
+import { criteriosDoPlanoSemEvidencia, duracaoTotalS, tempoRestanteMs, type EstadoSessao } from "./estado";
 import { fechamentoAtivo } from "./fechamento";
 import { FASES, type Fase, type RespostaAnalise, type StatusAnalise } from "./tipos";
 
@@ -57,6 +60,60 @@ export function ritmoDoEstado(estado: EstadoSessao, agora: number): Ritmo {
     marco: marcoDeFase(estado.fase, estado.faseIniciadaEm, agora)
       || (estado.ultimaConclusaoEm != null && agora - estado.ultimaConclusaoEm < RITMO.marcoDeConclusaoMs),
   };
+}
+
+/** Por que o quadro não oferece o encerramento agora (`podeOferecerEncerrar`). */
+export type MotivoParaNaoEncerrar = "faltam_criterios" | "falta_mudanca";
+
+/**
+ * Quando o quadro pode oferecer o encerramento (#129, decisão F). Pode quando (a) faltam até FRACAO_PARA_FECHAR da
+ * duração da vaga (limiar em lib/totti/fechamento.ts); ou (b) nenhum critério do plano está sem evidência E a mudança
+ * de cenário já saiu (ou a entrevista não tem mudança prevista). Devolve null quando pode, ou o que falta.
+ * Sem duração conhecida, não barra (o comportamento de antes).
+ */
+export function podeOferecerEncerrar(
+  estado: EstadoSessao,
+  agora: number,
+  contexto: { kit: Pick<Kit, "id">; problema: Pick<Problema, "empecilho"> },
+): MotivoParaNaoEncerrar | null {
+  const duracaoMs = duracaoTotalS(estado) * 1000;
+  if (duracaoMs <= 0) return null;
+  if (tempoRestanteMs(estado, agora) <= limiarDoFechamentoNoQuadro(duracaoMs)) return null;
+  if (criteriosDoPlanoSemEvidencia(estado).length > 0) return "faltam_criterios";
+  if (!estado.empecilho && temMudancaPrevista(contexto.kit, contexto.problema)) return "falta_mudanca";
+  return null;
+}
+
+/**
+ * Os dois ajustes do fechamento no quadro para o núcleo (`gatilhoDoFechamento`): o limiar de tempo (a fração da duração
+ * da vaga) e se "terminei" pode fechar agora (sem a barra de `podeOferecerEncerrar`, a conclusão não fecha).
+ */
+export function parametrosDoFechamentoNoQuadro(
+  estado: EstadoSessao,
+  agora: number,
+  contexto: { kit: Pick<Kit, "id">; problema: Pick<Problema, "empecilho"> },
+): { limiarTempoMs: number; podeFecharPorConclusao: boolean } {
+  return {
+    limiarTempoMs: limiarDoFechamentoNoQuadro(duracaoTotalS(estado) * 1000),
+    podeFecharPorConclusao: podeOferecerEncerrar(estado, agora, contexto) === null,
+  };
+}
+
+/** Fases em que "terminei" fala do desenho (como em estado.ts). */
+const FASES_DA_CONCLUSAO_BARRADA: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO"];
+
+/**
+ * Ele disse que terminou há pouco e o quadro barrou o encerramento: a análise recebe a linha que puxa uma parte, um
+ * porquê ou um critério (lib/agente/prompts/avaliador.ts). Só no desenho, e sem fechamento em andamento.
+ */
+export function conclusaoBarradaRecente(
+  estado: EstadoSessao,
+  agora: number,
+  contexto: { kit: Pick<Kit, "id">; problema: Pick<Problema, "empecilho"> },
+): MotivoParaNaoEncerrar | null {
+  if (estado.fechamento || !FASES_DA_CONCLUSAO_BARRADA.includes(estado.fase)) return null;
+  if (estado.ultimaConclusaoEm == null || agora - estado.ultimaConclusaoEm >= RITMO.marcoDeConclusaoMs) return null;
+  return podeOferecerEncerrar(estado, agora, contexto);
 }
 
 /** Fases em que a pergunta sobre o desenho passa pelo ritmo por conteúdo (`motivoDoConteudo`). */
