@@ -102,6 +102,8 @@ export const Rascunho = z.object({
   eliminatorios: z.array(z.string()).default([]),
   /** Trecho literal em que ela falou do time, da empresa ou do momento da contratação (interno; vai para o guia). */
   contexto: z.string().default(""),
+  /** Instruções de como o Totti conduz a entrevista (vão para `conductNotes` da config; não entram na nota). */
+  conducao: z.array(z.string()).default([]),
 });
 export type Rascunho = z.infer<typeof Rascunho>;
 
@@ -259,6 +261,7 @@ export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
     origens: {},
     eliminatorios: [],
     contexto: "",
+    conducao: [],
   };
 }
 
@@ -324,6 +327,7 @@ export function paraInterviewConfig(
     seniority: r.seniority,
     focus: r.focus,
     recruiterNotes: [acrescentarNaoAvaliado(r.recruiterNotes, naoAvaliado), notaDoTema(r)].filter(Boolean).join("\n"),
+    ...(r.conducao.length > 0 ? { conductNotes: r.conducao } : {}),
     tone: preferencias?.tom ?? "amigavel",
     hints: preferencias?.dicas ?? "leves",
     criteria,
