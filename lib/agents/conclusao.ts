@@ -16,3 +16,13 @@ export function disseQueTerminou(texto: string): boolean {
 export function disseQueJaTerminou(texto: string): boolean {
   return disseQueTerminou(texto) && /\bj[áa]\b/i.test(texto);
 }
+
+/**
+ * "Terminei" solto, sem dizer de quê ("terminei", "pronto, acabei", "acho que terminei aqui"): o fim da entrevista
+ * (#130, item 9), não de uma parte. "Terminei a função" ou "terminei o loop" vão para o modelo, que decide.
+ */
+const TERMINOU_SOLTO = /\b(terminei|acabei|finalizei|conclu[íi])([\s,]+(aqui|tudo|j[áa]|agora|ent[ãa]o|ok|n[ée]))*\s*[.!,]*\s*$/i;
+
+export function disseSoQueTerminou(texto: string): boolean {
+  return disseQueTerminou(texto) && TERMINOU_SOLTO.test(texto.trim());
+}

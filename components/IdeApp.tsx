@@ -20,7 +20,7 @@ import { useMidiaLocal } from "@/lib/presenca/useMidiaLocal";
 import { useTranscricao } from "@/lib/presenca/useTranscricao";
 import { useInterrupcao } from "@/lib/voz/useInterrupcao";
 import { comoFuncionaLiveCoding, DESPEDIDA_LIVE_CODING } from "@/lib/conversa/instrucoes";
-import { TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
+import { limiarDoFechamentoNaIde } from "@/lib/totti/fechamento";
 import { criarEncerrarComDespedida } from "./ide/encerrarComDespedida";
 import { deveAguardarParaFalar, podeTomarTurno } from "@/lib/conversa/turnos";
 import { pausaDasMaosParaFalarMs } from "@/lib/interrupcao/politica";
@@ -454,7 +454,7 @@ export default function IdeApp({ problemId, vaga = DEFAULT_CONFIG, convite }: { 
   const remaining = Math.max(0, DURATION_MS - session.elapsedMs);
   const fechamentoTempoPedidoRef = useRef(false);
   useEffect(() => {
-    if (!sessionId || session.ended || finalizando || conversa.fio || remaining > Math.min(TEMPO_PARA_FECHAR_MS, DURATION_MS * 0.2)) return;
+    if (!sessionId || session.ended || finalizando || conversa.fio || remaining > limiarDoFechamentoNaIde(DURATION_MS)) return;
     if (fechamentoTempoPedidoRef.current) return;
     fechamentoTempoPedidoRef.current = true;
     void postEncerramento(sessionId, "tempo").then((res) => {

@@ -67,3 +67,14 @@ export function candidatasDoFechamento(session: SessionState, t: number): Pergun
   }
   return candidatas;
 }
+
+/**
+ * Ele pediu para encerrar (ou disse que terminou a entrevista): até MAX_PERGUNTAS_AO_PEDIR_FIM perguntas antes da
+ * despedida (#130, item 9). Só a revisão da abordagem (a abordagem errada é revista no fechamento, item 4) e os
+ * critérios da recrutadora ainda sem evidência; as perguntas da análise ficam de fora. O núcleo corta pelo máximo e
+ * pelo tempo.
+ */
+export function candidatasDoPedidoDeFim(session: SessionState, t: number): PerguntaFinal[] {
+  if (session.ended) return [];
+  return candidatasDoFechamento(session, t).filter((c) => c.origem === "revisao" || c.origem === "criterio");
+}

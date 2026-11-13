@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { disseQueTerminou } from "../conclusao";
 import { faseDaEntrevista } from "../fase";
 import { candidatasDoFechamento } from "../fechamento";
-import { limitarPerguntas, querEncerrar, runInterviewerTurn, terminouComSolucaoPronta } from "../interviewer";
+import { limitarPerguntas, querEncerrar, runInterviewerTurn } from "../interviewer";
+import { disseSoQueTerminou } from "../conclusao";
 import {
   abordagemParaRever, decideBlip, enqueueKickoff, enqueueRunFalhou, FALAS_DO_RUN_FALHOU, lastBlipDecision, ordemDaComplexidade,
   PERGUNTA_DE_REVISAO, perdeuAVez, startClosing,
@@ -186,7 +187,7 @@ test("'terminei' com o último run verde: o fechamento começa na hora, mesmo de
     { role: "agent" as const, text: "E a memória?" },
     { role: "candidate" as const, text: "Constante. Terminei." },
   ];
-  assert.equal(terminouComSolucaoPronta(s, messages), true);
+  assert.equal(disseSoQueTerminou("Constante. Terminei."), true);
   const r = await runInterviewerTurn(s, { blipId: "q-5", messages });
   assert.ok(s.fechamento, "o fechamento começou");
   assert.doesNotMatch(r.reply, /continua daí|pode seguir|pode continuar/i);
@@ -196,11 +197,24 @@ test("'terminei' com o último run verde: o fechamento começa na hora, mesmo de
   assert.match(r.reply, /mudaria alguma coisa na abordagem/);
 });
 
-test("'terminei' sem run verde não abre o fechamento por esta regra", () => {
-  const { s } = sessao("terminei-vermelho");
+test("'terminei' solto é o fim da entrevista; dizendo de quê, é uma etapa (#130, item 9)", () => {
+  for (const fim of ["terminei", "Terminei.", "pronto, terminei", "acabei aqui", "Constante. Terminei.", "acho que é isso, acabei, né"]) {
+    assert.equal(disseSoQueTerminou(fim), true, fim);
+  }
+  for (const etapa of ["terminei essa parte", "terminei a primeira versão", "terminei o loop, agora vou testar", "ainda não terminei", "quando eu terminar eu aviso"]) {
+    assert.equal(disseSoQueTerminou(etapa), false, etapa);
+  }
+});
+
+test("'terminei' solto sem run verde também abre o fechamento, com as perguntas finais antes da despedida", async () => {
+  const { s, relogio } = sessao("terminei-vermelho");
   escrever(s, 200_000);
   rodar(s, 400_000, 3);
-  assert.equal(terminouComSolucaoPronta(s, [{ role: "candidate", text: "terminei" }]), false);
+  relogio.agora = 420_000;
+  const r = await runInterviewerTurn(s, { messages: [{ role: "candidate", text: "terminei" }] });
+  assert.ok(s.fechamento, "o fechamento começou");
+  assert.equal(r.despedida, undefined);
+  assert.match(r.reply, /\?$/);
 });
 
 test("limitarPerguntas: 'terminei' nunca vira 'Continua daí.'", () => {

@@ -5,25 +5,29 @@
 import { InterviewerOutput } from "@/lib/agents/interviewerSchema";
 import { buildInterviewerSystem, buildInterviewerUser, candidatoPerguntou, type InterviewerTurnInput } from "@/lib/agents/prompts/interviewer";
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
-import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
+import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, mudancaPendente, testesIde } from "@/lib/agents/empecilho";
 import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas, linesWrittenBeyondStarter } from "@/lib/agents/fase";
-import { allPassed, findBlipQuestion, nextHint, perdeuAVez } from "@/lib/agents/policy";
-import { disseQueJaTerminou, disseQueTerminou } from "@/lib/agents/conclusao";
+import { findBlipQuestion, nextHint, perdeuAVez } from "@/lib/agents/policy";
+import { disseQueJaTerminou, disseQueTerminou, disseSoQueTerminou } from "@/lib/agents/conclusao";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
 import { completeJson } from "@/lib/llm";
 import { registrarUsoLlm } from "./uso";
-import { aplicarGuardas, eSoReacao, escolherConvite, falaNaoRepetida, reacaoNeutra, semReacaoRepetida } from "@/lib/totti/guardas";
 import {
-  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoLiveCoding, paraSaidaDoLiveCoding,
+  aplicarGuardas, emPortugues, ePerguntaDePorque, eSoReacao, escolherConvite, falaNaoRepetida, perguntaDePorque, reacaoAoPensar, reacaoNeutra,
+  semConviteDeSeguir, semReacaoRepetida,
+} from "@/lib/totti/guardas";
+import {
+  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoLiveCoding, paraSaidaDoLiveCoding, pedePorque,
   type SituacaoDoTurno,
 } from "@/lib/totti/turno";
 import { appendEvent, latestCode, numberCode, sessionNow } from "@/lib/session/store";
 import type { SessionState } from "@/lib/session/types";
 import { getProblem } from "@/problems";
-import { candidatasDoFechamento } from "@/lib/agents/fechamento";
-import { gatilhoDoFechamento, iniciarFechamento, proximoPasso } from "@/lib/totti/fechamento";
+import { candidatasDoFechamento, candidatasDoPedidoDeFim } from "@/lib/agents/fechamento";
+import { gatilhoDoFechamento, iniciarFechamento, limiarDoFechamentoNaIde, proximoPasso, type EstadoFechamento, type GatilhoDoFechamento } from "@/lib/totti/fechamento";
+import type { LeituraDoTurno } from "@/lib/totti/turno";
 
 /** Falha do LLM: pede para repetir. Varia para não soar como gravação quando acontece mais de uma vez. */
 const FALLBACK_REPLIES = FALAS_DE_REPETICAO;
@@ -63,9 +67,51 @@ export async function runInterviewerTurn(
   req: { blipId?: string; messages: ChatMessage[]; reconheceu?: boolean },
 ): Promise<ChatResponse> {
   const resposta = await turno(session, req);
+  if (!resposta.reply) return resposta;
   // Toda fala que sai (a gerada, a pergunta preparada e as de reserva) passa pela trava comum da reação repetida:
-  // não abre com outro reconhecimento depois do "uhum" da IDE nem repete o da fala anterior.
-  return resposta.reply ? { ...resposta, reply: semReacaoRepetida(resposta.reply, falasDoTottiNaConversa(req.messages), req.reconheceu === true) || resposta.reply } : resposta;
+  // não abre com outro reconhecimento depois do "uhum" da IDE nem repete o da fala anterior. E pelo português claro
+  // (#130, item 14): o termo em inglês que a vaga não usa sai antes de a fala ir ao candidato.
+  const semRepetir = semReacaoRepetida(resposta.reply, falasDoTottiNaConversa(req.messages), req.reconheceu === true) || resposta.reply;
+  return { ...resposta, reply: emPortugues(semRepetir, session.config.jobDescription ?? "") };
+}
+
+/**
+ * Começa o fechamento e devolve a primeira fala dele. Numa conversa aberta o fechamento segue nela, sem abrir outro
+ * balão por cima (`fechamentoBlipId`). Com `etapa`, o fechamento começa já nessa etapa (pedido de fim com pergunta).
+ */
+function abrirFechamento(
+  session: SessionState,
+  req: { blipId?: string; messages: ChatMessage[] },
+  inicio: { gatilho: GatilhoDoFechamento; perguntasNoPedidoDeFim?: boolean; etapa?: EstadoFechamento["etapa"] },
+  leitura?: LeituraDoTurno,
+  falaDoCandidato = "",
+): ChatResponse {
+  const t = elapsedMs(session);
+  const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - t);
+  const pedido = inicio.gatilho === "pediu_encerrar";
+  const inicial = iniciarFechamento({
+    sala: "codigo",
+    gatilho: inicio.gatilho,
+    // Pedido de fim: só a revisão e os critérios da recrutadora sem evidência (#130, item 9).
+    candidatas: pedido ? candidatasDoPedidoDeFim(session, t) : candidatasDoFechamento(session, t),
+    tempoRestanteMs,
+    perguntasJaFeitas: falasDoAgente(session, req.messages),
+    perguntasNoPedidoDeFim: inicio.perguntasNoPedidoDeFim,
+  });
+  session.fechamento = inicio.etapa ? { ...inicial, etapa: inicio.etapa } : inicial;
+  session.fechamentoCodigoInicial = latestCode(session);
+  session.fechamentoIniciadoEm = t;
+  session.fechamentoBlipId = req.blipId;
+  return passoDoFechamento(session, leitura, falaDoCandidato);
+}
+
+/** O próximo passo do fechamento em andamento, como resposta da IDE. */
+function passoDoFechamento(session: SessionState, leitura?: LeituraDoTurno, falaDoCandidato = ""): ChatResponse {
+  const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - elapsedMs(session));
+  const passo = proximoPasso(session.fechamento!, leitura, falaDoCandidato, { tempoRestanteMs });
+  session.fechamento = passo.estado;
+  if (passo.encerrar) return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa, despedida: true };
+  return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
 }
 
 /** As falas do Totti nesta conversa (as que vieram no pedido), mais antigas primeiro. */
@@ -172,26 +218,14 @@ async function turno(
     messages: req.messages,
   };
 
-  // A solução passa nos testes visíveis e ele diz que terminou (numa fala livre ou respondendo a uma pergunta, na
-  // primeira vez ou de novo): o fechamento começa na hora, com os pontos que ainda valem (a revisão da abordagem
-  // primeiro) e, sem nenhum, a última palavra e a despedida. Entrevista de 12/11: terminou tudo, respondeu a
-  // complexidade, disse "terminei" e ouviu "Continua daí.".
-  if (!session.fechamento && question?.kind !== "encerramento" && terminouComSolucaoPronta(session, req.messages)) {
-    const t = elapsedMs(session);
-    const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - t);
-    session.conclusoes = (session.conclusoes ?? 0) + 1;
-    session.etapaConcluidaEm = t;
-    session.fechamento = iniciarFechamento({ sala: "codigo", gatilho: "concluiu", candidatas: candidatasDoFechamento(session, t), tempoRestanteMs, perguntasJaFeitas: falasDoAgente(session, req.messages) });
-    session.fechamentoCodigoInicial = latestCode(session);
-    session.fechamentoIniciadoEm = t;
-    // Numa conversa aberta, o fechamento segue nela, sem abrir outro balão por cima.
-    session.fechamentoBlipId = req.blipId;
-    const passo = proximoPasso(session.fechamento, undefined, "", { tempoRestanteMs });
-    session.fechamento = passo.estado;
-    if (passo.encerrar) return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa, despedida: true };
-    return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
-  }
   const perguntou = candidatoPerguntou(req.messages);
+  // "Terminei" solto (sem dizer de quê) é o fim da entrevista (#130, item 9): o fechamento começa na hora, com até duas
+  // perguntas sobre a revisão da abordagem e os critérios que faltam, e depois a despedida. Nunca vira "Continua daí."
+  // (entrevista de 12/11, onde veio no meio da conversa da complexidade). Com uma pergunta junto, ou dizendo de quê
+  // terminou, quem decide é o modelo.
+  if (!session.fechamento && question?.kind !== "encerramento" && !perguntou && disseSoQueTerminou(req.messages.findLast((m) => m.role === "candidate")?.text ?? "")) {
+    return abrirFechamento(session, req, { gatilho: "pediu_encerrar", perguntasNoPedidoDeFim: true });
+  }
   const system = buildInterviewerSystem(session.config, problem);
   const user = buildInterviewerUser(input);
   const candidateLines = req.messages.filter((m) => m.role === "candidate").slice(-3).map((m) => m.text);
@@ -202,17 +236,23 @@ async function turno(
    * vazia repetida. Na primeira fala de uma pergunta sua a pergunta é o motivo da fala, então ali ela não é
    * barrada (se era a hora dela, a política já decidiu).
    */
+  // A pergunta do Totti que ele está respondendo: a última fala dele nesta conversa, se terminou em pergunta.
+  const ultimaDoTotti = req.messages.findLast((m) => m.role === "agent")?.text;
+  // Escolha curta a uma pergunta com alternativas ("lista ou dicionário?" → "dicionário"): falta o porquê (#130, item 12).
+  const porque = !opening && pedePorque(ultimaDoTotti, req.messages.findLast((m) => m.role === "candidate")?.text ?? "");
   const comGuardas = (o: InterviewerOutput): InterviewerOutput => {
     if (o.respond === false || !o.reply.trim()) return o;
     const naConversa = falasDoTottiNaConversa(req.messages);
+    // O porquê que o modelo já pediu não é pergunta repetida nem de condução: é a pergunta que este turno precisa.
+    const porqueDoModelo = porque && ePerguntaDePorque(o.reply);
     const guardada = aplicarGuardas(o.reply, {
       falaDoCandidato: req.messages.findLast((m) => m.role === "candidate")?.text,
       candidatoPerguntou: perguntou,
       falasDoTotti: naConversa,
-      perguntasJaFeitas: opening ? undefined : falasDoAgente(session, req.messages).filter((t) => t.includes("?")),
+      perguntasJaFeitas: opening || porqueDoModelo ? undefined : falasDoAgente(session, req.messages).filter((t) => t.includes("?")),
       // No encerramento, "quer acrescentar alguma coisa?" é a pergunta da vez; e com ele travado, oferecer um
       // caminho ("prefere continuar sozinho?") é ajuda, não condução devolvida.
-      barrarConducao: !opening && question?.kind !== "encerramento" && !travado(req.messages),
+      barrarConducao: !opening && !porqueDoModelo && question?.kind !== "encerramento" && !travado(req.messages),
       reconheceu: req.reconheceu === true,
     });
     if (!guardada.travas.length) return o;
@@ -246,7 +286,19 @@ async function turno(
   const lida = (o: InterviewerOutput): InterviewerOutput => {
     const guardada = comGuardas(o);
     if (session.fechamento) return paraSaidaDoLiveCoding(deSaidaDoLiveCoding(guardada, situacao), guardada);
-    return limitarPerguntas(comTurno(guardada), question, req.messages, opening);
+    return comPorque(limitarPerguntas(comTurno(guardada), question, req.messages, opening));
+  };
+  /**
+   * Ele fez uma escolha curta e a fala não termina em pergunta: o porquê entra no fim (#130, item 12), sem o convite
+   * para seguir (a pergunta já devolve a vez). Se o modelo calou, a pergunta sai sozinha. "Não sei", "pula", pedido de
+   * tempo e pedido de fim ficam de fora.
+   */
+  const comPorque = (o: InterviewerOutput): InterviewerOutput => {
+    const soltou = o.probeOutcome?.kind === "nao_conseguiu" || o.probeOutcome?.kind === "recusou";
+    if (!porque || soltou || o.finish === true || o.pediuTempo === true || o.reply.trim().endsWith("?")) return o;
+    const base = o.respond === false ? "" : semConviteDeSeguir(o.reply);
+    console.info("[interviewer] turno", { regras: ["pede_porque"], antes: o.reply });
+    return { ...o, respond: true, reply: [base, perguntaDePorque(falasDoAgente(session, req.messages))].filter(Boolean).join(" "), end: false };
   };
   const calou = (o: InterviewerOutput): boolean => o.respond === false || o.reply.trim() === "";
   let output: InterviewerOutput;
@@ -256,12 +308,32 @@ async function turno(
     output = lida(await generate(session, system, user, Math.min(PRAZO_GERACAO_MS, sobra())));
     const t = elapsedMs(session);
     const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - t);
+    // Pediu tempo para pensar (#130, item 7): na primeira vez da entrevista, uma reação curta; depois, calado. Nunca
+    // convite nem pergunta, não é sinal negativo (nada é registrado) e conta como fala do Totti para a regra da bola:
+    // a próxima pergunta espera ele digitar ou falar (ver `estadoDaBola` em policy.ts). No fechamento, ele espera.
+    if (!opening && output.pediuTempo === true && output.finish !== true && output.candidatoPerguntou !== true) {
+      session.pediuTempoEm = t;
+      if (session.fechamento || session.reacaoAoPensarDita) return { reply: "", commands: [], end: false, listening: true };
+      session.reacaoAoPensarDita = true;
+      return { reply: reacaoAoPensar(falasDoAgente(session, req.messages)), commands: [], end: false };
+    }
     const leituraFechamento = deSaidaDoLiveCoding(output, situacao);
+    // Pediu para encerrar e fez uma pergunta na mesma fala ("pode encerrar, mas e a lista vazia?"): a pergunta não cai
+    // (#130, item 8). O Totti responde e pergunta se tem mais alguma coisa; o fechamento começa na última palavra.
+    if (!session.fechamento && !opening && leituraFechamento.encerrar && leituraFechamento.candidatoPerguntou === true) {
+      const daPergunta = deSaidaDoLiveCoding({ ...output, respond: true, finish: false }, situacao);
+      return abrirFechamento(session, req, { gatilho: "pediu_encerrar", etapa: "ultima_palavra" }, daPergunta, falaDoCandidato);
+    }
     const conclusoesAntes = session.conclusoes ?? 0;
+    // "Terminei essa parte" não fecha enquanto faltam critérios da recrutadora ou a mudança de cenário: vira só uma fala
+    // (como no quadro, #129 decisão F). O fim da entrevista vem pelo pedido de fim (item 9) ou pelo tempo.
+    const podeFecharPorConclusao = uncoveredCriteria(session).length === 0 && !mudancaPendente(session);
     const gatilho = session.fechamento ? null : gatilhoDoFechamento({
       concluiu: leituraFechamento.concluiu,
       materialPronto: faseDaEntrevista(session) === "funcionando",
       tempoRestanteMs,
+      limiarTempoMs: limiarDoFechamentoNaIde(session.config.durationMin * 60_000),
+      podeFecharPorConclusao,
       pediuEncerrar: leituraFechamento.encerrar || querEncerrar(req.messages),
       // Um "terminei" de outra conversa da sessão conta como conclusão anterior.
       conclusoesAntes: Math.max(conclusoesAntes, falasDoCandidatoNaSessao(session).some(disseQueTerminou) ? 1 : 0),
@@ -270,19 +342,12 @@ async function turno(
       if (leituraFechamento.concluiu) {
         session.conclusoes = (session.conclusoes ?? 0) + 1;
         session.etapaConcluidaEm = t;
+        session.ultimaConclusaoEm = t;
       }
-      session.fechamento = iniciarFechamento({ sala: "codigo", gatilho, candidatas: candidatasDoFechamento(session, t), tempoRestanteMs, perguntasJaFeitas: falasDoAgente(session, req.messages) });
-      session.fechamentoCodigoInicial = latestCode(session);
-      session.fechamentoIniciadoEm = t;
-      // Começou no meio de uma conversa: o fechamento segue nela, sem abrir outro balão por cima.
-      session.fechamentoBlipId = req.blipId;
+      // Pedido de fim passa pelos critérios que faltam (até duas perguntas), a não ser que ele precise sair já.
+      return abrirFechamento(session, req, { gatilho, perguntasNoPedidoDeFim: gatilho === "pediu_encerrar" && output.urgent !== true }, leituraFechamento, falaDoCandidato);
     }
-    if (session.fechamento) {
-      const passo = proximoPasso(session.fechamento, leituraFechamento, situacao.falaDoCandidato, { tempoRestanteMs });
-      session.fechamento = passo.estado;
-      if (passo.encerrar) return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa, despedida: true };
-      return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
-    }
+    if (session.fechamento) return passoDoFechamento(session, leituraFechamento, falaDoCandidato);
     // Só ouvindo (pensando em voz alta, ainda explicando): nada é falado e a conversa segue aberta.
     // A primeira fala de um balão é a pergunta, então ali o agente sempre fala.
     if (!opening && perguntou && calou(output) && output.finish !== true && sobra() >= MIN_PARA_REGERAR_MS) {
@@ -445,6 +510,7 @@ async function turno(
   const concluded = output.concluded === true && !opening;
   if (concluded) {
     session.etapaConcluidaEm = t;
+    session.ultimaConclusaoEm = t;
     session.conclusoes = (session.conclusoes ?? 0) + 1;
   }
 
@@ -593,17 +659,6 @@ export function querEncerrar(messages: ChatMessage[], anteriores: string[] = [])
 /** As falas do candidato já gravadas na sessão (todas as conversas), mais antigas primeiro. */
 export function falasDoCandidatoNaSessao(session: SessionState): string[] {
   return session.events.flatMap((e) => (e.type === "speech" && e.role === "candidate" ? [e.text] : []));
-}
-
-/**
- * A última fala diz que ele terminou e o último run passou em todos os testes visíveis: é o fim, não uma etapa.
- * Sem solução pronta, "terminei" segue a regra comum (lib/totti/fechamento.ts `gatilhoDoFechamento`): fecha na
- * segunda vez, contando as conversas anteriores.
- */
-export function terminouComSolucaoPronta(session: SessionState, messages: ChatMessage[]): boolean {
-  if (!disseQueTerminou(messages.findLast((m) => m.role === "candidate")?.text ?? "")) return false;
-  const ultimoRun = session.events.findLast((e) => e.type === "run");
-  return ultimoRun?.type === "run" && allPassed(ultimoRun.result);
 }
 
 /** A fala segura quando a geração foi barrada: resposta neutra se ele perguntou algo, senão uma pergunta aberta. */
