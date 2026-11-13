@@ -135,6 +135,18 @@ export function desenhoNovoDesdePergunta(estado: EstadoSessao, pecas: string[] |
 }
 
 /**
+ * Quantas perguntas já citaram cada peça (#129, bloco J): id do grafo → número de perguntas. Conta por pergunta, não por
+ * menção: uma pergunta que cita a mesma peça duas vezes conta uma. Só dados: o prompt mostra o nome e a guarda compara.
+ */
+export function contagemDePecasPerguntadas(perguntas: { elementos: string[] }[]): Map<string, number> {
+  const vezes = new Map<string, number>();
+  for (const p of perguntas) {
+    for (const id of new Set(p.elementos)) vezes.set(id, (vezes.get(id) ?? 0) + 1);
+  }
+  return vezes;
+}
+
+/**
  * O teto do ritmo por conteúdo venceu: faz `tetoSemPerguntaMs` desde a última pergunta da análise (ou, sem nenhuma, desde
  * o começo da fase). No ALTO_NIVEL exige também desenho novo desde a última pergunta. No APROFUNDAMENTO vence só pelo
  * tempo (decisão do dono: com o desenho já pronto, a pergunta sai mesmo sem peça nova). Aí a pergunta sai sem parte fechada.

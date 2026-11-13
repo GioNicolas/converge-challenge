@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { comVezDevolvida, eSoReacao, escolherConvite, limitarFrases, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimV2, trocarIdsPorNomes } from "../guardas";
+import { comVezDevolvida, eSoReacao, escolherConvite, limitarFrases, nomesDasPecas, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimV2, trocarIdsPorNomes } from "../guardas";
 
 describe("eSoReacao", () => {
   it("reconhece reação sem conteúdo", () => {
@@ -54,6 +54,13 @@ describe("trocarIdsPorNomes", () => {
   it("id desconhecido entre colchetes vira 'esse elemento'; texto sem id não muda", () => {
     assert.equal(trocarIdsPorNomes("E no [r9]?", grafo), "E no esse elemento?");
     assert.equal(trocarIdsPorNomes("Por que esse cache?", grafo), "Por que esse cache?");
+  });
+});
+
+describe("nomesDasPecas", () => {
+  it("dá o nome de cada peça pelo id (minúsculo) e deixa as setas de fora", () => {
+    const grafo = "COMPONENTES\n- [r5] Cache Redis (retângulo)\n- [e2] \"Réplica de leitura\" (elipse)\nCONEXÕES\n- [s5] Cache Redis → Réplica de leitura \"miss\"";
+    assert.deepEqual([...nomesDasPecas(grafo)], [["r5", "Cache Redis"], ["e2", "Réplica de leitura"]]);
   });
 });
 

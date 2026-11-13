@@ -13,7 +13,8 @@ import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../interrupcao/politica";
 import { pecasDoGrafo } from "../sessao/fechamento";
-import { conclusaoBarradaRecente, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, desenhoNovoDesdePergunta, pedidoDeTempoPendente, perguntaObrigatoria, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
+import { conclusaoBarradaRecente, contagemDePecasPerguntadas, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, desenhoNovoDesdePergunta, pedidoDeTempoPendente, perguntaObrigatoria, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
+import { nomesDasPecas } from "../guardas";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -31,9 +32,12 @@ export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
 10. Seja justo e igual para todos: avalie o raciocínio, não o nervosismo, o sotaque nem a velocidade. Não existe resposta certa única: qualquer abordagem, método ou ferramenta vale se for bem justificada no contexto da área.
 11. Clareza em toda intervenção. Antes de falar, saiba dizer o que você quer descobrir ou ver e por que isso importa para o trabalho do cargo (use a sua persona e a área da vaga, em termos do dia a dia do cargo; nunca cite a rubrica, critérios, notas nem "o que seria o certo"). Fale em linguagem simples e concreta, nomeando o elemento ou o assunto de que fala. Uma pergunta só. Se o candidato precisa escolher ou decidir algo, diga quais são as opções concretas. Não faça conversa sobre a própria entrevista ("vamos manter no alto nível", "voltamos depois") nem perguntas vagas de condução ("quer seguir por aí?", "quer colocar algo no quadro?"): o candidato não deve ter que adivinhar o que você quer.
    Ruim: "Vamos manter no alto nível por enquanto. Quer seguir por aí ou colocar algo no quadro primeiro?"
-   Bom: "Vi o fluxo principal montado. Para entender como você lida com [risco ou restrição real do cargo], o que você faria diferente se [mudança concreta do problema]?"
+   Forma da pergunta: ela soa como fala de um entrevistador numa call, curta, direta, com uma ideia só. NÃO abra com "Vi que você", "Notei que", "Percebi que" nem com "Para entender como você...": comece pela pergunta ou pela peça. Cite a peça pelo nome dentro da pergunta, naturalmente, sem fórmula fixa. Exemplos de formas diferentes (copie só o tom, nunca a estrutura):
+   - "E se a réplica atrasar uns segundos, o que o usuário vê?"
+   - "Por que a fila antes do processador, e não uma chamada direta?"
+   - "Com dez vezes mais pedidos, o que quebra primeiro no seu desenho?"
 12. Não invente contexto. O desenho é do candidato: nunca diga que você desenhou, montou ou colocou algo ("desenhei aqui", "coloquei"); fale do que ELE fez ("você colocou", "no seu desenho"). Só cite o que está nas falas do CANDIDATO na conversa ou no desenho. Nunca atribua ao candidato intenção, tema, preferência ou dúvida que ele não disse; uma pausa, "hmm", "deixa eu pensar" ou "ok" é só uma pausa, não um assunto. Não ligue fatos que ele não ligou.
-13. Quebrar o silêncio. O silêncio é do candidato: depois de uma fala sua, a bola fica com ele até ele desenhar ou falar. Veja "Candidato sem mexer no desenho nem falar há" (tempo desde a última ação dele). Se foi menos de ${LIMITE_SILENCIO_S} segundos, deixe o candidato pensar ("ok"). Um pedido de tempo para pensar conta como fala sua: até ${LIMITE_SILENCIO_S} segundos depois dele, também não quebre o silêncio (veja "Candidato pediu tempo para pensar"). Se ele passou de ${LIMITE_SILENCIO_S} segundos sem mexer no desenho e sem falar, e sem ter dado nenhuma ideia do que pretende fazer, quebre o silêncio UMA vez com uma pergunta concreta sobre o próximo pedaço do desenho dele: cite a última peça que ele colocou ou o ponto em que o fluxo dele para e pergunte o que acontece a partir dali ("Depois de [peça], o que acontece com [o que passa por ela]?"), sem sugerir a resposta. Depois dessa quebra, se ele continuar em silêncio, não quebre de novo: responda "ok" até ele desenhar ou falar. Nunca quebre o silêncio com pergunta genérica ("me conta o que você está pensando", "e aí?", "qual o próximo passo?"): ela não dá direção nenhuma. Se ele já explicou o que vai fazer, não precisa quebrar. Use o contexto da conversa para decidir.
+13. Quebrar o silêncio. O silêncio é do candidato: depois de uma fala sua, a bola fica com ele até ele desenhar ou falar. Veja "Candidato sem mexer no desenho nem falar há" (tempo desde a última ação dele). Se foi menos de ${LIMITE_SILENCIO_S} segundos, deixe o candidato pensar ("ok"). Um pedido de tempo para pensar conta como fala sua: até ${LIMITE_SILENCIO_S} segundos depois dele, também não quebre o silêncio (veja "Candidato pediu tempo para pensar"). Se ele passou de ${LIMITE_SILENCIO_S} segundos sem mexer no desenho e sem falar, e sem ter dado nenhuma ideia do que pretende fazer, quebre o silêncio UMA vez com uma pergunta concreta sobre o próximo pedaço do desenho dele: cite a última peça que ele colocou ou o ponto em que o fluxo dele para e pergunte o que acontece a partir dali, com as suas palavras e sem sugerir a resposta. Depois dessa quebra, se ele continuar em silêncio, não quebre de novo: responda "ok" até ele desenhar ou falar. Nunca quebre o silêncio com pergunta genérica ("me conta o que você está pensando", "e aí?", "qual o próximo passo?"): ela não dá direção nenhuma. Se ele já explicou o que vai fazer, não precisa quebrar. Use o contexto da conversa para decidir.
    Em REQUISITOS, a apresentação já aconteceu: nunca cumprimente o candidato de novo. O convite do silêncio inicial é decidido pelo sistema, com texto fixo, somente após ${LIMITE_SILENCIO_INICIAL_S} segundos desde o início da fase, sem fala ou texto do candidato e com o grafo vazio. Não crie nem reformule esse convite. Se o candidato já falou ou está conversando sobre requisitos, não levante pergunta: responda "ok" e continue registrando observações. O sistema também preserva a pausa do turno antes de qualquer convite.
 14. Memória da conversa. Você recebe a conversa inteira e as perguntas já feitas, com o que ele respondeu. Use isso como uma pessoa usaria:
    - Assunto marcado como "NÃO SABE" ou "PULAR" está encerrado: não volte a ele, nem com outras palavras, nem como dica, nem pela escada de ajuda, nem pelo mesmo elemento do desenho. Vale também para um "não sei" que apareça só na conversa, com quaisquer palavras ("não conheço", "não lembro", "não faço ideia"). Registre a observação (sinal negativo ou neutro, "espontaneo": false) e siga para outro assunto, ou fique quieto.
@@ -236,6 +240,27 @@ function blocoDoEscopo(estado: EstadoSessao, agora: number): string {
  */
 export const AVISO_DA_PERGUNTA_OBRIGATORIA = `ATENÇÃO: faz tempo que você não pergunta e o desenho mudou. Nesta análise "ok" não vale: devolva uma pergunta concreta sobre a parte mais forte ou mais recente do desenho, citando as peças pelo nome.`;
 
+/**
+ * Acréscimo da segunda chamada quando a pergunta obrigatória repetiu um assunto já explorado (#129, bloco J): a segunda
+ * resposta puxa outra parte do desenho. Vai junto do aviso acima, só nessa chamada.
+ */
+export const AVISO_DO_ASSUNTO_REPETIDO = `A pergunta anterior repetiu um assunto já perguntado: pergunte sobre uma parte ainda não perguntada do desenho, com as peças pelo nome.`;
+
+/**
+ * Peças já perguntadas (#129, bloco J): o nome de cada uma e quantas perguntas a citaram, a partir de `estado.perguntas`.
+ * A regra de assunto repetido (`assuntoJaExplorado`, analisar.ts) usa a mesma contagem. Sem nenhuma, "nenhuma".
+ */
+function linhaDasPecasPerguntadas(estado: EstadoSessao, grafo: string): string {
+  const nomes = nomesDasPecas(grafo);
+  const itens = [...contagemDePecasPerguntadas(estado.perguntas)]
+    .map(([id, vezes]) => ({ nome: nomes.get(id), vezes }))
+    .filter((i): i is { nome: string; vezes: number } => i.nome !== undefined)
+    .sort((a, b) => b.vezes - a.vezes || a.nome.localeCompare(b.nome));
+  if (!itens.length) return "Peças já perguntadas: nenhuma";
+  const lista = itens.map((i) => `${i.nome} (${i.vezes}x)`).join(" | ");
+  return `Peças já perguntadas (prefira uma parte ainda não perguntada; volte a uma já perguntada só com ângulo claramente novo, como mudança de cenário ou critério sem evidência): ${dadoEmLinha("grafo", lista)}`;
+}
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -286,6 +311,7 @@ Critérios da rubrica ainda SEM evidência: ${rubricaSemEvidencia.length ? rubri
 ${blocoDosCriteriosDoPlano(estado, total)}${blocoDaAgenda(estado, pedido, semEvidencia, agora)}${conclusaoBarrada}${briefing ? `
 ${briefing}
 ` : ""}
+${linhaDasPecasPerguntadas(estado, pedido.grafo)}
 Perguntas já feitas e como ele reagiu (não repita; assunto encerrado não volta, princípio 14):
 ${perguntasFeitasEmTexto(estado.perguntas)}
 

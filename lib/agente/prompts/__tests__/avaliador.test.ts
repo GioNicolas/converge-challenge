@@ -238,6 +238,37 @@ describe("ritmo por conteúdo no prompt (#129, bloco B)", () => {
   });
 });
 
+describe("forma da pergunta e assunto explorado no prompt (#129, bloco J)", () => {
+  it("o exemplo-molde saiu: a regra de forma e três exemplos de formas diferentes estão no prompt estático", () => {
+    const e = montarSistemaEstatico(kitDemo, problema);
+    assert.ok(!e.includes("Bom: \"Vi o fluxo principal montado"), "o molde antigo saiu");
+    assert.ok(!e.includes("Depois de [peça]"), "o modelo de quebra de silêncio saiu");
+    for (const trecho of [
+      "soa como fala de um entrevistador numa call",
+      "NÃO abra com \"Vi que você\", \"Notei que\", \"Percebi que\" nem com \"Para entender como você...\"",
+      "Cite a peça pelo nome dentro da pergunta",
+      "\"E se a réplica atrasar uns segundos, o que o usuário vê?\"",
+      "\"Por que a fila antes do processador, e não uma chamada direta?\"",
+      "\"Com dez vezes mais pedidos, o que quebra primeiro no seu desenho?\"",
+    ]) {
+      assert.ok(e.includes(trecho), `faltou: ${trecho}`);
+    }
+  });
+
+  it("a linha de peças já perguntadas traz o nome da peça e quantas perguntas a citaram", () => {
+    const duas = { ...estado, perguntas: [...estado.perguntas, { ...estado.perguntas[0], numero: 2, elementos: ["e1"] }] };
+    const d = montarPromptAvaliador(kitDemo, problema, duas, pedido(), AGORA).sistema.dinamico;
+    assert.ok(d.includes("Peças já perguntadas (prefira uma parte ainda não perguntada; volte a uma já perguntada só com ângulo claramente novo"));
+    assert.ok(d.includes("Postgres (2x)"));
+  });
+
+  it("sem perguntas feitas, a linha diz \"nenhuma\"", () => {
+    const sem = { ...estado, perguntas: [] };
+    const d = montarPromptAvaliador(kitDemo, problema, sem, pedido(), AGORA).sistema.dinamico;
+    assert.ok(d.includes("Peças já perguntadas: nenhuma"));
+  });
+});
+
 describe("critérios da recrutadora no prompt (#129, bloco D)", () => {
   const MIN = 60_000;
   // Plano de 30 min: 30% do tempo são 9 min. O relógio sai de `iniciadaEm`.

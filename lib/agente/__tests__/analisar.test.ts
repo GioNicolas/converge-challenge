@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import {
   analisar,
   assinaturaDaAnalise,
+  assuntoJaExplorado,
   CONVITES_SILENCIO_INICIAL,
+  cortarAberturaDeMolde,
   INTERVALO_BRECHA_EMPECILHO_MS,
   precisaAbrirBrechaDaMudanca,
   refiltrarComEstadoAtual,
@@ -14,7 +16,7 @@ import { eQuaseDuplicada, limitarFrases } from "../guardas";
 import type { PlanoDaSessao } from "../plano";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
-import { duracaoTotalS, estadoInicial, transicionar, type EstadoSessao } from "../sessao/estado";
+import { duracaoTotalS, estadoInicial, transicionar, type EstadoSessao, type PerguntaFeita } from "../sessao/estado";
 import type { Fase, PedidoAnalise, RespostaAnalise } from "../sessao/tipos";
 
 const AGORA = 10_000_000;
@@ -548,5 +550,159 @@ describe("analisar: pergunta obrigatória no teto (#129, bloco B)", () => {
     const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 2 * MIN, desenhoNaUltimaPergunta: ["r1"] });
     await analisar(deps(llm), estado, pedido(), AGORA);
     assert.equal(llm.chamadas.length, 1);
+  });
+});
+
+/** Uma pergunta já feita que citou estas peças (ids do grafo de `pedido()`: r1 Cliente, e1 Postgres). */
+function feita(numero: number, elementos: string[]): PerguntaFeita {
+  return { numero, status: "duvida", pergunta: `Pergunta feita ${numero}?`, nota: null, elementos, degrau: null, fase: "APROFUNDAMENTO", feitaEm: AGORA - 600_000 };
+}
+
+describe("analisar: abertura de molde da pergunta (#129, bloco J)", () => {
+  const grafo = pedido().grafo;
+
+  it("corta \"Vi que você ...\" e \"Para entender como você ..., \" e mantém a pergunta", () => {
+    assert.deepEqual(
+      cortarAberturaDeMolde("Vi que você colocou o Postgres. Para entender como você lida com carga, o que acontece quando o Postgres cai?", grafo),
+      { texto: "O que acontece quando o Postgres cai?", cortou: true },
+    );
+  });
+
+  it("corta \"Notei que você\" e \"Percebi que você\" quando sobra pergunta com peça citada", () => {
+    assert.equal(cortarAberturaDeMolde("Notei que você ligou o Cliente ao Postgres. Por que essa ligação vai direto ao Postgres?", grafo).texto, "Por que essa ligação vai direto ao Postgres?");
+    assert.equal(cortarAberturaDeMolde("Percebi que você ligou o Cliente. Por que o Cliente fala com o Postgres?", grafo).texto, "Por que o Cliente fala com o Postgres?");
+  });
+
+  it("\"Para entender como você ...\" sozinho sai, desde que sobre uma pergunta", () => {
+    assert.deepEqual(cortarAberturaDeMolde("Para entender como você lida com carga, o que acontece no Postgres?", grafo), { texto: "O que acontece no Postgres?", cortou: true });
+  });
+
+  it("não corta se sobraria sem \"?\"", () => {
+    const t = "Vi que você colocou o Postgres. Isso faz sentido para o cargo.";
+    assert.deepEqual(cortarAberturaDeMolde(t, grafo), { texto: t, cortou: false });
+    const p = "Para entender como você lida com carga, veja o Postgres.";
+    assert.deepEqual(cortarAberturaDeMolde(p, grafo), { texto: p, cortou: false });
+  });
+
+  it("\"Vi que você\" não sai se a pergunta que sobra não cita peça do desenho", () => {
+    const t = "Vi que você colocou a fila e o cache, e como eles se falam?";
+    assert.deepEqual(cortarAberturaDeMolde(t, grafo), { texto: t, cortou: false });
+  });
+
+  it("só corta se o que sobra começa com palavra de pergunta", () => {
+    // A vírgula do Redis cortaria no lugar errado: sobra "Redis ou memória, o que...?", que não é pergunta.
+    const redis = "Para entender como você lida com cache, Redis ou memória, o que acontece se faltar?";
+    assert.deepEqual(cortarAberturaDeMolde(redis, grafo), { texto: redis, cortou: false });
+    const sujeito = "Vi que você colocou o Postgres. Postgres aguenta a carga, o que acha?";
+    assert.deepEqual(cortarAberturaDeMolde(sujeito, grafo), { texto: sujeito, cortou: false });
+    assert.equal(cortarAberturaDeMolde("Vi que você colocou o Postgres. Qual o motivo do Postgres?", grafo).texto, "Qual o motivo do Postgres?");
+  });
+
+  it("pergunta sem abertura de molde fica como está", () => {
+    const t = "Por que o Postgres, e não outro banco?";
+    assert.deepEqual(cortarAberturaDeMolde(t, grafo), { texto: t, cortou: false });
+  });
+
+  it("na análise, a abertura sai e o ajuste abertura_de_molde é registrado", async () => {
+    const llm = criarClienteFalso([duvida({ pergunta: "Vi que você colocou o Postgres. Para entender como você lida com carga, o que acontece quando o Postgres cai?" })]);
+    const r = await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.resposta.pergunta, "O que acontece quando o Postgres cai?");
+    assert.ok(r.diagnostico.ajustes.includes("abertura_de_molde"));
+  });
+});
+
+describe("analisar: assunto já explorado (#129, bloco J)", () => {
+  // Duas perguntas feitas sobre o Postgres (e1): a peça já foi perguntada duas vezes.
+  const comPostgresDuasVezes = () => estadoEm("APROFUNDAMENTO", { perguntas: [feita(1, ["e1"]), feita(2, ["e1"])] });
+
+  it("pergunta só sobre peças já perguntadas duas vezes é assunto repetido", () => {
+    const e = comPostgresDuasVezes();
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, e), true);
+    assert.equal(assuntoJaExplorado({ status: "dica", elementos: ["e1"] }, e), true);
+  });
+
+  it("uma peça nova na pergunta não é repetição, mesmo com a outra já perguntada", () => {
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1", "r1"] }, comPostgresDuasVezes()), false);
+  });
+
+  it("peça perguntada só uma vez não é repetição", () => {
+    const e = estadoEm("APROFUNDAMENTO", { perguntas: [feita(1, ["e1"])] });
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, e), false);
+  });
+
+  it("as peças perguntadas juntas (duas peças, cada uma duas vezes) contam como repetição", () => {
+    const e = estadoEm("APROFUNDAMENTO", { perguntas: [feita(1, ["e1", "r1"]), feita(2, ["r1", "e1"])] });
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1", "r1"] }, e), true);
+  });
+
+  it("não vale para ok, redirecionar, FECHAMENTO, quebra de silêncio nem sem elemento citado", () => {
+    const e = comPostgresDuasVezes();
+    assert.equal(assuntoJaExplorado({ status: "ok", elementos: ["e1"] }, e), false);
+    assert.equal(assuntoJaExplorado({ status: "redirecionar", elementos: ["e1"] }, e), false);
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, { ...e, fase: "FECHAMENTO" }), false);
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, e, 60), false);
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: [] }, e), false);
+  });
+
+  it("na análise, pergunta de assunto repetido vira ok (assunto_repetido) e a observação fica", async () => {
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] })]);
+    const r = await analisar(deps(llm), comPostgresDuasVezes(), pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("assunto_repetido"));
+    assert.equal(r.resposta.observacoes.length, 1);
+  });
+
+  it("na análise, peça nova na pergunta passa", async () => {
+    const llm = criarClienteFalso([duvida({ elementos: ["e1", "r1"] })]);
+    const r = await analisar(deps(llm), comPostgresDuasVezes(), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("assunto_repetido"), false);
+  });
+
+  it("quebra de silêncio (60 s parado) não é bloqueada pela repetição", async () => {
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] })]);
+    const r = await analisar(deps(llm), comPostgresDuasVezes(), { ...pedido(), parado_ha_s: 60 }, AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("assunto_repetido"), false);
+  });
+
+  it("pergunta obrigatória do teto repetida: segunda chamada com o aviso acrescido; se ela trouxer outra parte, sai", async () => {
+    // 4 min sem pergunta e peça nova: o teto venceu. A primeira pergunta repete o Postgres.
+    const estado = estadoEm("APROFUNDAMENTO", {
+      ultimaPerguntaEm: AGORA - 4 * 60_000, desenhoNaUltimaPergunta: ["r1"], perguntas: [feita(1, ["e1"]), feita(2, ["e1"])],
+    });
+    const outra = duvida({ pergunta: "Se o cliente repetir o pedido, o que acontece?", elementos: ["r1"] });
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] }), outra]);
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.ok(llm.chamadas[1]?.sistema.dinamico?.includes("A pergunta anterior repetiu um assunto já perguntado"));
+    assert.ok(!llm.chamadas[0]?.sistema.dinamico?.includes("A pergunta anterior repetiu um assunto já perguntado"));
+    assert.equal(r.resposta.pergunta, "Se o cliente repetir o pedido, o que acontece?");
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("assunto_repetido"), false);
+  });
+
+  it("pergunta obrigatória repetida: se a segunda também repete, a pergunta do teto fica (ajuste no teto)", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", {
+      ultimaPerguntaEm: AGORA - 4 * 60_000, desenhoNaUltimaPergunta: ["r1"], perguntas: [feita(1, ["e1"]), feita(2, ["e1"])],
+    });
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] }), duvida({ elementos: ["e1"] })]);
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.ok(r.diagnostico.ajustes.includes("assunto_repetido_no_teto"));
+  });
+
+  it("pergunta obrigatória repetida e segunda chamada falha: a pergunta do teto fica (sem lançar)", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", {
+      ultimaPerguntaEm: AGORA - 4 * 60_000, desenhoNaUltimaPergunta: ["r1"], perguntas: [feita(1, ["e1"]), feita(2, ["e1"])],
+    });
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] }), new ErroLlm("timeout", "prazo")]);
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.origem, "llm");
   });
 });
