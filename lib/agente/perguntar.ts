@@ -8,10 +8,10 @@ import {
   gatilhoDoFechamento, iniciarFechamento, proximoPasso,
   type EstadoFechamento, type EtapaDoFechamento, type PassoDoFechamento,
 } from "../totti/fechamento";
-import { devolveAVez, reacaoAoPensar, reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
+import { devolveAVez, ePerguntaDePorque, perguntaDePorque, reacaoAoPensar, reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
 import { frasesSemPergunta } from "../totti/texto";
 import {
-  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoQuadro, ficouSemResposta, perguntouComClareza,
+  avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoQuadro, ficouSemResposta, pedePorque, perguntouComClareza,
   sinalDeConclusao,
   type LeituraDoTurno, type SituacaoDoTurno,
 } from "../totti/turno";
@@ -376,7 +376,13 @@ async function responderFala(
   const concluiu = saida.concluiu === true || peloSinal;
   const comConclusao = (e: EstadoSessao) => concluiu ? transicionar(e, { tipo: "CANDIDATO_CONCLUIU", grafo: entrada.grafo }, agora).estado : e;
   // "pensando" não é resposta à pergunta: ele pediu tempo (tratado logo abaixo).
-  const desfecho: Desfecho | null = haPerguntaAtiva && saida.desfecho !== "pensando" ? (saida.desfecho ?? null) : null;
+  const desfechoDaSaida: Desfecho | null = haPerguntaAtiva && saida.desfecho !== "pensando" ? (saida.desfecho ?? null) : null;
+  // A pergunta do Totti que ele está respondendo: a ativa, ou a última fala dele, se ela terminou em pergunta.
+  const perguntaDoTotti = perguntaAberta ?? estado.perguntaAtiva?.pergunta ?? (minhaUltima?.trim().endsWith("?") ? minhaUltima : undefined);
+  // Escolha de uma ou poucas palavras a uma pergunta com alternativas: pede o porquê (lib/totti/turno.ts). Quem não
+  // sabe ou pula fica de fora (o desfecho já trata). Ali a resposta dele conta como respondida, mesmo sem a marca do modelo.
+  const porque = v2 && desfechoDaSaida !== "nao_sabe" && desfechoDaSaida !== "pulou" && pedePorque(perguntaDoTotti, entrada.texto);
+  const desfecho: Desfecho | null = porque && haPerguntaAtiva && desfechoDaSaida === null ? "respondeu" : desfechoDaSaida;
   const mudoOuConcluiu = (): ResultadoPerguntar => ({ ...mudo(), concluiu, desfecho, estado: comConclusao(comFala) });
   /** Silêncio, a não ser que ele tenha feito uma pergunta clara: essa nunca fica sem resposta (regra comum às salas). */
   const calar = (): ResultadoPerguntar => {
@@ -404,18 +410,22 @@ async function responderFala(
   // As travas da fala são as do Totti único (lib/totti/guardas.ts), as mesmas do live coding: cumprimento fora da
   // abertura, validação, eco do que o candidato disse, reação vazia repetida e, no v2, pergunta que ele já ouviu
   // (do Totti na conversa, da análise do desenho ou da mudança no problema) ou que só devolve a condução.
+  // A pergunta de porquê do modelo não é repetida nem de condução: é a pergunta que este turno precisa fazer. O porquê
+  // que ele já pediu antes ("Por que no backend?") volta quando a escolha é nova, mesmo que o ponto já tenha sido visto.
+  const porqueDoModelo = porque && ePerguntaDePorque(saida.texto);
   const guardada = aplicarGuardas(saida.texto, {
     falaDoCandidato: entrada.texto,
     falasDoTotti: jaDitas,
-    perguntasJaFeitas: v2
+    perguntasJaFeitas: v2 && !porqueDoModelo
       ? [
         ...estado.conversa.filter((f) => f.quem === "agente" && f.texto.includes("?")).map((f) => f.texto),
         ...estado.perguntas.flatMap((p) => [p.pergunta, ...(p.seguimentos ?? [])]),
       ]
       : undefined,
-    barrarConducao: v2 && fasesDeDesenho,
+    barrarConducao: v2 && fasesDeDesenho && !porqueDoModelo,
   });
   if (guardada.travas.length) log("perguntar_travas", { sessao_id: entrada.sessao_id, fase: entrada.fase, travas: guardada.travas });
+  if (porque) log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["pede_porque"] });
   const perguntaBarrada = guardada.travas.includes("pergunta_repetida") || guardada.travas.includes("pergunta_de_conducao");
   // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
   const curto = limitarFrases(guardada.texto, MAX_FRASES_FALA);
@@ -470,6 +480,11 @@ async function responderFala(
     if (saida.responder && !base && saida.texto.trim() && situacao.respondiaAoTotti && soEcoOuCumprimento) base = reacaoNeutra(jaDitas);
     // "Hm." atrás de "Hm." vira bordão na voz: a segunda reação vazia seguida fica em silêncio (a vez já é dele).
     if (eSoReacao(base) && eSoReacao(minhaUltima)) base = "";
+    // Ele fez uma escolha curta e a fala não termina em pergunta: o porquê entra no fim, sem convite depois dele (a
+    // pergunta já devolve a vez). Se o modelo calou, a pergunta sai sozinha.
+    const porqueForcado = porque && !base.trim().endsWith("?");
+    // O convite que o modelo pôs ("Tá, pode seguir.") sai antes: a pergunta de porquê já devolve a vez.
+    if (porqueForcado) base = [semConviteDeSeguir(base), perguntaDePorque(jaDitas)].filter(Boolean).join(" ");
     // "Não sei" ou "pula" não ganham pergunta nova, e quem acabou de responder a uma pergunta do Totti não ouve só
     // um "Tá." ou um fato solto: sem pergunta nem próximo passo, entra um convite.
     const decidido = decidirTurno(deSaidaDoQuadro({ ...saida, texto: base, concluiu }, situacao), situacao);
@@ -486,7 +501,9 @@ async function responderFala(
       return { responder: true, texto: aviso, requisito: null, concluiu, desfecho,
         estado: transicionar(comConclusao(comFala), { tipo: "AGENTE_FALOU", texto: aviso }, agora).estado };
     }
-    if (!saida.responder || !texto) return calar();
+    if (!texto || (!saida.responder && !porqueForcado)) return calar();
+    // Pergunta de porquê: é continuação do mesmo fio, então a pergunta ativa segue aberta e o quadro espera a resposta.
+    if (porque && texto.trim().endsWith("?")) seguimento = true;
   } else {
     // "Não sei" ou "pula": a vez volta com um convite, nunca com outra pergunta. Depois de uma resposta, o modelo
     // pode emendar UMA pergunta de continuação ("aprofundar"), que faz a entrevista andar no mesmo fio, até

@@ -379,3 +379,69 @@ describe("perguntar (v2): \"tô pensando\" é pedido de tempo, não resposta", (
     assert.match(r.texto, /^Certo\. \S/);
   });
 });
+
+describe("por quê obrigatório no v2 (escolha curta a uma pergunta com alternativas)", () => {
+  const ativa = { ...estado, fase: "APROFUNDAMENTO" as const };
+  const depsV2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ ...deps(llm), versao: "v2" as const });
+  const perguntada = { fase: "APROFUNDAMENTO" as const, perguntaAtiva: "No back ou no front?" };
+  it("(a) escolha curta e o modelo só reage: sai o porquê, sem convite, e a pergunta segue aberta", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tá.", requisito: null, concluiu: false, desfecho: "respondeu" }]);
+    const r = await perguntar(depsV2(llm), ativa, { ...perguntada, texto: "back" }, AGORA);
+    assert.equal(r.texto, "Tá. Por quê?");
+    assert.equal(r.perguntou, true);
+    assert.equal(r.seguimento, true);
+    assert.equal(r.desfecho, "respondeu");
+  });
+  it("(a) com o modelo calado, a pergunta de porquê sai sozinha", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null, concluiu: false }]);
+    const r = await perguntar(depsV2(llm), ativa, { ...perguntada, texto: "back" }, AGORA);
+    assert.equal(r.responder, true);
+    assert.equal(r.texto, "Por quê?");
+    assert.equal(r.seguimento, true);
+  });
+  it("(a) a pergunta de porquê que sai não repete a última que o Totti disse", async () => {
+    const jaPerguntou = { ...ativa, conversa: [{ quem: "agente" as const, texto: "Tá. Por quê?", em: AGORA - 60_000 }] };
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null, concluiu: false }]);
+    const r = await perguntar(depsV2(llm), jaPerguntou, { ...perguntada, texto: "SQL" }, AGORA);
+    assert.equal(r.texto, "Por que essa opção?");
+  });
+  it("(b) o modelo pergunta o porquê de novo: a pergunta passa, mesmo que o ponto já tenha sido aprofundado", async () => {
+    const jaAprofundado = { ...ativa, conversa: [
+      { quem: "agente" as const, texto: "Por que no backend?", em: AGORA - 60_000 },
+      { quem: "candidato" as const, texto: "Porque é mais simples.", em: AGORA - 50_000 },
+    ] };
+    const llm = criarClienteFalso([{ responder: true, texto: "Por que no backend?", requisito: null, concluiu: false, desfecho: "respondeu" }]);
+    const r = await perguntar(depsV2(llm), jaAprofundado, { ...perguntada, texto: "back" }, AGORA);
+    assert.equal(r.texto, "Por que no backend?");
+    assert.equal(r.seguimento, true);
+  });
+  it("(c) resposta longa e justificada: nada é forçado", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Saquei. E o banco aguenta esse volume?", requisito: null, concluiu: false, desfecho: "respondeu" }]);
+    const r = await perguntar(depsV2(llm), ativa, { ...perguntada, texto: "Fila, porque o pico é alto e eu não quero perder pedido." }, AGORA);
+    assert.doesNotMatch(r.texto, /Por qu/);
+    assert.equal(r.seguimento, undefined);
+  });
+  it("(a) o convite que o modelo pôs sai antes da pergunta de porquê: \"Tá, pode seguir.\" → \"Tá. Por quê?\"", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tá, pode seguir.", requisito: null, concluiu: false, desfecho: "respondeu" }]);
+    const r = await perguntar(depsV2(llm), ativa, { ...perguntada, texto: "back" }, AGORA);
+    assert.equal(r.texto, "Tá. Por quê?");
+  });
+  it("(d) não sei: nada é forçado, o desfecho é 'não sabe' e a fala não termina em pergunta", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Tranquilo, deixa isso de lado.", requisito: null, concluiu: false, desfecho: "nao_sabe" }]);
+    const r = await perguntar(depsV2(llm), ativa, { ...perguntada, texto: "não sei" }, AGORA);
+    assert.equal(r.desfecho, "nao_sabe");
+    assert.doesNotMatch(r.texto, /Por qu/);
+    assert.doesNotMatch(r.texto, /\?/);
+  });
+  it("o prompt manda pedir o porquê da escolha curta mesmo depois de aprofundar", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null, concluiu: false }]);
+    await perguntar(depsV2(llm), ativa, { ...perguntada, texto: "back" }, AGORA);
+    assert.match(llm.chamadas[0].sistema.estatico, /pergunte o porquê da escolha DELE antes de seguir/);
+  });
+  it("registra a regra pede_porque no log do turno", async () => {
+    const llm = criarClienteFalso([{ responder: false, texto: "", requisito: null, concluiu: false }]);
+    const eventos: [string, Record<string, unknown>][] = [];
+    await perguntar({ ...depsV2(llm), log: (e, m) => eventos.push([e, m]) }, ativa, { ...perguntada, texto: "back" }, AGORA);
+    assert.ok(eventos.some(([e, m]) => e === "perguntar_turno" && (m.regras as string[]).includes("pede_porque")));
+  });
+});

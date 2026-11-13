@@ -9,7 +9,7 @@
 //   - "terminei" dito com as mãos paradas conta como conclusão mesmo que o modelo não tenha marcado.
 // Este arquivo não importa nada de `lib/agente` nem de `lib/agents`: as salas é que importam daqui.
 import { comVezDevolvida, eSoReacao, escolherConvite, falaNaoRepetida, semPerguntaNoFimSeSobrar } from "./guardas";
-import type { Sala } from "./texto";
+import { frasesDe, normalizar, type Sala } from "./texto";
 
 export const INTENCOES = ["perguntou", "respondeu", "nao_sabe", "pulou", "concluiu", "encerrar", "pensando_alto", "conversa", "outro"] as const;
 export type Intencao = (typeof INTENCOES)[number];
@@ -88,6 +88,34 @@ export function perguntouComClareza(fala: string): boolean {
   const texto = fala.toLowerCase().trim();
   if (PERGUNTA_DIRETA.test(texto)) return true;
   return texto.endsWith("?") && !SO_CONFIRMACAO.test(texto);
+}
+
+/** A escolha curta que pede o porquê: até três palavras. */
+const MAX_PALAVRAS_DA_ESCOLHA = 3;
+/** "Não sei" e "pula" não pedem porquê: o desfecho da pergunta já trata. */
+const NAO_SABE_OU_PULA = /\b(nao sei|n sei|nao faco ideia|nao pensei|pula|pular|pulo|passa|passo)\b/;
+/** Pediu tempo: não é escolha. */
+const PEDIU_TEMPO = /\b(pensando|pensar|calma)\b/;
+/**
+ * Já traz a justificativa: não falta o porquê. "pra/para" só conta seguido de verbo no infinitivo ("pra escalar",
+ * "para não travar"); como preposição ("pra fila", "para o back") não é justificativa.
+ */
+const JUSTIFICA = /\b(porque|pq|pois|ja que|(pra|para) (nao )?[a-z]+(ar|er|ir))\b/;
+
+/**
+ * A pergunta do Totti oferece alternativas ("No back ou no front?") e a resposta dele é só a escolha, de até três
+ * palavras, sem justificativa: o porquê é o que falta ouvir. Pergunta sem alternativas não pede porquê, e uma
+ * resposta vazia também não.
+ */
+export function pedePorque(perguntaDoTotti: string | undefined, respostaDoCandidato: string): boolean {
+  const pergunta = (perguntaDoTotti ?? "").trim();
+  if (!pergunta.endsWith("?")) return false;
+  const ultima = frasesDe(pergunta).at(-1) ?? pergunta;
+  if (!/\sou\s/.test(normalizar(ultima))) return false;
+  const resposta = normalizar(respostaDoCandidato);
+  const palavras = resposta ? resposta.split(" ").length : 0;
+  if (palavras < 1 || palavras > MAX_PALAVRAS_DA_ESCOLHA) return false;
+  return !NAO_SABE_OU_PULA.test(resposta) && !PEDIU_TEMPO.test(resposta) && !JUSTIFICA.test(resposta);
 }
 
 /** "Terminei", "acabei": só pode ser o trabalho. */

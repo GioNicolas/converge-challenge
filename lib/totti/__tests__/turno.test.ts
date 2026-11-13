@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { convitesPara } from "../guardas";
 import {
   avisosDeQueVaiOlhar, candidatoPerguntou, comRespostaDeReserva, decidirTurno, deSaidaDoLiveCoding, deSaidaDoQuadro, ficouSemResposta,
-  paraSaidaDoLiveCoding, paraSaidaDoQuadro, pareceConclusao, PEDIDOS_DE_REPETIR_A_PERGUNTA, perguntouComClareza, sinalDeConclusao,
+  paraSaidaDoLiveCoding, paraSaidaDoQuadro, pareceConclusao, PEDIDOS_DE_REPETIR_A_PERGUNTA, pedePorque, perguntouComClareza, sinalDeConclusao,
   type LeituraDoTurno, type SituacaoDoTurno,
 } from "../turno";
 
@@ -245,5 +245,40 @@ describe("aviso de que vai olhar", () => {
   it("é o mesmo nas duas salas, só com o material trocado", () => {
     assert.deepEqual(avisosDeQueVaiOlhar("quadro"), ["Tá, deixa eu dar uma olhada no desenho.", "Certo, só um instante que eu olho o que você fez."]);
     assert.deepEqual(avisosDeQueVaiOlhar("codigo").map((a) => a.replace("no código", "no desenho")), avisosDeQueVaiOlhar("quadro"));
+  });
+});
+
+describe("por quê obrigatório: escolha curta a uma pergunta com alternativas", () => {
+  it("escolha de até três palavras a uma pergunta com alternativas pede o porquê", () => {
+    assert.equal(pedePorque("No back ou no front?", "back"), true);
+    assert.equal(pedePorque("SQL ou NoSQL?", "NoSQL"), true);
+    assert.equal(pedePorque("Você usaria fila ou chamada direta?", "fila"), true);
+    assert.equal(pedePorque("Você usaria fila ou chamada direta?", "chamada direta"), true);
+  });
+  it("resposta longa ou com justificativa não pede porquê", () => {
+    assert.equal(pedePorque("Você usaria fila ou chamada direta?", "Fila, porque o pico é alto e eu não quero perder pedido"), false);
+    assert.equal(pedePorque("No back ou no front?", "back porque sim"), false);
+    assert.equal(pedePorque("No back ou no front?", "back pois o time já domina"), false);
+    assert.equal(pedePorque("No back ou no front?", "back já que é mais simples"), false);
+    assert.equal(pedePorque("No back ou no front?", "back para escalar"), false);
+    assert.equal(pedePorque("No back ou no front?", "back pra escalar"), false);
+    assert.equal(pedePorque("No back ou no front?", "para não travar"), false);
+  });
+  it("pra/para como preposição (sem verbo no infinitivo) não é justificativa", () => {
+    assert.equal(pedePorque("No back ou no front?", "pra fila"), true);
+    assert.equal(pedePorque("No back ou no front?", "para o back"), true);
+  });
+  it("não sei, pula e pedido de tempo não pedem porquê (o desfecho já trata)", () => {
+    assert.equal(pedePorque("No back ou no front?", "não sei"), false);
+    assert.equal(pedePorque("No back ou no front?", "Não sei."), false);
+    assert.equal(pedePorque("No back ou no front?", "pula"), false);
+    assert.equal(pedePorque("No back ou no front?", "tô pensando"), false);
+    assert.equal(pedePorque("No back ou no front?", "calma"), false);
+  });
+  it("pergunta sem alternativas, sem '?' ou ausente não pede porquê; resposta vazia também não", () => {
+    assert.equal(pedePorque("Quanto de tráfego você espera?", "back"), false);
+    assert.equal(pedePorque("No back ou no front.", "back"), false);
+    assert.equal(pedePorque(undefined, "back"), false);
+    assert.equal(pedePorque("No back ou no front?", "   "), false);
   });
 });

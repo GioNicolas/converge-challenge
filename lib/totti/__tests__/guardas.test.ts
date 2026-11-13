@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  aplicarGuardas, comVezDevolvida, convitesPara, escolherConvite, eSoReacao, falaNaoRepetida, perguntaDeConducao, perguntaJaFeita,
+  aplicarGuardas, comVezDevolvida, convitesPara, escolherConvite, ePerguntaDePorque, eSoReacao, falaNaoRepetida, perguntaDeConducao, perguntaDePorque, perguntaJaFeita,
   reacaoNeutra, semCumprimento, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimSeSobrar, semReacaoRepetida, semValidacao,
 } from "../guardas";
 
@@ -223,5 +223,20 @@ describe("aplicarGuardas", () => {
       const uma = aplicarGuardas(fala, contexto);
       assert.deepEqual(aplicarGuardas(uma.texto, contexto), { texto: uma.texto, travas: [] }, fala);
     }
+  });
+});
+
+describe("por quê: pergunta de porquê e a que ainda não saiu", () => {
+  it("reconhece a pergunta de porquê, com ou sem acento e com reação antes", () => {
+    assert.equal(ePerguntaDePorque("Por que no backend?"), true);
+    assert.equal(ePerguntaDePorque("Tá. Por quê?"), true);
+    assert.equal(ePerguntaDePorque("Por que essa opção?"), true);
+    assert.equal(ePerguntaDePorque("Tá. E o banco aguenta?"), false);
+    assert.equal(ePerguntaDePorque("Por que no backend, então."), false);
+  });
+  it("a pergunta de porquê não repete a última que o Totti disse, mesmo dentro de uma reação", () => {
+    assert.equal(perguntaDePorque([]), "Por quê?");
+    assert.equal(perguntaDePorque(["Tá. Por quê?"]), "Por que essa opção?");
+    assert.equal(perguntaDePorque(["Tá. Por quê?", "Certo. Por que essa opção?"]), "E por que essa e não a outra?");
   });
 });

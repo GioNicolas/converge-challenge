@@ -361,6 +361,28 @@ export function perguntaDeConducao(fala: string): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Por quê
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Perguntas de porquê para a escolha curta dele (`pedePorque`, lib/totti/turno.ts), quando a fala não pergunta nada. */
+export const PERGUNTAS_DE_PORQUE = ["Por quê?", "Por que essa opção?", "E por que essa e não a outra?"];
+
+/** A última pergunta da fala é de porquê ("Por que no backend?", "Por quê?"). */
+export function ePerguntaDePorque(fala: string): boolean {
+  const pergunta = frasesDe(fala.trim()).filter((f) => f.trim().endsWith("?")).at(-1);
+  return !!pergunta && /\bpor que\b/.test(normalizar(pergunta));
+}
+
+/**
+ * A pergunta de porquê que o Totti ainda não fez: a que não é a última pergunta de nenhuma das falas recentes. Só a
+ * pergunta conta (a reação que vem antes não), porque o "Tá. Por quê?" de agora não pode voltar como "Por quê?".
+ */
+export function perguntaDePorque(falasDoTotti: string[]): string {
+  const ultimasPerguntas = falasDoTotti.map((t) => frasesDe(t.trim()).filter((f) => f.endsWith("?")).at(-1) ?? "");
+  return falaNaoRepetida(PERGUNTAS_DE_PORQUE, ultimasPerguntas);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Todas juntas
 // ---------------------------------------------------------------------------------------------------------------
 
