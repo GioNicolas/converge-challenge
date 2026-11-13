@@ -406,7 +406,10 @@ export function proximoPasso(
   // decide: "encerrar" já se despediu lá em cima, a pergunta já foi respondida, e o que sobra é um assunto novo. A
   // lista de respostas curtas ("não", "pode", "nada") só decide sem essa leitura: o modelo falhou, ou a sala não a
   // pede (o live coding hoje).
+  // Com a leitura, também é fim quando o modelo não vê nada para responder: ele soltou o assunto ("pula", "não sei"),
+  // ou o modelo ficou calado. Assim um "não, é isso" que o modelo não marcou como encerrar não ouve a pergunta de novo.
   const leuAIntencao = leitura?.candidatoPerguntou !== undefined;
+  if (leuAIntencao && (soltou || !respostaDe(leitura))) return despedir(atual);
   if (!leuAIntencao && aceitaEncerrar(falaDoCandidato, leitura)) return despedir(atual);
   // Assunto novo recebe uma resposta e volta para a última palavra, uma vez só.
   const resposta = respostaDe(leitura) || reacaoNeutra(atual.ditas);

@@ -188,6 +188,11 @@ export type RegistroDaPergunta = { pergunta: string };
 
 /** Quantas dúvidas descartadas o estado guarda para conferir o registro do quadro. */
 export const MAX_PERGUNTAS_DESCARTADAS = 5;
+/**
+ * Até quanto tempo depois de criada uma dúvida descartada ainda pode ser registrada pelo quadro. O quadro fala a dúvida
+ * logo que a análise volta, na primeira pausa do candidato; uma descartada mais velha que isso não é corrida, é replay.
+ */
+export const IDADE_MAX_DESCARTADA_MS = 3 * 60_000;
 
 export type EventoSessao =
   | { tipo: "COMECAR" }
@@ -294,14 +299,17 @@ function fazerPergunta(estado: EstadoSessao, pendente: PlinPendente, agora: numb
 
 /**
  * O quadro falou uma dúvida que o servidor já tinha descartado: registra a dúvida do servidor com o mesmo texto (a mais
- * nova, se houver duas iguais) e a tira das descartadas. Texto que não é de nenhuma descartada não muda nada.
+ * nova, se houver duas iguais, e só até IDADE_MAX_DESCARTADA_MS depois de criada) e a tira das descartadas. Uma
+ * pendente mais nova, que o candidato não ouviu, passa a ser descartada no lugar dela. Sem descartada com esse texto:
+ * null.
  */
-function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, agora: number): Transicao {
-  const texto = r.pergunta.trim();
+function registrarPerguntaDoQuadro(estado: EstadoSessao, texto: string, agora: number): Transicao | null {
   const descartadas = estado.perguntasDescartadas ?? [];
-  const i = descartadas.findLastIndex((p) => p.pergunta?.trim() === texto);
-  if (i < 0) return { estado, efeitos: [] };
-  return fazerPergunta({ ...estado, perguntasDescartadas: descartadas.filter((_, j) => j !== i) }, descartadas[i], agora);
+  const i = descartadas.findLastIndex((p) => p.pergunta?.trim() === texto && agora - p.criadoEm <= IDADE_MAX_DESCARTADA_MS);
+  if (i < 0) return null;
+  const pendente = estado.perguntaPendente;
+  const restantes = [...descartadas.filter((_, j) => j !== i), ...(pendente ? [pendente] : [])].slice(-MAX_PERGUNTAS_DESCARTADAS);
+  return fazerPergunta({ ...estado, perguntasDescartadas: restantes }, descartadas[i], agora);
 }
 
 /** Quanto da resposta do candidato fica guardado junto da pergunta (vai aos prompts). */
@@ -599,13 +607,16 @@ function transicionarEvento(
 
     case "PLIN_CLICADO": {
       const pendente = estado.perguntaPendente;
-      // Sem dúvida pendente aqui: o quadro disse que fez a pergunta (numa corrida, o servidor já cancelou a pendente).
-      // Vale só se for uma das descartadas. Sem texto, ou com outra resposta ativa, nada muda.
-      if (estado.plin !== "PLIN_PENDENTE" || !pendente) {
-        const r = evento.registro;
-        if (!r?.pergunta.trim() || estado.plin === "PERGUNTA_ATIVA") return nada;
-        return registrarPerguntaDoQuadro(estado, r, agora);
+      const comPendente = estado.plin === "PLIN_PENDENTE" && !!pendente;
+      // O quadro disse que falou outra coisa que não a pendente: numa corrida, o servidor cancelou ou substituiu a dúvida
+      // que ele falou. Vale a descartada com aquele texto. Com outra resposta ativa, ou sem descartada com o texto, segue
+      // a regra de antes (a pendente, se houver; o quadro antigo não manda texto).
+      const texto = evento.registro?.pergunta.trim() ?? "";
+      if (texto && estado.plin !== "PERGUNTA_ATIVA" && !(comPendente && pendente?.pergunta?.trim() === texto)) {
+        const registrada = registrarPerguntaDoQuadro(estado, texto, agora);
+        if (registrada) return registrada;
       }
+      if (!comPendente || !pendente) return nada;
       return fazerPergunta(estado, pendente, agora);
     }
 

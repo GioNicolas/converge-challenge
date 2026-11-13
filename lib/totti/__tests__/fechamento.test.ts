@@ -325,6 +325,18 @@ describe("última palavra: com a leitura da intenção pelo modelo, a lista de p
     assert.equal(passo.encerrar, false);
   });
 
+  it("o modelo não marcou encerrar mas não vê nada para responder (calado, \"pulou\" ou \"não sabe\"): despede", () => {
+    for (const leitura of [
+      doModelo({ responder: false, texto: "" }),
+      doModelo({ texto: "Certo.", intencao: "pulou" }),
+      doModelo({ texto: "", intencao: "nao_sabe" }),
+    ]) {
+      const passo = proximoPasso(naUltima(), leitura, "não, é isso");
+      assert.ok(DESPEDIDAS.includes(passo.fala), passo.fala);
+      assert.equal(passo.encerrar, true);
+    }
+  });
+
   it("sem a leitura (o modelo falhou ou a sala não a pede), a lista de respostas curtas segue valendo", () => {
     for (const leitura of [null, lida()]) {
       const passo = proximoPasso(naUltima(), leitura, "não, é isso");

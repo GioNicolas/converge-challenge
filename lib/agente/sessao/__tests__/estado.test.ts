@@ -4,6 +4,7 @@ import {
   criteriosDoPlanoSemEvidencia,
   criteriosSemEvidencia,
   estadoInicial,
+  IDADE_MAX_DESCARTADA_MS,
   MAX_PERGUNTAS_DESCARTADAS,
   nomesDosCriteriosDoPlano,
   transicionar,
@@ -492,12 +493,27 @@ describe("PLIN_CLICADO sem dúvida pendente (corrida: o quadro disse que fez a p
     assert.equal(transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta: "   " } }, T0 + MIN).estado, e);
   });
 
-  it("com dúvida pendente, o clique usa a pendente (o registro não entra) e ela não vira descartada", () => {
+  it("com dúvida pendente e texto que nenhuma descartada tem, o clique usa a pendente e ela não vira descartada", () => {
     const pendente = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN).estado;
     const r = transicionar(pendente, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN + 1000);
     assert.equal(r.estado.perguntaAtiva?.pergunta, duvida().pergunta);
     assert.equal(r.estado.perguntas.length, 1);
     assert.equal(r.estado.perguntasDescartadas, undefined);
+  });
+
+  it("a pendente foi substituída depois que o quadro falou a anterior: registra a que ele falou, e a nova vira descartada", () => {
+    const comP = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta }) }, T0 + 10_000).estado;
+    const comQ = transicionar(comP, { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: "E a outra?" }) }, T0 + 20_000).estado;
+    const r = transicionar(comQ, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN);
+    assert.equal(r.estado.perguntaAtiva?.pergunta, pergunta);
+    assert.deepEqual(r.estado.perguntas.map((p) => p.pergunta), [pergunta]);
+    assert.equal(r.estado.perguntaPendente, null);
+    assert.deepEqual(r.estado.perguntasDescartadas?.map((p) => p.pergunta), ["E a outra?"]);
+  });
+
+  it(`descartada com mais de ${IDADE_MAX_DESCARTADA_MS / MIN} min não é registrada (replay)`, () => {
+    const e = descartada(alto());
+    assert.equal(transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + 10_000 + IDADE_MAX_DESCARTADA_MS + 1).estado, e);
   });
 
   it("com outra resposta ativa, não sobrescreve", () => {
