@@ -16,15 +16,24 @@ export const semPerguntaNoFim = (texto: string, jaDitas: string[] = []) => totti
 export const semPerguntaNoFimV2 = (texto: string) => totti.semPerguntaNoFimSeSobrar(texto, "quadro");
 
 /**
- * Troca ids do grafo ("[r5]", "o r5") pelo nome do elemento ("Cache Redis") numa fala. O modelo às vezes fala
- * o id, que não significa nada para quem ouve. Sem nome conhecido, o id sai e fica "esse elemento".
+ * Nome de cada peça do grafo pelo id ("r5" → "Cache Redis"). Setas e linhas ficam de fora (não têm nome). Chave minúscula.
+ * Também usada pelo prompt da análise (#129, bloco J): o assunto perguntado sai com o nome que o candidato vê.
  */
-export function trocarIdsPorNomes(texto: string, grafo: string): string {
+export function nomesDasPecas(grafo: string): Map<string, string> {
   const nomes = new Map<string, string>();
   for (const linha of grafo.split("\n")) {
     const m = linha.match(/^\s*-\s*\[([a-z]\d+)\]\s+(.+?)(?:\s+\((?:retângulo|elipse|losango|texto|moldura|imagem|desenho)[^)]*\))?\s*(?:—.*)?$/i);
     if (m && !/[→—]/.test(m[2])) nomes.set(m[1].toLowerCase(), m[2].replace(/^"|"$/g, "").trim());
   }
+  return nomes;
+}
+
+/**
+ * Troca ids do grafo ("[r5]", "o r5") pelo nome do elemento ("Cache Redis") numa fala. O modelo às vezes fala
+ * o id, que não significa nada para quem ouve. Sem nome conhecido, o id sai e fica "esse elemento".
+ */
+export function trocarIdsPorNomes(texto: string, grafo: string): string {
+  const nomes = nomesDasPecas(grafo);
   return texto
     .replace(/\[([a-z]\d+)\]/gi, (_, id: string) => nomes.get(id.toLowerCase()) ?? "esse elemento")
     .replace(/\b([a-z]\d+)\b/g, (todo, id: string) => nomes.get(id) ?? todo)

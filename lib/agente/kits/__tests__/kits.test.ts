@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Kit } from "../tipos";
 import { KITS, obterKit, obterProblema, resolverAvaliacao, dadosPublicosDoProblema } from "../index";
+import { EMPECILHOS_GENERICOS, escolherEmpecilhoGenerico, temMudancaPrevista } from "../empecilhos-genericos";
+import { errosDoEmpecilho } from "../validar";
 
 const kits = Object.values(KITS);
 
@@ -81,4 +83,32 @@ test("dados públicos têm só titulo e enunciado", () => {
       const json = JSON.stringify(pub);
       assert.ok(!json.includes(p.ficha[0].resposta));
     }
+});
+
+test("as três mudanças genéricas passam nas mesmas regras das mudanças geradas", () => {
+  for (const [nome, e] of Object.entries(EMPECILHOS_GENERICOS)) {
+    assert.deepEqual(errosDoEmpecilho(e), [], nome);
+  }
+  assert.deepEqual(
+    Object.values(EMPECILHOS_GENERICOS).map((e) => e.tipo).sort(),
+    ["parte_cai", "requisito_muda", "restricao_nova"],
+  );
+});
+
+test("a genérica segue a cobertura: escalabilidade, depois dados e consistência, depois trade-offs", () => {
+  assert.equal(escolherEmpecilhoGenerico(["escalabilidade", "dados_consistencia", "tradeoffs"]).id, EMPECILHOS_GENERICOS.volume.id);
+  assert.equal(escolherEmpecilhoGenerico(["dados_consistencia", "tradeoffs"]).id, EMPECILHOS_GENERICOS.dependencia.id);
+  assert.equal(escolherEmpecilhoGenerico(["tradeoffs", "comunicacao"]).id, EMPECILHOS_GENERICOS.orcamento.id);
+  // Escalabilidade já coberta: sem evidência de consistência, cai na dependência, mesmo sem trade-offs.
+  assert.equal(escolherEmpecilhoGenerico(["dados_consistencia"]).id, EMPECILHOS_GENERICOS.dependencia.id);
+  // Sem pista (tudo coberto, ou só critérios do plano): volume 10x.
+  assert.equal(escolherEmpecilhoGenerico([]).id, EMPECILHOS_GENERICOS.volume.id);
+  assert.equal(escolherEmpecilhoGenerico(["comunicacao", "requisitos"]).id, EMPECILHOS_GENERICOS.volume.id);
+});
+
+test("problema sem mudança própria só tem mudança em kit de system design", () => {
+  const semMudanca = { ...obterProblema("system_design", "encurtador_url")!, empecilho: undefined };
+  assert.equal(temMudancaPrevista(obterKit("system_design")!, semMudanca), true, "a genérica do kit");
+  assert.equal(temMudancaPrevista(obterKit("design_produto")!, semMudanca), false);
+  assert.equal(temMudancaPrevista(obterKit("system_design")!, { empecilho: semMudanca.empecilho }), true);
 });

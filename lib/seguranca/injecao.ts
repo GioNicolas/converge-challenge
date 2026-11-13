@@ -28,6 +28,8 @@ export const ETIQUETAS = [
   "observacoes",
   "vaga",
   "notas",
+  // Nomes dos critérios que a recrutadora definiu no plano (dado dela, não instrução).
+  "criterios",
   // Texto gerado pelo analista (LLM que leu o código) e saída de execução do código: não confiável também.
   "leitura_do_analista",
   "hipotese",

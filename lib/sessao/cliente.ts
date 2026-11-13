@@ -79,6 +79,10 @@ export type RespostaAnalise = {
   observacoes: Observacao[];
   /** O cérebro acha que o candidato já mostrou o suficiente do alto nível: segue para o aprofundamento. */
   avancar_fase?: boolean;
+  /** O candidato fechou uma parte do desenho (ver o servidor, `motivoDoConteudo`). Só informativo no quadro. */
+  parteFechada?: boolean;
+  /** Redirecionamento de escopo (servidor, decisão I). Vale no quadro só para o ritmo: fura o intervalo entre perguntas. */
+  escopo?: boolean;
   /** Sequência comum em andamento; ausente quando suspensa ou ainda não iniciada. */
   fechamento?: EtapaDoFechamento;
 };
@@ -102,6 +106,8 @@ const EsquemaResposta = z.object({
     )
     .default([]),
   avancar_fase: z.boolean().default(false),
+  parteFechada: z.boolean().default(false),
+  escopo: z.boolean().default(false),
   fechamento: z.enum(ETAPAS_DO_FECHAMENTO).optional(),
 });
 

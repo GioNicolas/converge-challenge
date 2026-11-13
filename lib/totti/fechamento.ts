@@ -10,7 +10,7 @@
 // Este arquivo não importa nada de `lib/agente` nem de `lib/agents`: as salas é que importam daqui.
 import { falaNaoRepetida, perguntaJaFeita, reacaoNeutra, semConviteDeSeguir } from "./guardas";
 import { frasesDe, normalizar, type Sala } from "./texto";
-import type { LeituraDoTurno } from "./turno";
+import { PEDIDOS_DE_REPETIR_A_PERGUNTA, type LeituraDoTurno } from "./turno";
 
 export const ETAPAS_DO_FECHAMENTO = ["anuncio", "perguntas_finais", "ultima_palavra", "despedida", "encerrada"] as const;
 export type EtapaDoFechamento = (typeof ETAPAS_DO_FECHAMENTO)[number];
@@ -42,7 +42,7 @@ export type EstadoFechamento = {
   aprofundou: boolean;
   /** As perguntas finais que já foram feitas. */
   feitas: string[];
-  /** A última palavra já recebeu um assunto novo: ela só volta uma vez. */
+  /** A última palavra já recebeu um assunto novo: ela só volta uma vez (uma pergunta dele não conta, ver `responderAPergunta`). */
   voltouDaUltimaPalavra: boolean;
   /** O que o Totti disse durante o fechamento, da mais antiga para a mais nova. */
   ditas: string[];
@@ -67,11 +67,75 @@ export type PassoDoFechamento = {
 
 /** Faltando isto, a entrevista entra em fechamento mesmo que ele não tenha dito que terminou. */
 export const TEMPO_PARA_FECHAR_MS = 3 * 60_000;
+/**
+ * No quadro, o limiar de tempo é uma fração da duração da vaga (#129, decisão F), e não os 3 min fixos: numa vaga de 30
+ * min, faltando 4,5 min ou menos, a entrevista fecha. O live coding segue com TEMPO_PARA_FECHAR_MS.
+ */
+export const FRACAO_PARA_FECHAR = 0.15;
+
+/** O limiar de tempo do quadro para uma duração total (ms). Sem duração conhecida, vale o de sempre (TEMPO_PARA_FECHAR_MS). */
+export function limiarDoFechamentoNoQuadro(duracaoTotalMs: number): number {
+  return duracaoTotalMs > 0 ? FRACAO_PARA_FECHAR * duracaoTotalMs : TEMPO_PARA_FECHAR_MS;
+}
+
+/** Quando o APROFUNDAMENTO acaba, como fração do tempo total: faltam FRACAO_PARA_FECHAR para o fim (#129, decisão F). */
+export const FRACAO_DO_FIM_DO_APROFUNDAMENTO = 1 - FRACAO_PARA_FECHAR;
+/** Um APROFUNDAMENTO que começa depois do fim previsto ainda tem este tempo (s). */
+export const MIN_APROFUNDAMENTO_S = 60;
+
+/** O que a duração efetiva da fase precisa saber (tudo em ms, exceto as durações em segundos). */
+export type DadosDaDuracaoDaFase = {
+  /** Quando a fase atual começou (ms). */
+  faseIniciadaEm: number | null;
+  /** Quando a entrevista começou (ms). Ausente ou null (estado antigo): vale a duração de `tempos`. */
+  iniciadaEm?: number | null;
+  /** Duração total da entrevista em segundos (a mesma conta da garantia dos 60%). */
+  duracaoTotalS?: number;
+  /** Duração da fase em `tempos` (s). */
+  duracaoFaseS?: number;
+};
+
+/**
+ * Duração efetiva de uma fase, em segundos, contada do começo dela. Só o APROFUNDAMENTO muda: ele vai até o instante
+ * em que faltam FRACAO_PARA_FECHAR do tempo total da entrevista (iniciadaEm + total × 0,85), independente de quando a
+ * fase começou. Se esse instante já tinha passado quando a fase começou, vale MIN_APROFUNDAMENTO_S. As demais fases, e
+ * o APROFUNDAMENTO sem dados de início, valem `duracaoFaseS`. Sem duração: undefined (fase sem limite).
+ */
+export function duracaoEfetivaDaFaseS(fase: string, dados: DadosDaDuracaoDaFase): number | undefined {
+  const { faseIniciadaEm, iniciadaEm, duracaoTotalS, duracaoFaseS } = dados;
+  if (fase !== "APROFUNDAMENTO" || faseIniciadaEm === null || iniciadaEm === undefined || iniciadaEm === null || !duracaoTotalS) {
+    return duracaoFaseS;
+  }
+  const fimMs = iniciadaEm + duracaoTotalS * FRACAO_DO_FIM_DO_APROFUNDAMENTO * 1000;
+  return fimMs > faseIniciadaEm ? (fimMs - faseIniciadaEm) / 1000 : MIN_APROFUNDAMENTO_S;
+}
+
+/**
+ * Quanto falta, em ms, para o timer da fase disparar, contado de `agora` (o timer do navegador usa esta conta). Para o
+ * APROFUNDAMENTO é o instante absoluto do fim (iniciadaEm + total × 0,85): um reinício do timer não empurra o fim além
+ * dos 85%. Se esse instante já tinha passado quando a fase começou, espera MIN_APROFUNDAMENTO_S a partir de agora. As
+ * demais fases (e o APROFUNDAMENTO sem dados de início) valem a duração cheia de `tempos`, como antes.
+ */
+export function msAteFimDaFase(fase: string, agora: number, dados: DadosDaDuracaoDaFase): number | undefined {
+  const { faseIniciadaEm, iniciadaEm, duracaoTotalS, duracaoFaseS } = dados;
+  if (fase !== "APROFUNDAMENTO" || faseIniciadaEm === null || iniciadaEm === undefined || iniciadaEm === null || !duracaoTotalS) {
+    return duracaoFaseS === undefined ? undefined : duracaoFaseS * 1000;
+  }
+  const fimMs = iniciadaEm + duracaoTotalS * FRACAO_DO_FIM_DO_APROFUNDAMENTO * 1000;
+  if (fimMs <= faseIniciadaEm) return Math.max(fimMs - agora, MIN_APROFUNDAMENTO_S * 1000);
+  return Math.max(fimMs - agora, 0);
+}
+
 /** Quanto uma pergunta final leva, contando a resposta e a reação. */
 export const TEMPO_POR_PERGUNTA_FINAL_MS = 60_000;
 /** O que a última palavra e a despedida precisam. */
 export const RESERVA_PARA_A_DESPEDIDA_MS = 45_000;
 export const MAX_PERGUNTAS_FINAIS = 4;
+/**
+ * Quando ele pede para encerrar, o quadro (#129, decisão revisada) faz até estas perguntas antes da última palavra, se o
+ * plano ainda tem critérios sem evidência. Pedido com urgência, ou sem candidatas, vai direto (ou à última palavra).
+ */
+export const MAX_PERGUNTAS_AO_PEDIR_FIM = 2;
 
 /** O que a sala sabe dizer sobre o momento, para o núcleo decidir se é hora de fechar. */
 export type SinalDeFechamento = {
@@ -85,17 +149,25 @@ export type SinalDeFechamento = {
   materialPronto?: boolean;
   /** Quanto falta para o fim da entrevista. Ausente: a sala não sabe. */
   tempoRestanteMs?: number;
+  /** Limiar de tempo que fecha a entrevista (ms). Ausente: TEMPO_PARA_FECHAR_MS (o live coding). */
+  limiarTempoMs?: number;
+  /**
+   * Se "terminei" pode fechar agora. Falso: a sala barrou (faltam critérios ou a mudança de cenário), e a conclusão
+   * vira só uma fala. Ausente ou verdadeiro: a regra de sempre (live coding).
+   */
+  podeFecharPorConclusao?: boolean;
 };
 
 /**
  * É hora de fechar? Pedido para encerrar vai direto à despedida. "Terminei" com o material pronto fecha na primeira
- * vez; sem ele, na segunda (na primeira o Totti ainda tem o que perguntar sobre o que falta). Tempo acabando fecha
- * de qualquer jeito.
+ * vez; sem ele, na segunda (na primeira o Totti ainda tem o que perguntar sobre o que falta), e só se a sala não
+ * barrou (`podeFecharPorConclusao`). Tempo acabando fecha de qualquer jeito, no limiar da sala.
  */
 export function gatilhoDoFechamento(sinal: SinalDeFechamento): GatilhoDoFechamento | null {
   if (sinal.pediuEncerrar) return "pediu_encerrar";
-  if (sinal.concluiu && (sinal.materialPronto || (sinal.conclusoesAntes ?? 0) >= 1)) return "concluiu";
-  if (sinal.tempoRestanteMs !== undefined && sinal.tempoRestanteMs <= TEMPO_PARA_FECHAR_MS) return "tempo";
+  const podeConcluir = sinal.podeFecharPorConclusao !== false;
+  if (podeConcluir && sinal.concluiu && (sinal.materialPronto || (sinal.conclusoesAntes ?? 0) >= 1)) return "concluiu";
+  if (sinal.tempoRestanteMs !== undefined && sinal.tempoRestanteMs <= (sinal.limiarTempoMs ?? TEMPO_PARA_FECHAR_MS)) return "tempo";
   return null;
 }
 
@@ -127,8 +199,10 @@ export function escolherPerguntasFinais(candidatas: PerguntaFinal[], tempoRestan
 }
 
 /**
- * Começa o fechamento. Pedido para encerrar vai direto à despedida; os outros gatilhos começam pelo anúncio. A
- * primeira fala sai do `proximoPasso` (sem leitura, ou com a do turno em que ele disse que terminou).
+ * Começa o fechamento. Pedido para encerrar vai direto à despedida, a não ser que a sala peça as perguntas finais
+ * (`perguntasNoPedidoDeFim`): aí começa pelo anúncio do pedido, com até MAX_PERGUNTAS_AO_PEDIR_FIM perguntas. Os outros
+ * gatilhos começam pelo anúncio. A primeira fala sai do `proximoPasso` (sem leitura, ou com a do turno em que ele disse
+ * que terminou).
  */
 export function iniciarFechamento(inicio: {
   sala: Sala;
@@ -138,13 +212,17 @@ export function iniciarFechamento(inicio: {
   tempoRestanteMs?: number;
   /** O que o candidato já ouviu nesta entrevista (para não perguntar de novo). */
   perguntasJaFeitas?: string[];
+  /** Pedido para encerrar com perguntas finais antes da última palavra (ausente: vai direto à despedida, como no live coding). */
+  perguntasNoPedidoDeFim?: boolean;
 }): EstadoFechamento {
-  const direto = inicio.gatilho === "pediu_encerrar";
+  const pedido = inicio.gatilho === "pediu_encerrar";
+  const direto = pedido && !inicio.perguntasNoPedidoDeFim;
+  const escolhidas = direto ? [] : escolherPerguntasFinais(inicio.candidatas ?? [], inicio.tempoRestanteMs, inicio.perguntasJaFeitas);
   return {
     etapa: direto ? "despedida" : "anuncio",
     gatilho: inicio.gatilho,
     sala: inicio.sala,
-    fila: direto ? [] : escolherPerguntasFinais(inicio.candidatas ?? [], inicio.tempoRestanteMs, inicio.perguntasJaFeitas),
+    fila: pedido && !direto ? escolhidas.slice(0, MAX_PERGUNTAS_AO_PEDIR_FIM) : escolhidas,
     atual: null,
     aprofundou: false,
     feitas: [],
@@ -171,6 +249,8 @@ const ANUNCIO = {
 };
 const ULTIMA_PALAVRA = "Era isso da minha parte. Quer acrescentar alguma coisa antes de encerrar?";
 const ULTIMA_PALAVRA_SEM_PERGUNTAS = { concluiu: "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?", tempo: "O nosso tempo está acabando. Quer acrescentar alguma coisa antes de encerrar?" };
+/** O anúncio quando ele pediu para encerrar e a sala ainda faz perguntas finais (curto: ele já disse que quer sair). */
+const ANUNCIO_DO_PEDIDO_DE_FIM = { um: "Claro, vamos fechar. Antes, uma coisa rápida:", varios: "Beleza. Só mais umas coisas antes de terminar:" };
 const VOLTA_DA_ULTIMA_PALAVRA = "Mais alguma coisa antes de encerrar?";
 const ACOLHIMENTOS = ["Tranquilo.", "Sem problema."];
 
@@ -185,8 +265,12 @@ export const DESPEDIDAS = [
 // O que a fala do candidato mostra, sem modelo
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Resposta curta que não traz assunto novo ("nada", "pode", "não quero", "já falei tudo"), ou o pedido de encerrar. */
-export function aceitaEncerrar(fala: string): boolean {
+/**
+ * Resposta curta que não traz assunto novo ("nada", "pode", "não quero", "já falei tudo"), ou o pedido de encerrar.
+ * Quando o modelo leu que ele perguntou (`candidatoPerguntou`), a fala não encerra: a pergunta vem antes.
+ */
+export function aceitaEncerrar(fala: string, leitura?: LeituraDoTurno | null): boolean {
+  if (leitura?.candidatoPerguntou === true) return false;
   const t = normalizar(fala);
   if (!t) return false;
   if (/\b(encerr\w*|finaliz\w*|fech\w*)\b/.test(t)) return true;
@@ -195,11 +279,12 @@ export function aceitaEncerrar(fala: string): boolean {
 }
 
 /** O que alguém diz enquanto monta a resposta, sem dizer nada ainda. */
-const SO_ENCHIMENTO = /^(h+m+|hu+m+|a+h+|e+h+|e|bom|entao|pera|perai|espera|calma|aqui|tipo|assim|olha)$/;
+const SO_ENCHIMENTO = /^(h+m+|hu+m+|a+h+|e+h+|e|bom|entao|pera|perai|espera|calma|aqui|tipo|assim|olha|to|pensando)$/;
 
 /**
- * Ele ainda está montando a resposta ("hmm, deixa eu pensar"): o Totti espera em vez de passar para a próxima. Só
- * conta a fala que é inteira de quem pensa; qualquer palavra com conteúdo ("hmm, não sei") já é uma resposta.
+ * Ele ainda está montando a resposta ("hmm, deixa eu pensar", "calma, tô pensando"): o Totti espera em vez de passar
+ * para a próxima. Só conta a fala que é inteira de quem pensa; qualquer palavra com conteúdo ("hmm, não sei") já é uma
+ * resposta.
  */
 export function aindaPensando(fala: string): boolean {
   const t = normalizar(fala);
@@ -242,6 +327,19 @@ function respostaDe(leitura: LeituraDoTurno | null | undefined): string {
   return frasesDe(semConviteDeSeguir(leitura.texto)).filter((f) => !f.trim().endsWith("?")).join(" ").trim();
 }
 
+/**
+ * Ele fez uma pergunta no fechamento: a resposta do modelo sai inteira (sem pergunta nova e sem convite). Na última
+ * palavra volta "Mais alguma coisa?", sem limite de voltas. Nas perguntas finais a pergunta atual segue aberta: sem
+ * avançar e sem gastar o aprofundamento. Sem resposta do modelo, pede de novo (a mesma reserva do turno), em vez de
+ * ficar calado.
+ */
+function responderAPergunta(estado: EstadoFechamento, leitura: LeituraDoTurno): PassoDoFechamento {
+  const resposta = respostaDe(leitura);
+  if (!resposta) return passo(estado, falaNaoRepetida(PEDIDOS_DE_REPETIR_A_PERGUNTA, estado.ditas));
+  if (estado.etapa === "ultima_palavra") return passo(estado, `${resposta} ${VOLTA_DA_ULTIMA_PALAVRA}`);
+  return passo(estado, resposta);
+}
+
 /** Sai a próxima pergunta da fila, com a reação na frente; sem fila, a última palavra. */
 function avancar(estado: EstadoFechamento, antes: string): PassoDoFechamento {
   const [proxima, ...resto] = estado.fila;
@@ -269,8 +367,9 @@ export function proximoPasso(
 ): PassoDoFechamento {
   if (estado.etapa === "encerrada") return { fala: "", etapa: "encerrada", encerrar: true, estado };
   if (estado.etapa === "despedida") return despedir(estado);
-  // Pedido para encerrar no meio do fechamento: direto para a despedida.
-  if (leitura?.encerrar) return despedir(estado);
+  // Pedido para encerrar no meio do fechamento: direto para a despedida. Se na mesma fala ele fez uma pergunta, a
+  // pergunta é respondida primeiro (e não se despede no mesmo passo).
+  if (leitura?.encerrar && leitura.candidatoPerguntou !== true) return despedir(estado);
 
   const atual: EstadoFechamento = opcoes.tempoRestanteMs === undefined ? estado
     : { ...estado, fila: estado.fila.slice(0, perguntasQueCabem(opcoes.tempoRestanteMs)) };
@@ -278,13 +377,18 @@ export function proximoPasso(
 
   if (atual.etapa === "anuncio") {
     if (!atual.fila.length) return avancar(atual, "");
-    const anuncio = ANUNCIO[atual.gatilho === "tempo" ? "tempo" : "concluiu"][atual.fila.length === 1 ? "um" : "varios"];
+    const quantas = atual.fila.length === 1 ? "um" : "varios";
+    const anuncio = atual.gatilho === "pediu_encerrar"
+      ? ANUNCIO_DO_PEDIDO_DE_FIM[quantas]
+      : ANUNCIO[atual.gatilho === "tempo" ? "tempo" : "concluiu"][quantas];
     return avancar(atual, anuncio);
   }
 
   // Daqui para baixo o passo responde a um turno do candidato.
   if (!leitura && !falaDoCandidato.trim()) return esperar(atual);
   if (!soltou && aindaPensando(falaDoCandidato)) return esperar(atual);
+  // Ele perguntou (o modelo leu, mesmo sem "?"): responde, em qualquer etapa, antes de qualquer outra coisa.
+  if (leitura?.candidatoPerguntou === true) return responderAPergunta(atual, leitura);
 
   if (atual.etapa === "perguntas_finais") {
     // "Não sei" ou "pula": aceita com leveza e avança.
@@ -298,7 +402,7 @@ export function proximoPasso(
   }
 
   // Última palavra: resposta curta, "não" ou "pode" vai para a despedida.
-  if (aceitaEncerrar(falaDoCandidato)) return despedir(atual);
+  if (aceitaEncerrar(falaDoCandidato, leitura)) return despedir(atual);
   // Assunto novo recebe uma resposta e volta para a última palavra, uma vez só.
   const resposta = respostaDe(leitura) || reacaoNeutra(atual.ditas);
   if (atual.voltouDaUltimaPalavra) return despedir(atual, resposta);

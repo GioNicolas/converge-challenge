@@ -9,7 +9,7 @@
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
 import { sobreposicao } from "../guardas";
 import type { PlanoDaSessao } from "../plano";
-import type { EstadoFechamento } from "../../totti/fechamento";
+import { duracaoEfetivaDaFaseS, type EstadoFechamento } from "../../totti/fechamento";
 import { fechamentoPodeSerSuspenso, pecasDoGrafo, voltouADesenhar, type DesenhoConcluido, type FechamentoDaSessao } from "./fechamento";
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
 import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
@@ -26,8 +26,11 @@ export const TEMPOS_PADRAO: Tempos = {
   FECHAMENTO: 300,
 };
 
-/** Dúvida esperando o clique do candidato. */
-export type PlinPendente = RespostaAnalise & { criadoEm: number };
+/**
+ * Dúvida esperando o clique do candidato. `pecas`: as peças do desenho na análise que a fez (ver
+ * `desenhoNaUltimaPergunta`); ausente em estados e chamadas antigas.
+ */
+export type PlinPendente = RespostaAnalise & { criadoEm: number; pecas?: string[] | null };
 
 /** Pergunta que o candidato está respondendo (ou já respondeu, no registro). */
 export type PerguntaFeita = {
@@ -108,10 +111,30 @@ export type EstadoSessao = {
   /** Quando o candidato terminou de responder a última pergunta. */
   ultimaRespostaEm: number | null;
   /**
+   * As peças do desenho na análise que gerou a última pergunta feita (ver `desenhoNovoDesdePergunta`, sessao/politica.ts).
+   * Ausente/null: nenhuma pergunta feita ainda, ou o grafo veio cortado.
+   */
+  desenhoNaUltimaPergunta?: string[] | null;
+  /**
    * Quando o agente disse a última fala solta (resposta a uma dúvida, comentário, continuação). Uma pergunta nova
    * não sai logo depois dela. Ausente em estados guardados antes desse campo.
    */
   ultimaFalaDoAgenteEm?: number | null;
+  /**
+   * Quando ele pediu tempo para pensar ("calma", "deixa eu pensar") por último. Enquanto ele não desenhar nem falar
+   * depois disso, a bola segue com ele (ver `pedidoDeTempoPendente`) e a análise sabe que ele pediu tempo. Ausente/null:
+   * não pediu.
+   */
+  pediuTempoEm?: number | null;
+  /** O Totti já respondeu ao primeiro pedido de tempo da entrevista (depois disso, ele fica calado nesses pedidos). */
+  reacaoAoPensarDita?: boolean;
+  /**
+   * Quando o Totti fez a primeira pergunta de redirecionamento de escopo (#129, decisão I). Null/ausente: ainda não puxou
+   * o escopo. Contrato com o scorecard (Pessoa 5), ver lib/agente/sessao/tipos.ts.
+   */
+  escopoProvocadoEm?: number | null;
+  /** Quantos redirecionamentos de escopo já foram feitos (0 a LIMITE_REDIRECIONAMENTOS_DE_ESCOPO). Ausente = 0. */
+  escopoRedirecionamentos?: number;
 
   /** Todas as perguntas feitas, com os elementos citados. */
   perguntas: PerguntaFeita[];
@@ -123,6 +146,11 @@ export type EstadoSessao = {
   conversa: FalaRegistrada[];
   /** Mudança no problema já anunciada. Ausente/null: ainda não (estados antigos não têm o campo). */
   empecilho?: EmpecilhoAnunciado | null;
+  /**
+   * Quando a análise abriu a brecha da mudança por último (ela responde "ok" por um ciclo, depois dos 60% do tempo).
+   * Ausente/null: nunca abriu. Ver `precisaAbrirBrechaDaMudanca` (lib/agente/analisar.ts).
+   */
+  brechaEmpecilhoEm?: number | null;
   /** Quantas vezes o candidato disse que terminou ("pronto", "acho que é isso") e quando foi a última. */
   conclusoes?: number;
   ultimaConclusaoEm?: number | null;
@@ -143,6 +171,20 @@ export type EstadoSessao = {
   quadroAindaNoFechamento?: boolean;
 };
 
+/**
+ * A pergunta que o quadro disse que fez (evento "pergunta" da linha do tempo). Usada quando o servidor não tem a
+ * dúvida pendente (ela foi cancelada numa corrida com uma análise mais nova): registra mesmo assim, para o piso
+ * entre perguntas contar a pergunta que o candidato ouviu.
+ */
+export type RegistroDaPergunta = {
+  pergunta: string;
+  nota?: string | null;
+  elementos?: string[];
+  status?: RespostaAnalise["status"];
+  /** A pergunta falada era de redirecionamento de escopo (decisão I): conta no limite e grava a hora. */
+  escopo?: boolean;
+};
+
 export type EventoSessao =
   | { tipo: "COMECAR" }
   | { tipo: "APRESENTACAO_TERMINOU" }
@@ -155,12 +197,15 @@ export type EventoSessao =
   | { tipo: "ENCERRAR" }
   /** O quadro é dono da fase: o servidor acompanha. Só avança (alvo anterior ou igual é ignorado). */
   | { tipo: "SINCRONIZAR_FASE"; fase: Fase }
-  /** Resultado do /analisar (já passado por `filtrarResposta`). */
-  | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise }
+  /** Resultado do /analisar (já passado por `filtrarResposta`). `pecas`: as peças do desenho daquela análise. */
+  | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise; pecas?: string[] | null }
   /** O candidato mexeu nestes elementos (ids curtos do grafo). */
   | { tipo: "ELEMENTOS_ALTERADOS"; ids: string[] }
-  | { tipo: "PLIN_CLICADO" }
+  /** `registro`: a pergunta que o quadro disse ter feito, para quando não há dúvida pendente aqui (ver RegistroDaPergunta). */
+  | { tipo: "PLIN_CLICADO"; registro?: RegistroDaPergunta }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
+  /** Ele pediu tempo para pensar. `reagiu`: o Totti respondeu com a reação curta (a primeira vez na entrevista). */
+  | { tipo: "CANDIDATO_PEDIU_TEMPO"; reagiu: boolean }
   /** `perguntou`: a fala do Conversador terminou numa pergunta (v2); conta no intervalo antes do próximo plin. */
   | { tipo: "AGENTE_FALOU"; texto: string; perguntou?: boolean }
   /**
@@ -199,6 +244,44 @@ export type Efeito =
 
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
 
+/**
+ * Registra a pergunta que o quadro disse ter feito, sem dúvida pendente no servidor. Mesma conta do clique com
+ * pendente (número, cota, hora, histórico), com o texto que o quadro mandou. Não mexe em `desenhoNaUltimaPergunta`:
+ * sem a análise que a gerou, não há como saber as peças dela.
+ */
+function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, agora: number): Transicao {
+  const pergunta: PerguntaFeita = {
+    numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
+    status: r.status ?? "duvida",
+    pergunta: r.pergunta.trim(),
+    nota: r.nota ?? null,
+    elementos: r.elementos ?? [],
+    degrau: null,
+    fase: estado.fase,
+    feitaEm: agora,
+  };
+  const redirecionouEscopo = pergunta.status === "redirecionar" && r.escopo === true;
+  return {
+    estado: {
+      ...estado,
+      plin: "PERGUNTA_ATIVA",
+      perguntaAtiva: pergunta,
+      perguntaPendente: null,
+      perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
+      perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
+      conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
+      ultimaPerguntaEm: agora,
+      perguntas: [...estado.perguntas, pergunta],
+      conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
+      // Redirecionamento de escopo falado (decisão I): mesma conta do clique com pendente.
+      ...(redirecionouEscopo
+        ? { escopoProvocadoEm: estado.escopoProvocadoEm ?? agora, escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1 }
+        : {}),
+    },
+    efeitos: [{ tipo: "PERGUNTA_INICIADA", pergunta }],
+  };
+}
+
 /** Quanto da resposta do candidato fica guardado junto da pergunta (vai aos prompts). */
 const MAX_CARACTERES_RESPOSTA = 300;
 
@@ -226,13 +309,18 @@ export function tempoDaEntrevista(estado: EstadoSessao, agora: number): { totalM
   return { totalMin, decorridoMin, restanteMin: Math.max(0, totalMin - decorridoMin) };
 }
 
+/** Duração total da entrevista em segundos: o plano da vaga, ou a soma dos tempos das fases (estado antigo). */
+export function duracaoTotalS(estado: EstadoSessao): number {
+  if (estado.plano?.duracaoMin !== undefined) return estado.plano.duracaoMin * 60;
+  return Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
+}
+
 /**
  * Quanto falta para o fim da entrevista, em milissegundos (o fechamento comum decide por ele quantas perguntas
  * finais cabem). A mesma conta de `tempoDaEntrevista`, sem arredondar para minutos.
  */
 export function tempoRestanteMs(estado: EstadoSessao, agora: number): number {
-  const somaS = Object.values(estado.tempos).reduce<number>((s, t) => s + (t ?? 0), 0);
-  const totalMs = (estado.plano?.duracaoMin !== undefined ? estado.plano.duracaoMin * 60 : somaS) * 1000;
+  const totalMs = duracaoTotalS(estado) * 1000;
   let decorridoMs: number;
   if (estado.iniciadaEm) decorridoMs = agora - estado.iniciadaEm;
   else {
@@ -262,6 +350,11 @@ function semFechamento(estado: EstadoSessao): EstadoSessao {
 /** Fases em que "terminei" fala do desenho (em REQUISITOS ele só terminou de perguntar). */
 const FASES_DE_DESENHO: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO"];
 
+/** Nomes dos critérios que a recrutadora definiu no plano (sem vazios nem repetidos). Cada um é uma chave da cobertura. */
+export function nomesDosCriteriosDoPlano(plano: PlanoDaSessao | null | undefined): string[] {
+  return [...new Set((plano?.criterios ?? []).map((c) => c.nome).filter((nome) => nome.trim() !== ""))];
+}
+
 export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; plano?: PlanoDaSessao | null } = {}): EstadoSessao {
   return {
     fase: "AGUARDANDO",
@@ -278,19 +371,37 @@ export function estadoInicial(opcoes: { tempos?: Tempos; criterios?: string[]; p
     ultimaRespostaEm: null,
     perguntas: [],
     observacoes: [],
+    // Cobertura: a rubrica do kit mais os critérios do plano, pelo nome. Um nome igual a um id da rubrica é o mesmo
+    // critério (a chave aparece uma vez só).
     cobertura: Object.fromEntries(
-      (opcoes.criterios ?? []).map((c) => [c, { positivo: 0, negativo: 0, neutro: 0 }]),
+      [...new Set([...(opcoes.criterios ?? []), ...nomesDosCriteriosDoPlano(opcoes.plano)])]
+        .map((c) => [c, { positivo: 0, negativo: 0, neutro: 0 }]),
     ),
     conversa: [],
     empecilho: null,
   };
 }
 
-/** Critérios da rubrica que ainda não têm nenhuma evidência. */
+/**
+ * Critérios sem nenhuma evidência: os da rubrica e os do plano da recrutadora (pelo nome). Estado antigo, sem as
+ * chaves do plano na cobertura, conta os do plano mesmo assim.
+ */
 export function criteriosSemEvidencia(estado: EstadoSessao): string[] {
-  return Object.entries(estado.cobertura)
+  const daCobertura = Object.entries(estado.cobertura)
     .filter(([, e]) => e.positivo + e.negativo + e.neutro === 0)
     .map(([criterio]) => criterio);
+  return [...new Set([...daCobertura, ...criteriosDoPlanoSemEvidencia(estado)])];
+}
+
+/**
+ * Só os critérios do plano da recrutadora que ainda não têm nenhuma evidência (pelo nome). Para o fechamento decidir
+ * se pode encerrar cedo (bloco F do #129, ainda não feito).
+ */
+export function criteriosDoPlanoSemEvidencia(estado: EstadoSessao): string[] {
+  return nomesDosCriteriosDoPlano(estado.plano).filter((nome) => {
+    const e = Object.prototype.hasOwnProperty.call(estado.cobertura, nome) ? estado.cobertura[nome] : undefined;
+    return !e || e.positivo + e.negativo + e.neutro === 0;
+  });
 }
 
 const PROXIMA_FASE: Partial<Record<Fase, Fase>> = {
@@ -377,7 +488,13 @@ export function transicionar(
 
     case "TICK": {
       const proxima = PROXIMA_FASE[estado.fase];
-      const duracao = estado.tempos[estado.fase];
+      // Duração efetiva (#129): o APROFUNDAMENTO acaba com 85% do tempo total, não com o tempo de `tempos`.
+      const duracao = duracaoEfetivaDaFaseS(estado.fase, {
+        faseIniciadaEm: estado.faseIniciadaEm,
+        iniciadaEm: estado.iniciadaEm ?? null,
+        duracaoTotalS: duracaoTotalS(estado),
+        duracaoFaseS: estado.tempos[estado.fase],
+      });
       // Fase sem tempo configurado não acaba sozinha.
       if (!proxima || duracao === undefined || estado.faseIniciadaEm === null) return nada;
       return agora - estado.faseIniciadaEm >= duracao * 1000
@@ -406,7 +523,7 @@ export function transicionar(
 
       if (resposta.pergunta?.trim() && podeLevantarPlin(comObservacoes, resposta.status, agora, regras)) {
         // Uma dúvida nova substitui a pendente: a mais recente é a mais relevante.
-        const pendente: PlinPendente = { ...resposta, criadoEm: agora };
+        const pendente: PlinPendente = { ...resposta, criadoEm: agora, ...(evento.pecas !== undefined ? { pecas: evento.pecas } : {}) };
         return {
           estado: { ...comObservacoes, plin: "PLIN_PENDENTE", perguntaPendente: pendente },
           efeitos: [
@@ -445,7 +562,13 @@ export function transicionar(
 
     case "PLIN_CLICADO": {
       const pendente = estado.perguntaPendente;
-      if (estado.plin !== "PLIN_PENDENTE" || !pendente) return nada;
+      // Sem dúvida pendente aqui: o quadro disse que fez a pergunta (numa corrida, o servidor já cancelou a pendente).
+      // Registra o que ele mandou. Sem texto, ou com outra resposta ativa, nada muda.
+      if (estado.plin !== "PLIN_PENDENTE" || !pendente) {
+        const r = evento.registro;
+        if (!r?.pergunta.trim() || estado.plin === "PERGUNTA_ATIVA") return nada;
+        return registrarPerguntaDoQuadro(estado, r, agora);
+      }
       const pergunta: PerguntaFeita = {
         // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
         numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
@@ -469,6 +592,15 @@ export function transicionar(
           perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
           conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
           ultimaPerguntaEm: agora,
+          // O desenho que gerou esta pergunta: a próxima só pelo teto se houver peça nova depois dele.
+          ...(pendente.pecas !== undefined ? { desenhoNaUltimaPergunta: pendente.pecas } : {}),
+          // Redirecionamento de escopo feito (#129, decisão I): a hora do primeiro fica para o scorecard.
+          ...(pendente.status === "redirecionar" && pendente.escopo === true
+            ? {
+              escopoProvocadoEm: estado.escopoProvocadoEm ?? agora,
+              escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1,
+            }
+            : {}),
           perguntas: [...estado.perguntas, pergunta],
           conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
         },
@@ -614,6 +746,16 @@ export function transicionar(
       const retomado: EstadoSessao = { ...semFechamento(estado), desenhoConcluido: null };
       return { estado: retomado, efeitos: f ? [{ tipo: "FECHAMENTO_SUSPENSO" }] : [] };
     }
+
+    case "CANDIDATO_PEDIU_TEMPO":
+      return {
+        estado: {
+          ...estado,
+          pediuTempoEm: agora,
+          ...(evento.reagiu ? { reacaoAoPensarDita: true } : {}),
+        },
+        efeitos: [],
+      };
 
     case "AGENTE_FALOU":
       return {

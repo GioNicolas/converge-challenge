@@ -2,7 +2,7 @@
  * Validação determinística de um kit gerado (ou editado por uma pessoa): Zod + regras de negócio.
  * Não chama LLM. Devolve TODAS as violações de uma vez (alimentam o retry da geração e o PUT).
  */
-import { Kit, palavrasSemAcento, type Problema, semAcento } from "./tipos";
+import { Kit, palavrasSemAcento, type Empecilho, type Problema, semAcento } from "./tipos";
 
 export const MIN_CRITERIOS = 6;
 export const MIN_FICHA = 8;
@@ -83,6 +83,15 @@ export function validarKit(bruto: unknown, opcoes: OpcoesValidacao = {}): Result
   };
   const erros: string[] = [];
   const avisos: string[] = [];
+
+  // `empecilho` do problema também está fora do schema (o Zod o descarta). Volta do bruto, se passar nas regras:
+  // assim um PUT que edita a questão não apaga a mudança. Inválido sai do kit e vira aviso.
+  const problemaBruto = (bruto as { problemas?: { id?: unknown; empecilho?: unknown }[] }).problemas?.[0];
+  if (kit.problemas[0] && problemaBruto?.empecilho !== undefined) {
+    const emp = empecilhoDeEntrada(problemaBruto.empecilho, typeof problemaBruto.id === "string" ? problemaBruto.id : kit.problemas[0].id);
+    if (emp) kit.problemas[0] = { ...kit.problemas[0], empecilho: emp };
+    else avisos.push("empecilho do problema descartado: não passa nas regras (fala com pergunta, requisito até 50 caracteres)");
+  }
 
   if (!eSlugSeguro(kit.id)) erros.push(`kit.id "${kit.id}" não é um slug seguro (a-z, 0-9, _; começa por letra)`);
   for (const campo of ["area", "persona", "tipoEntrevista"] as const) {
@@ -291,4 +300,60 @@ export function errosDeConcordancia(p: Problema): string[] {
 /** Checagens de coerência do texto de um problema GERADO (ver `OpcoesValidacao`). */
 export function errosDeCoerencia(p: Problema): string[] {
   return [...errosDoTitulo(p), ...errosDeConcordancia(p)];
+}
+
+// Mudança no problema (empecilho) criada pelo gerador da questão da vaga.
+
+export const TIPOS_EMPECILHO = ["requisito_muda", "restricao_nova", "parte_cai"] as const;
+/** A fala da mudança segue o teto da fala do desafio (2 frases, com folga). */
+export const MAX_FALA_DO_EMPECILHO = MAX_FALA_DO_DESAFIO;
+export const MAX_REQUISITO_DO_EMPECILHO = 50;
+
+/** Id da mudança de um problema gerado (o modelo não escolhe ids: o código dá o id a partir do problema). */
+export const idEmpecilhoDoProblema = (problemaId: string): string => `mudanca_${problemaId}`;
+
+/** O que o modelo escreve para a mudança (sem id). */
+export type EmpecilhoBruto = { tipo: string; fala: string; requisito: string; exige: string };
+
+/**
+ * Regras da mudança gerada: tipo do enum, fala não vazia, dentro do teto e terminando em pergunta (a bola fica com
+ * o candidato), requisito de 1 a 50 caracteres e `exige` preenchido. Função pura. Vazio = válida.
+ */
+export function errosDoEmpecilho(e: EmpecilhoBruto): string[] {
+  const erros: string[] = [];
+  if (!(TIPOS_EMPECILHO as readonly string[]).includes(e.tipo)) erros.push(`empecilho.tipo "${e.tipo}" não existe`);
+  if (vazio(e.fala)) erros.push("empecilho.fala vazia");
+  else {
+    if (e.fala.trim().length > MAX_FALA_DO_EMPECILHO) erros.push(`empecilho.fala com ${e.fala.trim().length} caracteres; o máximo é ${MAX_FALA_DO_EMPECILHO}`);
+    if (!e.fala.trim().endsWith("?")) erros.push("empecilho.fala deve terminar em pergunta (a bola fica com o candidato)");
+  }
+  const requisito = e.requisito.trim().length;
+  if (requisito === 0) erros.push("empecilho.requisito vazio");
+  else if (requisito > MAX_REQUISITO_DO_EMPECILHO) erros.push(`empecilho.requisito com ${requisito} caracteres; o máximo é ${MAX_REQUISITO_DO_EMPECILHO}`);
+  if (vazio(e.exige)) erros.push("empecilho.exige vazio");
+  return erros;
+}
+
+/**
+ * A mudança que o gerador devolveu, pronta para o problema (com o id dado pelo código), ou undefined quando falha
+ * em alguma regra. Inválida = descartada: o problema segue sem ela e a rota usa uma genérica do kit.
+ */
+export function empecilhoGerado(bruto: EmpecilhoBruto | undefined | null, id: string): Empecilho | undefined {
+  if (!bruto || errosDoEmpecilho(bruto).length) return undefined;
+  return {
+    id,
+    tipo: bruto.tipo as Empecilho["tipo"],
+    fala: bruto.fala.trim(),
+    requisito: bruto.requisito.trim(),
+    exige: bruto.exige.trim(),
+  };
+}
+
+/** Mudança vinda de um kit salvo (bruto, sem garantia de tipos): só vale se os quatro campos são texto e passam nas regras. */
+function empecilhoDeEntrada(entrada: unknown, problemaId: string): Empecilho | undefined {
+  if (!entrada || typeof entrada !== "object") return undefined;
+  const { id, tipo, fala, requisito, exige } = entrada as Record<string, unknown>;
+  if ([tipo, fala, requisito, exige].some((v) => typeof v !== "string")) return undefined;
+  const bruto = { tipo, fala, requisito, exige } as EmpecilhoBruto;
+  return empecilhoGerado(bruto, typeof id === "string" && eSlugSeguro(id) ? id : idEmpecilhoDoProblema(problemaId));
 }

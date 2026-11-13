@@ -6,16 +6,16 @@ import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import { pedirEmpecilho, pedirFechamento, perguntar } from "@/lib/sessao/servidor";
-import { DESPEDIDAS, TEMPO_PARA_FECHAR_MS } from "@/lib/totti/fechamento";
+import { DESPEDIDAS, duracaoEfetivaDaFaseS, limiarDoFechamentoNoQuadro, msAteFimDaFase } from "@/lib/totti/fechamento";
 import { criarDespedida } from "@/lib/voz/despedida";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
-import { contarComponentes, esperaDoEmpecilho } from "@/lib/sessao/empecilho";
+import { concluiuHaPouco, contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho, relaxaPreChecagens } from "@/lib/sessao/empecilho";
 import { limparTextoDigitado } from "@/lib/sessao/textoDigitado";
 import { montarFalaDoDesafio } from "@/lib/sessao/falaDoDesafio";
 import { comoFuncionaQuadro } from "@/lib/conversa/instrucoes";
 import { deveAguardarParaFalar, deveAnalisarLogoAposResposta, podeTomarTurno, respostaTerminouPorSilencio } from "@/lib/conversa/turnos";
 import { alvosDaAcao, criarMemoriaVisual, mapearAcoesVisuais, resumirGestosRecentes } from "@/lib/presenca/acoesVisuais";
-import { SILENCIO_INICIAL_S, SILENCIO_REPETIR_S, SILENCIO_S } from "@/lib/contracts";
+import { deveForcarAnalise } from "@/lib/sessao/silencio";
 import { definirSessaoDaVoz } from "@/lib/voz/cliente";
 import {
   analisar,
@@ -39,6 +39,7 @@ import type { MarcaDeFala } from "@/lib/presenca/vozSincronizada";
 import { interrupcaoAtrasada, motivoDoMomento, pausaDasMaosParaFalarMs, RITMO } from "@/lib/interrupcao/politica";
 import { LICENCA_DE_NOVO_MS, LICENCA_SEM_RESPOSTA_MS, liberouAPergunta, pedeParaEncerrar } from "@/lib/conversa/licenca";
 import {
+  DURACAO_PADRAO_MIN,
   estadoInicial,
   marcoDoCliente,
   podeAnalisar,
@@ -78,10 +79,6 @@ interface OpcoesDeFala {
 
 type Acao = { evento: EventoEntrevista; agora: number };
 
-/** Silêncios que disparam uma análise para o agente poder quebrá-los (valores compartilhados com o cérebro em lib/contracts.ts). */
-const SILENCIO_MS = SILENCIO_S * 1000;
-const SILENCIO_INICIAL_MS = SILENCIO_INICIAL_S * 1000;
-const REPETIR_SILENCIO_MS = SILENCIO_REPETIR_S * 1000;
 /** O enunciado vai em preto (a cor padrão do traço no Excalidraw); as anotações de pergunta, na cor do agente. */
 const COR_ENUNCIADO = "#1e1e1e";
 /** Silêncio depois de uma fala sem resposta do agente que encerra a resposta à pergunta ativa. */
@@ -198,6 +195,8 @@ export function useEntrevista(
   const ultimaFalaEm = useRef(0);
   /** Última vez que o agente começou ou terminou de falar (o empecilho espera um respiro). */
   const ultimaFalaDoAgenteEm = useRef<number | null>(null);
+  /** Quando o servidor disse que ele pediu tempo para pensar (conta como fala do Totti para o silêncio). */
+  const pedidoDeTempoEm = useRef<number | null>(null);
   const falaParcial = useRef(false);
   const agenteFalandoRef = useRef(false);
   const pedidosEmAndamento = useRef(0);
@@ -615,14 +614,21 @@ export function useEntrevista(
     };
   }, [quadro, sessao, enviar, registrar]);
 
-  // Tempo de cada fase.
+  // Tempo de cada fase. O APROFUNDAMENTO acaba no instante em que faltam 15% do tempo total (#129, decisão F), contado
+  // do começo da entrevista: o reinício deste efeito não empurra o fim (msAteFimDaFase). O servidor usa a mesma conta
+  // (duracaoEfetivaDaFaseS, lib/agente/sessao/estado.ts TICK).
   useEffect(() => {
     if (estado.fechamento || estado.fase === "FECHAMENTO" || encerrandoRef.current) return;
-    const segundos = sessao?.tempos[estado.fase];
-    if (!segundos) return;
-    const t = setTimeout(() => { if (!encerrandoRef.current) enviar({ tipo: "TEMPO_DA_FASE_ACABOU" }); }, segundos * 1000);
+    const ms = msAteFimDaFase(estado.fase, Date.now(), {
+      faseIniciadaEm: estado.faseIniciadaEm,
+      iniciadaEm: estado.iniciadaEm ?? null,
+      duracaoTotalS: (estado.duracaoMin ?? DURACAO_PADRAO_MIN) * 60,
+      duracaoFaseS: sessao?.tempos[estado.fase],
+    });
+    if (ms === undefined) return;
+    const t = setTimeout(() => { if (!encerrandoRef.current) enviar({ tipo: "TEMPO_DA_FASE_ACABOU" }); }, ms);
     return () => clearTimeout(t);
-  }, [estado.fase, estado.fechamento, sessao, enviar]);
+  }, [estado.fase, estado.fechamento, estado.faseIniciadaEm, estado.iniciadaEm, estado.duracaoMin, sessao, enviar]);
 
   // Apresentação: o agente fala e escreve o enunciado no quadro.
   useEffect(() => {
@@ -679,7 +685,7 @@ export function useEntrevista(
       .map((curto) => conversor.current.idReal(curto))
       .filter((id): id is string => !!id);
 
-    registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos });
+    registrar("pergunta", { numero: numeroPergunta, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos, status: p.status, escopo: p.escopo === true });
     void descarregarJa();
     const controle = new AbortController();
     let coreografia: Promise<void> | null = null;
@@ -779,7 +785,8 @@ export function useEntrevista(
       if (encerrandoRef.current || estadoAtual.current.fase === "ENCERRADA" || estadoAtual.current.fechamento) return;
       const { fala, requisito } = r.empecilho;
       empecilhoAnunciadoEm.current = Date.now();
-      ultimaAtividade.current = Date.now();
+      // O anúncio é fala do Totti: o silêncio do candidato conta a partir dela, não da atividade dele.
+      ultimaFalaDoAgenteEm.current = Date.now();
       revisaoDaConversa.current++;
       conversa.current.push({ quem: "agente", texto: fala });
       if (!requisitosCombinados.current.includes(requisito)) requisitosCombinados.current.push(requisito);
@@ -802,13 +809,25 @@ export function useEntrevista(
       if (Date.now() - ultimoPedidoEmpecilho.current < INTERVALO_PEDIDO_EMPECILHO_MS) return;
       const e = estadoAtual.current;
       const agora = Date.now();
+      // Garantia dos 60% do tempo total (decisão G, lib/sessao/empecilho.ts): depois dela a mudança sai com pausa
+      // curta e sem pergunta ativa, sem exigir a fração da fase nem o quadro livre.
+      const duracaoTotalS = (e.duracaoMin ?? DURACAO_PADRAO_MIN) * 60;
+      const garantia = emGarantiaDoEmpecilho({ agora, iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS });
+      // Conclusão recente (decisão F) relaxa as mesmas pré-checagens que a garantia (ver relaxaPreChecagens).
+      const relaxa = relaxaPreChecagens({ garantia, ultimaConclusaoEm: e.ultimaConclusaoEm, agora });
       // Sem cortar ninguém: pausa do candidato, agente quieto, nada pendente, nenhuma pergunta no ar.
-      if (motivoDoMomento({ maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current }) !== null) return;
-      if (e.plin !== "LIVRE" || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
+      const parado = { maosParadasHaMs: agora - ultimoDesenhoEm.current, falaHaMs: agora - ultimaFalaEm.current };
+      if (motivoDoMomento(relaxa ? { ...parado, marco: true } : parado) !== null) return;
+      if ((relaxa ? e.plin === "PERGUNTA_ATIVA" : e.plin !== "LIVRE") || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 })) return;
-      const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS: sessao.tempos[e.fase],
-        jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current };
+      // A fração da fase (esperaDoEmpecilho) usa a mesma duração efetiva do timer da fase (#129, decisão F).
+      const duracaoDaFaseS = duracaoEfetivaDaFaseS(e.fase, { faseIniciadaEm: e.faseIniciadaEm, iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, duracaoFaseS: sessao.tempos[e.fase] });
+      const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS,
+        jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current,
+        iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, ultimaPerguntaEm: e.ultimaPerguntaEm ?? null,
+        // Ele disse que terminou há pouco: a conclusão conta como brecha para a mudança (decisão F).
+        conclusaoRecente: concluiuHaPouco(e.ultimaConclusaoEm, agora) };
       // O grafo só é montado quando o resto já permite (é a parte cara da conta).
       if (esperaDoEmpecilho({ ...base, componentes: Number.MAX_SAFE_INTEGER })) return;
       const componentes = contarComponentes(conversor.current.converter(quadro.api.getSceneElements()).texto);
@@ -833,17 +852,20 @@ export function useEntrevista(
   }, [estado.fase]);
 
   // Silêncio total do candidato (sem desenhar nem falar): força uma análise, e o modelo decide se quebra o silêncio.
+  // A regra está em lib/sessao/silencio.ts (deveForcarAnalise): depois de uma fala do Totti, espera SILENCIO_SEM_ACAO_S e
+  // quebra uma vez por período de silêncio.
   const ultimoDisparoParado = useRef(Date.now());
   useEffect(() => {
     const id = setInterval(() => {
       const e = estadoAtual.current;
-      // No FECHAMENTO também: sem isso, nada disparava análise e a pergunta final quase nunca saía.
-      const fasesComSilencio = e.fase === "REQUISITOS" || e.fase === "ALTO_NIVEL" || e.fase === "APROFUNDAMENTO" || e.fase === "FECHAMENTO";
-      const referencia = Math.max(ultimaAtividade.current, ultimoDisparoParado.current);
-      // Primeira vez: SILENCIO_MS depois da última atividade. Se o silêncio continua, só volta a cada REPETIR_SILENCIO_MS.
-      const primeiro = e.fase === "REQUISITOS" ? SILENCIO_INICIAL_MS : SILENCIO_MS;
-      const limite = ultimoDisparoParado.current > ultimaAtividade.current ? REPETIR_SILENCIO_MS : primeiro;
-      if (fasesComSilencio && e.plin === "LIVRE" && Date.now() - referencia > limite) {
+      if (e.plin === "LIVRE" && deveForcarAnalise({
+        agora: Date.now(),
+        fase: e.fase,
+        ultimaAtividade: ultimaAtividade.current,
+        ultimaFalaDoAgente: ultimaFalaDoAgenteEm.current,
+        pedidoDeTempoEm: pedidoDeTempoEm.current,
+        ultimoDisparo: ultimoDisparoParado.current,
+      })) {
         ultimoDisparoParado.current = Date.now();
         gatilho.current?.dispararAgora();
       }
@@ -1055,6 +1077,7 @@ export function useEntrevista(
           ...(perguntaCortada.current ? { pergunta_cortada: true } : {}),
         }, sinal);
         perguntaCortada.current = false;
+        if (r.pediuTempo) pedidoDeTempoEm.current = Date.now();
         if (sinal?.aborted) throw new DOMException("Substituída por uma fala nova.", "AbortError");
         // Só conta como enviada a foto que chegou ao Totti: sem ela (exportação lenta), a próxima fala tenta de novo.
         if (imagem_base64) desenhoDaUltimaFoto.current = desenho;
@@ -1203,12 +1226,14 @@ export function useEntrevista(
   useEffect(() => {
     if (!sessao || !iniciadaEm || !usarServidor()) return;
     const duracaoMs = Object.values(sessao.tempos).reduce<number>((s, t) => s + (t ?? 0), 0) * 1000;
+    // O mesmo limiar do servidor (decisão F): uma fração da duração da vaga (lib/totti/fechamento.ts).
+    const limiarMs = limiarDoFechamentoNoQuadro(duracaoMs);
     let ultimaTentativa = 0;
     const timer = setInterval(() => {
       const e = estadoAtual.current;
       if (encerrandoRef.current || e.fase === "ENCERRADA" || e.fechamento || e.plin !== "LIVRE" || pedindoFechamento.current) return;
       const agora = Date.now();
-      if (duracaoMs - (agora - iniciadaEm) > TEMPO_PARA_FECHAR_MS || agora - ultimaTentativa < 5000) return;
+      if (duracaoMs - (agora - iniciadaEm) > limiarMs || agora - ultimaTentativa < 5000) return;
       if (!podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current, falaParcial: falaParcial.current,
         agenteFalando: agenteFalandoRef.current, aguardandoResposta: pedidosEmAndamento.current > 0 || preparandoVozRef.current })) return;
       pedindoFechamento.current = true;

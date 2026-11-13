@@ -166,6 +166,14 @@ export function reacaoNeutra(falasDoTotti: string[] = []): string {
   return REACOES_NEUTRAS.find((r) => reconhecimentoQueAbre(r) !== ultima) ?? REACOES_NEUTRAS[0];
 }
 
+/** Reações ao pedido de tempo ("calma, deixa eu pensar"): curtas, sem convite. Só a primeira vez na entrevista. */
+const REACOES_AO_PENSAR = ["Claro, fica à vontade.", "Claro, sem pressa."];
+
+/** A reação ao pedido de tempo que o Totti ainda não disse. */
+export function reacaoAoPensar(falasDoTotti: string[] = []): string {
+  return falaNaoRepetida(REACOES_AO_PENSAR, falasDoTotti);
+}
+
 /**
  * Reação vazia repetida. "Hm." atrás de "Hm." vira bordão na voz: a segunda reação vazia seguida não sai (a vez já
  * é dele). E a fala não abre com o mesmo reconhecimento da fala anterior, nem com outro quando a sala acabou de
@@ -350,6 +358,55 @@ const CONDUCAO = /\b(quer|queria|gostaria|prefere|deseja|o que mais|algo mais|ma
 export function perguntaDeConducao(fala: string): boolean {
   const pergunta = frasesDe(fala.trim()).filter((f) => f.trim().endsWith("?")).at(-1);
   return !!pergunta && CONDUCAO.test(pergunta);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Por quê
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Perguntas de porquê para a escolha curta dele (`pedePorque`, lib/totti/turno.ts), quando a fala não pergunta nada. */
+export const PERGUNTAS_DE_PORQUE = ["Por quê?", "Por que essa opção?", "E por que essa e não a outra?"];
+
+/** A última pergunta da fala é de porquê ("Por que no backend?", "Por quê?"). */
+export function ePerguntaDePorque(fala: string): boolean {
+  const pergunta = frasesDe(fala.trim()).filter((f) => f.trim().endsWith("?")).at(-1);
+  return !!pergunta && /\bpor que\b/.test(normalizar(pergunta));
+}
+
+/**
+ * A pergunta de porquê que o Totti ainda não fez: a que não é a última pergunta de nenhuma das falas recentes. Só a
+ * pergunta conta (a reação que vem antes não), porque o "Tá. Por quê?" de agora não pode voltar como "Por quê?".
+ */
+export function perguntaDePorque(falasDoTotti: string[]): string {
+  const ultimasPerguntas = falasDoTotti.map((t) => frasesDe(t.trim()).filter((f) => f.endsWith("?")).at(-1) ?? "");
+  return falaNaoRepetida(PERGUNTAS_DE_PORQUE, ultimasPerguntas);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Português claro
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Termos em inglês que o Totti troca pelo português na fala (decisão H, #129). Só estes: o resto (Kafka, cache, API)
+ * é o nome usual da área e fica como está.
+ */
+const TROCAS_DE_TERMO: Record<string, string> = {
+  courier: "entregador", couriers: "entregadores", rider: "entregador", riders: "entregadores",
+};
+
+/**
+ * A fala com os termos da tabela trocados pelo português ("courier" → "entregador"). Palavra inteira, sem diferença
+ * de maiúscula, e a inicial maiúscula da palavra é mantida. Não troca um termo que a descrição da vaga usa
+ * (`termosDaVaga`): ali o nome é o que a empresa escreveu. Sem a descrição, troca todos.
+ */
+export function emPortugues(texto: string, termosDaVaga = ""): string {
+  const daVaga = new Set(normalizar(termosDaVaga).split(" "));
+  return texto.replace(/[\p{L}\p{N}_]+/gu, (palavra) => {
+    const minuscula = palavra.toLowerCase();
+    const troca = TROCAS_DE_TERMO[minuscula];
+    if (!troca || daVaga.has(minuscula)) return palavra;
+    return palavra[0] !== palavra[0].toLowerCase() ? comMaiuscula(troca) : troca;
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------------

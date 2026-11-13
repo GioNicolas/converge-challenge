@@ -28,6 +28,11 @@ const GRAFO = [
   "- [s1] Novo usuário Número: Senha: → Contatos",
 ].join("\n");
 
+/** A mudança de cenário que já saiu (o encerramento só é oferecido depois dela, decisão F, #129). */
+const MUDANCA_ANUNCIADA: NonNullable<EstadoSessao["empecilho"]> = {
+  id: "teste_mudanca", fala: "Uma mudança no problema: o volume cresceu dez vezes.", requisito: "Mudança: volume 10x", exige: "Rever gargalos.",
+  anunciadoEm: AGORA - 5 * 60_000, fase: "ALTO_NIVEL", forcado: false,
+};
 const JA_PERGUNTOU = "Se cada pessoa num grupo de cem mil faz uma requisição direta pro banco pra buscar mensagem, como você imagina que o banco se comporta com esse volume?";
 const REPETIDA = "Se a gente mantiver essa ida direta ao banco para cada pessoa do grupo buscar mensagem, como você escalaria essa parte para aguentar o volume?";
 
@@ -121,11 +126,15 @@ describe("#84: fechamento do quadro na sessão 4e38b42f", () => {
     return perguntar({ llm, kit: kitDemo, problema, log: () => {}, versao: "v2" as const }, estado,
       { fase: estado.fase, texto, sessao_id: SESSAO, grafo: DESENHO, desenhoParadoHaS: 10, ...extra }, agora).then((r) => ({ ...r, llm }));
   };
-  /** 12 minutos de entrevista, no alto nível, com uma dúvida da análise esperando a vez. */
+  /**
+   * 12 minutos de entrevista, no alto nível, com uma dúvida da análise esperando a vez. A mudança de cenário já saiu:
+   * sem ela, "terminei" é barrado (decisão F, #129), e estes testes são do fechamento, não da barra.
+   */
   const antesDeTerminar = () => estadoEm("ALTO_NIVEL", {
     iniciadaEm: AGORA - 12 * 60_000,
+    empecilho: MUDANCA_ANUNCIADA,
     plin: "PLIN_PENDENTE",
-    perguntaPendente: { status: "duvida", pergunta: PENDENTE, nota: "Entre servidores?", elementos: ["r2"], visual: [{ tipo: "circular", alvo: "r2" }], degrau: null, observacoes: [], criadoEm: AGORA - 20_000 },
+    perguntaPendente: { status: "duvida", parteFechada: true, escopo: false, pergunta: PENDENTE, nota: "Entre servidores?", elementos: ["r2"], visual: [{ tipo: "circular", alvo: "r2" }], degrau: null, observacoes: [], criadoEm: AGORA - 20_000 },
   });
 
   it("\"terminei\" → anúncio e primeira pergunta → respostas → última palavra → despedida", async () => {
@@ -211,7 +220,7 @@ describe("#84: fechamento do quadro na sessão 4e38b42f", () => {
   });
 
   it("primeira conclusão sem o caminho principal: avisa que vai olhar; na segunda, fecha", async () => {
-    const primeira = await turno(estadoEm("APROFUNDAMENTO"), "Acho que eu terminei aqui.", { responder: true, texto: "Tudo bem.", concluiu: true }, AGORA, { grafo: GRAFO });
+    const primeira = await turno(estadoEm("APROFUNDAMENTO", { empecilho: MUDANCA_ANUNCIADA }), "Acho que eu terminei aqui.", { responder: true, texto: "Tudo bem.", concluiu: true }, AGORA, { grafo: GRAFO });
     assert.ok(AVISOS_DE_QUE_VAI_OLHAR.includes(primeira.texto), primeira.texto);
     assert.equal(primeira.fechamento, undefined);
     // Depois de concluído, o convite de seguir desenhando não passa, mesmo sem fechamento.
@@ -225,7 +234,9 @@ describe("#84: fechamento do quadro na sessão 4e38b42f", () => {
   });
 
   it("pedido explícito de encerrar: sai a despedida do núcleo, sem perguntas finais", async () => {
-    const r = await turno(estadoEm("APROFUNDAMENTO"), "Acho que é isso, pode encerrar a entrevista.", { responder: false, texto: "", encerrar: true }, AGORA);
+    // Com urgência ("tenho que sair agora"), o pedido vai direto à despedida. Sem urgência e sem critérios no plano, o
+    // quadro vai à última palavra (decisão revisada, #129; ver perguntar.test.ts).
+    const r = await turno(estadoEm("APROFUNDAMENTO"), "Acho que é isso, pode encerrar a entrevista.", { responder: false, texto: "", encerrar: true, urgente: true }, AGORA);
     assert.equal(r.encerrar, true);
     assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
     assert.equal(r.fechamento, "encerrada");
@@ -300,7 +311,7 @@ describe("peça citada é marcada", () => {
 
   it("a análise que devolve visual vazio com elementos sai com a marca", () => {
     const r = filtrarResposta(estadoEm("ALTO_NIVEL"), {
-      status: "duvida", pergunta: "Por que os contatos ficam nesse banco?", nota: "Contatos no banco?", elementos: ["r3"], visual: [], degrau: null, observacoes: [],
+      status: "duvida", parteFechada: true, escopo: false, pergunta: "Por que os contatos ficam nesse banco?", nota: "Contatos no banco?", elementos: ["r3"], visual: [], degrau: null, observacoes: [],
     }, extrairIdsDoGrafo(GRAFO), AGORA);
     assert.deepEqual(r.visual, [{ tipo: "marcar", alvo: "r3" }]);
   });
@@ -314,7 +325,7 @@ describe("peça citada é marcada", () => {
 
 describe("livro de observações", () => {
   it("a mesma observação com outras palavras não entra de novo", () => {
-    const obs = (evidencia: string, criterio = "requisitos") => ({ status: "ok" as const, pergunta: null, nota: null, elementos: [], degrau: null,
+    const obs = (evidencia: string, criterio = "requisitos") => ({ status: "ok" as const, parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [{ criterio, sinal: "negativo" as const, espontaneo: false, evidencia }] });
     let e = estadoEm("ALTO_NIVEL");
     for (const evidencia of [

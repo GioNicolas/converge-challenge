@@ -12,7 +12,8 @@ import { gerarAbertura, PRAZO_ABERTURA_MS } from "../abertura";
 import { analisar, assinaturaDaAnalise, perguntaBloqueadaNaAnalise, refiltrarComEstadoAtual, respostaSilencio } from "../analisar";
 import { dadosPublicosDoProblema, resolverAvaliacao } from "../kits";
 import type { LlmCliente } from "../llm/cliente";
-import type { Kit, Problema } from "../kits/tipos";
+import type { Empecilho, Kit, Problema } from "../kits/tipos";
+import { escolherEmpecilhoGenerico, temMudancaPrevista } from "../kits/empecilhos-genericos";
 import { apresentacaoReserva, DESPEDIDA_RESERVA, type Abertura, type ContextoAbertura } from "../prompts/abertura";
 import { etapasEmTexto } from "../prompts/contexto";
 import { escalarTempos, planoDaConfig } from "../plano";
@@ -20,19 +21,23 @@ import { avaliacaoDaConfig } from "../kits/questao-da-vaga";
 import { perguntar, type PassoNaSessao } from "../perguntar";
 import { gatilhoDoFechamento, iniciarFechamento, proximoPasso, type EtapaDoFechamento } from "../../totti/fechamento";
 import { candidatasDoQuadro, perguntasJaOuvidas } from "../fechamento";
-import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
+import { pecasDoGrafo } from "../sessao/fechamento";
+import { parametrosDoFechamentoNoQuadro } from "../sessao/politica";
+import { duracaoEfetivaDaFaseS } from "../../totti/fechamento";
+import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, criteriosSemEvidencia, duracaoTotalS, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
   EsquemaImagemOpcional,
   EsquemaFase,
   EsquemaPedidoAnalise,
+  STATUS_ANALISE,
   type PedidoAnalise,
   type RespostaAnalise,
 } from "../sessao/tipos";
 import { kvPadrao } from "@/lib/storage/kv";
 import { PRAZO_ANALISE_DO_DESENHO_MS } from "@/lib/contracts";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
-import { contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
+import { concluiuHaPouco, contarComponentes, esperaDoEmpecilho, esperaDoEmpecilhoForcado } from "../../sessao/empecilho";
 import { registrarNoIndice } from "../resultados";
 import { contexto } from "./contexto";
 import { devHabilitado, finalizarEmSegundoPlano } from "./scorecard";
@@ -220,6 +225,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
   let resposta: RespostaAnalise = respostaSilencio();
   let origem = "sem_llm";
   let usoAnalise: Record<string, unknown> | undefined;
+  let abriuBrecha = false;
   const assinatura = assinaturaDaAnalise(pedido, estado.conversa.length + pedido.conversa_recente.length);
   const bloqueadaAgora = perguntaBloqueadaNaAnalise(estado, pedido, t0);
 
@@ -237,6 +243,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     if (r) {
       resposta = r.resposta;
       origem = r.diagnostico.origem;
+      abriuBrecha = r.diagnostico.ajustes.includes("abre_brecha_empecilho");
       const u = r.diagnostico.uso;
       if (u) usoAnalise = {
         modelo: u.modelo, provedor: u.provedor, reserva_disparada: u.reservaDisparada ?? false, ms: r.diagnostico.ms,
@@ -255,13 +262,15 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     const fim = ctx.agora();
     resposta = refiltrarComEstadoAtual(novo, resposta, pedido, t0, fim);
     const anteriores = novo.observacoes.length;
-    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, fim).estado;
+    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta, pecas: pecasDoGrafo(pedido.grafo) }, fim).estado;
     novo = {
       ...novo,
       ultimaAnalise: { assinatura, bloqueada: bloqueadaAgora },
       observacoes: novo.observacoes.map((o, i) => i < anteriores ? o : {
         ...o, desenho: { horario: new Date(t0).toISOString(), grafo: pedido.grafo },
       }),
+      // A brecha da mudança (decisão G) conta para o próximo ciclo: ver precisaAbrirBrechaDaMudanca.
+      ...(abriuBrecha ? { brechaEmpecilhoEm: fim } : {}),
     };
   } else if (origem === "sem_novidade") {
     novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, ctx.agora()).estado;
@@ -281,6 +290,9 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     degrau: resposta.degrau,
     observacoes: resposta.observacoes,
     ...(resposta.avancar_fase ? { avancar_fase: true } : {}),
+    parteFechada: resposta.parteFechada,
+    // O quadro precisa dele para o mesmo ritmo do servidor (intervalo furado no redirecionamento de escopo).
+    escopo: resposta.escopo,
   } satisfies RespostaAnalise;
   // Mais a etapa do fechamento comum, quando ele está em andamento: sem ela, o quadro sabe que ele foi suspenso.
   const fechamento = etapaDoFechamento(novo);
@@ -354,7 +366,9 @@ export async function fechamentoHandler(req: Request, { params }: ParamsId): Pro
     return json({ ...silencio, responder: !!texto, texto, fechamento: nucleo.etapa, encerrar: nucleo.etapa === "encerrada" });
   }
   const restante = tempoRestanteMs(estado, agora);
-  const gatilho = gatilhoDoFechamento({ pediuEncerrar: corpo.dados.gatilho === "pediu_encerrar", tempoRestanteMs: restante });
+  // O mesmo critério do quadro (decisão F): o relógio fecha no limiar da vaga, e o botão sem a barra da sala.
+  const gatilho = gatilhoDoFechamento({ pediuEncerrar: corpo.dados.gatilho === "pediu_encerrar", tempoRestanteMs: restante,
+    ...parametrosDoFechamentoNoQuadro(estado, agora, alvo) });
   if (!gatilho || estado.fase === "AGUARDANDO" || estado.fase === "APRESENTACAO") return json(silencio);
   const inicial = iniciarFechamento({ sala: "quadro", gatilho, tempoRestanteMs: restante,
     candidatas: candidatasDoQuadro(alvo.kit, alvo.problema, estado, agora), perguntasJaFeitas: perguntasJaOuvidas(estado) });
@@ -390,6 +404,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   const { fase, texto } = corpo.dados;
   let resposta: Pick<Awaited<ReturnType<typeof perguntar>>, "responder" | "texto" | "requisito" | "concluiu" | "seguimento" | "encerrar" | "visual" | "perguntou"> = { responder: false, texto: "", requisito: null, concluiu: false };
   let desfecho: Desfecho | null = null;
+  let pediuTempo: { reagiu: boolean } | undefined;
   let passoDoFechamento: PassoNaSessao | undefined;
   let gravandoUso: Promise<unknown> | undefined;
   // A fala substitui a anterior (ele continuou antes de ouvir a resposta): a anterior e a resposta não ouvida saem.
@@ -421,6 +436,7 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
       ...(r.seguimento ? { seguimento: true } : {}), ...(r.encerrar ? { encerrar: true } : {}),
       ...(r.visual !== undefined ? { visual: r.visual } : {}), ...(r.perguntou ? { perguntou: true } : {}) };
     desfecho = r.desfecho;
+    pediuTempo = r.pediuTempo;
     passoDoFechamento = r.passoDoFechamento;
   }
 
@@ -438,6 +454,8 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
     // suspenso, e a fala dele (a pergunta final seguinte, a despedida) já não vale. O quadro fica quieto.
     if (!novo.fechamento) resposta = { responder: false, texto: "", requisito: null, concluiu: resposta.concluiu };
   }
+  // Ele pediu tempo para pensar: a bola segue com ele até ele agir (lib/agente/sessao/politica.ts).
+  if (pediuTempo) novo = transicionar(novo, { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: pediuTempo.reagiu }, agora).estado;
   if (resposta.responder) novo = transicionar(novo, { tipo: "AGENTE_FALOU", texto: resposta.texto, ...(resposta.perguntou ? { perguntou: true } : {}) }, agora).estado;
   // Como ele reagiu à pergunta do agente fica na pergunta: "não sei" e "pula" encerram o assunto para a análise.
   const numeroDaPergunta = perguntaRespondida(novo, corpo.dados.pergunta_ativa);
@@ -457,7 +475,9 @@ export async function perguntarHandler(req: Request, { params }: ParamsId): Prom
   await gravandoUso;
   // `fechamento`: a etapa do fechamento comum depois deste turno. Ausente: a entrevista não está fechando (se o
   // quadro achava que estava, é porque ele foi suspenso).
-  return json(fechamento ? { ...resposta, fechamento } : resposta);
+  // Ele pediu tempo: o quadro guarda a hora (o pedido conta como fala do Totti para o silêncio, lib/sessao/silencio.ts).
+  const pediu = pediuTempo ? { pediuTempo: true } : {};
+  return json(fechamento ? { ...resposta, ...pediu, fechamento } : { ...resposta, ...pediu });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -481,11 +501,22 @@ function motivoDoEmpecilho(estado: EstadoSessao, grafo: string, forcar: boolean,
     agora,
     fase: estado.fase,
     faseIniciadaEm: estado.faseIniciadaEm,
-    duracaoDaFaseS: estado.tempos[estado.fase],
+    // Duração efetiva da fase (#129): no APROFUNDAMENTO, a fração é sobre o tempo até os 85% do total.
+    duracaoDaFaseS: duracaoEfetivaDaFaseS(estado.fase, {
+      faseIniciadaEm: estado.faseIniciadaEm,
+      iniciadaEm: estado.iniciadaEm ?? null,
+      duracaoTotalS: duracaoTotalS(estado),
+      duracaoFaseS: estado.tempos[estado.fase],
+    }),
     jaAnunciado,
     respondendoPergunta: estado.plin === "PERGUNTA_ATIVA",
     componentes: contarComponentes(grafo),
     ultimaFalaDoAgenteEm: ultimaDoAgente?.em ?? null,
+    iniciadaEm: estado.iniciadaEm ?? null,
+    duracaoTotalS: duracaoTotalS(estado),
+    ultimaPerguntaEm: estado.ultimaPerguntaEm,
+    // Ele disse que terminou há pouco: a conclusão conta como brecha para a mudança (decisão F).
+    conclusaoRecente: concluiuHaPouco(estado.ultimaConclusaoEm, agora),
   });
 }
 
@@ -508,8 +539,7 @@ export async function empecilhoHandler(req: Request, { params }: ParamsId): Prom
   if (!sessao) return notFound();
   const alvo = await resolverAvaliacao(sessao.avaliacaoId);
   if (!alvo) return erro(500, "avaliação da sessão indisponível");
-  const empecilho = alvo.problema.empecilho;
-  if (!empecilho) return json({ empecilho: null, motivo: "problema sem mudança prevista" });
+  if (!temMudancaPrevista(alvo.kit, alvo.problema)) return json({ empecilho: null, motivo: "problema sem mudança prevista" });
 
   const agora = ctx.agora();
   const estado = sincronizarFase(sessao.estado, corpo.dados.fase, agora);
@@ -520,6 +550,8 @@ export async function empecilhoHandler(req: Request, { params }: ParamsId): Prom
     return json({ empecilho: null, motivo });
   }
 
+  // A mudança do problema (gerada ou escrita à mão); sem ela, a genérica do kit para a cobertura do momento.
+  const empecilho: Empecilho = alvo.problema.empecilho ?? escolherEmpecilhoGenerico(criteriosSemEvidencia(estado));
   const novo = transicionar(estado, {
     tipo: "EMPECILHO_ANUNCIADO",
     empecilho: { id: empecilho.id, fala: empecilho.fala, requisito: empecilho.requisito, exige: empecilho.exige, forcado: forcar },
@@ -580,8 +612,23 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       const fase = EsquemaFase.safeParse(d.fase);
       return fase.success ? [{ tipo: "SINCRONIZAR_FASE", fase: fase.data }] : [];
     }
-    case "pergunta":
-      return [{ tipo: "PLIN_CLICADO" }];
+    case "pergunta": {
+      // O quadro manda o texto que falou. Sem texto, o clique segue como antes (só vale com dúvida pendente).
+      const pergunta = typeof d.pergunta === "string" ? d.pergunta.trim().slice(0, 2000) : "";
+      if (!pergunta) return [{ tipo: "PLIN_CLICADO" }];
+      const status = STATUS_ANALISE.find((s) => s === d.status);
+      const elementos = Array.isArray(d.elementos) ? d.elementos.filter((x): x is string => typeof x === "string") : [];
+      return [{
+        tipo: "PLIN_CLICADO",
+        registro: {
+          pergunta,
+          nota: typeof d.nota === "string" ? d.nota : null,
+          elementos,
+          ...(status ? { status } : {}),
+          ...(d.escopo === true ? { escopo: true } : {}),
+        },
+      }];
+    }
     case "resposta":
       return [
         {

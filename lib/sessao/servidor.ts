@@ -20,7 +20,7 @@ const EsquemaSessao: z.ZodType<Sessao> = z.object({
   despedida: z.string().nullable().optional(),
 });
 
-const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false), seguimento: z.boolean().default(false), encerrar: z.boolean().default(false), visual: EsquemaVisualOpcional, fechamento: z.enum(ETAPAS_DO_FECHAMENTO).optional() });
+const EsquemaPergunta = z.object({ responder: z.boolean(), texto: z.string(), requisito: z.string().nullable(), concluiu: z.boolean().default(false), seguimento: z.boolean().default(false), encerrar: z.boolean().default(false), pediuTempo: z.boolean().default(false), visual: EsquemaVisualOpcional, fechamento: z.enum(ETAPAS_DO_FECHAMENTO).optional() });
 export type RespostaPerguntar = z.infer<typeof EsquemaPergunta>;
 const EsquemaAlinhamento: z.ZodType<Alinhamento> = z.object({
   characters: z.array(z.string()),
