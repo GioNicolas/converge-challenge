@@ -466,7 +466,7 @@ describe("falaFormatoIndisponivel", () => {
   it("fala fixa em live coding, terminando com pergunta de decisão", () => {
     assert.equal(
       falaFormatoIndisponivel("live_coding"),
-      "System design ainda não está disponível nesta versão, então a entrevista segue em live coding. Prefere seguir assim ou mudar alguma coisa?",
+      "System design ainda não está disponível nesta versão, então a entrevista segue em live coding. Posso seguir assim?",
     );
   });
 });
@@ -514,6 +514,12 @@ describe("decisões: escolha, recusa ou incerto", () => {
     assert.equal(decidirResumo({ pediu_mudanca: 1 }), "mudanca");
     assert.equal(decidirResumo({ aprovou_resumo: 1, pediu_mudanca: 1 }), "mudanca");
     assert.equal(decidirResumo({ aprovou_resumo: 0.2 }), "incerto");
+  });
+
+  it("resumo: escolher ajustar ('quero') vale sobre a aprovação, e pedir a mudança vale sobre os dois", () => {
+    assert.equal(decidirResumo({ quer_ajustar: 1, aprovou_resumo: 1 }), "ajustar");
+    assert.equal(decidirResumo({ quer_ajustar: 1, pediu_mudanca: 1 }), "mudanca");
+    assert.equal(decidirResumo({ quer_ajustar: 0.3, aprovou_resumo: 1 }), "aprovou");
   });
 
   it("oferta em curso sem decisão fica pendente; com decisão ou com dúvida dela, não", () => {
@@ -670,5 +676,58 @@ describe("pedir o que faltou", () => {
   it("a pergunta de contexto é aberta, não de sim ou não", () => {
     assert.doesNotMatch(PERGUNTA_CONTEXTO, /^(tem|existe|há)\b/i);
     assert.match(PERGUNTA_CONTEXTO, /^O que/);
+  });
+});
+
+describe("depois do resumo: 'quero' escolhe ajustar (issue #127)", () => {
+  const resumo = { tipo: "resumo_final" as const };
+  const depoisDoResumo = (extra: Partial<EstadoPlanejamento>) =>
+    estado({
+      focus: [{ area: "tecnico", weight: 1 }],
+      mode: "live_coding",
+      resumos: 1,
+      ultimoPasso: resumo,
+      cobertura: { confirmou_inicio: 1, eliminatorios: 1, criterio_tecnico: 1 },
+      ...extra,
+    });
+
+  it("'quero' sem dizer o quê pergunta o que mudar, em vez de encerrar, mesmo com a aprovação lida", () => {
+    assert.deepEqual(proximoPasso(depoisDoResumo({ sinais: { quer_ajustar: 1 } })), { tipo: "perguntar_ajuste" });
+    assert.deepEqual(proximoPasso(depoisDoResumo({ sinais: { quer_ajustar: 0.9, aprovou_resumo: 0.8 } })), { tipo: "perguntar_ajuste" });
+  });
+
+  it("'pode finalizar' encerra", () => {
+    assert.deepEqual(proximoPasso(depoisDoResumo({ sinais: { aprovou_resumo: 1, quer_ajustar: 0.1 } })), { tipo: "encerrar" });
+  });
+
+  it("'quero tirar a dica' (disse o quê) segue o fluxo de mudança, sem perguntar o que mudar", () => {
+    const passo = proximoPasso(depoisDoResumo({ sinais: { quer_ajustar: 1, pediu_mudanca: 1, quer_sem_dicas: 1, aprovou_resumo: 0.7 } }));
+    assert.deepEqual(passo, { tipo: "resumo_final", revisao: true });
+  });
+
+  it("a pergunta de ajuste conta, e depois de duas o planejador não pergunta de novo nem encerra", () => {
+    const depois = aplicarPasso(planoInicial(), { tipo: "perguntar_ajuste" });
+    assert.equal(depois.perguntasPorTopico.ajuste, 1);
+    assert.equal(depois.ultimoPasso?.tipo, "perguntar_ajuste");
+    const duas = depoisDoResumo({ sinais: { quer_ajustar: 1 }, perguntasPorTopico: { confirmou_inicio: 1, ajuste: 2 } });
+    assert.notEqual(proximoPasso(duas).tipo, "perguntar_ajuste");
+    assert.notEqual(proximoPasso(duas).tipo, "encerrar");
+  });
+
+  it("depois de 'o que você quer mudar?', a mudança dita vira revisão e a aprovação encerra", () => {
+    const perguntou = { tipo: "perguntar_ajuste" as const };
+    const mudou = depoisDoResumo({ ultimoPasso: perguntou, sinais: { pediu_mudanca: 1, quer_sem_dicas: 1 } });
+    assert.deepEqual(proximoPasso(mudou), { tipo: "resumo_final", revisao: true });
+    assert.deepEqual(proximoPasso(depoisDoResumo({ ultimoPasso: perguntou, sinais: { aprovou_resumo: 1 } })), { tipo: "encerrar" });
+  });
+
+  it("'quero' antes do resumo não vira pergunta de ajuste", () => {
+    const passo = proximoPasso(estado({ focus: [{ area: "tecnico", weight: 1 }], mode: "live_coding", sinais: { quer_ajustar: 1 } }));
+    assert.notEqual(passo.tipo, "perguntar_ajuste");
+  });
+
+  it("resposta sem sentido depois de 'o que você quer mudar?' fica pendente de decisão (vai ao modelo)", () => {
+    const e = depoisDoResumo({ ultimoPasso: { tipo: "perguntar_ajuste" } });
+    assert.deepEqual(decisaoPendente(e, proximoPasso(e), false), { tipo: "resumo" });
   });
 });

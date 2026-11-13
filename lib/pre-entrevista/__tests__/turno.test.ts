@@ -6,7 +6,7 @@ import type { Classificacao } from "../classificador";
 import { conduzirTurno, desfazerValor, naoEntendidasSeguidas } from "../turno";
 import { falasParaLer } from "../sessoes";
 import { ErroChat } from "../llm";
-import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, type LeituraFalsa } from "./apoio";
+import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, sessaoComDecisaoAberta, sessaoRecemAberta, type LeituraFalsa } from "./apoio";
 
 const PERGUNTA = "Se o tempo acabar, o que conta mais: uma solução funcionando ou o caminho bem explicado?";
 const CONTEXTO = "Tem alguma coisa que reprova direto pra vocês?";
@@ -14,7 +14,7 @@ const RESUMO = "Vai ser live coding pra nível pleno. Vou olhar como ele escreve
 
 /** Conduz uma conversa com as falas dela, as leituras do Jev e as respostas do modelo, uma por turno. */
 async function conversar(turnos: Array<{ ela: string; jev?: LeituraFalsa; totti: string }>, classificacao: Classificacao = CLASSIFICACAO) {
-  const sessao = sessaoAberta([], classificacao);
+  const sessao = sessaoComDecisaoAberta([], classificacao);
   const falso = chatFalso(...turnos.map((t) => t.totti));
   const deps = { chat: falso.chat, ...jevFalso(...turnos.map((t) => t.jev ?? {})) };
   const resultados = [];
@@ -44,7 +44,7 @@ describe("conduzirTurno: sem movimento, nada muda", () => {
     assert.equal(resultados[1].passo.tipo, "resumo_final");
     assert.equal(sessao.plano.resumos, 1);
     assert.equal(sessao.resumo?.texto, resultados[1].fala);
-    assert.match(resultados[1].fala, /posso finalizar\?$/);
+    assert.match(resultados[1].fala, /posso finalizar( assim| com isso)?\?$/i);
   });
 });
 
@@ -123,7 +123,6 @@ describe("conduzirTurno: repetir e esclarecer não mudam o plano", () => {
     };
     const opcoes = "São três caminhos: trocar pra system design, deixar IA aplicada pra próxima etapa ou seguir sem. O que prefere?";
     const { sessao, resultados } = await conversar([{ ela: "não entendi, quais eram as opções mesmo", totti: saida(opcoes, "esclarecer") }], comIa);
-    assert.equal(sessao.plano.tradeoffNaAbertura, true);
     assert.equal(resultados[0].movimento, "esclarecer");
     assert.deepEqual(sessao.plano.decisoesTradeoff, {});
     assert.equal(sessao.plano.ultimoPasso?.tipo, "oferecer_tradeoff");
@@ -289,7 +288,7 @@ describe("conduzirTurno: resposta que não é escolha nem aprovação vai ao mod
   });
 
   it("troca: falha do modelo não decide nada e sai a fala de reserva", async () => {
-    const sessao = sessaoAberta([], COM_IA);
+    const sessao = sessaoComDecisaoAberta([], COM_IA);
     const chat = async () => {
       throw new ErroChat("nenhum provedor respondeu", []);
     };
@@ -508,5 +507,83 @@ describe("conduzirTurno: a confirmação da revisão diz o que foi pedido (issue
     assert.equal(resultados[2].fala, resposta);
     assert.equal(falso.chamadas.length, 3);
     assert.match(falso.chamadas[2][1].content, /não mudaram\..*não diga que ajustou nada/);
+  });
+});
+
+describe("conduzirTurno: depois da abertura (issue #127)", () => {
+  it("a primeira resposta recebe a proposta de formato, nível e foco, mesmo que o Jev leia o início como coberto", async () => {
+    const sessao = sessaoRecemAberta();
+    const proposta = "Pensei em live coding pra nível pleno, olhando principalmente algoritmos. É isso mesmo?";
+    const falso = chatFalso(saida(proposta));
+    const r = await conduzirTurno(sessao, "o que pesa é o código", { chat: falso.chat, ...jevFalso({ cobertura: { confirmou_inicio: 1 } }) });
+    assert.deepEqual(r.passo, { tipo: "confirmar_inicio" });
+    assert.equal(sessao.plano.perguntasPorTopico.confirmou_inicio, 1);
+    assert.match(falso.chamadas[0][1].content, /Diga a proposta em uma frase: live coding pra nível pleno/);
+  });
+
+  it("com o nível em aberto, a primeira resposta recebe a pergunta de nível antes da proposta", async () => {
+    const sessao = sessaoRecemAberta([], { ...CLASSIFICACAO, nivelExplicito: 0.2, confirmar: ["seniority"] });
+    const r = await conduzirTurno(sessao, "o que pesa é o código", { chat: chatFalso(saida("É júnior, pleno ou sênior?")).chat, ...jevFalso() });
+    assert.deepEqual(r.passo, { tipo: "perguntar_nivel" });
+  });
+
+  it("com área que o formato não mede, a primeira resposta recebe a oferta de troca", async () => {
+    const comIa: Classificacao = {
+      ...CLASSIFICACAO,
+      focus: [
+        { area: "uso_ia", weight: 0.6 },
+        { area: "tecnico", weight: 0.4 },
+      ],
+    };
+    const sessao = sessaoRecemAberta([], comIa);
+    const oferta = "Live coding não mede IA aplicada; posso trocar pra system design, deixar pra próxima etapa ou seguir sem. O que prefere?";
+    const r = await conduzirTurno(sessao, "IA pesa bastante", { chat: chatFalso(saida(oferta)).chat, ...jevFalso() });
+    assert.equal(r.passo.tipo, "oferecer_tradeoff");
+  });
+});
+
+describe("conduzirTurno: 'quero' depois do resumo (issue #127)", () => {
+  it("'quero' à pergunta de fechamento pergunta o que mudar, com fala fixa, sem encerrar nem contar outro resumo", async () => {
+    // O Jev leu 'quero' como aprovação e como escolha de ajustar: ajustar vence.
+    const { sessao, resultados, falso } = await conversar([
+      ...ATE_O_RESUMO,
+      { ela: "quero", jev: { sinais: { quer_ajustar: 1, aprovou_resumo: 0.8 } }, totti: saida("não devia ser usada") },
+    ]);
+    assert.equal(resultados[2].passo.tipo, "perguntar_ajuste");
+    assert.match(resultados[2].fala, /^(O que você quer mudar|Claro, o que você quer ajustar|Pode dizer: o que você quer mudar)\?$/);
+    assert.equal(sessao.plano.resumos, 1);
+    assert.equal(sessao.plano.ultimoPasso?.tipo, "perguntar_ajuste");
+    assert.equal(falso.chamadas.length, 2);
+  });
+
+  it("depois de 'o que você quer mudar?', 'pode finalizar' encerra", async () => {
+    const { resultados } = await conversar([
+      ...ATE_O_RESUMO,
+      { ela: "quero", jev: { sinais: { quer_ajustar: 1 } }, totti: saida("não devia ser usada") },
+      { ela: "ah, não, pode finalizar", jev: { sinais: { aprovou_resumo: 1 } }, totti: saida("não devia ser usada") },
+    ]);
+    assert.equal(resultados[3].passo.tipo, "encerrar");
+  });
+
+  it("'quero tirar a dica' diz o quê: segue o fluxo de mudança, sem perguntar o que mudar", async () => {
+    const { sessao, resultados } = await conversar([
+      ...ATE_O_RESUMO,
+      {
+        ela: "quero tirar a dica",
+        jev: { sinais: { quer_ajustar: 1, pediu_mudanca: 1, quer_sem_dicas: 1 } },
+        totti: saida("Tirei a dica. Posso finalizar?"),
+      },
+    ]);
+    assert.notEqual(resultados[2].passo.tipo, "perguntar_ajuste");
+    assert.notEqual(resultados[2].passo.tipo, "encerrar");
+    assert.equal(sessao.plano.resumos, 2);
+  });
+
+  it("'pode finalizar' à pergunta de fechamento encerra", async () => {
+    const { resultados } = await conversar([
+      ...ATE_O_RESUMO,
+      { ela: "pode finalizar", jev: { sinais: { aprovou_resumo: 1, quer_ajustar: 0 } }, totti: saida("não devia ser usada") },
+    ]);
+    assert.equal(resultados[2].passo.tipo, "encerrar");
   });
 });

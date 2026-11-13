@@ -259,7 +259,7 @@ const DISSE_QUE_TEM_SEM_DIZER: Pergunta = {
 
 /**
  * Sinais do turno: quer/dispensa por área, resposta vaga, contexto incompleto (só depois da pergunta de contexto), dúvida,
- * pedido de mudança, aprovação do resumo e a escolha sobre a troca de formato (só faz sentido logo depois da oferta, mas o
+ * pedido de mudança, escolha de ajustar, aprovação do resumo e a escolha sobre a troca de formato (só faz sentido logo depois da oferta, mas o
  * Jev responde sempre; o planejador decide se usa).
  */
 function sinaisDo(depoisDoContexto = false): Pergunta[] {
@@ -384,10 +384,25 @@ function sinaisDo(depoisDoContexto = false): Pergunta[] {
       sinal_nao: "Não se ela só aprovou ('pode finalizar', 'tá bom'), respondeu ao Totti sem pedir nada novo, ou só fez uma pergunta.",
     },
     {
+      id: "quer_ajustar",
+      pergunta:
+        "A última fala do Totti ofereceu seguir ou finalizar, ou perguntou se ela quer ajustar ou mudar algo, e a recrutadora escolheu ajustar (com ou sem dizer o quê)?",
+      sinal_sim:
+        "Sim se ela escolheu ajustar: 'quero', 'quero sim', 'quero ajustar', 'quero mudar', 'quero mudar uma coisa', 'tem sim', " +
+        "'uma coisa', 'só uma coisa', 'espera, quero ajustar'. Logo depois de 'quer ajustar/mudar alguma coisa?', um 'quero' seco é escolher ajustar.",
+      sinal_nao:
+        "Não se ela escolheu finalizar ('pode finalizar', 'pode', 'tá bom', 'não, está ótimo', 'não quero mudar nada'), se o Totti não " +
+        "ofereceu finalizar nem ajustar, ou se ela respondeu outra coisa.",
+    },
+    {
       id: "aprovou_resumo",
       pergunta: "A última fala da recrutadora aprova o resumo que o agente acabou de fazer e autoriza finalizar?",
-      sinal_sim: "Sim se ela concordou em finalizar: 'pode finalizar', 'tá bom', 'beleza, pode', 'confirmo', 'perfeito'.",
-      sinal_nao: "Não se ela pediu mudança ('muda o tom', 'tira pressão', 'espera'), fez pergunta ou respondeu outra coisa.",
+      sinal_sim:
+        "Sim se ela concordou em finalizar: 'pode finalizar', 'tá bom', 'beleza, pode', 'confirmo', 'perfeito', 'sim, pode'. " +
+        "Um 'não' ou 'nada' em resposta a 'quer mudar/ajustar alguma coisa?' também aprova.",
+      sinal_nao:
+        "Não se ela pediu mudança ('muda o tom', 'tira pressão', 'espera'), fez pergunta ou respondeu outra coisa. " +
+        "'Quero' ou 'tem sim' em resposta a 'quer ajustar/mudar alguma coisa?' escolhe ajustar: não é aprovação.",
     },
   ];
   return depoisDoContexto ? [...sinais, DISSE_QUE_TEM_SEM_DIZER] : sinais;

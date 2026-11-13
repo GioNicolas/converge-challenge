@@ -23,6 +23,8 @@
  *  - dúvida dela sobre a entrevista (`fez_pergunta`): a Totti responde e retoma o passo em curso, sem contar como pergunta nova;
  *  - o resumo vem quando não há mais o que perguntar; depois dele, a Totti só resume de novo se ela pedir mudança;
  *  - encerra só depois do resumo aprovado e sem pedido de mudança, ou no limite de resumos de verdade;
+ *  - depois do resumo, "quero" (ela escolheu ajustar, sinal `quer_ajustar`) vence a aprovação: sem dizer o quê, a Totti
+ *    pergunta o que ela quer mudar (`perguntar_ajuste`) em vez de encerrar; dizendo o quê, vale o fluxo de mudança;
  *  - quando o Totti pediu uma decisão (troca de formato, nível, aprovação do resumo) e a resposta dela não é escolha nem
  *    recusa, o código não decide por ela: a decisão fica pendente (`decisaoPendente`) e a fala vai ao modelo, que lê a
  *    resposta e devolve a escolha, ou adia (ver `conduzirTurno` em `turno.ts`).
@@ -114,6 +116,8 @@ export type Passo =
   /** Ela pediu system design e o formato não está disponível (trava desligada): a Totti avisa, uma vez, e segue em live coding. */
   | { tipo: "informar_formato_indisponivel" }
   | { tipo: "resumo_final"; revisao?: boolean }
+  /** Ela escolheu ajustar depois do resumo, sem dizer o quê: a Totti pergunta o que ela quer mudar, em uma frase. */
+  | { tipo: "perguntar_ajuste" }
   | ResponderDuvidaPasso
   | { tipo: "encerrar" };
 
@@ -138,8 +142,6 @@ export interface PlanoEstado {
   modoEscolhido?: InterviewMode;
   /** Troca feita e ainda não confirmada pelo Totti: vai na próxima pergunta de aprofundamento. */
   trocaPendente?: InterviewMode;
-  /** A primeira fala já foi a oferta de troca (ver `abrirConversa` em `turno.ts`). */
-  tradeoffNaAbertura?: boolean;
   /** Ela não soube dizer o nível e a conversa segue com a estimativa do classificador, dito em voz alta. */
   nivelPorEstimativa?: boolean;
   /** Quantas vezes o modelo adiou cada decisão pendente sem que ela decidisse (ver `MAX_ADIAMENTOS`). */
@@ -303,12 +305,20 @@ export function decidirTradeoff(sinais: Record<string, number>): DecisaoTradeoff
   return probabilidade >= LIMIAR ? melhor : "incerto";
 }
 
+/** Quantas vezes o Totti pergunta o que ela quer mudar (`perguntar_ajuste`) antes de seguir pelo fluxo normal. */
+export const MAX_PERGUNTAS_DE_AJUSTE = 2;
+
+/** Tópico da contagem de perguntas de `perguntar_ajuste` (ver `aplicarPasso`). */
+export const TOPICO_AJUSTE = "ajuste";
+
 /**
- * O que a fala dela decide sobre o resumo, pelos sinais do último turno: aprovou, pediu mudança, ou "incerto"
- * (nenhum dos dois passa do limiar). Aprovar e pedir mudança na mesma fala é pedir mudança. Função pura.
+ * O que a fala dela decide sobre o resumo, pelos sinais do último turno: pediu mudança, escolheu ajustar sem dizer o
+ * quê ("quero"), aprovou, ou "incerto" (nenhum passa do limiar). Aprovar e pedir mudança na mesma fala é pedir mudança,
+ * e escolher ajustar vence a aprovação ("quero" não é "pode finalizar"). Função pura.
  */
-export function decidirResumo(sinais: Record<string, number>): "aprovou" | "mudanca" | Incerto {
+export function decidirResumo(sinais: Record<string, number>): "aprovou" | "mudanca" | "ajustar" | Incerto {
   if ((sinais.pediu_mudanca ?? 0) >= LIMIAR) return "mudanca";
+  if ((sinais.quer_ajustar ?? 0) >= LIMIAR) return "ajustar";
   return (sinais.aprovou_resumo ?? 0) >= LIMIAR ? "aprovou" : "incerto";
 }
 
@@ -339,7 +349,9 @@ export function decisaoPendente(e: EstadoPlanejamento, passo: Passo, nivelPergun
   }
   const emCurso = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
   const revisao = passo.tipo === "resumo_final" && passo.revisao === true;
-  if (emCurso?.tipo === "resumo_final" && revisao && !e.trocaPendente && decidirResumo(e.sinais) === "incerto") return { tipo: "resumo" };
+  const decidiu = decidirResumo(e.sinais);
+  const depoisDoResumo = emCurso?.tipo === "resumo_final" || emCurso?.tipo === "perguntar_ajuste";
+  if (depoisDoResumo && revisao && !e.trocaPendente && (decidiu === "incerto" || decidiu === "ajustar")) return { tipo: "resumo" };
   return undefined;
 }
 
@@ -418,11 +430,17 @@ export function proximoPasso(e: EstadoPlanejamento): Passo {
   // "Pediu mudança" só conta logo depois de um resumo. Depois de uma pergunta, a resposta é uma resposta.
   // Sem passo conhecido, vale como antes (o caso normal é sempre um resumo antes do pedido).
   const ultimaFala = e.ultimoPasso?.tipo === "responder_duvida" ? e.ultimoPasso.retomar : e.ultimoPasso;
-  const pediuMudanca = sinal("pediu_mudanca") >= LIMIAR && (ultimaFala === undefined || ultimaFala.tipo === "resumo_final");
+  const depoisDoResumo = ultimaFala === undefined || ultimaFala.tipo === "resumo_final" || ultimaFala.tipo === "perguntar_ajuste";
+  const pediuMudanca = sinal("pediu_mudanca") >= LIMIAR && depoisDoResumo;
+  // "Quero" para "quer ajustar alguma coisa?": ela escolheu ajustar, sem dizer o quê. Só logo depois do resumo, e vence a aprovação.
+  const querAjustar = sinal("quer_ajustar") >= LIMIAR && !pediuMudanca && ultimaFala?.tipo === "resumo_final";
 
   // 1. Ela aprovou o resumo sem pedir mudança: acabou. Com troca de formato ainda não confirmada (pedida junto com a
   // aprovação), não encerra: o resumo de revisão mostra o formato novo (passo 5).
-  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && !pediuMudanca && !e.trocaPendente) return { tipo: "encerrar" };
+  if (e.resumos > 0 && sinal("aprovou_resumo") >= LIMIAR && !pediuMudanca && !querAjustar && !e.trocaPendente) return { tipo: "encerrar" };
+
+  // 1-ajuste. Ela quer ajustar e não disse o quê: a Totti pergunta o que ela quer mudar, em vez de encerrar ou resumir de novo.
+  if (e.resumos > 0 && querAjustar && perguntas(TOPICO_AJUSTE) < MAX_PERGUNTAS_DE_AJUSTE) return { tipo: "perguntar_ajuste" };
 
   // 1a. Nível em aberto: a Totti pergunta só o nível. Enquanto ele estiver em aberto, o início não conta como coberto
   // (ver `estadoDoPlanejamento` em `turno.ts`), então este passo vem antes do início e das demais perguntas.
@@ -540,6 +558,9 @@ export function aplicarPasso(p: PlanoEstado, passo: Passo): PlanoEstado {
       for (const a of passo.duvida) contar(`duvida_${a}`);
       if (passo.proximo) contar(criterio(passo.proximo.area));
       break;
+    case "perguntar_ajuste":
+      contar(TOPICO_AJUSTE);
+      break;
     case "resumo_final":
       resumos += 1;
       break;
@@ -578,6 +599,8 @@ export function descreverPasso(passo: Passo): string {
     }
     case "resumo_final":
       return passo.revisao ? "resumo_final (revisão)" : "resumo_final";
+    case "perguntar_ajuste":
+      return "perguntar_ajuste";
     case "responder_duvida":
       return `responder_duvida (${passo.seguidas}ª seguida) retoma ${descreverPasso(passo.retomar)}`;
     case "encerrar":
