@@ -25,8 +25,9 @@ import { ErroChat, houveFallback } from "./llm";
 import { diff, registrarEvento, type EventoLog, type MudancaCampo, type NovoEvento } from "./log";
 import { descreverPasso, planoInicial, type Passo, type PlanoEstado } from "./planejador";
 import { PREFERENCIAS_PADRAO, type Preferencias } from "./preferencias";
-import { criarRascunho, rascunhoNoFormatoAtivo, type Rascunho, type Turno } from "./rascunho";
+import { criarRascunho, rascunhoNoFormatoAtivo, type CampoFixado, type Rascunho, type Turno } from "./rascunho";
 import { estadoInicialEnfase, type EstadoEnfase } from "./enfase";
+import { camposMudados, fixarCampos, reaplicarFixados } from "./fixados";
 import { recalcularRascunho, type DetalhePeso } from "./pesos";
 
 export interface Sessao {
@@ -263,7 +264,9 @@ export function aplicarPesosNaSessao(sessao: Sessao, origem: string): void {
       naoAvaliado: sessao.naoAvaliado,
     },
   );
-  sessao.rascunho = aplicarCobertura(rascunho, rascunho.cobertura, areasEmJogo(rascunho.focus, sessao.plano.sinais, decisoes));
+  // O que ela editou na revisão e não voltou a falar fica como está (ver `fixados.ts`).
+  const respeitado = reaplicarFixados(antes, rascunho);
+  sessao.rascunho = aplicarCobertura(respeitado, respeitado.cobertura, areasEmJogo(respeitado.focus, sessao.plano.sinais, decisoes));
   sessao.pesosDetalhe = detalhe;
   const noFoco = detalhe.filter((d) => d.noFoco).map((d) => `${d.area} ${d.peso.toFixed(2)}`);
   registrarEvento(sessao, {
@@ -320,6 +323,20 @@ export function substituirRascunho(sessao: Sessao, novo: Rascunho, origem: strin
     resumo: `${origem}: ${resumoDiff(mudancas)}`,
     dados: { origem, diff: mudancas },
   });
+}
+
+/**
+ * Guarda a revisão editada à mão ao voltar à conversa, sem gerar config. O que mudou em relação ao rascunho atual
+ * fica fixado (ver `fixados.ts`): a extração e os pesos não o sobrescrevem enquanto ela não falar daquilo de novo.
+ * Cobertura e pendências são do servidor (a tela pode estar atrás); duração dita na revisão vale também nas preferências.
+ */
+export function salvarRevisao(sessao: Sessao, editado: Rascunho): CampoFixado[] {
+  const atual = sessao.rascunho;
+  const mudados = camposMudados(atual, editado);
+  const novo = fixarCampos({ ...editado, fixados: atual.fixados, cobertura: atual.cobertura, pendencias: atual.pendencias }, mudados);
+  if (mudados.includes("durationMin")) sessao.preferencias = { ...sessao.preferencias, duracaoMin: novo.durationMin };
+  substituirRascunho(sessao, novo, "revisão manual");
+  return mudados;
 }
 
 /** O que a exceção carrega além da mensagem, para o evento `erro`. */
@@ -399,7 +416,13 @@ async function rodarRodada(sessao: Sessao): Promise<void> {
       atual.pedidoProblema?.origem === "fala" && atual.mode === extraido.mode
         ? { problemId: atual.problemId, pedidoProblema: atual.pedidoProblema }
         : {};
-    sessao.rascunho = { ...extraido, ...nivelDeVolta, ...pedidoDeVolta, cobertura: mesclarCobertura(atual.cobertura, cob.cobertura) };
+    // Campo editado na revisão (fixado) não é sobrescrito pela extração: vale o que está na sessão agora.
+    sessao.rascunho = reaplicarFixados(atual, {
+      ...extraido,
+      ...nivelDeVolta,
+      ...pedidoDeVolta,
+      cobertura: mesclarCobertura(atual.cobertura, cob.cobertura),
+    });
     aplicarPesosNaSessao(sessao, "segundo plano");
     const mudancas = diff(antes, sessao.rascunho);
     registrarEvento(sessao, {

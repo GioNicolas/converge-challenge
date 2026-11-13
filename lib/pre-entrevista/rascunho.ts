@@ -66,6 +66,13 @@ export type Foco = z.infer<typeof Foco>;
 export const Origem = z.union([z.object({ fala: z.string(), turno: z.number().int() }), z.literal("catalogo")]);
 export type Origem = z.infer<typeof Origem>;
 
+/**
+ * Campos que a recrutadora pode editar na revisão. Um campo editado fica "fixado": a extração e os pesos
+ * automáticos não o sobrescrevem até ela falar daquele campo de novo (ver `fixados.ts`).
+ */
+export const CampoFixado = z.enum(["mode", "seniority", "focus", "criteria", "recruiterNotes", "durationMin"]);
+export type CampoFixado = z.infer<typeof CampoFixado>;
+
 export const Rascunho = z.object({
   mode: InterviewMode,
   roleTitle: z.string(),
@@ -102,6 +109,8 @@ export const Rascunho = z.object({
   eliminatorios: z.array(z.string()).default([]),
   /** Trecho literal em que ela falou do time, da empresa ou do momento da contratação (interno; vai para o guia). */
   contexto: z.string().default(""),
+  /** Campos editados à mão na revisão, que o automático não sobrescreve (interno: não vai no InterviewConfig). */
+  fixados: z.array(CampoFixado).default([]),
 });
 export type Rascunho = z.infer<typeof Rascunho>;
 
@@ -259,6 +268,7 @@ export function criarRascunho(vaga: Vaga, c: Classificacao): Rascunho {
     origens: {},
     eliminatorios: [],
     contexto: "",
+    fixados: [],
   };
 }
 

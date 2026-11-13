@@ -105,7 +105,29 @@ export async function buscarSessao(sessaoId: string): Promise<EstadoSessao | nul
   return guardar((await r.json()) as EstadoSessao);
 }
 
-export type ResultadoFinal = { config: InterviewConfig } | { erros: string[] };
+/**
+ * Guarda no servidor o que ela editou na revisão ao voltar à conversa (sem publicar). O que mudou fica fixado: só
+ * muda de novo se ela falar daquilo com o Totti. Devolve o estado da sessão com o rascunho guardado.
+ */
+export async function salvarRascunho(sessaoId: string, rascunho: Rascunho): Promise<EstadoSessao> {
+  if (!usarServidor()) {
+    const anterior = sessoesDemo.get(sessaoId);
+    if (!anterior) throw new Error("Sessão de demonstração não encontrada.");
+    const estado = { ...anterior, rascunho };
+    sessoesDemo.set(sessaoId, estado);
+    return estado;
+  }
+  const r = await fetch(`${API}/${sessaoId}/rascunho`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rascunho, copia: copiaDe(sessaoId) }),
+  });
+  if (!r.ok) throw new Error(await erroDe(r));
+  const j = (await r.json()) as { estado: EstadoSessao };
+  return guardar(j.estado);
+}
+
+export type ResultadoFinal ={ config: InterviewConfig } | { erros: string[] };
 
 export async function finalizar(sessaoId: string, rascunho: Rascunho): Promise<ResultadoFinal> {
   if (!usarServidor()) {
