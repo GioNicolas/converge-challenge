@@ -74,6 +74,7 @@ import { lerLinguagens } from "./linguagens";
 import { atualizarPreferencias } from "./preferencias";
 import { aplicarPedidoDeProblema } from "./problema-pedido";
 import type { FocusArea, InterviewMode } from "@/lib/contracts";
+import { camposFalados, reaplicarFixados, soltarCampos } from "./fixados";
 import { aplicarDecisoesTradeoff, areasFora, duracaoDoRascunho, type DecisaoTradeoff, type DecisoesTradeoff, type Turno } from "./rascunho";
 import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, falasParaLer, registrarFala, type Sessao } from "./sessoes";
@@ -510,6 +511,10 @@ async function lerFalaDela(sessao: Sessao, texto: string, deps: DepsDoTurno): Pr
   // planejador e da fala do Totti, que precisa dizer se a questão existe (ver `linhasDoPedido` em `conversa.ts`).
   const falaDoTotti = ultimaFalaDoAgente(sessao.transcricao);
   sessao.rascunho = aplicarPedidoDeProblema(sessao.rascunho, texto, sessao.transcricao.length, falaDoTotti);
+  // O que ela editou na revisão fica como está, a menos que tenha falado daquilo nesta fala (ver `fixados.ts`).
+  const falou = { nivelDito: sessao.rascunho.seniority !== antes.rascunho.seniority, duracaoDita: duracao !== undefined };
+  const soltos = camposFalados(sessao.plano.sinais, falou, LIMIAR);
+  sessao.rascunho = reaplicarFixados(soltarCampos(antes.rascunho, soltos), sessao.rascunho);
   return antes;
 }
 

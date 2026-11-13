@@ -5,11 +5,12 @@
 //   Como vai ser (formato, senioridade, duração) · O que mais pesa · Critérios · Observações
 // O formato manda no resto: área que o formato não mede (ver `MEDE`) fica travada em 0%, e trocar o formato
 // ou ligar/desligar uma área refaz os critérios (`ajustarCriterios`), para nunca publicar um plano incoerente.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, ArrowRight, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { FocusArea, type Criterion, type InterviewMode } from "@/lib/contracts";
 import { ajustarCriterios, mede, modoAlternativoQueMede } from "@/lib/pre-entrevista/catalogo";
+import { camposMudados } from "@/lib/pre-entrevista/fixados";
 import type { Rascunho } from "@/lib/pre-entrevista/rascunho";
 import { problemaFixado } from "@/lib/pre-entrevista/problema-pedido";
 import { curvaSuave } from "@/lib/design/motion";
@@ -22,7 +23,10 @@ type Props = {
   publicado?: boolean;
   erros: string[];
   onConfirmar: (rascunho: Rascunho) => void;
-  onVoltar: () => void;
+  /** Ao voltar à conversa: o rascunho editado (para guardar), ou null se nada mudou. */
+  onVoltar: (rascunhoEditado: Rascunho | null) => void;
+  /** Avisa a cada mudança: o rascunho editado, ou null se está igual ao original (para quem volta fora daqui). */
+  onMudar?: (rascunhoEditado: Rascunho | null) => void;
 };
 
 const campo =
@@ -128,7 +132,7 @@ function pesosDoFormato(p: Pesos, mode: InterviewMode): Pesos {
   return novo;
 }
 
-export default function RevisaoPlano({ rascunho, enviando, publicado = false, erros, onConfirmar, onVoltar }: Props) {
+export default function RevisaoPlano({ rascunho, enviando, publicado = false, erros, onConfirmar, onVoltar, onMudar }: Props) {
   const [inicial] = useState(() => {
     const base = Object.fromEntries(FocusArea.options.map((a) => [a, 0])) as Pesos;
     for (const f of rascunho.focus) base[f.area] = Math.round(f.weight * 100);
@@ -175,13 +179,27 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
     setEditando(id);
   }
 
-  function confirmar() {
+  /** O rascunho como está na tela (foco pelos pesos, sem critério sem nome). */
+  function rascunhoDaTela(): Rascunho {
     const focus = FocusArea.options
       .filter((a) => pesos[a] > 0)
-      .map((area) => ({ area, weight: Math.round((pesos[area] / soma) * 100) / 100 }));
-    const criteria = r.criteria.filter((c) => c.name.trim());
-    onConfirmar({ ...r, criteria, focus, confirmado: { mode: true, seniority: true, focus: true } });
+      .map((area) => ({ area, weight: soma > 0 ? Math.round((pesos[area] / soma) * 100) / 100 : 0 }));
+    return { ...r, criteria: r.criteria.filter((c) => c.name.trim()), focus };
   }
+
+  function confirmar() {
+    onConfirmar({ ...rascunhoDaTela(), confirmado: { mode: true, seniority: true, focus: true } });
+  }
+
+  // O que ela mudou em relação ao que chegou (null: nada). Só vale com algum critério e peso, como no publicar.
+  const tela = rascunhoDaTela();
+  const mudou = camposMudados(rascunho, tela).length > 0 || tela.roleTitle !== rascunho.roleTitle;
+  const editado = mudou && soma > 0 && tela.criteria.length > 0 ? tela : null;
+  const chaveEditado = JSON.stringify(editado);
+  useEffect(() => {
+    onMudar?.(editado);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveEditado]);
 
   const podePublicar = !enviando && r.criteria.some((c) => c.name.trim()) && soma > 0;
 
@@ -443,7 +461,7 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
           )}
           <div className="flex items-center gap-2">
             <button
-              onClick={onVoltar}
+              onClick={() => onVoltar(editado)}
               className="flex items-center gap-1.5 rounded-full px-4 py-2.5 text-[14px] text-texto-suave transition-colors hover:bg-superficie-2/60 hover:text-texto"
             >
               <ArrowLeft size={15} /> Voltar à conversa
