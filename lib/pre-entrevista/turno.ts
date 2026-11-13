@@ -44,7 +44,6 @@ import {
   perguntaEmAberto,
   responder,
   respostaFixa,
-  tradeoffDaAbertura,
   type Movimento,
   type RespostaAgente,
 } from "./conversa";
@@ -78,13 +77,20 @@ import { aplicarDecisoesTradeoff, areasFora, duracaoDoRascunho, type DecisaoTrad
 import { fraseComPalavra, limitarPalavras, normalizarTexto, RE_DICAS, RE_ELIMINATORIO, RE_TOM } from "./frases";
 import { aplicarPesosNaSessao, desfazerUltimaFala, falasParaLer, registrarFala, type Sessao } from "./sessoes";
 
+/** O Totti já propôs o formato, o nível e o foco (passo `confirmar_inicio`)? A abertura não propõe (ver `abrirConversa`). */
+function propostaFeita(sessao: Sessao): boolean {
+  return (sessao.plano.perguntasPorTopico.confirmou_inicio ?? 0) > 0;
+}
+
 /**
  * Estado que o planejador enxerga: o plano da sessão mais o foco, a cobertura e o formato do rascunho.
  * Enquanto o nível está em aberto, o início não conta como coberto: a Totti só fecha o início depois do nível.
  */
 function estadoDoPlanejamento(sessao: Sessao): EstadoPlanejamento {
   const aberto = nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, sessao.rascunho.confirmado.seniority);
-  const cobertura = aberto ? { ...sessao.rascunho.cobertura, confirmou_inicio: 0 } : sessao.rascunho.cobertura;
+  // O início também não conta como coberto antes de o Totti propô-lo: a abertura não propõe formato, nível nem foco,
+  // então a resposta a ela não confirma a proposta (ver `abrirConversa`).
+  const cobertura = aberto || !propostaFeita(sessao) ? { ...sessao.rascunho.cobertura, confirmou_inicio: 0 } : sessao.rascunho.cobertura;
   // Área que ela já tratou na fala (respondeu ou declarou central): o básico dela já foi dito, não se pergunta de novo.
   const enfase = sessao.enfaseEstado;
   const areasFaladas = AREAS.filter((a) => (enfase[a].falou && enfase[a].maximo >= 2) || enfase[a].declarado === "central");
@@ -242,8 +248,9 @@ async function atualizarCobertura(sessao: Sessao, deps: DepsDoTurno, aoReceberJe
         confirmado: { ...sessao.rascunho.confirmado, seniority: true },
       };
     }
-    // Enquanto o nível está em aberto, o início não fica coberto (nem na tela, nem para o planejador).
-    if (nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, sessao.rascunho.confirmado.seniority)) {
+    // Enquanto o nível está em aberto, ou antes de o Totti propor o início, o início não fica coberto (nem na tela, nem para
+    // o planejador): a resposta à abertura não confirma uma proposta que ainda não foi feita.
+    if (nivelEmAberto(sessao.plano, sessao.classificacao.confirmar, sessao.rascunho.confirmado.seniority) || !propostaFeita(sessao)) {
       sessao.rascunho = { ...sessao.rascunho, cobertura: { ...sessao.rascunho.cobertura, confirmou_inicio: 0 } };
     }
 
@@ -374,13 +381,13 @@ export function atualizarNaoAvaliado(sessao: Sessao): void {
   sessao.naoAvaliado = [...new Set([...porDecisao, ...porFormato, ...porCompetencia])];
 }
 
-/** Primeira fala do Totti, sem LLM. Conta como a pergunta de confirmação do início. */
+/**
+ * Primeira fala do Totti, sem LLM: cumprimenta, diz o que entendeu da vaga e faz uma pergunta. Ela não propõe formato,
+ * nível nem foco, então não conta como passo do planejador: a proposta (`confirmar_inicio`), o nível (`perguntar_nivel`)
+ * e a oferta de troca (`oferecer_tradeoff`) vêm nos passos seguintes.
+ */
 export function abrirConversa(sessao: Sessao): void {
-  const oferta = tradeoffDaAbertura(sessao);
-  registrarFala(sessao, { role: "agente", text: aberturaDoAgente(sessao) }, { dados: { origem: "abertura_sem_llm", oferta } });
-  sessao.plano = aplicarPasso(sessao.plano, { tipo: "confirmar_inicio" });
-  // Se a abertura já foi a oferta de troca, a resposta a ela é a escolha (ver `resolverTradeoff`).
-  if (oferta) sessao.plano = { ...aplicarPasso(sessao.plano, oferta), tradeoffNaAbertura: true };
+  registrarFala(sessao, { role: "agente", text: aberturaDoAgente(sessao) }, { dados: { origem: "abertura_sem_llm" } });
   atualizarNaoAvaliado(sessao);
 }
 

@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Classificacao } from "@/lib/pre-entrevista/classificador";
 import { conduzirTurno, type DepsDoTurno } from "@/lib/pre-entrevista/turno";
-import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoAberta, type LeituraFalsa } from "@/lib/pre-entrevista/__tests__/apoio";
+import { CLASSIFICACAO, chatFalso, jevFalso, saida, sessaoComDecisaoAberta, type LeituraFalsa } from "@/lib/pre-entrevista/__tests__/apoio";
 import { decisoesDoModelo } from "../decisoes";
 
 const PERGUNTA = "Se o tempo acabar, o que conta mais: uma solução funcionando ou o caminho bem explicado?";
@@ -34,7 +34,7 @@ function chatEmSequencia(respostas: (string | null)[]): DepsDoTurno["chat"] {
 }
 
 async function conversar(turnos: (Omit<Turno, "totti"> & { totti: (string | null)[] })[], classificacao: Classificacao = CLASSIFICACAO) {
-  const sessao = sessaoAberta([], classificacao);
+  const sessao = sessaoComDecisaoAberta([], classificacao);
   const deps = { chat: chatEmSequencia(turnos.flatMap((t) => t.totti)), ...jevFalso(...turnos.map((t) => t.jev ?? {})) };
   for (const turno of turnos) await conduzirTurno(sessao, turno.ela, deps);
   return sessao;

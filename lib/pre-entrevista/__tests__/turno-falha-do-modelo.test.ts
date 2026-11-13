@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { conduzirTurno } from "../turno";
 import { ErroChat, type ChatResposta } from "../llm";
 import { falaDeReserva } from "../conversa";
-import { CLASSIFICACAO, jevFalso, sessaoAberta } from "./apoio";
+import { CLASSIFICACAO, jevFalso, sessaoComDecisaoAberta } from "./apoio";
 import type { Classificacao } from "../classificador";
 
 /** A abertura já oferece a troca de formato: a primeira fala ambígua fica com decisão pendente de troca. */
@@ -42,7 +42,7 @@ const saidaComDecisao = (fala: string, decisao: string) => JSON.stringify({ fala
 
 describe("conduzirTurno: falha do modelo com decisão pendente não conta como adiamento", () => {
   it("nível: duas falhas seguidas refazem a pergunta e não decidem o nível", async () => {
-    const sessao = sessaoAberta([], SEM_NIVEL);
+    const sessao = sessaoComDecisaoAberta([], SEM_NIVEL);
     const adiamentosAntes = structuredClone(sessao.plano.adiamentos);
     const deps = { chat: chatQueFalha, ...jevFalso() };
 
@@ -59,7 +59,7 @@ describe("conduzirTurno: falha do modelo com decisão pendente não conta como a
   });
 
   it("troca: duas falhas seguidas não decidem a troca nem mudam o formato", async () => {
-    const sessao = sessaoAberta([], COM_IA);
+    const sessao = sessaoComDecisaoAberta([], COM_IA);
     const modoAntes = sessao.rascunho.mode;
     const adiamentosAntes = structuredClone(sessao.plano.adiamentos);
     const deps = { chat: chatQueFalha, ...jevFalso() };
@@ -77,7 +77,7 @@ describe("conduzirTurno: falha do modelo com decisão pendente não conta como a
   });
 
   it("adiamento real seguido de falha: o contador fica em 1 e nada é decidido", async () => {
-    const sessao = sessaoAberta([], COM_IA);
+    const sessao = sessaoComDecisaoAberta([], COM_IA);
     const { chat } = chatComFalhas(saidaComDecisao("Claro, sem pressa.", "adiar"));
     const deps = { chat, ...jevFalso() };
 
@@ -93,7 +93,7 @@ describe("conduzirTurno: falha do modelo com decisão pendente não conta como a
   });
 
   it("registra o aviso de decisão pendente falhou e nenhum evento de 'o modelo devolveu'", async () => {
-    const sessao = sessaoAberta([], COM_IA);
+    const sessao = sessaoComDecisaoAberta([], COM_IA);
     await conduzirTurno(sessao, "hum", { chat: chatQueFalha, ...jevFalso() });
 
     const resumos = sessao.logs.map((e) => e.resumo);
