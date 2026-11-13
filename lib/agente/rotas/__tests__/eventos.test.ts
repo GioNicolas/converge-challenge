@@ -29,27 +29,15 @@ describe("desenho e a saída de REQUISITOS", () => {
 });
 
 describe("evento 'pergunta' da linha do tempo", () => {
-  it("leva o texto que o quadro falou, com nota, elementos e status", () => {
+  it("leva só o texto que o quadro falou: nota, elementos, status e escopo do quadro não entram", () => {
     assert.deepEqual(
-      eventosDaMaquina("pergunta", { numero: 3, pergunta: "  Como você lida com X?  ", nota: "X?", elementos: ["e1", 7], status: "dica" }),
-      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "Como você lida com X?", nota: "X?", elementos: ["e1"], status: "dica" } }],
+      eventosDaMaquina("pergunta", { numero: 3, pergunta: "  Como você lida com X?  ", nota: "X?", elementos: ["e1"], status: "redirecionar", escopo: true }),
+      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "Como você lida com X?" } }],
     );
   });
 
-  it("status inválido não entra; sem texto, o clique segue sem registro", () => {
-    assert.deepEqual(
-      eventosDaMaquina("pergunta", { pergunta: "Por quê?", status: "outro" }),
-      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "Por quê?", nota: null, elementos: [] } }],
-    );
+  it("sem texto, o clique segue sem registro", () => {
     assert.deepEqual(eventosDaMaquina("pergunta", { numero: 1 }), [{ tipo: "PLIN_CLICADO" }]);
-  });
-
-  it("o escopo falado (decisão I) chega ao registro; sem ele, o registro não ganha o campo", () => {
-    assert.deepEqual(
-      eventosDaMaquina("pergunta", { pergunta: "O problema pede outra coisa. Por onde começar?", status: "redirecionar", escopo: true }),
-      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "O problema pede outra coisa. Por onde começar?", nota: null, elementos: [], status: "redirecionar", escopo: true } }],
-    );
-    const semEscopo = eventosDaMaquina("pergunta", { pergunta: "Por quê?", status: "duvida" });
-    assert.equal("escopo" in (semEscopo[0] as { registro: object }).registro, false);
+    assert.deepEqual(eventosDaMaquina("pergunta", { pergunta: "   " }), [{ tipo: "PLIN_CLICADO" }]);
   });
 });

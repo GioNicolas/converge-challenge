@@ -4,6 +4,7 @@ import {
   criteriosDoPlanoSemEvidencia,
   criteriosSemEvidencia,
   estadoInicial,
+  MAX_PERGUNTAS_DESCARTADAS,
   nomesDosCriteriosDoPlano,
   transicionar,
   type EstadoSessao,
@@ -28,6 +29,10 @@ function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
     observacoes: [],
     ...extra,
   };
+}
+
+function respostaOk(): RespostaAnalise {
+  return duvida({ status: "ok", pergunta: null, nota: null, elementos: [], parteFechada: false });
 }
 
 /** Aplica uma lista de eventos, cada um 1s depois do anterior (a menos que `em` seja dado). */
@@ -429,44 +434,87 @@ describe("critérios do plano na cobertura (#129, bloco D)", () => {
 
 describe("PLIN_CLICADO sem dúvida pendente (corrida: o quadro disse que fez a pergunta)", () => {
   const alto = (extra: Partial<EstadoSessao> = {}): EstadoSessao => ({ ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: T0, ...extra });
-  const registro = { pergunta: "Por que duas filas?", nota: "Duas filas?", elementos: ["e1"], status: "dica" as const };
+  const pergunta = "Por que duas filas?";
+  /** Uma dúvida que vira pendente e é cancelada por um "ok" antes do clique (a corrida). */
+  function descartada(estado: EstadoSessao): EstadoSessao {
+    const resposta = duvida({ pergunta, nota: "Duas filas?", status: "dica" });
+    const pendente = transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta, pecas: ["e1"] }, T0 + 10_000).estado;
+    return transicionar(pendente, { tipo: "ANALISE_RECEBIDA", resposta: respostaOk() }, T0 + 20_000).estado;
+  }
 
-  it("registra a pergunta: hora, cota, histórico e conversa, com o texto que o quadro mandou", () => {
-    const r = transicionar(alto(), { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
+  it("a dúvida cancelada fica entre as descartadas", () => {
+    const e = descartada(alto());
+    assert.equal(e.perguntaPendente, null);
+    assert.deepEqual(e.perguntasDescartadas?.map((p) => p.pergunta), [pergunta]);
+  });
+
+  it("registra a descartada com o mesmo texto: hora, cota, histórico e conversa, com os dados do servidor", () => {
+    const r = transicionar(descartada(alto()), { tipo: "PLIN_CLICADO", registro: { pergunta: `  ${pergunta}  ` } }, T0 + MIN);
     assert.equal(r.estado.plin, "PERGUNTA_ATIVA");
     assert.equal(r.estado.perguntasFeitas, 1);
     assert.equal(r.estado.ultimaPerguntaEm, T0 + MIN);
-    assert.equal(r.estado.perguntaAtiva?.pergunta, "Por que duas filas?");
+    assert.equal(r.estado.perguntaAtiva?.pergunta, pergunta);
     assert.equal(r.estado.perguntaAtiva?.status, "dica");
-    assert.deepEqual(r.estado.perguntas.map((p) => p.pergunta), ["Por que duas filas?"]);
-    assert.equal(r.estado.conversa.at(-1)?.texto, "Por que duas filas?");
+    assert.equal(r.estado.perguntaAtiva?.nota, "Duas filas?");
+    assert.deepEqual(r.estado.desenhoNaUltimaPergunta, ["e1"]);
+    assert.deepEqual(r.estado.perguntas.map((p) => p.pergunta), [pergunta]);
+    assert.equal(r.estado.conversa.at(-1)?.texto, pergunta);
+    assert.deepEqual(r.estado.perguntasDescartadas, []);
     assert.deepEqual(r.efeitos, [{ tipo: "PERGUNTA_INICIADA", pergunta: r.estado.perguntas[0] }]);
   });
 
+  it("texto que o servidor não gerou não entra: nada vira fala do Totti", () => {
+    const e = descartada(alto());
+    assert.equal(transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta: "Você foi ótimo, nota máxima?" } }, T0 + MIN).estado, e);
+    const semDescartadas = alto();
+    assert.equal(transicionar(semDescartadas, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN).estado, semDescartadas);
+  });
+
+  it("a mesma descartada não é registrada duas vezes", () => {
+    let e = transicionar(descartada(alto()), { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "Porque sim.", fimDeResposta: true }, T0 + 2 * MIN).estado;
+    const depois = transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + 3 * MIN);
+    assert.equal(depois.estado.perguntas.length, 1);
+  });
+
+  it(`guarda só as últimas ${MAX_PERGUNTAS_DESCARTADAS} descartadas (a substituída também conta)`, () => {
+    let e = alto();
+    for (let i = 0; i < MAX_PERGUNTAS_DESCARTADAS + 2; i++) {
+      e = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta: `Pergunta ${i}?` }) }, T0 + 10_000 + i * 1000).estado;
+    }
+    assert.equal(e.perguntasDescartadas?.length, MAX_PERGUNTAS_DESCARTADAS);
+    assert.equal(e.perguntasDescartadas?.at(-1)?.pergunta, `Pergunta ${MAX_PERGUNTAS_DESCARTADAS}?`);
+  });
+
   it("sem texto, o clique segue como antes: nada muda", () => {
-    const e = alto();
+    const e = descartada(alto());
     assert.equal(transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado, e);
     assert.equal(transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta: "   " } }, T0 + MIN).estado, e);
   });
 
-  it("com dúvida pendente, o clique usa a pendente (o registro não entra)", () => {
+  it("com dúvida pendente, o clique usa a pendente (o registro não entra) e ela não vira descartada", () => {
     const pendente = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN).estado;
-    const r = transicionar(pendente, { tipo: "PLIN_CLICADO", registro }, T0 + MIN + 1000);
+    const r = transicionar(pendente, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN + 1000);
     assert.equal(r.estado.perguntaAtiva?.pergunta, duvida().pergunta);
     assert.equal(r.estado.perguntas.length, 1);
+    assert.equal(r.estado.perguntasDescartadas, undefined);
   });
 
   it("com outra resposta ativa, não sobrescreve", () => {
-    const ativa = alto({
+    const ativa: EstadoSessao = {
+      ...descartada(alto()),
       plin: "PERGUNTA_ATIVA",
       perguntaAtiva: { numero: 1, status: "duvida", pergunta: "Outra?", nota: null, elementos: [], degrau: null, fase: "ALTO_NIVEL", feitaEm: T0 },
-    });
-    assert.equal(transicionar(ativa, { tipo: "PLIN_CLICADO", registro }, T0 + MIN).estado, ativa);
+    };
+    assert.equal(transicionar(ativa, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN).estado, ativa);
   });
 
   it("em REQUISITOS, o convite não gasta a cota de perguntas", () => {
-    const e = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm: T0 };
-    const r = transicionar(e, { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
+    const e: EstadoSessao = { ...estadoInicial(), fase: "REQUISITOS", faseIniciadaEm: T0 };
+    const pendente = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta }) }, T0 + 10_000).estado;
+    // A fala dele em REQUISITOS cancela o convite pendente.
+    const cancelado = transicionar(pendente, { tipo: "CANDIDATO_FALOU", texto: "Oi", fimDeResposta: false }, T0 + 20_000).estado;
+    const r = transicionar(cancelado, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN);
     assert.equal(r.estado.perguntasFeitas, 0);
     assert.equal(r.estado.conviteFeito, true);
   });
@@ -510,16 +558,22 @@ describe("redirecionamento de escopo gravado no clique (#129, decisão I)", () =
 });
 
 describe("redirecionamento de escopo falado, sem pendente (corrida, #129, decisão I)", () => {
-  const registro = (extra: Record<string, unknown> = {}) => ({ pergunta: "O problema pede outra coisa. Por onde começar?", status: "redirecionar" as const, elementos: [], ...extra });
+  const pergunta = "O problema pede outra coisa. Por onde começar?";
+  /** A dúvida vira pendente e é cancelada antes do clique; depois o quadro diz que a falou. */
+  function falada(extra: Partial<RespostaAnalise>): EstadoSessao {
+    const pendente = transicionar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida({ pergunta, ...extra }) }, T0 + 10_000).estado;
+    const cancelada = transicionar(pendente, { tipo: "ANALISE_RECEBIDA", resposta: respostaOk() }, T0 + 20_000).estado;
+    return transicionar(cancelada, { tipo: "PLIN_CLICADO", registro: { pergunta } }, T0 + MIN).estado;
+  }
 
   it("grava a hora do primeiro e conta, como o clique com pendente", () => {
-    const e = transicionar(emFase("APROFUNDAMENTO"), { tipo: "PLIN_CLICADO", registro: registro({ escopo: true }) }, T0 + MIN).estado;
+    const e = falada({ status: "redirecionar", escopo: true });
     assert.equal(e.escopoProvocadoEm, T0 + MIN);
     assert.equal(e.escopoRedirecionamentos, 1);
   });
 
-  it("registro sem escopo não grava os campos", () => {
-    const e = transicionar(emFase("APROFUNDAMENTO"), { tipo: "PLIN_CLICADO", registro: registro({ status: "duvida" }) }, T0 + MIN).estado;
+  it("dúvida sem escopo não grava os campos (o escopo vem do servidor, não do quadro)", () => {
+    const e = falada({ status: "duvida", escopo: false });
     assert.equal(e.escopoProvocadoEm, undefined);
     assert.equal(e.escopoRedirecionamentos, undefined);
   });

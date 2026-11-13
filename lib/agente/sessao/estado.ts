@@ -99,6 +99,12 @@ export type EstadoSessao = {
 
   plin: CicloPlin;
   perguntaPendente: PlinPendente | null;
+  /**
+   * As últimas dúvidas pendentes que saíram sem clique (canceladas ou substituídas), da mais antiga para a mais nova.
+   * O quadro pode ter falado uma delas numa corrida: o registro dele só vale se o texto for o de uma destas (ver
+   * `RegistroDaPergunta`). Ausente em estados antigos.
+   */
+  perguntasDescartadas?: PlinPendente[];
   perguntaAtiva: PerguntaFeita | null;
 
   perguntasFeitas: number;
@@ -173,17 +179,15 @@ export type EstadoSessao = {
 
 /**
  * A pergunta que o quadro disse que fez (evento "pergunta" da linha do tempo). Usada quando o servidor não tem a
- * dúvida pendente (ela foi cancelada numa corrida com uma análise mais nova): registra mesmo assim, para o piso
- * entre perguntas contar a pergunta que o candidato ouviu.
+ * dúvida pendente (ela foi cancelada numa corrida com uma análise mais nova), para o piso entre perguntas contar a
+ * pergunta que o candidato ouviu. Só o texto vem do quadro, e ele só serve para achar a dúvida entre as descartadas
+ * (`perguntasDescartadas`): o que fica registrado é a dúvida do servidor. Texto que o servidor não gerou não entra,
+ * senão quem chama a rota direto punha falas na boca do Totti.
  */
-export type RegistroDaPergunta = {
-  pergunta: string;
-  nota?: string | null;
-  elementos?: string[];
-  status?: RespostaAnalise["status"];
-  /** A pergunta falada era de redirecionamento de escopo (decisão I): conta no limite e grava a hora. */
-  escopo?: boolean;
-};
+export type RegistroDaPergunta = { pergunta: string };
+
+/** Quantas dúvidas descartadas o estado guarda para conferir o registro do quadro. */
+export const MAX_PERGUNTAS_DESCARTADAS = 5;
 
 export type EventoSessao =
   | { tipo: "COMECAR" }
@@ -245,41 +249,59 @@ export type Efeito =
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
 
 /**
- * Registra a pergunta que o quadro disse ter feito, sem dúvida pendente no servidor. Mesma conta do clique com
- * pendente (número, cota, hora, histórico), com o texto que o quadro mandou. Não mexe em `desenhoNaUltimaPergunta`:
- * sem a análise que a gerou, não há como saber as peças dela.
+ * A dúvida vira a pergunta que o candidato ouviu: número, cota, hora, histórico e, no redirecionamento de escopo, a
+ * conta do escopo. Serve ao clique com pendente e ao registro de uma descartada (`RegistroDaPergunta`).
  */
-function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, agora: number): Transicao {
+function fazerPergunta(estado: EstadoSessao, pendente: PlinPendente, agora: number): Transicao {
   const pergunta: PerguntaFeita = {
+    // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
     numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
-    status: r.status ?? "duvida",
-    pergunta: r.pergunta.trim(),
-    nota: r.nota ?? null,
-    elementos: r.elementos ?? [],
-    degrau: null,
+    status: pendente.status,
+    pergunta: pendente.pergunta ?? "",
+    nota: pendente.nota,
+    elementos: pendente.elementos,
+    ...(pendente.visual ? { visual: pendente.visual } : {}),
+    degrau: pendente.degrau,
     fase: estado.fase,
     feitaEm: agora,
   };
-  const redirecionouEscopo = pergunta.status === "redirecionar" && r.escopo === true;
   return {
     estado: {
       ...estado,
       plin: "PERGUNTA_ATIVA",
       perguntaAtiva: pergunta,
       perguntaPendente: null,
+      // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
       perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
       perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
       conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
       ultimaPerguntaEm: agora,
+      // O desenho que gerou esta pergunta: a próxima só pelo teto se houver peça nova depois dele.
+      ...(pendente.pecas !== undefined ? { desenhoNaUltimaPergunta: pendente.pecas } : {}),
+      // Redirecionamento de escopo feito (#129, decisão I): a hora do primeiro fica para o scorecard.
+      ...(pendente.status === "redirecionar" && pendente.escopo === true
+        ? {
+          escopoProvocadoEm: estado.escopoProvocadoEm ?? agora,
+          escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1,
+        }
+        : {}),
       perguntas: [...estado.perguntas, pergunta],
       conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
-      // Redirecionamento de escopo falado (decisão I): mesma conta do clique com pendente.
-      ...(redirecionouEscopo
-        ? { escopoProvocadoEm: estado.escopoProvocadoEm ?? agora, escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1 }
-        : {}),
     },
     efeitos: [{ tipo: "PERGUNTA_INICIADA", pergunta }],
   };
+}
+
+/**
+ * O quadro falou uma dúvida que o servidor já tinha descartado: registra a dúvida do servidor com o mesmo texto (a mais
+ * nova, se houver duas iguais) e a tira das descartadas. Texto que não é de nenhuma descartada não muda nada.
+ */
+function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, agora: number): Transicao {
+  const texto = r.pergunta.trim();
+  const descartadas = estado.perguntasDescartadas ?? [];
+  const i = descartadas.findLastIndex((p) => p.pergunta?.trim() === texto);
+  if (i < 0) return { estado, efeitos: [] };
+  return fazerPergunta({ ...estado, perguntasDescartadas: descartadas.filter((_, j) => j !== i) }, descartadas[i], agora);
 }
 
 /** Quanto da resposta do candidato fica guardado junto da pergunta (vai aos prompts). */
@@ -467,6 +489,21 @@ export function transicionar(
   agora: number,
   regras: Regras = REGRAS_PADRAO,
 ): Transicao {
+  const t = transicionarEvento(estado, evento, agora, regras);
+  // A dúvida pendente saiu sem virar pergunta (cancelada ou substituída): fica entre as descartadas, para o registro do
+  // quadro poder conferir o texto (ver RegistroDaPergunta). O clique a consome, então não conta.
+  const antes = estado.perguntaPendente;
+  if (!antes || t.estado.perguntaPendente === antes || evento.tipo === "PLIN_CLICADO") return t;
+  const descartadas = [...(t.estado.perguntasDescartadas ?? []), antes].slice(-MAX_PERGUNTAS_DESCARTADAS);
+  return { ...t, estado: { ...t.estado, perguntasDescartadas: descartadas } };
+}
+
+function transicionarEvento(
+  estado: EstadoSessao,
+  evento: EventoSessao,
+  agora: number,
+  regras: Regras,
+): Transicao {
   const nada: Transicao = { estado, efeitos: [] };
   if (estado.fase === "ENCERRADA") return nada;
 
@@ -563,49 +600,13 @@ export function transicionar(
     case "PLIN_CLICADO": {
       const pendente = estado.perguntaPendente;
       // Sem dúvida pendente aqui: o quadro disse que fez a pergunta (numa corrida, o servidor já cancelou a pendente).
-      // Registra o que ele mandou. Sem texto, ou com outra resposta ativa, nada muda.
+      // Vale só se for uma das descartadas. Sem texto, ou com outra resposta ativa, nada muda.
       if (estado.plin !== "PLIN_PENDENTE" || !pendente) {
         const r = evento.registro;
         if (!r?.pergunta.trim() || estado.plin === "PERGUNTA_ATIVA") return nada;
         return registrarPerguntaDoQuadro(estado, r, agora);
       }
-      const pergunta: PerguntaFeita = {
-        // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
-        numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
-        status: pendente.status,
-        pergunta: pendente.pergunta ?? "",
-        nota: pendente.nota,
-        elementos: pendente.elementos,
-        ...(pendente.visual ? { visual: pendente.visual } : {}),
-        degrau: pendente.degrau,
-        fase: estado.fase,
-        feitaEm: agora,
-      };
-      return {
-        estado: {
-          ...estado,
-          plin: "PERGUNTA_ATIVA",
-          perguntaAtiva: pergunta,
-          perguntaPendente: null,
-          // O convite de REQUISITOS (silêncio inicial) não gasta a cota de perguntas do agente.
-          perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
-          perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
-          conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
-          ultimaPerguntaEm: agora,
-          // O desenho que gerou esta pergunta: a próxima só pelo teto se houver peça nova depois dele.
-          ...(pendente.pecas !== undefined ? { desenhoNaUltimaPergunta: pendente.pecas } : {}),
-          // Redirecionamento de escopo feito (#129, decisão I): a hora do primeiro fica para o scorecard.
-          ...(pendente.status === "redirecionar" && pendente.escopo === true
-            ? {
-              escopoProvocadoEm: estado.escopoProvocadoEm ?? agora,
-              escopoRedirecionamentos: (estado.escopoRedirecionamentos ?? 0) + 1,
-            }
-            : {}),
-          perguntas: [...estado.perguntas, pergunta],
-          conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
-        },
-        efeitos: [{ tipo: "PERGUNTA_INICIADA", pergunta }],
-      };
+      return fazerPergunta(estado, pendente, agora);
     }
 
     case "CANDIDATO_FALOU": {
