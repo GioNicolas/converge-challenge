@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  aplicarGuardas, comVezDevolvida, convitesPara, escolherConvite, eSoReacao, falaNaoRepetida, perguntaDeConducao, perguntaJaFeita,
-  reacaoNeutra, semCumprimento, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimSeSobrar, semReacaoRepetida, semValidacao,
+  aplicarGuardas, comVezDevolvida, convitesPara, escolherConvite, ePerguntaDePorque, eSoReacao, falaNaoRepetida, perguntaDeConducao, perguntaDePorque, perguntaJaFeita,
+  reacaoNeutra, semCumprimento, semEcoNoComeco, semPerguntaNoFim, semPerguntaNoFimSeSobrar, semReacaoRepetida, semValidacao, emPortugues,
 } from "../guardas";
 
 describe("cumprimento e reapresentação fora da abertura", () => {
@@ -223,5 +223,48 @@ describe("aplicarGuardas", () => {
       const uma = aplicarGuardas(fala, contexto);
       assert.deepEqual(aplicarGuardas(uma.texto, contexto), { texto: uma.texto, travas: [] }, fala);
     }
+  });
+});
+
+describe("por quê: pergunta de porquê e a que ainda não saiu", () => {
+  it("reconhece a pergunta de porquê, com ou sem acento e com reação antes", () => {
+    assert.equal(ePerguntaDePorque("Por que no backend?"), true);
+    assert.equal(ePerguntaDePorque("Tá. Por quê?"), true);
+    assert.equal(ePerguntaDePorque("Por que essa opção?"), true);
+    assert.equal(ePerguntaDePorque("Tá. E o banco aguenta?"), false);
+    assert.equal(ePerguntaDePorque("Por que no backend, então."), false);
+  });
+  it("a pergunta de porquê não repete a última que o Totti disse, mesmo dentro de uma reação", () => {
+    assert.equal(perguntaDePorque([]), "Por quê?");
+    assert.equal(perguntaDePorque(["Tá. Por quê?"]), "Por que essa opção?");
+    assert.equal(perguntaDePorque(["Tá. Por quê?", "Certo. Por que essa opção?"]), "E por que essa e não a outra?");
+  });
+});
+
+describe("português claro (emPortugues)", () => {
+  it("troca courier e rider, no singular e no plural, pelo termo do português", () => {
+    assert.equal(emPortugues("Chegou o courier."), "Chegou o entregador.");
+    assert.equal(emPortugues("Os couriers e os riders saem juntos."), "Os entregadores e os entregadores saem juntos.");
+    assert.equal(emPortugues("O rider atrasou."), "O entregador atrasou.");
+  });
+  it("mantém a inicial maiúscula da palavra trocada", () => {
+    assert.equal(emPortugues("Courier chega às dez."), "Entregador chega às dez.");
+    assert.equal(emPortugues("Riders na fila."), "Entregadores na fila.");
+  });
+  it("só troca palavra inteira: dentro de outra palavra, não", () => {
+    assert.equal(emPortugues("O supercourier e o couriers_api ficam."), "O supercourier e o couriers_api ficam.");
+    assert.equal(emPortugues("Um courierzinho."), "Um courierzinho.");
+  });
+  it("não mexe nos termos que são o nome usual da área", () => {
+    assert.equal(emPortugues("Kafka, cache e API com load balancer."), "Kafka, cache e API com load balancer.");
+  });
+  it("não troca o termo que a descrição da vaga usa, mas troca o resto", () => {
+    const vaga = "Experiência com courier próprio e rastreio em tempo real.";
+    assert.equal(emPortugues("O courier e o rider atrasam.", vaga), "O courier e o entregador atrasam.");
+    assert.equal(emPortugues("O courier atrasa.", "Logística de última milha."), "O entregador atrasa.");
+  });
+  it("é idempotente: trocar de novo não muda mais nada", () => {
+    const uma = emPortugues("Os couriers e o Rider.");
+    assert.equal(emPortugues(uma), uma);
   });
 });

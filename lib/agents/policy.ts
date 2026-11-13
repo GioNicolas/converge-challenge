@@ -74,8 +74,8 @@ const BOOST_FAILED_RUN = 0.1;
 const BOOST_LONG_PAUSE = 0.1;
 /** Pausa a partir desse tamanho conta como pausa longa pro boost. */
 const LONG_PAUSE_MS = 30_000;
-/** A partir dessa fração do tempo, pergunta de critério ainda não explorado ganha reforço. */
-const AGENDA_START_FRACTION = 0.4;
+/** A partir dessa fração do tempo, pergunta de critério ainda não explorado ganha reforço (30%, como no quadro: #129). */
+const AGENDA_START_FRACTION = 0.3;
 /** Reforço de agenda: critério da recrutadora que ainda não foi explorado. */
 const BOOST_UNCOVERED = 0.15;
 /**

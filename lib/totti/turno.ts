@@ -9,7 +9,7 @@
 //   - "terminei" dito com as mãos paradas conta como conclusão mesmo que o modelo não tenha marcado.
 // Este arquivo não importa nada de `lib/agente` nem de `lib/agents`: as salas é que importam daqui.
 import { comVezDevolvida, eSoReacao, escolherConvite, falaNaoRepetida, semPerguntaNoFimSeSobrar } from "./guardas";
-import type { Sala } from "./texto";
+import { frasesDe, normalizar, type Sala } from "./texto";
 
 export const INTENCOES = ["perguntou", "respondeu", "nao_sabe", "pulou", "concluiu", "encerrar", "pensando_alto", "conversa", "outro"] as const;
 export type Intencao = (typeof INTENCOES)[number];
@@ -30,6 +30,12 @@ export type LeituraDoTurno = {
   perguntou: boolean;
   /** O gesto da sala (linhas grifadas ou marcas no desenho). O núcleo não lê: só carrega. */
   apontar?: unknown;
+  /**
+   * O modelo leu que o candidato fez uma pergunta (ou pediu esclarecimento) que espera resposta, mesmo sem "?". Só a
+   * sala que pede isso (o quadro, no v2) o traz; ausente, o fechamento segue como antes. Diferente de `intencao`
+   * "perguntou", que sai do regex `candidatoPerguntou` quando o modelo não marcou nada.
+   */
+  candidatoPerguntou?: boolean;
 };
 
 /** O mínimo que as duas salas sabem dizer sobre o momento da conversa. */
@@ -47,6 +53,12 @@ export type SituacaoDoTurno = {
   paradoHaS?: number;
   /** Ele travou no trabalho e o Totti está ajudando: ali uma pergunta ("onde travou?", "quer uma dica?") é ajuda. */
   ajudando?: boolean;
+  /**
+   * (Quadro) A última fala do Totti já devolveu a vez e, desde então, o candidato não desenhou: só disse uma reação
+   * ou pediu tempo. Ali não entra convite de novo (o "Pode seguir." repetido soa como gravação). Ausente: a regra
+   * de sempre (live coding e quadro sem essa informação).
+   */
+  semAcaoDesdeOConvite?: boolean;
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -82,6 +94,34 @@ export function perguntouComClareza(fala: string): boolean {
   const texto = fala.toLowerCase().trim();
   if (PERGUNTA_DIRETA.test(texto)) return true;
   return texto.endsWith("?") && !SO_CONFIRMACAO.test(texto);
+}
+
+/** A escolha curta que pede o porquê: até três palavras. */
+const MAX_PALAVRAS_DA_ESCOLHA = 3;
+/** "Não sei" e "pula" não pedem porquê: o desfecho da pergunta já trata. */
+const NAO_SABE_OU_PULA = /\b(nao sei|n sei|nao faco ideia|nao pensei|pula|pular|pulo|passa|passo)\b/;
+/** Pediu tempo: não é escolha. */
+const PEDIU_TEMPO = /\b(pensando|pensar|calma)\b/;
+/**
+ * Já traz a justificativa: não falta o porquê. "pra/para" só conta seguido de verbo no infinitivo ("pra escalar",
+ * "para não travar"); como preposição ("pra fila", "para o back") não é justificativa.
+ */
+const JUSTIFICA = /\b(porque|pq|pois|ja que|(pra|para) (nao )?[a-z]+(ar|er|ir))\b/;
+
+/**
+ * A pergunta do Totti oferece alternativas ("No back ou no front?") e a resposta dele é só a escolha, de até três
+ * palavras, sem justificativa: o porquê é o que falta ouvir. Pergunta sem alternativas não pede porquê, e uma
+ * resposta vazia também não.
+ */
+export function pedePorque(perguntaDoTotti: string | undefined, respostaDoCandidato: string): boolean {
+  const pergunta = (perguntaDoTotti ?? "").trim();
+  if (!pergunta.endsWith("?")) return false;
+  const ultima = frasesDe(pergunta).at(-1) ?? pergunta;
+  if (!/\sou\s/.test(normalizar(ultima))) return false;
+  const resposta = normalizar(respostaDoCandidato);
+  const palavras = resposta ? resposta.split(" ").length : 0;
+  if (palavras < 1 || palavras > MAX_PALAVRAS_DA_ESCOLHA) return false;
+  return !NAO_SABE_OU_PULA.test(resposta) && !PEDIU_TEMPO.test(resposta) && !JUSTIFICA.test(resposta);
 }
 
 /** "Terminei", "acabei": só pode ser o trabalho. */
@@ -145,8 +185,11 @@ export type SaidaDoQuadro = {
   texto: string;
   concluiu?: boolean;
   encerrar?: boolean;
-  desfecho?: "respondeu" | "nao_sabe" | "pulou" | null;
+  /** "pensando": ele pediu tempo para pensar (não é resposta; lib/agente/perguntar.ts trata). */
+  desfecho?: "respondeu" | "nao_sabe" | "pulou" | "pensando" | null;
   visual?: unknown;
+  /** O modelo leu que ele perguntou (ver `LeituraDoTurno.candidatoPerguntou`). */
+  candidatoPerguntou?: boolean;
 };
 
 /** O que sobra para a intenção depois do que o modelo marcou: o que a fala e o momento mostram. */
@@ -183,11 +226,15 @@ export function deSaidaDoQuadro(saida: SaidaDoQuadro, situacao: SituacaoDoTurno)
   const intencao: Intencao =
     saida.encerrar === true ? "encerrar"
     : saida.concluiu === true ? "concluiu"
+    : saida.desfecho === "pensando" ? "pensando_alto"
     : desfecho === "nao_sabe" ? "nao_sabe"
     : desfecho === "pulou" ? "pulou"
     : desfecho === "respondeu" ? "respondeu"
     : intencaoSemMarca(responder, situacao);
-  return leitura({ responder, texto: saida.texto, intencao, concluiu: saida.concluiu === true, encerrar: saida.encerrar === true, apontar: saida.visual });
+  return leitura({
+    responder, texto: saida.texto, intencao, concluiu: saida.concluiu === true, encerrar: saida.encerrar === true, apontar: saida.visual,
+    ...(saida.candidatoPerguntou !== undefined ? { candidatoPerguntou: saida.candidatoPerguntou } : {}),
+  });
 }
 
 /** A leitura decidida de volta na saída do live coding: só os campos comuns mudam. */
@@ -220,7 +267,10 @@ const CONVITE_EM_TODA_RESPOSTA: Record<Sala, boolean> = { quadro: true, codigo: 
  */
 export function ficouSemResposta(lida: LeituraDoTurno, situacao: SituacaoDoTurno): boolean {
   const calado = !lida.responder || lida.texto.trim() === "";
-  return !lida.encerrar && calado && perguntouComClareza(situacao.falaDoCandidato);
+  // A pergunta que o modelo leu (`candidatoPerguntou`, sem "?") conta como clara, e não cai no "pediu para encerrar":
+  // a pergunta vem antes do encerramento (lib/agente/perguntar.ts).
+  const marcada = lida.candidatoPerguntou === true;
+  return (!lida.encerrar || marcada) && calado && (marcada || perguntouComClareza(situacao.falaDoCandidato));
 }
 
 /** O recado para a segunda geração. `campo` é o nome do campo de responder no schema da sala. */
@@ -266,7 +316,8 @@ export function decidirTurno(lida: LeituraDoTurno, situacao: SituacaoDoTurno): {
   // Ele acabou de responder a uma pergunta do Totti (ou de soltar o assunto): a réplica não para num "Tá." solto,
   // senão ele fica sem saber o que fazer.
   if (situacao.respondiaAoTotti || soltou) {
-    const comVez = eSoReacao(texto) ? `${texto} ${escolherConvite(texto, jaDitas, situacao.sala)}`
+    const comVez = situacao.semAcaoDesdeOConvite ? texto
+      : eSoReacao(texto) ? `${texto} ${escolherConvite(texto, jaDitas, situacao.sala)}`
       : CONVITE_EM_TODA_RESPOSTA[situacao.sala] ? comVezDevolvida(texto, jaDitas, situacao.sala)
       : texto;
     if (comVez !== texto) regras.push("vez_devolvida");

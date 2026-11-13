@@ -14,10 +14,12 @@ let repo = criarRepositorioEmMemoria();
 let relogio = AGORA;
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const post = (dados: unknown) => new Request("http://localhost/api", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(dados) });
-async function sessao(restanteMin = 20) {
+/** `mudancaAnunciada`: a mudança de cenário já saiu (sem ela, "terminei" é barrado: decisão F, #129). */
+async function sessao(restanteMin = 20, mudancaAnunciada = false) {
   return repo.criar({ avaliacaoId: "demo", candidatoId: "teste", estado: {
     ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: AGORA - 60_000,
     iniciadaEm: AGORA - (35 - restanteMin) * 60_000,
+    ...(mudancaAnunciada ? { empecilho: { id: "teste_mudanca", fala: "Mudança.", requisito: "Mudança", exige: "Rever.", anunciadoEm: AGORA - 60_000, fase: "ALTO_NIVEL" as const, forcado: false } } : {}),
   } });
 }
 beforeEach(() => {
@@ -49,8 +51,16 @@ test("relógio não antecipa fechamento quando ainda há tempo; pedido explícit
   assert.match(fim.texto, /Obrigado/);
 });
 
+test("relógio fecha no limiar do quadro (15% da entrevista): faltando 5 min de 35, já fecha (os 3 min de antes não fechavam)", async () => {
+  const s = await sessao(5);
+  const r = await (await fechar(post({ fase: "ALTO_NIVEL", gatilho: "tempo" }), params(s.id))).json();
+  assert.equal(r.responder, true);
+  assert.notEqual(r.fechamento, undefined);
+  assert.equal((await repo.obter(s.id))!.estado.fechamento?.nucleo.gatilho, "tempo");
+});
+
 test("rotas preservam fechamento entre turnos, bloqueiam análise e seguem até despedida", async () => {
-  const s = await sessao();
+  const s = await sessao(20, true);
   const llm = criarClienteFalso([
     { responder: false, texto: "", requisito: null, concluiu: true },
     { status: "duvida", pergunta: "O banco aguenta o volume?", nota: "Banco", elementos: ["r3"], degrau: null, observacoes: [] },

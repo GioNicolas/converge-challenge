@@ -1,16 +1,30 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S } from "../../../contracts";
-import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "../../../interrupcao/politica";
+import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../../contracts";
+import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../../interrupcao/politica";
+import type { PlanoDaSessao } from "../../plano";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
+  perguntaObrigatoria,
+  tetoDaPergunta,
+  precisaAbrirBrechaDaMudanca,
+  conclusaoBarradaRecente,
+  desenhoNovoDesdePergunta,
   extrairIdsDoGrafo,
   filtrarResposta,
   motivoBloqueio,
+  motivoDoConteudo,
+  falaQueContaParaABola,
   motivoBloqueioPlin,
+  parametrosDoFechamentoNoQuadro,
+  pedidoDeTempoPendente,
   podeAnalisar,
   podeLevantarPlin,
+  podeOferecerEncerrar,
   REGRAS_PADRAO,
+  aplicarRegraDoEscopo,
+  ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS,
+  motivoRedirecionamentoDeEscopo,
   statusPermitido,
 } from "../politica";
 import { FASES, STATUS_ANALISE, type Fase, type RespostaAnalise } from "../tipos";
@@ -27,7 +41,7 @@ function estadoEm(fase: Fase, extra: Partial<EstadoSessao> = {}): EstadoSessao {
 
 function resposta(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
-    status: "duvida",
+    status: "duvida", parteFechada: true, escopo: false,
     pergunta: "Onde fica o gargalo?",
     nota: "Gargalo?",
     elementos: ["e1"],
@@ -298,15 +312,41 @@ describe("a bola está com o candidato depois de uma fala solta do agente", () =
     assert.equal(motivoBloqueioPlin(falou(), AGORA + 3_000, regras, { paradoHaS: 2 }), null);
   });
 
-  it("sem ação dele, um silêncio de verdade (o limite que já quebra o silêncio) libera a pergunta", () => {
-    assert.equal(motivoBloqueioPlin(falou(), AGORA + 8_000 - 1, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
-    assert.equal(motivoBloqueioPlin(falou(), AGORA + 8_000, regras, { paradoHaS: 60 }), null);
+  it("sem ação dele, só um silêncio total de SILENCIO_SEM_ACAO_S (60 s) libera a pergunta", () => {
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + SILENCIO_SEM_ACAO_S * 1000 - 1, regras, { paradoHaS: 120 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(falou(), AGORA + SILENCIO_SEM_ACAO_S * 1000, regras, { paradoHaS: 120 }), null);
   });
 
-  it("em REQUISITOS o silêncio que libera é o inicial, mais longo", () => {
+  it("o mesmo limite de 60 s vale em REQUISITOS (antes era 15 s)", () => {
     const req = transicionar(estadoEm("REQUISITOS", base), { tipo: "AGENTE_FALOU", texto: "Uns 4 mil por segundo." }, AGORA).estado;
-    assert.equal(motivoBloqueioPlin(req, AGORA + 10_000, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
-    assert.equal(motivoBloqueioPlin(req, AGORA + 15_000, regras, { paradoHaS: 60 }), null);
+    assert.equal(motivoBloqueioPlin(req, AGORA + 15_000, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(req, AGORA + 60_000, regras, { paradoHaS: 120 }), null);
+  });
+
+  it("o pedido de tempo conta como fala do Totti: sem ação dele, a bola segura 60 s depois do pedido e libera", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: false }, AGORA + 1_000).estado;
+    assert.equal(motivoBloqueioPlin(pediu, AGORA + 60_999, regras, { paradoHaS: 60 }), "BOLA_COM_O_CANDIDATO");
+    assert.equal(motivoBloqueioPlin(pediu, AGORA + 61_000, regras, { paradoHaS: 61 }), null);
+    assert.equal(pedidoDeTempoPendente(pediu, AGORA + 61_000, 61), true);
+  });
+
+  it("o pedido só conta como fala se for a última coisa do agente (a fala mais recente vale)", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: false }, AGORA + 1_000).estado;
+    assert.equal(falaQueContaParaABola(pediu), AGORA + 1_000);
+    assert.equal(falaQueContaParaABola(estadoEm("APROFUNDAMENTO", base)), null);
+  });
+
+  it("depois do pedido, ele agir (desenhar ou falar) libera a regra: o pedido deixa de estar pendente", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: false }, AGORA + 1_000).estado;
+    // Última ação há 2 s, depois do pedido: ele voltou a agir.
+    assert.equal(pedidoDeTempoPendente(pediu, AGORA + 10_000, 2), false);
+    assert.equal(motivoBloqueioPlin(pediu, AGORA + 10_000, regras, { paradoHaS: 2 }), null);
+  });
+
+  it("sem saber se ele agiu desde o pedido, a espera vale", () => {
+    const pediu = transicionar(falou(), { tipo: "CANDIDATO_PEDIU_TEMPO", reagiu: true }, AGORA).estado;
+    assert.equal(pedidoDeTempoPendente(pediu, AGORA + 10_000), true);
+    assert.equal(pedidoDeTempoPendente(estadoEm("APROFUNDAMENTO", base), AGORA + 10_000), false);
   });
 
   it("sem saber há quanto tempo ele está parado, a regra não se aplica", () => {
@@ -355,5 +395,313 @@ describe("intervalo entre perguntas: referência de tempo", () => {
     delete (antigo as { ultimaRespostaEm?: number | null }).ultimaRespostaEm;
     assert.equal(motivoBloqueioPlin(antigo, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
     assert.equal(motivoBloqueioPlin(antigo, AGORA - 10_000 + INTERVALO), null);
+  });
+});
+
+describe("ritmo por conteúdo do quadro (#129, bloco B)", () => {
+  const PISO = RITMO_QUADRO.pisoEntrePerguntasMs;
+  const TETO = RITMO_QUADRO.tetoSemPerguntaMs;
+  const fechada = { status: "duvida" as const, parteFechada: true };
+  const aberta = { status: "duvida" as const, parteFechada: false };
+  const alto = (extra: Partial<EstadoSessao> = {}) => estadoEm("ALTO_NIVEL", extra);
+
+  it("piso: parte fechada só sai com 2 min desde a última pergunta", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA });
+    assert.equal(motivoDoConteudo(e, fechada, AGORA + PISO - 1), "PISO_ENTRE_PERGUNTAS");
+    assert.equal(motivoDoConteudo(e, fechada, AGORA + PISO), null);
+  });
+
+  it("sem pergunta anterior, a parte fechada sai sem esperar o piso", () => {
+    assert.equal(motivoDoConteudo(alto(), fechada, AGORA), null);
+  });
+
+  it("sem parte fechada e antes do teto, a pergunta vira SEM_PARTE_FECHADA", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 2 * MIN });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
+  });
+
+  it("teto: 3 min sem pergunta e com desenho novo sai mesmo sem parte fechada", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1"] });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1", "e1"] }), null);
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO - 1, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
+  });
+
+  it("teto sem desenho novo não libera: o mesmo desenho não gera pergunta sem parte fechada", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
+  });
+
+  it("sem pergunta anterior, o teto conta desde o começo da fase", () => {
+    const e = alto({ faseIniciadaEm: AGORA, ultimaPerguntaEm: null });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO - 1, { pecas: ["r1"] }), "SEM_PARTE_FECHADA");
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1"] }), null);
+  });
+
+  it("grafo cortado (peças desconhecidas) não conta como desenho novo", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1"] });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: null }), "SEM_PARTE_FECHADA");
+  });
+
+  it("quebra de silêncio fura o piso, com ou sem parte fechada", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 30_000 });
+    assert.equal(motivoDoConteudo(e, fechada, AGORA, { paradoHaS: SILENCIO_SEM_ACAO_S }), null);
+    assert.equal(motivoDoConteudo(e, aberta, AGORA, { paradoHaS: SILENCIO_SEM_ACAO_S }), null);
+    assert.equal(motivoDoConteudo(e, fechada, AGORA, { paradoHaS: SILENCIO_SEM_ACAO_S - 1 }), "PISO_ENTRE_PERGUNTAS");
+  });
+
+  it("marco de conclusão ('terminei') fura o piso", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 30_000, ultimaConclusaoEm: AGORA - 10_000 });
+    assert.equal(motivoDoConteudo(e, fechada, AGORA), null);
+  });
+
+  it("só se aplica a duvida e dica em ALTO_NIVEL e APROFUNDAMENTO", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 1000 });
+    assert.equal(motivoDoConteudo(estadoEm("REQUISITOS", { ultimaPerguntaEm: AGORA - 1000 }), aberta, AGORA), null);
+    assert.equal(motivoDoConteudo(e, { status: "redirecionar", parteFechada: false }, AGORA), null);
+    assert.equal(motivoDoConteudo(e, { status: "ok", parteFechada: false }, AGORA), null);
+    assert.equal(
+      motivoDoConteudo(estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 1000 }), { status: "dica", parteFechada: false }, AGORA),
+      "SEM_PARTE_FECHADA",
+    );
+  });
+
+  it("desenhoNovoDesdePergunta: só peça que não estava no grafo da última pergunta", () => {
+    const e = alto({ desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(desenhoNovoDesdePergunta(e, ["r1", "e1"]), false);
+    assert.equal(desenhoNovoDesdePergunta(e, ["r1", "e1", "s2"]), true);
+    assert.equal(desenhoNovoDesdePergunta(alto(), ["r1"]), true, "sem pergunta anterior, qualquer peça conta");
+    assert.equal(desenhoNovoDesdePergunta(alto(), []), false);
+    assert.equal(desenhoNovoDesdePergunta(e, null), false);
+  });
+
+  it("PLIN_CLICADO grava as peças da análise que fez a pergunta (base do teto)", () => {
+    const pendente = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: resposta(), pecas: ["r1", "e1"] }, AGORA).estado;
+    assert.equal(pendente.plin, "PLIN_PENDENTE");
+    const feita = transicionar(pendente, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
+    assert.deepEqual(feita.desenhoNaUltimaPergunta, ["r1", "e1"]);
+    const semPecas = transicionar(transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: resposta() }, AGORA).estado, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
+    assert.equal(semPecas.desenhoNaUltimaPergunta, undefined, "sem peças na análise, o campo fica ausente");
+  });
+});
+
+describe("quando o quadro pode oferecer o encerramento (#129, decisão F)", () => {
+  const PLANO: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [
+      { nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 },
+      { nome: "Falha no gateway", descricao: "o que acontece se o gateway cair", peso: 1 },
+    ],
+  };
+  /** Vaga de 30 min, começada 9 min atrás: faltam 21 min, longe do limiar de 15%. */
+  const quadroEm = (extra: Partial<EstadoSessao> = {}): EstadoSessao => ({
+    ...estadoInicial({ plano: PLANO }), fase: "ALTO_NIVEL", faseIniciadaEm: AGORA - 5 * MIN, iniciadaEm: AGORA - 9 * MIN, ...extra,
+  });
+  const comCriteriosCobertos = (e: EstadoSessao): EstadoSessao => ({
+    ...e,
+    cobertura: { ...e.cobertura, Idempotência: { positivo: 1, negativo: 0, neutro: 0 }, "Falha no gateway": { positivo: 1, negativo: 0, neutro: 0 } },
+  });
+  const anunciada: EstadoSessao["empecilho"] = { id: "x", fala: "Mudou.", requisito: "Mudança", exige: "Rever.", anunciadoEm: AGORA - MIN, fase: "ALTO_NIVEL", forcado: false };
+  const COM_MUDANCA = { kit: { id: "system_design" }, problema: {} };
+  const SEM_MUDANCA = { kit: { id: "design_produto" }, problema: {} };
+
+  it("com critério do plano sem evidência, barra (faltam_criterios), mesmo com a mudança anunciada", () => {
+    assert.equal(podeOferecerEncerrar(quadroEm(), AGORA, COM_MUDANCA), "faltam_criterios");
+    assert.equal(podeOferecerEncerrar(quadroEm({ empecilho: anunciada }), AGORA, COM_MUDANCA), "faltam_criterios");
+  });
+
+  it("critérios cobertos mas a mudança ainda não saiu: barra (falta_mudanca)", () => {
+    assert.equal(podeOferecerEncerrar(comCriteriosCobertos(quadroEm()), AGORA, COM_MUDANCA), "falta_mudanca");
+  });
+
+  it("critérios cobertos e mudança anunciada: pode", () => {
+    assert.equal(podeOferecerEncerrar(comCriteriosCobertos(quadroEm({ empecilho: anunciada })), AGORA, COM_MUDANCA), null);
+  });
+
+  it("sem mudança prevista no problema, critérios cobertos bastam", () => {
+    assert.equal(podeOferecerEncerrar(comCriteriosCobertos(quadroEm()), AGORA, SEM_MUDANCA), null);
+  });
+
+  it("faltando 15% da duração ou menos, pode, mesmo com critério e mudança pendentes (4,5 min numa vaga de 30)", () => {
+    assert.equal(podeOferecerEncerrar(quadroEm({ iniciadaEm: AGORA - 25.5 * MIN }), AGORA, COM_MUDANCA), null, "faltam 4,5 min");
+    assert.equal(podeOferecerEncerrar(quadroEm({ iniciadaEm: AGORA - 25.4 * MIN }), AGORA, COM_MUDANCA), "faltam_criterios", "faltam 4,6 min");
+  });
+
+  it("sem duração conhecida, não barra (o comportamento de antes)", () => {
+    assert.equal(podeOferecerEncerrar(estadoInicial({ tempos: {}, plano: null }), AGORA, COM_MUDANCA), null);
+  });
+
+  it("parametrosDoFechamentoNoQuadro: limiar da vaga e a barra da conclusão", () => {
+    assert.deepEqual(parametrosDoFechamentoNoQuadro(quadroEm(), AGORA, COM_MUDANCA), { limiarTempoMs: 4.5 * MIN, podeFecharPorConclusao: false });
+    const pode = comCriteriosCobertos(quadroEm({ empecilho: anunciada }));
+    assert.deepEqual(parametrosDoFechamentoNoQuadro(pode, AGORA, COM_MUDANCA), { limiarTempoMs: 4.5 * MIN, podeFecharPorConclusao: true });
+  });
+
+  it("conclusaoBarradaRecente: só com conclusão recente, no desenho, sem fechamento, e barrada", () => {
+    const concluiu = (ha: number, fase: EstadoSessao["fase"] = "ALTO_NIVEL") => quadroEm({ fase, ultimaConclusaoEm: AGORA - ha, conclusoes: 1 });
+    assert.equal(conclusaoBarradaRecente(concluiu(10_000), AGORA, COM_MUDANCA), "faltam_criterios");
+    assert.equal(conclusaoBarradaRecente(concluiu(60_000), AGORA, COM_MUDANCA), null, "conclusão antiga não conta");
+    assert.equal(conclusaoBarradaRecente(concluiu(10_000, "REQUISITOS"), AGORA, COM_MUDANCA), null, "fora do desenho não conta");
+    assert.equal(conclusaoBarradaRecente(quadroEm(), AGORA, COM_MUDANCA), null, "sem conclusão, não há o que puxar");
+    assert.equal(conclusaoBarradaRecente(comCriteriosCobertos(concluiu(10_000)), AGORA, COM_MUDANCA), "falta_mudanca");
+  });
+});
+
+describe("redirecionamento de escopo (#129, decisão I)", () => {
+  const PECAS = ["r1", "e1", "s1"];
+  const ESPERA = ESPERA_SEGUNDO_LEMBRETE_ESCOPO_MS;
+  const alto = (extra: Partial<EstadoSessao> = {}) => estadoEm("ALTO_NIVEL", extra);
+  const redireciona = (extra: Partial<RespostaAnalise> = {}) => resposta({ status: "redirecionar", escopo: true, parteFechada: false, ...extra });
+
+  it("só em ALTO_NIVEL e APROFUNDAMENTO", () => {
+    assert.equal(motivoRedirecionamentoDeEscopo(alto(), AGORA, PECAS), null);
+    assert.equal(motivoRedirecionamentoDeEscopo(estadoEm("APROFUNDAMENTO"), AGORA, PECAS), null);
+    assert.equal(motivoRedirecionamentoDeEscopo(estadoEm("REQUISITOS"), AGORA, PECAS), "escopo_fora_da_fase");
+    assert.equal(motivoRedirecionamentoDeEscopo(estadoEm("FECHAMENTO"), AGORA, PECAS), "escopo_fora_da_fase");
+  });
+
+  it("sem peça desenhada não julga o escopo; grafo grande demais para comparar conta como desenho", () => {
+    assert.equal(motivoRedirecionamentoDeEscopo(alto(), AGORA, []), "escopo_sem_desenho");
+    assert.equal(motivoRedirecionamentoDeEscopo(alto(), AGORA, null), null);
+  });
+
+  it("o primeiro sai; o segundo só depois de 5 min do primeiro; o terceiro nunca", () => {
+    assert.equal(motivoRedirecionamentoDeEscopo(alto({ escopoRedirecionamentos: 1, escopoProvocadoEm: AGORA - ESPERA + 1 }), AGORA, PECAS), "escopo_espera_lembrete");
+    assert.equal(motivoRedirecionamentoDeEscopo(alto({ escopoRedirecionamentos: 1, escopoProvocadoEm: AGORA - ESPERA }), AGORA, PECAS), null);
+    assert.equal(motivoRedirecionamentoDeEscopo(alto({ escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 10 * ESPERA }), AGORA, PECAS), "escopo_ja_redirecionado");
+  });
+
+  it("aplicarRegraDoEscopo: fora da regra vira ok com o motivo; dentro passa; sem escopo, escopo cai fora de redirecionar", () => {
+    const barrada = aplicarRegraDoEscopo(estadoEm("REQUISITOS"), redireciona(), AGORA, PECAS);
+    assert.equal(barrada.motivo, "escopo_fora_da_fase");
+    assert.equal(barrada.resposta.status, "ok");
+    assert.equal(barrada.resposta.escopo, false);
+    const passa = aplicarRegraDoEscopo(alto(), redireciona(), AGORA, PECAS);
+    assert.equal(passa.motivo, null);
+    assert.equal(passa.resposta.status, "redirecionar");
+    assert.equal(passa.resposta.escopo, true);
+    const duvidaComEscopo = aplicarRegraDoEscopo(alto(), resposta({ status: "duvida", escopo: true }), AGORA, PECAS);
+    assert.equal(duvidaComEscopo.resposta.escopo, false);
+    assert.equal(duvidaComEscopo.motivo, null);
+  });
+
+  it("fura o intervalo e o respiro entre perguntas, mas só com escopo", () => {
+    const recente = alto({ ultimaPerguntaEm: AGORA - 10_000, ultimaRespostaEm: AGORA - 5_000 });
+    assert.equal(filtrarResposta(recente, redireciona({ escopo: false }), IDS, AGORA).status, "ok", "sem escopo, o ritmo comum barra");
+    const comEscopo = filtrarResposta(recente, redireciona(), IDS, AGORA);
+    assert.equal(comEscopo.status, "redirecionar");
+    assert.equal(comEscopo.pergunta, "Onde fica o gargalo?");
+  });
+
+  it("a cota de perguntas não barra o escopo (revisado, decisão I)", () => {
+    const cedo = alto({ iniciadaEm: AGORA, perguntasFeitas: 1 });
+    assert.equal(filtrarResposta(cedo, redireciona(), IDS, AGORA).status, "redirecionar");
+  });
+
+  it("o orçamento de perguntas continua valendo para o escopo", () => {
+    const sem = alto({ perguntasFeitas: LIMITE, ultimaPerguntaEm: AGORA - 10_000 });
+    assert.equal(filtrarResposta(sem, redireciona(), IDS, AGORA).status, "ok");
+    assert.equal(motivoBloqueioPlin(sem, AGORA, REGRAS_PADRAO, { escopo: true }), "LIMITE_DE_PERGUNTAS");
+  });
+
+  it("a regra da bola continua valendo: fala do Totti sem ação do candidato segura o escopo", () => {
+    const bola = alto({ ultimaFalaDoAgenteEm: AGORA - 10_000 });
+    assert.equal(filtrarResposta(bola, redireciona(), IDS, AGORA, REGRAS_PADRAO, { paradoHaS: 60 }).status, "ok");
+  });
+});
+
+describe("cota e escopo (#129, decisão I, revisado)", () => {
+  it("a cota não barra o redirecionamento de escopo; o orçamento total continua barrando", () => {
+    // Início da entrevista (fração 0): a cota é 1, e uma pergunta já feita a esgota.
+    const cedo = estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA, perguntasFeitas: 1 });
+    assert.equal(motivoBloqueioPlin(cedo, AGORA), "COTA_DO_TEMPO");
+    assert.equal(motivoBloqueioPlin(cedo, AGORA, REGRAS_PADRAO, { escopo: true }), null);
+    const cheio = estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA, perguntasFeitas: LIMITE });
+    assert.equal(motivoBloqueioPlin(cheio, AGORA, REGRAS_PADRAO, { escopo: true }), "LIMITE_DE_PERGUNTAS");
+  });
+});
+
+describe("pergunta obrigatória do teto (#129, bloco B)", () => {
+  const TETO = RITMO_QUADRO.tetoSemPerguntaMs;
+  const AGORA_OB = 10_000_000;
+  const PECAS = ["r1", "e1"];
+  const ctx = { mudancaPrevista: false };
+  // Teto vencido: a última pergunta foi há mais que o teto, com a peça e1 nova desde então.
+  const vencida = (extra: Partial<EstadoSessao> = {}) => estadoEm("APROFUNDAMENTO", {
+    iniciadaEm: AGORA_OB - 10 * 60_000, faseIniciadaEm: AGORA_OB - 60_000,
+    ultimaPerguntaEm: AGORA_OB - TETO - 1, desenhoNaUltimaPergunta: ["r1"], ...extra,
+  });
+
+  it("o teto de RITMO_QUADRO é de 3 min", () => {
+    assert.equal(TETO, 180_000);
+  });
+
+  it("com o teto vencido, em fase de conteúdo e sem bloqueio, a pergunta é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida(), AGORA_OB, PECAS, ctx), true);
+  });
+
+  it("antes do teto, não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ ultimaPerguntaEm: AGORA_OB - TETO + 1 }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("no ALTO_NIVEL, sem desenho novo, não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ fase: "ALTO_NIVEL", desenhoNaUltimaPergunta: ["r1", "e1"] }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("no APROFUNDAMENTO, sem desenho novo, o teto vence pelo tempo (decisão do dono)", () => {
+    assert.equal(perguntaObrigatoria(vencida({ desenhoNaUltimaPergunta: ["r1", "e1"] }), AGORA_OB, PECAS, ctx), true);
+    assert.equal(perguntaObrigatoria(vencida({ desenhoNaUltimaPergunta: ["r1", "e1"], ultimaPerguntaEm: AGORA_OB - TETO + 1 }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("fora das fases de conteúdo (REQUISITOS), não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ fase: "REQUISITOS" }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("uma pergunta pendente é outro portão: não é obrigatória", () => {
+    const pendente = { status: "duvida" as const, pergunta: "x?", nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: true, escopo: false, visual: [], criadoEm: AGORA_OB - 1 };
+    assert.equal(perguntaObrigatoria(vencida({ perguntaPendente: pendente }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("orçamento de perguntas esgotado é outro portão: não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ perguntasFeitas: 50 }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("a brecha da mudança (decisão G) é um \"ok\" de propósito: não é obrigatória", () => {
+    // Garantia dos 60% já passou (23 min de 35), a mudança prevista ainda não entrou e a brecha está aberta.
+    const comBrecha = vencida({ iniciadaEm: AGORA_OB - 23 * 60_000 });
+    assert.equal(perguntaObrigatoria(comBrecha, AGORA_OB, PECAS, { mudancaPrevista: true }), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(comBrecha, AGORA_OB, true), true);
+    assert.equal(perguntaObrigatoria(comBrecha, AGORA_OB, PECAS, { mudancaPrevista: false }), true);
+  });
+
+  it("a brecha de INTERVALO_BRECHA_EMPECILHO_MS: ciclo recente, sem brecha; depois, de novo", () => {
+    const recente = vencida({ iniciadaEm: AGORA_OB - 23 * 60_000, brechaEmpecilhoEm: AGORA_OB - 1000 });
+    assert.equal(precisaAbrirBrechaDaMudanca(recente, AGORA_OB, true), false);
+    assert.equal(perguntaObrigatoria(recente, AGORA_OB, PECAS, { mudancaPrevista: true }), true);
+  });
+});
+
+describe("teto por fase (decisão do dono): APROFUNDAMENTO vence só pelo tempo; ALTO_NIVEL exige desenho novo", () => {
+  const TETO_MS = RITMO_QUADRO.tetoSemPerguntaMs;
+  const AG = 10_000_000;
+  const pecas = ["r1", "e1"];
+
+  it("APROFUNDAMENTO com 3 min sem pergunta e sem desenho novo: o teto vence", () => {
+    const e = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AG - TETO_MS, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(tetoDaPergunta(e, AG, pecas), true);
+  });
+
+  it("ALTO_NIVEL com 3 min sem pergunta e sem desenho novo: o teto não vence", () => {
+    const e = estadoEm("ALTO_NIVEL", { ultimaPerguntaEm: AG - TETO_MS, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(tetoDaPergunta(e, AG, pecas), false);
+  });
+
+  it("antes dos 3 min, nem o APROFUNDAMENTO vence", () => {
+    const e = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AG - TETO_MS + 1, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(tetoDaPergunta(e, AG, pecas), false);
+  });
+
+  it("no APROFUNDAMENTO sem desenho novo, motivoDoConteudo deixa a pergunta sair (sem parte fechada)", () => {
+    const e = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AG - TETO_MS, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(motivoDoConteudo(e, { status: "duvida", parteFechada: false }, AG, { pecas }), null);
   });
 });

@@ -5,7 +5,7 @@
  * da vaga e do que ela combinou com o Totti. Uma questão por vaga: todo candidato da mesma vaga resolve o mesmo
  * problema, então dá para comparar. Confirmar o plano vale como aprovação humana do problema.
  *
- * Só o PROBLEMA é gerado (enunciado, fala, ficha, sinais, armadilhas). A rubrica, a persona e os tipos de
+ * Só o PROBLEMA é gerado (enunciado, fala, ficha, sinais, armadilhas e a mudança no meio da entrevista, o empecilho). A rubrica, a persona e os tipos de
  * pergunta continuam os do kit fixo do formato, que o scorecard e o relatório já conhecem.
  *
  * A geração começa ao fechar o plano, em segundo plano. Quem cria a sessão do quadro ESPERA por ela (ou a
@@ -13,10 +13,12 @@
  * quando o candidato entrava logo depois de a vaga ser criada, e todo mundo via o encurtador de URL. O problema
  * fixo do catálogo (`avaliacaoDoPlano`) só fica para quando a geração falha ou passa do prazo.
  */
+import { z } from "zod";
 import type { InterviewConfig } from "@/lib/contracts";
 import { kvPadrao, type Kv } from "@/lib/storage/kv";
 import type { LlmCliente } from "../llm/cliente";
 import { ErroLlm } from "../llm/cliente";
+import { emPortugues } from "../../totti/guardas";
 import { avaliacaoDoPlano } from "../plano";
 import {
   montarMensagemCorrecaoProblema,
@@ -29,7 +31,7 @@ import { resolverAvaliacaoEstatica } from "./index";
 import { repositorioAvaliacoesPadrao, type RepositorioAvaliacoes } from "./repositorio";
 import { revisarProblema } from "./revisar";
 import { Problema, type Kit } from "./tipos";
-import { errosDoProblema } from "./validar";
+import { empecilhoGerado, errosDoProblema, idEmpecilhoDoProblema, TIPOS_EMPECILHO } from "./validar";
 
 /** Avaliação padrão do quadro, quando a config não aponta outra. */
 const AVALIACAO_PADRAO = "demo";
@@ -37,8 +39,18 @@ const AVALIACAO_PADRAO = "demo";
 /** Id da avaliação gerada para a config. Fixo por config: quem cria a sessão acha sem consultar outro índice. */
 export const avaliacaoGeradaDaConfig = (configId: string) => `questao-${configId}`;
 
-/** O que o modelo devolve: o problema sem id (o id sai da config, nunca do modelo). */
-const ProblemaGerado = Problema.omit({ id: true });
+/**
+ * O que o modelo devolve: o problema sem id (o id sai da config, nunca do modelo) e com a mudança no problema
+ * (empecilho). Modo estrito: o campo é obrigatório no schema, mas uma mudança inválida só sai do problema
+ * (`empecilhoGerado`), sem nova chamada ao modelo.
+ */
+const EmpecilhoGerado = z.object({
+  tipo: z.enum(TIPOS_EMPECILHO),
+  fala: z.string(),
+  requisito: z.string(),
+  exige: z.string(),
+});
+const ProblemaGerado = Problema.omit({ id: true }).extend({ empecilho: EmpecilhoGerado });
 
 /** Prazo de uma chamada ao modelo. São até duas (a segunda corrige o que o validador recusou). */
 const TIMEOUT_PROBLEMA_MS = 60_000;
@@ -83,6 +95,21 @@ function kitBase(config: InterviewConfig): Kit {
   return alvo.kit;
 }
 
+/**
+ * Português claro (decisão H, #129): todo texto do problema (enunciado, fala, ficha, empecilho) sai sem termo em
+ * inglês que a vaga não usa. O id não se mexe (é o da config); o resto é texto, lista ou objeto de texto.
+ */
+function emPortuguesNoProblema<T>(valor: T, descricaoVaga = ""): T {
+  if (typeof valor === "string") return emPortugues(valor, descricaoVaga) as T;
+  if (Array.isArray(valor)) return valor.map((v) => emPortuguesNoProblema(v, descricaoVaga)) as T;
+  if (valor && typeof valor === "object") {
+    return Object.fromEntries(
+      Object.entries(valor).map(([k, v]) => [k, k === "id" ? v : emPortuguesNoProblema(v, descricaoVaga)]),
+    ) as T;
+  }
+  return valor;
+}
+
 /** Só vale gerar para system design com uma vaga de verdade (as configs de vitrine não têm descrição). */
 export function geraQuestao(config: InterviewConfig): boolean {
   return config.mode === "system_design" && !!config.jobDescription?.trim();
@@ -114,7 +141,11 @@ export async function gerarProblema(config: InterviewConfig, llm: LlmCliente): P
         timeoutMs: TIMEOUT_PROBLEMA_MS,
       });
       modelo = r.modelo;
-      const problema: Problema = { ...r.dados, id };
+      // A mudança sai do bruto e vira `empecilho` só se passar nas regras; inválida = descartada (a rota usa a genérica).
+      const { empecilho: bruto, ...resto } = r.dados;
+      const emp = empecilhoGerado(bruto, idEmpecilhoDoProblema(id));
+      if (!emp) console.warn("[agente] empecilho gerado descartado (regras):", { config_id: config.id, motivo: bruto ? "fora das regras" : "ausente" });
+      const problema: Problema = { ...resto, id, ...(emp ? { empecilho: emp } : {}) };
       erros = errosDoProblema(problema);
       if (!erros.length) return { problema, ms: Date.now() - inicio, modelo, tentativas: tentativa };
       // Última tentativa e só a coerência do texto reclama (o título tem falsos positivos): segue, e a revisão pode corrigir.
@@ -147,7 +178,7 @@ export async function gerarQuestaoDaVaga(config: InterviewConfig, deps: DepsQues
   const gerado = await gerarProblema(config, deps.llm);
   // Revisão de texto (português, título, fala curta). Nunca falha nem bloqueia: sem revisão, vale o texto gerado.
   const rev = await revisarProblema(gerado.problema, deps.llm);
-  const r = { ...gerado, problema: rev.problema };
+  const r = { ...gerado, problema: emPortuguesNoProblema(rev.problema, config.jobDescription?.trim()) };
   console.warn("[agente] questao_da_vaga_revisada", {
     config_id: config.id,
     aceita: rev.aceita,
@@ -157,7 +188,7 @@ export async function gerarQuestaoDaVaga(config: InterviewConfig, deps: DepsQues
     modelo: rev.modelo,
     ms: rev.ms,
   });
-  // Sem empecilho: ele é escrito à mão por problema (ver `Empecilho` em tipos.ts), e o quadro segue sem ele.
+  // O empecilho gerado (se passou nas regras) vai dentro do problema. Sem ele, a rota usa uma genérica do kit (empecilhos-genericos.ts).
   const kit: Kit = { ...base, problemas: [r.problema] };
   const avaliacaoId = avaliacaoGeradaDaConfig(config.id);
   await repositorio.criar({ avaliacaoId, kit, problema: r.problema, vagaId: config.vagaId ?? config.id });

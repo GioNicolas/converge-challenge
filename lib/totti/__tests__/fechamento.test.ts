@@ -5,8 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
-  aceitaEncerrar, aindaPensando, aoVoltarATrabalhar, DESPEDIDAS, escolherPerguntasFinais, gatilhoDoFechamento, iniciarFechamento,
-  perguntasQueCabem, proximoPasso, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
+  aceitaEncerrar, aindaPensando, aoVoltarATrabalhar, DESPEDIDAS, escolherPerguntasFinais, FRACAO_PARA_FECHAR, gatilhoDoFechamento, iniciarFechamento,
+  duracaoEfetivaDaFaseS, FRACAO_DO_FIM_DO_APROFUNDAMENTO, msAteFimDaFase, limiarDoFechamentoNoQuadro, MAX_PERGUNTAS_AO_PEDIR_FIM, MIN_APROFUNDAMENTO_S, perguntasQueCabem, proximoPasso, TEMPO_PARA_FECHAR_MS, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
 } from "../fechamento";
 import { comVezDevolvida, convitesPara, escolherConvite, semConviteDeSeguir, semPerguntaNoFim, semPerguntaNoFimSeSobrar } from "../guardas";
 import type { LeituraDoTurno } from "../turno";
@@ -43,6 +43,33 @@ describe("quando o fechamento começa", () => {
     assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 2 * MIN }), "tempo");
     assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 10 * MIN }), null);
     assert.equal(gatilhoDoFechamento({}), null);
+  });
+});
+
+describe("quando o fechamento começa no quadro (#129, decisão F)", () => {
+  it("sem os parâmetros novos, o comportamento é o de sempre (live coding)", () => {
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 3 * MIN }), "tempo", "3 min é o limiar fixo");
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 3 * MIN + 1 }), null);
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, tempoRestanteMs: 20 * MIN, podeFecharPorConclusao: true }), "concluiu");
+  });
+  it("o limiar de tempo substitui os 3 min", () => {
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 4 * MIN, limiarTempoMs: 4.5 * MIN }), "tempo");
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 5 * MIN, limiarTempoMs: 4.5 * MIN }), null);
+    assert.equal(gatilhoDoFechamento({ tempoRestanteMs: 5 * MIN, limiarTempoMs: 6 * MIN }), "tempo");
+  });
+  it("com a conclusão barrada, \"terminei\" não fecha, nem na primeira vez nem na segunda", () => {
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, conclusoesAntes: 0, podeFecharPorConclusao: false }), null);
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, conclusoesAntes: 1, podeFecharPorConclusao: false }), null);
+    assert.equal(gatilhoDoFechamento({ concluiu: true, materialPronto: true, conclusoesAntes: 2, podeFecharPorConclusao: false, tempoRestanteMs: 20 * MIN }), null);
+  });
+  it("o limiar do quadro é 15% da duração da vaga; sem duração conhecida, os 3 min", () => {
+    assert.equal(FRACAO_PARA_FECHAR, 0.15);
+    assert.equal(limiarDoFechamentoNoQuadro(30 * MIN), 4.5 * MIN);
+    assert.equal(limiarDoFechamentoNoQuadro(0), TEMPO_PARA_FECHAR_MS);
+  });
+  it("a barra não afeta o pedido de encerrar nem o tempo acabando", () => {
+    assert.equal(gatilhoDoFechamento({ pediuEncerrar: true, podeFecharPorConclusao: false, tempoRestanteMs: 20 * MIN }), "pediu_encerrar");
+    assert.equal(gatilhoDoFechamento({ podeFecharPorConclusao: false, tempoRestanteMs: 2 * MIN }), "tempo");
   });
 });
 
@@ -204,6 +231,76 @@ describe("a máquina de estados", () => {
   });
 });
 
+describe("pergunta dele no fechamento: o modelo leu (candidatoPerguntou), sem regex", () => {
+  const pergunta = (texto: string, extra: Partial<LeituraDoTurno> = {}) => lida({ texto, candidatoPerguntou: true, intencao: "perguntou", ...extra });
+  const VOLTA = "Mais alguma coisa antes de encerrar?";
+  const semCandidatas = () => iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: [], tempoRestanteMs: 15 * MIN });
+  const comPerguntas = () => iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: CANDIDATAS, tempoRestanteMs: 15 * MIN });
+
+  it("na última palavra, responde e volta a perguntar, várias vezes seguidas, sem despedir", () => {
+    const passos = rodar(semCandidatas(), [
+      ["o que é courier?", pergunta("É o entregador.")],
+      ["e o que ele leva?", pergunta("Encomendas de um lugar para outro.")],
+      ["quem paga o frete?", pergunta("Quem contrata a entrega.")],
+    ]);
+    assert.equal(passos[1].fala, `É o entregador. ${VOLTA}`);
+    assert.equal(passos[2].fala, `Encomendas de um lugar para outro. ${VOLTA}`);
+    assert.equal(passos[3].fala, `Quem contrata a entrega. ${VOLTA}`);
+    assert.deepEqual(passos.slice(1).map((p) => [p.etapa, p.encerrar]), [["ultima_palavra", false], ["ultima_palavra", false], ["ultima_palavra", false]]);
+    // Sem pergunta nova, "não, é isso" despede.
+    const fim = proximoPasso(passos.at(-1)!.estado, quieto, "não, é isso");
+    assert.ok(DESPEDIDAS.includes(fim.fala), fim.fala);
+    assert.equal(fim.encerrar, true);
+  });
+
+  it("nas perguntas finais, responde sem avançar e sem gastar o aprofundamento", () => {
+    const passos = rodar(comPerguntas(), [
+      ["cair como, ficar fora do ar?", pergunta("Isso, fora do ar por alguns minutos.")],
+      ["e quem tenta de novo?", lida({ texto: "Saquei. E o cliente?", perguntou: true })],
+    ]);
+    assert.equal(passos[1].fala, "Isso, fora do ar por alguns minutos.");
+    assert.equal(passos[1].etapa, "perguntas_finais");
+    assert.equal(passos[1].estado.atual?.pergunta, P1, "continua na mesma pergunta final");
+    assert.equal(passos[1].estado.aprofundou, false);
+    assert.equal(passos[2].fala, "Saquei. E o cliente?", "o aprofundamento ainda está disponível");
+    assert.equal(passos[2].estado.aprofundou, true);
+  });
+
+  it("encerrar junto com a pergunta não despede no mesmo passo, na última palavra nem nas perguntas finais", () => {
+    const naUltima = rodar(semCandidatas(), [["pode encerrar, mas o que é courier?", pergunta("É o entregador.", { encerrar: true, responder: true })]]);
+    assert.equal(naUltima[1].fala, `É o entregador. ${VOLTA}`);
+    assert.equal(naUltima[1].encerrar, false);
+    assert.equal(naUltima[1].etapa, "ultima_palavra");
+    const naPergunta = rodar(comPerguntas(), [["pode encerrar, mas o que é courier?", pergunta("É o entregador.", { encerrar: true, responder: true })]]);
+    assert.equal(naPergunta[1].fala, "É o entregador.");
+    assert.equal(naPergunta[1].encerrar, false);
+    assert.equal(naPergunta[1].etapa, "perguntas_finais");
+  });
+
+  it("sem a marca de pergunta (ou com ela falsa), encerrar segue direto para a despedida", () => {
+    for (const marca of [undefined, false]) {
+      const passo = proximoPasso(comPerguntas(), lida({ texto: "É o entregador.", encerrar: true, candidatoPerguntou: marca }), "pode encerrar");
+      assert.ok(DESPEDIDAS.includes(passo.fala), `${marca}: ${passo.fala}`);
+      assert.equal(passo.encerrar, true);
+    }
+  });
+
+  it("uma resposta vazia a uma pergunta dele pede de novo, em vez de ficar calado", () => {
+    const naUltima = rodar(semCandidatas(), [["o que é courier?", pergunta("", { responder: false })]]);
+    assert.equal(naUltima[1].fala, "Não peguei a sua pergunta. Pode repetir?");
+    assert.equal(naUltima[1].etapa, "ultima_palavra");
+    const naPergunta = rodar(comPerguntas(), [["o que é courier?", pergunta("", { responder: false })]]);
+    assert.equal(naPergunta[1].fala, "Não peguei a sua pergunta. Pode repetir?");
+    assert.equal(naPergunta[1].estado.atual?.pergunta, P1);
+  });
+
+  it("aceitaEncerrar: quem o modelo leu como pergunta não encerra; sem a marca, segue como antes", () => {
+    assert.equal(aceitaEncerrar("não", pergunta("É o entregador.")), false);
+    assert.equal(aceitaEncerrar("não", lida({ candidatoPerguntou: false })), true);
+    assert.equal(aceitaEncerrar("não"), true);
+  });
+});
+
 describe("nenhuma fala do fechamento manda continuar o código ou o desenho", () => {
   it("nem as fixas, nem as que aproveitam a reação do modelo", () => {
     // O modelo, por hábito, termina com o convite: o fechamento tira.
@@ -261,7 +358,7 @@ describe("o que a fala do candidato mostra no fechamento", () => {
     for (const nao of ["queria saber quando sai o resultado dessa etapa do processo seletivo", "eu queria acrescentar uma coisa sobre o cache", ""]) assert.equal(aceitaEncerrar(nao), false, nao);
   });
   it("ainda pensando: só a fala curta de quem monta a resposta", () => {
-    for (const sim of ["hmm", "hmm, deixa eu pensar", "deixa eu ver", "peraí", "um segundo"]) assert.equal(aindaPensando(sim), true, sim);
+    for (const sim of ["hmm", "hmm, deixa eu pensar", "deixa eu ver", "peraí", "um segundo", "calma, tô pensando", "to pensando", "pensando"]) assert.equal(aindaPensando(sim), true, sim);
     for (const nao of ["hmm, não sei", "nada", "pode encerrar", "eu olharia a taxa de acerto do cache", "então eu colocaria uma fila na frente do serviço de códigos para segurar o pico", ""]) assert.equal(aindaPensando(nao), false, nao);
   });
 });
@@ -273,5 +370,183 @@ describe("o núcleo não depende das salas", () => {
       const fonte = fs.readFileSync(path.join(pasta, arquivo), "utf8");
       assert.doesNotMatch(fonte, /from\s+["'][^"']*(\/agente\/|\/agents\/|\/agente["']|\/agents["'])/, arquivo);
     }
+  });
+});
+
+describe("duração efetiva da fase (#129, decisão F): o APROFUNDAMENTO acaba com 85% do tempo total", () => {
+  // Entrevista de 35 min (2100 s) que começou em t = 0: o APROFUNDAMENTO acaba em 0,85 × 2100 s = 1785 s (29,75 min).
+  const TOTAL_S = 35 * 60;
+  const INICIO = 0;
+  const base = { iniciadaEm: INICIO, duracaoTotalS: TOTAL_S, duracaoFaseS: 900 };
+
+  it("a fração que vale é 1 - FRACAO_PARA_FECHAR (0,85)", () => {
+    assert.equal(FRACAO_DO_FIM_DO_APROFUNDAMENTO, 0.85);
+    assert.equal(MIN_APROFUNDAMENTO_S, 60);
+  });
+
+  it("começo cedo (ALTO_NIVEL terminou aos 10 min): o APROFUNDAMENTO dura até os 85%, ou seja 1185 s", () => {
+    const dur = duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 10 * 60_000 });
+    assert.equal(dur, 1785 - 600);
+  });
+
+  it("começo no tempo previsto (aos 20 min): dura até os 85%, 585 s, e não os 900 de `tempos`", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 20 * 60_000 }), 585);
+  });
+
+  it("começo tarde (aos 25 min): sobram 285 s até os 85%", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 25 * 60_000 }), 285);
+  });
+
+  it("instante já passado ao entrar (começo depois dos 85%): vale o mínimo de 60 s", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 30 * 60_000 }), MIN_APROFUNDAMENTO_S);
+  });
+
+  it("começo exatamente no instante dos 85%: também vale o mínimo de 60 s", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 1785 * 1000 }), MIN_APROFUNDAMENTO_S);
+  });
+
+  it("a conta segue a entrevista, não a fase: com outra duração total, o fim muda", () => {
+    // 20 min de entrevista: 85% = 17 min. Começo aos 10 min: sobram 7 min.
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, duracaoTotalS: 20 * 60, faseIniciadaEm: 10 * 60_000 }), 420);
+  });
+
+  it("as outras fases não mudam: a duração de `tempos`", () => {
+    assert.equal(duracaoEfetivaDaFaseS("ALTO_NIVEL", { ...base, faseIniciadaEm: 5 * 60_000, duracaoFaseS: 600 }), 600);
+    assert.equal(duracaoEfetivaDaFaseS("REQUISITOS", { ...base, faseIniciadaEm: 0, duracaoFaseS: 300 }), 300);
+    assert.equal(duracaoEfetivaDaFaseS("FECHAMENTO", { ...base, faseIniciadaEm: 0, duracaoFaseS: 300 }), 300);
+  });
+
+  it("estado antigo, sem iniciadaEm: vale a duração de `tempos` (como antes)", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { faseIniciadaEm: 10 * 60_000, duracaoFaseS: 900 }), 900);
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { faseIniciadaEm: 10 * 60_000, iniciadaEm: null, duracaoFaseS: 900 }), 900);
+  });
+
+  it("sem duração total, ou sem a fase iniciada: vale a duração de `tempos`", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { iniciadaEm: 0, faseIniciadaEm: 10 * 60_000, duracaoFaseS: 900 }), 900);
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: null }), 900);
+  });
+
+  it("sem nenhuma duração conhecida, a fase não tem limite (undefined)", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { faseIniciadaEm: 0 }), undefined);
+  });
+});
+
+describe("espera até o fim da fase, contada de agora (#129, decisão F): o timer do navegador", () => {
+  // Entrevista de 35 min (2100 s) iniciada em t = 0: o APROFUNDAMENTO acaba em 1785 s (29,75 min).
+  const TOTAL_S = 35 * 60;
+  const base = { iniciadaEm: 0, duracaoTotalS: TOTAL_S, duracaoFaseS: 900 };
+  const FIM = 1785 * 1000;
+
+  it("começo cedo: a espera é o instante absoluto do fim menos agora", () => {
+    const faseIniciadaEm = 10 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm, { ...base, faseIniciadaEm }), FIM - faseIniciadaEm);
+  });
+
+  it("um reinício do timer depois de 5 min da fase não empurra o fim: a espera cai 5 min", () => {
+    const faseIniciadaEm = 10 * 60_000;
+    const agora = faseIniciadaEm + 5 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", agora, { ...base, faseIniciadaEm }), FIM - agora);
+  });
+
+  it("o fim absoluto é o mesmo com qualquer agora: fim = agora + espera", () => {
+    const faseIniciadaEm = 12 * 60_000;
+    for (const agora of [faseIniciadaEm, faseIniciadaEm + 60_000, faseIniciadaEm + 400_000]) {
+      assert.equal(agora + msAteFimDaFase("APROFUNDAMENTO", agora, { ...base, faseIniciadaEm })!, FIM);
+    }
+  });
+
+  it("começo tarde, com o instante do fim ainda no futuro: a espera segue o fim", () => {
+    const faseIniciadaEm = 25 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm, { ...base, faseIniciadaEm }), FIM - faseIniciadaEm);
+  });
+
+  it("instante já passado ao entrar na fase: espera o mínimo de 60 s a partir de agora", () => {
+    const faseIniciadaEm = 30 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm, { ...base, faseIniciadaEm }), MIN_APROFUNDAMENTO_S * 1000);
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm + 20_000, { ...base, faseIniciadaEm }), MIN_APROFUNDAMENTO_S * 1000);
+  });
+
+  it("fim já alcançado por um reinício atrasado (o fim passou, a fase começou antes): espera zero", () => {
+    const faseIniciadaEm = 20 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", FIM + 1000, { ...base, faseIniciadaEm }), 0);
+  });
+
+  it("as outras fases valem a duração cheia de `tempos`, em ms, sem contar de agora", () => {
+    assert.equal(msAteFimDaFase("ALTO_NIVEL", 5 * 60_000, { ...base, faseIniciadaEm: 0, duracaoFaseS: 600 }), 600_000);
+    assert.equal(msAteFimDaFase("REQUISITOS", 1000, { ...base, faseIniciadaEm: 0, duracaoFaseS: 300 }), 300_000);
+  });
+
+  it("sem dados de início, o APROFUNDAMENTO vale a duração de `tempos`; sem nada, sem timer", () => {
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", 0, { faseIniciadaEm: 0, duracaoFaseS: 900 }), 900_000);
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", 0, { faseIniciadaEm: 0 }), undefined);
+  });
+});
+
+describe("pedido de encerrar com perguntas finais (#129, decisão revisada): a sala pede, até duas, e depois a última palavra", () => {
+  const ANUNCIO_UM = "Claro, vamos fechar. Antes, uma coisa rápida:";
+  const ANUNCIO_VARIAS = "Beleza. Só mais umas coisas antes de terminar:";
+  const ULTIMA = "Era isso da minha parte. Quer acrescentar alguma coisa antes de encerrar?";
+  const pedido = (extra: Partial<Parameters<typeof iniciarFechamento>[0]> = {}) =>
+    iniciarFechamento({ sala: "quadro", gatilho: "pediu_encerrar", candidatas: CANDIDATAS, tempoRestanteMs: 15 * MIN, perguntasNoPedidoDeFim: true, ...extra });
+
+  it("começa pelo anúncio do pedido, com as duas primeiras candidatas (MAX_PERGUNTAS_AO_PEDIR_FIM)", () => {
+    assert.equal(MAX_PERGUNTAS_AO_PEDIR_FIM, 2);
+    const inicio = pedido();
+    assert.equal(inicio.etapa, "anuncio");
+    assert.deepEqual(inicio.fila.map((p) => p.pergunta), [P1, P2]);
+    const passos = rodar(inicio, []);
+    assert.equal(passos[0].fala, `${ANUNCIO_VARIAS} ${P1}`);
+    assert.equal(passos[0].etapa, "perguntas_finais");
+  });
+
+  it("com uma pergunta só, o anúncio é o do singular", () => {
+    const passo = proximoPasso(pedido({ candidatas: [{ pergunta: P1 }] }));
+    assert.equal(passo.fala, `${ANUNCIO_UM} ${P1}`);
+  });
+
+  it("a fila para nas duas perguntas, depois a última palavra; 'não' despede", () => {
+    const passos = rodar(pedido(), [
+      ["Usaria um cache.", lida({ texto: "Saquei." })],
+      ["Acho que sim.", lida({ responder: false, texto: "" })],
+      ["não", lida({ responder: false, texto: "", intencao: "respondeu" })],
+    ]);
+    assert.equal(passos[1].fala.endsWith(P2), true, passos[1].fala);
+    assert.equal(passos[1].etapa, "perguntas_finais");
+    assert.equal(passos[2].etapa, "ultima_palavra");
+    assert.ok(passos[2].fala.endsWith(ULTIMA), passos[2].fala);
+    assert.ok(DESPEDIDAS.includes(passos[3].fala), passos[3].fala);
+    assert.equal(passos[3].encerrar, true);
+  });
+
+  it("sem candidatas, vai à última palavra direto; 'não' despede", () => {
+    const passos = rodar(pedido({ candidatas: [] }), [["não", lida({ responder: false, texto: "", intencao: "respondeu" })]]);
+    assert.equal(passos[0].fala, "Por mim, era isso. Quer acrescentar alguma coisa antes de encerrar?");
+    assert.equal(passos[0].etapa, "ultima_palavra");
+    assert.ok(DESPEDIDAS.includes(passos[1].fala), passos[1].fala);
+  });
+
+  it("o tempo que resta limita as perguntas: com 2 min cabe uma", () => {
+    const passo = proximoPasso(pedido({ tempoRestanteMs: 2 * MIN }));
+    assert.equal(passo.fala, `${ANUNCIO_UM} ${P1}`);
+    assert.equal(passo.estado.fila.length, 0, "a fila guarda só o que sai");
+  });
+
+  it("ele pede para encerrar de novo no meio das perguntas: despede, sem terminar a fila", () => {
+    const passos = rodar(pedido(), [["pode encerrar", lida({ responder: false, texto: "", encerrar: true })]]);
+    assert.ok(DESPEDIDAS.includes(passos[1].fala), passos[1].fala);
+    assert.equal(passos[1].encerrar, true);
+  });
+
+  it("sem o parâmetro (live coding), o pedido segue direto à despedida", () => {
+    const passo = proximoPasso(iniciarFechamento({ sala: "codigo", gatilho: "pediu_encerrar", candidatas: CANDIDATAS }));
+    assert.ok(DESPEDIDAS.includes(passo.fala), passo.fala);
+    assert.equal(passo.encerrar, true);
+    const explicito = proximoPasso(iniciarFechamento({ sala: "quadro", gatilho: "pediu_encerrar", candidatas: CANDIDATAS, perguntasNoPedidoDeFim: false }));
+    assert.equal(explicito.encerrar, true);
+  });
+
+  it("o anúncio do pedido não é o do fechamento por conclusão", () => {
+    const concluiu = proximoPasso(iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: [{ pergunta: P1 }] }));
+    assert.equal(concluiu.fala, `Beleza. Só preciso fechar um ponto com você antes de encerrar. ${P1}`);
   });
 });

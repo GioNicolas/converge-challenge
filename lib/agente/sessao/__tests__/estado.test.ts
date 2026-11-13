@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  criteriosDoPlanoSemEvidencia,
   criteriosSemEvidencia,
   estadoInicial,
+  nomesDosCriteriosDoPlano,
   transicionar,
   type EstadoSessao,
   type EventoSessao,
 } from "../estado";
+import type { PlanoDaSessao } from "../../plano";
 import { intervaloMinimoMs, orcamentoDeInterrupcoes } from "../../../interrupcao/politica";
 import type { Fase, RespostaAnalise } from "../tipos";
 
@@ -17,7 +20,7 @@ const INTERVALO = intervaloMinimoMs(35);
 
 function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
-    status: "duvida",
+    status: "duvida", parteFechada: true, escopo: false,
     pergunta: "Onde fica o gargalo?",
     nota: "Gargalo?",
     elementos: ["e1"],
@@ -102,7 +105,9 @@ describe("fases: orçamento de tempo", () => {
     let e = aplicar(estadoInicial({ tempos }), { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" });
     let t = e.faseIniciadaEm!;
     const esperado: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO", "ENCERRADA"];
-    const duracoes = [10, 20, 30, 5];
+    // O APROFUNDAMENTO acaba com 85% do tempo total (65 s = 55,25 s desde o COMECAR). Ele começa aos 31 s (a apresentação
+    // e cada evento do `aplicar` andam 1 s), então dura 24,25 s (#129, decisão F).
+    const duracoes = [10, 20, 24.25, 5];
     esperado.forEach((fase, i) => {
       // Um instante antes: nada acontece.
       assert.equal(transicionar(e, { tipo: "TICK" }, t + duracoes[i] * 1000 - 1).estado.fase, e.fase);
@@ -112,6 +117,25 @@ describe("fases: orçamento de tempo", () => {
       assert.equal(r.estado.faseIniciadaEm, t);
       e = r.estado;
     });
+  });
+
+  it("APROFUNDAMENTO começa cedo: acaba com 85% do tempo total, não com o tempo de `tempos` (#129, decisão F)", () => {
+    // Entrevista padrão, 35 min (2100 s). Começo aos 10 min: o APROFUNDAMENTO vai até 1785 s, ou seja 1185 s.
+    let e = transicionar(estadoInicial(), { tipo: "COMECAR" }, T0).estado;
+    e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
+    e = transicionar(e, { tipo: "APROFUNDAR" }, T0 + 10 * MIN).estado;
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 10 * MIN + 1185_000 - 1).estado.fase, "APROFUNDAMENTO");
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 10 * MIN + 1185_000).estado.fase, "FECHAMENTO");
+  });
+
+  it("APROFUNDAMENTO começa tarde: vale o mínimo de 60 s (#129, decisão F)", () => {
+    let e = transicionar(estadoInicial(), { tipo: "COMECAR" }, T0).estado;
+    e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
+    e = transicionar(e, { tipo: "APROFUNDAR" }, T0 + 30 * MIN).estado;
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 30 * MIN + 60_000 - 1).estado.fase, "APROFUNDAMENTO");
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 30 * MIN + 60_000).estado.fase, "FECHAMENTO");
   });
 
   it("fase sem tempo configurado não acaba sozinha", () => {
@@ -188,7 +212,7 @@ describe("ciclo do plin", () => {
 
   it("ok cancela a pendente", () => {
     const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
-    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+    const ok: RespostaAnalise = { status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
     const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000);
     assert.equal(r.estado.plin, "LIVRE");
     assert.equal(r.estado.perguntaPendente, null);
@@ -287,7 +311,7 @@ describe("registros", () => {
     const base = estadoInicial({ criterios: ["escalabilidade", "dados", "trade-offs"] });
     let e = aplicar(base, { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" }, { tipo: "CANDIDATO_DESENHOU" });
     const ok: RespostaAnalise = {
-      status: "ok", pergunta: null, nota: null, elementos: [], degrau: null,
+      status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [
         { criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" },
         { criterio: "cache", sinal: "positivo", espontaneo: true, evidencia: "citou Redis" },
@@ -338,5 +362,165 @@ describe("SINCRONIZAR_FASE", () => {
     assert.equal(b.estado.fase, "APROFUNDAMENTO");
     assert.deepEqual(b.efeitos, []);
     assert.equal(transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "ENCERRADA" }, T0).estado.fase, "ENCERRADA");
+  });
+});
+
+describe("critérios do plano na cobertura (#129, bloco D)", () => {
+  const plano: PlanoDaSessao = {
+    cargo: "Engenheiro de pagamentos", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30,
+    criterios: [
+      { nome: "Idempotência", descricao: "não cobra duas vezes", peso: 2 },
+      { nome: "Falha no gateway", descricao: "o que acontece se o gateway cair", peso: 1 },
+      { nome: "escalabilidade", descricao: "", peso: 1 },
+    ],
+  };
+  const RUBRICA = ["escalabilidade", "dados"];
+
+  it("a cobertura tem uma chave por critério do plano, pelo nome, sem duplicar o id da rubrica", () => {
+    const e = estadoInicial({ criterios: RUBRICA, plano });
+    assert.deepEqual(Object.keys(e.cobertura).sort(), ["Falha no gateway", "Idempotência", "dados", "escalabilidade"]);
+    assert.deepEqual(e.cobertura.Idempotência, { positivo: 0, negativo: 0, neutro: 0 });
+  });
+
+  it("sem plano, a cobertura é só a rubrica (como antes)", () => {
+    const e = estadoInicial({ criterios: RUBRICA });
+    assert.deepEqual(Object.keys(e.cobertura), RUBRICA);
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(e), []);
+  });
+
+  it("nomes vazios ou repetidos do plano não viram critério", () => {
+    const sujo: PlanoDaSessao = { ...plano, criterios: [{ nome: "  ", descricao: "", peso: 1 }, { nome: "Idempotência", descricao: "", peso: 1 }, { nome: "Idempotência", descricao: "x", peso: 1 }] };
+    assert.deepEqual(nomesDosCriteriosDoPlano(sujo), ["Idempotência"]);
+    assert.deepEqual(Object.keys(estadoInicial({ plano: sujo }).cobertura), ["Idempotência"]);
+  });
+
+  it("criteriosDoPlanoSemEvidencia lista só os do plano, pelo nome", () => {
+    const e = estadoInicial({ criterios: RUBRICA, plano });
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(e), ["Idempotência", "Falha no gateway", "escalabilidade"]);
+    assert.deepEqual(criteriosSemEvidencia(e), ["escalabilidade", "dados", "Idempotência", "Falha no gateway"]);
+  });
+
+  it("uma observação com o nome do plano soma na cobertura daquele critério e o tira da lista", () => {
+    let e = estadoInicial({ criterios: RUBRICA, plano });
+    e = transicionar(e, { tipo: "COMECAR" }, T0).estado;
+    e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
+    const ok: RespostaAnalise = {
+      status: "ok", parteFechada: false, escopo: false, pergunta: null, nota: null, elementos: [], degrau: null,
+      observacoes: [{ criterio: "Idempotência", sinal: "positivo", espontaneo: true, evidencia: "chave por pedido" }],
+    };
+    e = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000).estado;
+    assert.deepEqual(e.cobertura.Idempotência, { positivo: 1, negativo: 0, neutro: 0 });
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(e), ["Falha no gateway", "escalabilidade"]);
+    assert.ok(!criteriosSemEvidencia(e).includes("Idempotência"));
+  });
+
+  it("estado antigo (plano sem as chaves na cobertura) conta os critérios do plano como sem evidência", () => {
+    const antigo: EstadoSessao = { ...estadoInicial({ criterios: RUBRICA, plano }), cobertura: { escalabilidade: { positivo: 1, negativo: 0, neutro: 0 }, dados: { positivo: 0, negativo: 0, neutro: 0 } } };
+    assert.deepEqual(criteriosDoPlanoSemEvidencia(antigo), ["Idempotência", "Falha no gateway"]);
+    assert.deepEqual(criteriosSemEvidencia(antigo), ["dados", "Idempotência", "Falha no gateway"]);
+  });
+
+  it("o estado com plano sobrevive a JSON.stringify/parse", () => {
+    const e = estadoInicial({ criterios: RUBRICA, plano });
+    assert.deepEqual(JSON.parse(JSON.stringify(e)), e);
+  });
+});
+
+describe("PLIN_CLICADO sem dúvida pendente (corrida: o quadro disse que fez a pergunta)", () => {
+  const alto = (extra: Partial<EstadoSessao> = {}): EstadoSessao => ({ ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: T0, ...extra });
+  const registro = { pergunta: "Por que duas filas?", nota: "Duas filas?", elementos: ["e1"], status: "dica" as const };
+
+  it("registra a pergunta: hora, cota, histórico e conversa, com o texto que o quadro mandou", () => {
+    const r = transicionar(alto(), { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
+    assert.equal(r.estado.plin, "PERGUNTA_ATIVA");
+    assert.equal(r.estado.perguntasFeitas, 1);
+    assert.equal(r.estado.ultimaPerguntaEm, T0 + MIN);
+    assert.equal(r.estado.perguntaAtiva?.pergunta, "Por que duas filas?");
+    assert.equal(r.estado.perguntaAtiva?.status, "dica");
+    assert.deepEqual(r.estado.perguntas.map((p) => p.pergunta), ["Por que duas filas?"]);
+    assert.equal(r.estado.conversa.at(-1)?.texto, "Por que duas filas?");
+    assert.deepEqual(r.efeitos, [{ tipo: "PERGUNTA_INICIADA", pergunta: r.estado.perguntas[0] }]);
+  });
+
+  it("sem texto, o clique segue como antes: nada muda", () => {
+    const e = alto();
+    assert.equal(transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado, e);
+    assert.equal(transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta: "   " } }, T0 + MIN).estado, e);
+  });
+
+  it("com dúvida pendente, o clique usa a pendente (o registro não entra)", () => {
+    const pendente = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN).estado;
+    const r = transicionar(pendente, { tipo: "PLIN_CLICADO", registro }, T0 + MIN + 1000);
+    assert.equal(r.estado.perguntaAtiva?.pergunta, duvida().pergunta);
+    assert.equal(r.estado.perguntas.length, 1);
+  });
+
+  it("com outra resposta ativa, não sobrescreve", () => {
+    const ativa = alto({
+      plin: "PERGUNTA_ATIVA",
+      perguntaAtiva: { numero: 1, status: "duvida", pergunta: "Outra?", nota: null, elementos: [], degrau: null, fase: "ALTO_NIVEL", feitaEm: T0 },
+    });
+    assert.equal(transicionar(ativa, { tipo: "PLIN_CLICADO", registro }, T0 + MIN).estado, ativa);
+  });
+
+  it("em REQUISITOS, o convite não gasta a cota de perguntas", () => {
+    const e = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm: T0 };
+    const r = transicionar(e, { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
+    assert.equal(r.estado.perguntasFeitas, 0);
+    assert.equal(r.estado.conviteFeito, true);
+  });
+});
+
+describe("redirecionamento de escopo gravado no clique (#129, decisão I)", () => {
+  const redireciona = (extra: Partial<RespostaAnalise> = {}) => duvida({ status: "redirecionar", parteFechada: false, escopo: true, ...extra });
+
+  /** Uma análise que vira pergunta de redirecionamento de escopo, clicada no instante `em`. */
+  function clicar(estado: EstadoSessao, resposta: RespostaAnalise, em: number): EstadoSessao {
+    const pendente = transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta, pecas: ["r1", "e1"] }, em - 1000).estado;
+    return transicionar(pendente, { tipo: "PLIN_CLICADO" }, em).estado;
+  }
+
+  it("o primeiro redirecionamento de escopo grava a hora e conta 1", () => {
+    const e = clicar(emFase("APROFUNDAMENTO"), redireciona(), T0 + MIN);
+    assert.equal(e.escopoProvocadoEm, T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 1);
+  });
+
+  it("o segundo conta 2 e mantém a hora do primeiro", () => {
+    let e = clicar(emFase("APROFUNDAMENTO"), redireciona(), T0 + MIN);
+    e = transicionar(e, { tipo: "CANDIDATO_FALOU", texto: "ok", fimDeResposta: true }, T0 + 2 * MIN).estado;
+    e = clicar(e, redireciona(), T0 + 10 * MIN);
+    assert.equal(e.escopoProvocadoEm, T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 2);
+  });
+
+  it("pergunta comum, sem escopo, não grava nada", () => {
+    const e = clicar(emFase("APROFUNDAMENTO"), duvida(), T0 + MIN);
+    assert.equal(e.escopoProvocadoEm, undefined);
+    assert.equal(e.escopoRedirecionamentos, undefined);
+  });
+
+  it("estado antigo, sem os campos, funciona", () => {
+    const antigo = emFase("APROFUNDAMENTO");
+    delete (antigo as { escopoProvocadoEm?: number | null }).escopoProvocadoEm;
+    const e = clicar(antigo, redireciona(), T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 1);
+  });
+});
+
+describe("redirecionamento de escopo falado, sem pendente (corrida, #129, decisão I)", () => {
+  const registro = (extra: Record<string, unknown> = {}) => ({ pergunta: "O problema pede outra coisa. Por onde começar?", status: "redirecionar" as const, elementos: [], ...extra });
+
+  it("grava a hora do primeiro e conta, como o clique com pendente", () => {
+    const e = transicionar(emFase("APROFUNDAMENTO"), { tipo: "PLIN_CLICADO", registro: registro({ escopo: true }) }, T0 + MIN).estado;
+    assert.equal(e.escopoProvocadoEm, T0 + MIN);
+    assert.equal(e.escopoRedirecionamentos, 1);
+  });
+
+  it("registro sem escopo não grava os campos", () => {
+    const e = transicionar(emFase("APROFUNDAMENTO"), { tipo: "PLIN_CLICADO", registro: registro({ status: "duvida" }) }, T0 + MIN).estado;
+    assert.equal(e.escopoProvocadoEm, undefined);
+    assert.equal(e.escopoRedirecionamentos, undefined);
   });
 });

@@ -74,3 +74,10 @@ describe("abertura", () => {
     assert.ok(montarPromptAbertura(kitDemo, problema).dinamico.includes("não cite um número"));
   });
 });
+
+describe("português claro na abertura (#129, decisão H)", () => {
+  it("as falas de apresentação e despedida seguem a regra de termo em português", () => {
+    const { estatico } = montarPromptAbertura(kitDemo, kitDemo.problemas[0]);
+    assert.match(estatico, /Português claro: termo do domínio em português \("entregador", "pedido", "lojista", "fila"\)/);
+  });
+});

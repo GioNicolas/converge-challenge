@@ -3,7 +3,7 @@
 //
 // Fases:  AGUARDANDO → APRESENTACAO → REQUISITOS → ALTO_NIVEL → APROFUNDAMENTO → FECHAMENTO → ENCERRADA
 // Plin:   LIVRE → PLIN_PENDENTE (análise devolveu uma pergunta, esperando a vez) → PERGUNTA_ATIVA (o Totti a disse; sem clique) → LIVRE
-import { motivoDoRitmo, RITMO, type Ritmo } from "@/lib/interrupcao/politica";
+import { motivoDoRitmo, orcamentoDeInterrupcoes, RITMO, type Ritmo } from "@/lib/interrupcao/politica";
 import type { EtapaDoFechamento } from "@/lib/totti/fechamento";
 import type { Fase, RespostaAnalise } from "@/lib/sessao/cliente";
 
@@ -123,7 +123,11 @@ export function aceitaPlin(estado: EstadoEntrevista, resposta: RespostaAnalise, 
   if (estado.fase === "REQUISITOS" && estado.conviteFeito) return false;
   const extra = estado.fase === "FECHAMENTO" || estado.fase === "REQUISITOS";
   const ritmo = ritmoDoCliente(estado, agora);
-  return motivoDoRitmo(extra ? { ...ritmo, feitas: 0, marco: true } : ritmo) === null;
+  const base = extra ? { ...ritmo, feitas: 0, marco: true } : ritmo;
+  // Redirecionamento de escopo (#129, decisão I, revisado): fora intervalo, respiro e cota, como no servidor
+  // (`motivoBloqueioPlin`). Só o orçamento total vale.
+  if (resposta.status === "redirecionar" && resposta.escopo === true) return base.feitas < orcamentoDeInterrupcoes(base.duracaoMin);
+  return motivoDoRitmo(base) === null;
 }
 
 /** Situação do quadro para o ritmo da política comum (o mesmo que o servidor monta em `ritmoDoEstado`). */

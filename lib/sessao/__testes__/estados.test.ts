@@ -4,6 +4,7 @@ import { estadoInicial as estadoDoServidor } from "@/lib/agente/sessao/estado";
 import { motivoBloqueioPlin } from "@/lib/agente/sessao/politica";
 import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "@/lib/interrupcao/politica";
 import {
+  aceitaPlin,
   DURACAO_PADRAO_MIN,
   estadoInicial,
   podeAnalisar,
@@ -295,4 +296,17 @@ test("a pergunta pendente cai se a fala do candidato já respondeu a ela (sem re
   const pendente = transicionar(noAprofundamento(), { tipo: "ANALISE_RECEBIDA", resposta: { ...duvida, pergunta: "Onde fica o gargalo de escrita no banco?" } }, 0);
   assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU", texto: "acho que o gargalo vai ser a escrita no banco principal" }, 1).plin, "LIVRE");
   assert.equal(transicionar(pendente, { tipo: "CANDIDATO_CONTINUOU", texto: "vou colocar um cache na frente da API" }, 1).plin, "PLIN_PENDENTE");
+});
+
+test("redirecionamento de escopo fura intervalo e respiro no quadro, como no servidor (#129, decisão I)", () => {
+  const T = 1_000_000;
+  const estado = { ...estadoInicial(), fase: "ALTO_NIVEL" as const, iniciadaEm: T - 5 * 60_000, duracaoMin: 35, ultimaPerguntaEm: T - 10_000, ultimaRespostaEm: T - 5_000, plin: "LIVRE" as const };
+  const resposta = (extra: Partial<RespostaAnalise> = {}): RespostaAnalise => ({
+    status: "redirecionar", pergunta: "Por onde começar?", nota: null, elementos: [], degrau: null, observacoes: [], ...extra,
+  });
+  assert.equal(aceitaPlin(estado, resposta({ escopo: false }), T), false, "sem escopo, o respiro comum barra");
+  assert.equal(aceitaPlin(estado, resposta({ escopo: true }), T), true, "com escopo, fura o respiro e o intervalo");
+  assert.equal(aceitaPlin({ ...estado, perguntasFeitas: 3 }, resposta({ escopo: false }), T), false, "sem escopo, a cota barra");
+  assert.equal(aceitaPlin({ ...estado, perguntasFeitas: 3 }, resposta({ escopo: true }), T), true, "com escopo, a cota não barra (revisado)");
+  assert.equal(aceitaPlin({ ...estado, perguntasFeitas: 99 }, resposta({ escopo: true }), T), false, "o orçamento continua valendo");
 });

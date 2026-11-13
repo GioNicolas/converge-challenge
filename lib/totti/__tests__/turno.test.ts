@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { convitesPara } from "../guardas";
 import {
   avisosDeQueVaiOlhar, candidatoPerguntou, comRespostaDeReserva, decidirTurno, deSaidaDoLiveCoding, deSaidaDoQuadro, ficouSemResposta,
-  paraSaidaDoLiveCoding, paraSaidaDoQuadro, pareceConclusao, PEDIDOS_DE_REPETIR_A_PERGUNTA, perguntouComClareza, sinalDeConclusao,
+  paraSaidaDoLiveCoding, paraSaidaDoQuadro, pareceConclusao, PEDIDOS_DE_REPETIR_A_PERGUNTA, pedePorque, perguntouComClareza, sinalDeConclusao,
   type LeituraDoTurno, type SituacaoDoTurno,
 } from "../turno";
 
@@ -95,6 +95,13 @@ describe("adaptadores: a saída de cada sala vira a mesma leitura", () => {
     assert.equal(deSaidaDoQuadro({ responder: false, texto: "" }, situacao()).intencao, "pensando_alto");
   });
 
+  it("a marca de pergunta do modelo chega à leitura do quadro; sem ela, a leitura não ganha o campo", () => {
+    const comMarca = deSaidaDoQuadro({ responder: true, texto: "É o entregador.", candidatoPerguntou: true }, situacao({ falaDoCandidato: "não entendi o que é courier" }));
+    assert.equal(comMarca.candidatoPerguntou, true);
+    assert.equal("candidatoPerguntou" in deSaidaDoQuadro({ responder: true, texto: "Saquei." }, situacao()), false);
+    assert.equal("candidatoPerguntou" in deSaidaDoLiveCoding({ reply: "Saquei." }, situacao()), false);
+  });
+
   it("o desfecho e a sondagem só valem quando havia pergunta do Totti em aberto; a dica mantém o assunto aberto", () => {
     assert.equal(deSaidaDoQuadro({ responder: true, texto: "Tranquilo.", desfecho: "nao_sabe" }, situacao()).intencao, "conversa");
     assert.equal(deSaidaDoLiveCoding({ reply: "Tranquilo.", probeOutcome: { kind: "nao_conseguiu" } }, situacao()).intencao, "conversa");
@@ -113,6 +120,40 @@ describe("adaptadores: a saída de cada sala vira a mesma leitura", () => {
     const lidaDoQuadro = deSaidaDoQuadro(doQuadro, situacao());
     assert.equal(lidaDoQuadro.apontar, doQuadro.visual);
     assert.deepEqual(paraSaidaDoQuadro({ ...lidaDoQuadro, responder: false }, doQuadro), { ...doQuadro, responder: false, texto: "", concluiu: false, encerrar: false });
+  });
+});
+
+describe("quadro: sem convite repetido enquanto ele só reage", () => {
+  // O Totti acabou de devolver a vez (convite) e o candidato só disse "tá": o convite não volta a sair.
+  const reagiu = { respondiaAoTotti: true, falaDoCandidato: "Tá.", falasDoTotti: ["Pode seguir com o desenho."] };
+
+  it("sem o sinal, a reação ganha o convite de sempre (o comportamento de antes)", () => {
+    const r = decidirTurno(lida({ intencao: "respondeu", texto: "Certo." }), situacao({ sala: "quadro", ...reagiu }));
+    assert.match(r.leitura.texto, /^Certo\. \S/);
+    assert.ok(r.regras.includes("vez_devolvida"));
+  });
+
+  it("com o sinal (desde o convite ele só reagiu), a reação sai sem convite nenhum", () => {
+    const r = decidirTurno(lida({ intencao: "respondeu", texto: "Certo." }), situacao({ sala: "quadro", ...reagiu, semAcaoDesdeOConvite: true }));
+    assert.equal(r.leitura.texto, "Certo.");
+    assert.deepEqual(r.regras, []);
+  });
+
+  it("com o sinal, a fala que só devolve um fato também não ganha convite a mais", () => {
+    const fato = lida({ intencao: "respondeu", texto: "Isso, um bilhão por mês." });
+    const r = decidirTurno(fato, situacao({ sala: "quadro", respondiaAoTotti: true, falaDoCandidato: "Tá.", semAcaoDesdeOConvite: true }));
+    assert.equal(r.leitura.texto, "Isso, um bilhão por mês.");
+  });
+
+  it("o live coding não usa o sinal: a fala de sempre (sem convite para reação)", () => {
+    const r = decidirTurno(lida({ intencao: "respondeu", texto: "Certo." }), situacao({ sala: "codigo", ...reagiu, semAcaoDesdeOConvite: true }));
+    assert.equal(r.leitura.texto, "Certo.");
+  });
+
+  it("\"pensando\" é uma leitura de pensando alto, sem resposta", () => {
+    const r = deSaidaDoQuadro({ responder: false, texto: "", desfecho: "pensando" }, situacao({ sala: "quadro", respondiaAoTotti: true }));
+    assert.equal(r.intencao, "pensando_alto");
+    assert.equal(r.responder, false);
   });
 });
 
@@ -196,6 +237,16 @@ describe("pergunta clara nunca fica sem resposta", () => {
     assert.equal(ficouSemResposta({ ...quieto, encerrar: true }, situacao({ falaDoCandidato: "posso encerrar?" })), false);
   });
 
+  it("a pergunta que o modelo leu (sem \"?\") conta, inclusive com pedido de encerrar; sem a marca, a regra é a de antes", () => {
+    const fala = "não entendi o que é courier";
+    const marcada = { ...quieto, candidatoPerguntou: true };
+    assert.equal(ficouSemResposta(marcada, situacao({ falaDoCandidato: fala })), true, "marca do modelo sem \"?\"");
+    assert.equal(ficouSemResposta({ ...marcada, encerrar: true }, situacao({ falaDoCandidato: fala })), true, "marca com encerrar");
+    assert.equal(ficouSemResposta({ ...quieto, encerrar: true }, situacao({ falaDoCandidato: fala })), false, "sem marca, encerrar exclui");
+    assert.equal(ficouSemResposta(quieto, situacao({ falaDoCandidato: fala })), false, "sem marca, sem \"?\" não é pergunta clara");
+    assert.equal(ficouSemResposta({ ...marcada, responder: true, texto: "É o entregador." }, situacao({ falaDoCandidato: fala })), false, "com resposta, nada a fazer");
+  });
+
   it("se nem a segunda geração respondeu, o Totti pede para repetir, sem repetir o pedido anterior", () => {
     const s = situacao({ falaDoCandidato: "o que tu acha" });
     const r = comRespostaDeReserva(quieto, s);
@@ -211,5 +262,40 @@ describe("aviso de que vai olhar", () => {
   it("é o mesmo nas duas salas, só com o material trocado", () => {
     assert.deepEqual(avisosDeQueVaiOlhar("quadro"), ["Tá, deixa eu dar uma olhada no desenho.", "Certo, só um instante que eu olho o que você fez."]);
     assert.deepEqual(avisosDeQueVaiOlhar("codigo").map((a) => a.replace("no código", "no desenho")), avisosDeQueVaiOlhar("quadro"));
+  });
+});
+
+describe("por quê obrigatório: escolha curta a uma pergunta com alternativas", () => {
+  it("escolha de até três palavras a uma pergunta com alternativas pede o porquê", () => {
+    assert.equal(pedePorque("No back ou no front?", "back"), true);
+    assert.equal(pedePorque("SQL ou NoSQL?", "NoSQL"), true);
+    assert.equal(pedePorque("Você usaria fila ou chamada direta?", "fila"), true);
+    assert.equal(pedePorque("Você usaria fila ou chamada direta?", "chamada direta"), true);
+  });
+  it("resposta longa ou com justificativa não pede porquê", () => {
+    assert.equal(pedePorque("Você usaria fila ou chamada direta?", "Fila, porque o pico é alto e eu não quero perder pedido"), false);
+    assert.equal(pedePorque("No back ou no front?", "back porque sim"), false);
+    assert.equal(pedePorque("No back ou no front?", "back pois o time já domina"), false);
+    assert.equal(pedePorque("No back ou no front?", "back já que é mais simples"), false);
+    assert.equal(pedePorque("No back ou no front?", "back para escalar"), false);
+    assert.equal(pedePorque("No back ou no front?", "back pra escalar"), false);
+    assert.equal(pedePorque("No back ou no front?", "para não travar"), false);
+  });
+  it("pra/para como preposição (sem verbo no infinitivo) não é justificativa", () => {
+    assert.equal(pedePorque("No back ou no front?", "pra fila"), true);
+    assert.equal(pedePorque("No back ou no front?", "para o back"), true);
+  });
+  it("não sei, pula e pedido de tempo não pedem porquê (o desfecho já trata)", () => {
+    assert.equal(pedePorque("No back ou no front?", "não sei"), false);
+    assert.equal(pedePorque("No back ou no front?", "Não sei."), false);
+    assert.equal(pedePorque("No back ou no front?", "pula"), false);
+    assert.equal(pedePorque("No back ou no front?", "tô pensando"), false);
+    assert.equal(pedePorque("No back ou no front?", "calma"), false);
+  });
+  it("pergunta sem alternativas, sem '?' ou ausente não pede porquê; resposta vazia também não", () => {
+    assert.equal(pedePorque("Quanto de tráfego você espera?", "back"), false);
+    assert.equal(pedePorque("No back ou no front.", "back"), false);
+    assert.equal(pedePorque(undefined, "back"), false);
+    assert.equal(pedePorque("No back ou no front?", "   "), false);
   });
 });

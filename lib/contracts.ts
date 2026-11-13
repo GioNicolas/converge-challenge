@@ -472,6 +472,12 @@ export const SILENCIO_INICIAL_S = 120;
 export const SILENCIO_REQUISITOS_S = 15;
 /** Se o silêncio continua depois de uma análise, o quadro volta a perguntar ao modelo a cada tanto. */
 export const SILENCIO_REPETIR_S = 30;
+/**
+ * Depois de uma fala do Totti, quanto tempo de silêncio total (sem o candidato desenhar nem falar) até ele poder
+ * falar de novo. A bola é do candidato: antes disso, só ele a devolve. Vale em todas as fases e cada quebra de
+ * silêncio acontece uma vez por período de silêncio (ver `deveForcarAnalise` em lib/sessao/silencio.ts).
+ */
+export const SILENCIO_SEM_ACAO_S = 60;
 
 // ---------------------------------------------------------------------------
 // Ritmo das perguntas do agente: vem da política comum de interrupção (lib/interrupcao/politica.ts), a mesma no

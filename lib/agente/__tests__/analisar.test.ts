@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { analisar, assinaturaDaAnalise, CONVITES_SILENCIO_INICIAL, refiltrarComEstadoAtual, type DepsAnalisar } from "../analisar";
+import {
+  analisar,
+  assinaturaDaAnalise,
+  assuntoJaExplorado,
+  CONVITES_SILENCIO_INICIAL,
+  cortarAberturaDeMolde,
+  INTERVALO_BRECHA_EMPECILHO_MS,
+  precisaAbrirBrechaDaMudanca,
+  refiltrarComEstadoAtual,
+  respostaSilencio,
+  type DepsAnalisar,
+} from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
+import type { PlanoDaSessao } from "../plano";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
-import { estadoInicial, transicionar, type EstadoSessao } from "../sessao/estado";
+import { duracaoTotalS, estadoInicial, transicionar, type EstadoSessao, type PerguntaFeita } from "../sessao/estado";
 import type { Fase, PedidoAnalise, RespostaAnalise } from "../sessao/tipos";
 
 const AGORA = 10_000_000;
@@ -42,6 +54,9 @@ function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
     elementos: ["e1"],
     degrau: null,
     observacoes: [{ criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" }],
+    // A pergunta fala do banco, uma parte fechada do desenho (ritmo por conteúdo, #129 bloco B).
+    parteFechada: true,
+    escopo: false,
     ...extra,
   };
 }
@@ -86,13 +101,13 @@ describe("analisar", () => {
     const json = JSON.stringify(r.resposta);
     for (const f of problema.ficha) assert.ok(!json.includes(f.resposta));
     for (const c of kitDemo.criterios) for (const n of [1, 2, 3, 4] as const) assert.ok(!json.includes(c.niveis[n]));
-    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "pergunta", "status", "visual"]);
+    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "escopo", "nota", "observacoes", "parteFechada", "pergunta", "status", "visual"]);
   });
 
   it("ok cancela a dúvida pendente", async () => {
     const pend = transicionar(estadoEm("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, AGORA).estado;
     assert.equal(pend.plin, "PLIN_PENDENTE");
-    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false, escopo: false };
     const r = await analisar(deps(criarClienteFalso([ok])), pend, pedido(), AGORA + 1000);
     assert.equal(r.estado.plin, "LIVRE");
     assert.deepEqual(r.efeitos, [{ tipo: "PLIN_CANCELADO", motivo: "ok" }]);
@@ -307,5 +322,387 @@ describe("refiltrarComEstadoAtual", () => {
     assert.deepEqual(refiltrarComEstadoAtual(livre, silenciada, ped(30), AGORA, AGORA + 2000), silenciada);
     const filtrada = refiltrarComEstadoAtual(livre, duvida(), ped(), AGORA, AGORA + 2000);
     assert.deepEqual(refiltrarComEstadoAtual(livre, filtrada, ped(), AGORA, AGORA + 2000), filtrada);
+  });
+});
+
+describe("analisar: ritmo por conteúdo do quadro (#129, bloco B)", () => {
+  const MIN = 60_000;
+
+  it("parte não fechada vira ok (sem_parte_fechada) e as observações ficam", async () => {
+    const llm = criarClienteFalso([duvida({ parteFechada: false })]);
+    const r = await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.resposta.pergunta, null);
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("sem_parte_fechada"));
+    assert.equal(r.resposta.observacoes.length, 1);
+    assert.equal(r.estado.cobertura.escalabilidade.negativo, 1);
+  });
+
+  it("parte fechada dentro do piso (2 min) vira ok (piso_entre_perguntas) e as observações ficam", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - MIN });
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("piso_entre_perguntas"));
+    assert.equal(r.estado.cobertura.escalabilidade.negativo, 1);
+  });
+
+  it("parte fechada depois do piso continua virando pergunta", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 3 * MIN });
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.includes("piso_entre_perguntas"), false);
+  });
+
+  it("teto: sem parte fechada, 5 min sem pergunta e desenho novo, a pergunta sai", async () => {
+    // O grafo do pedido tem r1, e1 e s1; a última pergunta foi feita com só r1 no quadro: há peça nova.
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 5 * MIN, desenhoNaUltimaPergunta: ["r1"] });
+    const r = await analisar(deps(criarClienteFalso([duvida({ parteFechada: false })])), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.includes("sem_parte_fechada"), false);
+  });
+
+  it("quebra de silêncio (60 s parado) fura o piso mesmo com a pergunta anterior há 30 s", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 30_000 });
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado, { ...pedido(), parado_ha_s: 60 }, AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+  });
+
+  it("refiltrar com o estado de agora: pergunta ouvida durante a análise conta para o piso", () => {
+    const resposta = duvida();
+    const ouviuAgora = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 30_000 });
+    assert.equal(refiltrarComEstadoAtual(ouviuAgora, resposta, pedido(), AGORA - 1000, AGORA).status, "ok");
+    assert.equal(refiltrarComEstadoAtual(estadoEm("APROFUNDAMENTO"), resposta, pedido(), AGORA - 1000, AGORA).status, "duvida");
+  });
+
+  it("o desenho da análise vira o snapshot da pergunta que ela gera", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.deepEqual(r.estado.perguntaPendente?.pecas, ["r1", "e1", "s1"]);
+    const feita = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
+    assert.deepEqual(feita.desenhoNaUltimaPergunta, ["r1", "e1", "s1"]);
+  });
+});
+
+describe("brecha da mudança depois dos 60% (#129, decisão G)", () => {
+  const total = duracaoTotalS(estadoInicial({ criterios }));
+  /** No meio do aprofundamento, com a entrevista começada `fracao` do tempo total atrás. */
+  const comFracao = (fracao: number, extra: Partial<EstadoSessao> = {}) =>
+    estadoEm("APROFUNDAMENTO", { iniciadaEm: AGORA - fracao * total * 1000, ...extra });
+  const anunciada = { id: "x", fala: "f?", requisito: "r", exige: "e", anunciadoEm: AGORA - 1, fase: "ALTO_NIVEL" as const, forcado: false };
+
+  it("só passada a fração da garantia, no meio da entrevista, sem mudança anunciada e com mudança prevista", () => {
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.59), AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.6), AGORA, true), true);
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.7, { empecilho: anunciada }), AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca({ ...comFracao(0.7), fase: "FECHAMENTO" }, AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(comFracao(0.7), AGORA, false), false, "problema sem mudança prevista");
+  });
+
+  it("um ciclo por vez: depois de uma brecha, espera o intervalo", () => {
+    const e = comFracao(0.7, { brechaEmpecilhoEm: AGORA - 30_000 });
+    assert.equal(precisaAbrirBrechaDaMudanca(e, AGORA, true), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(e, AGORA + INTERVALO_BRECHA_EMPECILHO_MS - 30_000, true), true);
+  });
+
+  it("a análise troca a dúvida por ok, registra o ajuste e guarda a hora da brecha", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), comFracao(0.7), pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.ok(r.diagnostico.ajustes.includes("abre_brecha_empecilho"));
+    assert.equal(r.estado.brechaEmpecilhoEm, AGORA);
+  });
+
+  it("antes da garantia a dúvida segue e nada é registrado", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), comFracao(0.3), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("abre_brecha_empecilho"), false);
+    assert.equal(r.estado.brechaEmpecilhoEm, undefined);
+  });
+});
+
+describe("analisar: a pergunta da análise sai em português claro (#129, decisão H)", () => {
+  const comVaga = (descricaoVaga?: string) => estadoEm("APROFUNDAMENTO", {
+    plano: { cargo: "Engenheiro de logística", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30, ...(descricaoVaga ? { descricaoVaga } : {}) } as PlanoDaSessao,
+  });
+
+  it("a pergunta com courier vira entregador antes de virar plin", async () => {
+    const llm = criarClienteFalso([duvida({ pergunta: "Quando o courier perde o sinal, o que acontece com a entrega?" })]);
+    const r = await analisar(deps(llm), comVaga(), pedido(), AGORA);
+    assert.equal(r.resposta.pergunta, "Quando o entregador perde o sinal, o que acontece com a entrega?");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+  });
+
+  it("com o termo na descrição da vaga, a pergunta mantém o termo", async () => {
+    const llm = criarClienteFalso([duvida({ pergunta: "Quando o courier perde o sinal, o que acontece?" })]);
+    const r = await analisar(deps(llm), comVaga("Entregas com courier próprio."), pedido(), AGORA);
+    assert.equal(r.resposta.pergunta, "Quando o courier perde o sinal, o que acontece?");
+  });
+});
+
+describe("analisar: redirecionamento de escopo (#129, decisão I)", () => {
+  const redireciona = (extra: Partial<RespostaAnalise> = {}): RespostaAnalise =>
+    duvida({ status: "redirecionar", parteFechada: false, escopo: true, pergunta: "O problema pede a arquitetura, não as telas. Por onde você começaria?", ...extra });
+  const semDesenho: PedidoAnalise = { ...pedido(), grafo: "" };
+
+  it("primeiro redirecionamento de escopo com desenho vira plin", async () => {
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "redirecionar");
+    assert.equal(r.resposta.escopo, true);
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.length, 0);
+  });
+
+  it("sem desenho, o escopo vira ok com o ajuste escopo_sem_desenho", async () => {
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), estadoEm("APROFUNDAMENTO"), semDesenho, AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.resposta.escopo, false);
+    assert.ok(r.diagnostico.ajustes.includes("escopo_sem_desenho"));
+  });
+
+  it("na fase de REQUISITOS, o escopo vira ok com o ajuste escopo_fora_da_fase", async () => {
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), estadoEm("REQUISITOS"), pedido("REQUISITOS"), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.ok(r.diagnostico.ajustes.includes("escopo_fora_da_fase"));
+  });
+
+  it("segundo redirecionamento antes de 5 min vira ok; depois de 5 min passa", async () => {
+    const e = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 1, escopoProvocadoEm: AGORA - 4 * 60_000 });
+    const cedo = await analisar(deps(criarClienteFalso([redireciona()])), e, pedido(), AGORA);
+    assert.equal(cedo.resposta.status, "ok");
+    assert.ok(cedo.diagnostico.ajustes.includes("escopo_espera_lembrete"));
+    const tarde = await analisar(deps(criarClienteFalso([redireciona()])), { ...e, escopoProvocadoEm: AGORA - 5 * 60_000 }, pedido(), AGORA);
+    assert.equal(tarde.resposta.status, "redirecionar");
+  });
+
+  it("terceiro redirecionamento nunca sai", async () => {
+    const e = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 60 * 60_000 });
+    const r = await analisar(deps(criarClienteFalso([redireciona()])), e, pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.ok(r.diagnostico.ajustes.includes("escopo_ja_redirecionado"));
+  });
+
+  it("escopo fora de redirecionar (ex.: duvida) é descartado sem mudar o status", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida({ escopo: true })])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.resposta.escopo, false);
+  });
+
+  it("refiltragem com o estado de agora também barra o terceiro", () => {
+    const atual = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 60 * 60_000 });
+    const r = refiltrarComEstadoAtual(atual, redireciona(), pedido(), AGORA, AGORA);
+    assert.equal(r.status, "ok");
+  });
+});
+
+describe("analisar: pergunta obrigatória no teto (#129, bloco B)", () => {
+  const MIN = 60_000;
+  // 4 min sem pergunta e uma peça nova no grafo (r1 já estava na última pergunta): o teto (3 min) venceu.
+  const comTetoVencido = () => estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 4 * MIN, desenhoNaUltimaPergunta: ["r1"] });
+
+  it("o teto vencido e um \"ok\" do modelo geram uma segunda chamada, com o aviso, e a pergunta sai", async () => {
+    const llm = criarClienteFalso([respostaSilencio(), duvida()]);
+    const r = await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.ok(llm.chamadas[1]?.sistema.dinamico?.includes("ATENÇÃO: faz tempo que você não pergunta"));
+    assert.ok(!llm.chamadas[0]?.sistema.dinamico?.includes("ATENÇÃO: faz tempo que você não pergunta"));
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.includes("teto_sem_pergunta"), false);
+  });
+
+  it("se a segunda chamada também devolve \"ok\", fica \"ok\" e a análise registra teto_sem_pergunta", async () => {
+    const llm = criarClienteFalso([respostaSilencio(), respostaSilencio()]);
+    const r = await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("teto_sem_pergunta"));
+  });
+
+  it("se a segunda chamada falha, fica \"ok\" com teto_sem_pergunta (sem lançar)", async () => {
+    const llm = criarClienteFalso([respostaSilencio(), new ErroLlm("timeout", "prazo")]);
+    const r = await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.diagnostico.origem, "llm");
+    assert.ok(r.diagnostico.ajustes.includes("teto_sem_pergunta"));
+  });
+
+  it("no máximo uma segunda chamada por análise", async () => {
+    const llm = criarClienteFalso([respostaSilencio()]);
+    await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+  });
+
+  it("com outro portão fechado (orçamento de perguntas), o \"ok\" não ganha segunda chamada", async () => {
+    const llm = criarClienteFalso([respostaSilencio()]);
+    const estado = { ...comTetoVencido(), perguntasFeitas: 50 };
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 1);
+    assert.equal(r.diagnostico.ajustes.includes("teto_sem_pergunta"), false);
+  });
+
+  it("sem teto vencido, o \"ok\" é o da primeira chamada (nenhuma segunda)", async () => {
+    const llm = criarClienteFalso([respostaSilencio()]);
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 2 * MIN, desenhoNaUltimaPergunta: ["r1"] });
+    await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 1);
+  });
+});
+
+/** Uma pergunta já feita que citou estas peças (ids do grafo de `pedido()`: r1 Cliente, e1 Postgres). */
+function feita(numero: number, elementos: string[]): PerguntaFeita {
+  return { numero, status: "duvida", pergunta: `Pergunta feita ${numero}?`, nota: null, elementos, degrau: null, fase: "APROFUNDAMENTO", feitaEm: AGORA - 600_000 };
+}
+
+describe("analisar: abertura de molde da pergunta (#129, bloco J)", () => {
+  const grafo = pedido().grafo;
+
+  it("corta \"Vi que você ...\" e \"Para entender como você ..., \" e mantém a pergunta", () => {
+    assert.deepEqual(
+      cortarAberturaDeMolde("Vi que você colocou o Postgres. Para entender como você lida com carga, o que acontece quando o Postgres cai?", grafo),
+      { texto: "O que acontece quando o Postgres cai?", cortou: true },
+    );
+  });
+
+  it("corta \"Notei que você\" e \"Percebi que você\" quando sobra pergunta com peça citada", () => {
+    assert.equal(cortarAberturaDeMolde("Notei que você ligou o Cliente ao Postgres. Por que essa ligação vai direto ao Postgres?", grafo).texto, "Por que essa ligação vai direto ao Postgres?");
+    assert.equal(cortarAberturaDeMolde("Percebi que você ligou o Cliente. Por que o Cliente fala com o Postgres?", grafo).texto, "Por que o Cliente fala com o Postgres?");
+  });
+
+  it("\"Para entender como você ...\" sozinho sai, desde que sobre uma pergunta", () => {
+    assert.deepEqual(cortarAberturaDeMolde("Para entender como você lida com carga, o que acontece no Postgres?", grafo), { texto: "O que acontece no Postgres?", cortou: true });
+  });
+
+  it("não corta se sobraria sem \"?\"", () => {
+    const t = "Vi que você colocou o Postgres. Isso faz sentido para o cargo.";
+    assert.deepEqual(cortarAberturaDeMolde(t, grafo), { texto: t, cortou: false });
+    const p = "Para entender como você lida com carga, veja o Postgres.";
+    assert.deepEqual(cortarAberturaDeMolde(p, grafo), { texto: p, cortou: false });
+  });
+
+  it("\"Vi que você\" não sai se a pergunta que sobra não cita peça do desenho", () => {
+    const t = "Vi que você colocou a fila e o cache, e como eles se falam?";
+    assert.deepEqual(cortarAberturaDeMolde(t, grafo), { texto: t, cortou: false });
+  });
+
+  it("só corta se o que sobra começa com palavra de pergunta", () => {
+    // A vírgula do Redis cortaria no lugar errado: sobra "Redis ou memória, o que...?", que não é pergunta.
+    const redis = "Para entender como você lida com cache, Redis ou memória, o que acontece se faltar?";
+    assert.deepEqual(cortarAberturaDeMolde(redis, grafo), { texto: redis, cortou: false });
+    const sujeito = "Vi que você colocou o Postgres. Postgres aguenta a carga, o que acha?";
+    assert.deepEqual(cortarAberturaDeMolde(sujeito, grafo), { texto: sujeito, cortou: false });
+    assert.equal(cortarAberturaDeMolde("Vi que você colocou o Postgres. Qual o motivo do Postgres?", grafo).texto, "Qual o motivo do Postgres?");
+  });
+
+  it("pergunta sem abertura de molde fica como está", () => {
+    const t = "Por que o Postgres, e não outro banco?";
+    assert.deepEqual(cortarAberturaDeMolde(t, grafo), { texto: t, cortou: false });
+  });
+
+  it("na análise, a abertura sai e o ajuste abertura_de_molde é registrado", async () => {
+    const llm = criarClienteFalso([duvida({ pergunta: "Vi que você colocou o Postgres. Para entender como você lida com carga, o que acontece quando o Postgres cai?" })]);
+    const r = await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.resposta.pergunta, "O que acontece quando o Postgres cai?");
+    assert.ok(r.diagnostico.ajustes.includes("abertura_de_molde"));
+  });
+});
+
+describe("analisar: assunto já explorado (#129, bloco J)", () => {
+  // Duas perguntas feitas sobre o Postgres (e1): a peça já foi perguntada duas vezes.
+  const comPostgresDuasVezes = () => estadoEm("APROFUNDAMENTO", { perguntas: [feita(1, ["e1"]), feita(2, ["e1"])] });
+
+  it("pergunta só sobre peças já perguntadas duas vezes é assunto repetido", () => {
+    const e = comPostgresDuasVezes();
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, e), true);
+    assert.equal(assuntoJaExplorado({ status: "dica", elementos: ["e1"] }, e), true);
+  });
+
+  it("uma peça nova na pergunta não é repetição, mesmo com a outra já perguntada", () => {
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1", "r1"] }, comPostgresDuasVezes()), false);
+  });
+
+  it("peça perguntada só uma vez não é repetição", () => {
+    const e = estadoEm("APROFUNDAMENTO", { perguntas: [feita(1, ["e1"])] });
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, e), false);
+  });
+
+  it("as peças perguntadas juntas (duas peças, cada uma duas vezes) contam como repetição", () => {
+    const e = estadoEm("APROFUNDAMENTO", { perguntas: [feita(1, ["e1", "r1"]), feita(2, ["r1", "e1"])] });
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1", "r1"] }, e), true);
+  });
+
+  it("não vale para ok, redirecionar, FECHAMENTO, quebra de silêncio nem sem elemento citado", () => {
+    const e = comPostgresDuasVezes();
+    assert.equal(assuntoJaExplorado({ status: "ok", elementos: ["e1"] }, e), false);
+    assert.equal(assuntoJaExplorado({ status: "redirecionar", elementos: ["e1"] }, e), false);
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, { ...e, fase: "FECHAMENTO" }), false);
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: ["e1"] }, e, 60), false);
+    assert.equal(assuntoJaExplorado({ status: "duvida", elementos: [] }, e), false);
+  });
+
+  it("na análise, pergunta de assunto repetido vira ok (assunto_repetido) e a observação fica", async () => {
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] })]);
+    const r = await analisar(deps(llm), comPostgresDuasVezes(), pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("assunto_repetido"));
+    assert.equal(r.resposta.observacoes.length, 1);
+  });
+
+  it("na análise, peça nova na pergunta passa", async () => {
+    const llm = criarClienteFalso([duvida({ elementos: ["e1", "r1"] })]);
+    const r = await analisar(deps(llm), comPostgresDuasVezes(), pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("assunto_repetido"), false);
+  });
+
+  it("quebra de silêncio (60 s parado) não é bloqueada pela repetição", async () => {
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] })]);
+    const r = await analisar(deps(llm), comPostgresDuasVezes(), { ...pedido(), parado_ha_s: 60 }, AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("assunto_repetido"), false);
+  });
+
+  it("pergunta obrigatória do teto repetida: segunda chamada com o aviso acrescido; se ela trouxer outra parte, sai", async () => {
+    // 4 min sem pergunta e peça nova: o teto venceu. A primeira pergunta repete o Postgres.
+    const estado = estadoEm("APROFUNDAMENTO", {
+      ultimaPerguntaEm: AGORA - 4 * 60_000, desenhoNaUltimaPergunta: ["r1"], perguntas: [feita(1, ["e1"]), feita(2, ["e1"])],
+    });
+    const outra = duvida({ pergunta: "Se o cliente repetir o pedido, o que acontece?", elementos: ["r1"] });
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] }), outra]);
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.ok(llm.chamadas[1]?.sistema.dinamico?.includes("A pergunta anterior repetiu um assunto já perguntado"));
+    assert.ok(!llm.chamadas[0]?.sistema.dinamico?.includes("A pergunta anterior repetiu um assunto já perguntado"));
+    assert.equal(r.resposta.pergunta, "Se o cliente repetir o pedido, o que acontece?");
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.ajustes.includes("assunto_repetido"), false);
+  });
+
+  it("pergunta obrigatória repetida: se a segunda também repete, a pergunta do teto fica (ajuste no teto)", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", {
+      ultimaPerguntaEm: AGORA - 4 * 60_000, desenhoNaUltimaPergunta: ["r1"], perguntas: [feita(1, ["e1"]), feita(2, ["e1"])],
+    });
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] }), duvida({ elementos: ["e1"] })]);
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.ok(r.diagnostico.ajustes.includes("assunto_repetido_no_teto"));
+  });
+
+  it("pergunta obrigatória repetida e segunda chamada falha: a pergunta do teto fica (sem lançar)", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", {
+      ultimaPerguntaEm: AGORA - 4 * 60_000, desenhoNaUltimaPergunta: ["r1"], perguntas: [feita(1, ["e1"]), feita(2, ["e1"])],
+    });
+    const llm = criarClienteFalso([duvida({ elementos: ["e1"] }), new ErroLlm("timeout", "prazo")]);
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.diagnostico.origem, "llm");
   });
 });

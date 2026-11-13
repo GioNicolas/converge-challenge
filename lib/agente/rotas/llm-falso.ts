@@ -38,6 +38,8 @@ export function criarLlmFalsoDeterministico(): LlmCliente {
                 { criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único sem cache" },
               ],
               avancar_fase,
+              // O banco único é uma parte fechada do desenho: a pergunta sai pelo piso, não pelo teto.
+              parteFechada: true,
             }
           : { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], avancar_fase };
       } else if (args.nomeSchema === NOME_SCHEMA_ABERTURA) {
