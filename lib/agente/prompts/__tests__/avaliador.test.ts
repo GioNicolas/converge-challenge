@@ -153,7 +153,7 @@ describe("bloco dinâmico", () => {
     const comPendente: EstadoSessao = {
       ...estado,
       plin: "PLIN_PENDENTE",
-      perguntaPendente: { status: "duvida", pergunta: "E se o cache cair?", nota: null, elementos: ["e1"], degrau: null, observacoes: [], criadoEm: AGORA - 1000 },
+      perguntaPendente: { status: "duvida", parteFechada: true, pergunta: "E se o cache cair?", nota: null, elementos: ["e1"], degrau: null, observacoes: [], criadoEm: AGORA - 1000 },
     };
     const dp = montarPromptAvaliador(kitDemo, problema, comPendente, pedido(), AGORA).sistema.dinamico;
     assert.ok(dp.includes('"E se o cache cair?"'));
@@ -179,5 +179,40 @@ describe("bloco dinâmico", () => {
   it("o bloco dinâmico não carrega a ficha nem a rubrica", () => {
     assert.ok(!d.includes(problema.ficha[0].resposta));
     assert.ok(!d.includes(kitDemo.criterios[0].niveis[1]));
+  });
+});
+
+describe("ritmo por conteúdo no prompt (#129, bloco B)", () => {
+  const MIN = 60_000;
+  const e = montarSistemaEstatico(kitDemo, problema);
+
+  it("o princípio 1 pede parte fechada, marca parteFechada e proíbe a peça recém-colocada", () => {
+    for (const trecho of ["FECHOU UMA PARTE", "\"parteFechada\": true", "peça que acabou de ser colocada", "\"parteFechada\": false"]) {
+      assert.ok(e.includes(trecho), `faltou: ${trecho}`);
+    }
+    assert.ok(!e.includes("uma pergunta curta sobre a parte que ele acabou de colocar"), "o princípio antigo saiu");
+  });
+
+  it("a regra de saída do campo parteFechada está no prompt estático", () => {
+    assert.ok(e.includes("\"parteFechada\": true somente quando a fase atual é ALTO_NIVEL ou APROFUNDAMENTO"));
+  });
+
+  it("o teto avisa o modelo quando faz 5 min sem pergunta e há desenho novo", () => {
+    const atrasado = { ...estado, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1"] };
+    const d = montarPromptAvaliador(kitDemo, problema, atrasado, pedido(), AGORA).sistema.dinamico;
+    assert.ok(d.includes("PERGUNTA EM ATRASO: faz 5 min que você não pergunta e o desenho mudou"));
+    assert.ok(d.includes("parte mais forte do desenho"));
+  });
+
+  it("sem desenho novo, o aviso do teto não aparece", () => {
+    const parado = { ...estado, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1", "e1", "s1"] };
+    const d = montarPromptAvaliador(kitDemo, problema, parado, pedido(), AGORA).sistema.dinamico;
+    assert.ok(!d.includes("PERGUNTA EM ATRASO"));
+  });
+
+  it("antes dos 5 min, o aviso do teto não aparece", () => {
+    const recente = { ...estado, ultimaPerguntaEm: AGORA - 2 * MIN, desenhoNaUltimaPergunta: ["r1"] };
+    const d = montarPromptAvaliador(kitDemo, problema, recente, pedido(), AGORA).sistema.dinamico;
+    assert.ok(!d.includes("PERGUNTA EM ATRASO"));
   });
 });

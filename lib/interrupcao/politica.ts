@@ -73,6 +73,17 @@ export const RITMO = {
   marcoDeConclusaoMs: 45_000,
 } as const;
 
+/**
+ * Ritmo por conteúdo do quadro (#129, bloco B). Só o quadro usa: a análise do desenho só vira pergunta quando o
+ * candidato fechou uma parte (ou no teto). O live coding não lê estes valores.
+ */
+export const RITMO_QUADRO = {
+  /** Nunca duas perguntas da análise em menos de tanto tempo. A quebra de silêncio não respeita este piso. */
+  pisoEntrePerguntasMs: 120_000,
+  /** Passado tanto tempo sem pergunta e havendo desenho novo, a pergunta sai mesmo sem parte fechada. */
+  tetoSemPerguntaMs: 300_000,
+} as const;
+
 /** Interrupções que a entrevista comporta (fora abertura, encerramento e mudança no problema). */
 export function orcamentoDeInterrupcoes(duracaoMin: number): number {
   const n = Math.round(Math.max(0, duracaoMin) / RITMO.minutosPorInterrupcao);

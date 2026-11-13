@@ -17,7 +17,7 @@ const INTERVALO = intervaloMinimoMs(35);
 
 function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
-    status: "duvida",
+    status: "duvida", parteFechada: true,
     pergunta: "Onde fica o gargalo?",
     nota: "Gargalo?",
     elementos: ["e1"],
@@ -188,7 +188,7 @@ describe("ciclo do plin", () => {
 
   it("ok cancela a pendente", () => {
     const e = aplicar(emFase("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() });
-    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+    const ok: RespostaAnalise = { status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
     const r = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: ok }, T0 + 5000);
     assert.equal(r.estado.plin, "LIVRE");
     assert.equal(r.estado.perguntaPendente, null);
@@ -287,7 +287,7 @@ describe("registros", () => {
     const base = estadoInicial({ criterios: ["escalabilidade", "dados", "trade-offs"] });
     let e = aplicar(base, { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" }, { tipo: "CANDIDATO_DESENHOU" });
     const ok: RespostaAnalise = {
-      status: "ok", pergunta: null, nota: null, elementos: [], degrau: null,
+      status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [
         { criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" },
         { criterio: "cache", sinal: "positivo", espontaneo: true, evidencia: "citou Redis" },
@@ -338,5 +338,50 @@ describe("SINCRONIZAR_FASE", () => {
     assert.equal(b.estado.fase, "APROFUNDAMENTO");
     assert.deepEqual(b.efeitos, []);
     assert.equal(transicionar(a.estado, { tipo: "SINCRONIZAR_FASE", fase: "ENCERRADA" }, T0).estado.fase, "ENCERRADA");
+  });
+});
+
+describe("PLIN_CLICADO sem dúvida pendente (corrida: o quadro disse que fez a pergunta)", () => {
+  const alto = (extra: Partial<EstadoSessao> = {}): EstadoSessao => ({ ...estadoInicial(), fase: "ALTO_NIVEL", faseIniciadaEm: T0, ...extra });
+  const registro = { pergunta: "Por que duas filas?", nota: "Duas filas?", elementos: ["e1"], status: "dica" as const };
+
+  it("registra a pergunta: hora, cota, histórico e conversa, com o texto que o quadro mandou", () => {
+    const r = transicionar(alto(), { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
+    assert.equal(r.estado.plin, "PERGUNTA_ATIVA");
+    assert.equal(r.estado.perguntasFeitas, 1);
+    assert.equal(r.estado.ultimaPerguntaEm, T0 + MIN);
+    assert.equal(r.estado.perguntaAtiva?.pergunta, "Por que duas filas?");
+    assert.equal(r.estado.perguntaAtiva?.status, "dica");
+    assert.deepEqual(r.estado.perguntas.map((p) => p.pergunta), ["Por que duas filas?"]);
+    assert.equal(r.estado.conversa.at(-1)?.texto, "Por que duas filas?");
+    assert.deepEqual(r.efeitos, [{ tipo: "PERGUNTA_INICIADA", pergunta: r.estado.perguntas[0] }]);
+  });
+
+  it("sem texto, o clique segue como antes: nada muda", () => {
+    const e = alto();
+    assert.equal(transicionar(e, { tipo: "PLIN_CLICADO" }, T0 + MIN).estado, e);
+    assert.equal(transicionar(e, { tipo: "PLIN_CLICADO", registro: { pergunta: "   " } }, T0 + MIN).estado, e);
+  });
+
+  it("com dúvida pendente, o clique usa a pendente (o registro não entra)", () => {
+    const pendente = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, T0 + MIN).estado;
+    const r = transicionar(pendente, { tipo: "PLIN_CLICADO", registro }, T0 + MIN + 1000);
+    assert.equal(r.estado.perguntaAtiva?.pergunta, duvida().pergunta);
+    assert.equal(r.estado.perguntas.length, 1);
+  });
+
+  it("com outra resposta ativa, não sobrescreve", () => {
+    const ativa = alto({
+      plin: "PERGUNTA_ATIVA",
+      perguntaAtiva: { numero: 1, status: "duvida", pergunta: "Outra?", nota: null, elementos: [], degrau: null, fase: "ALTO_NIVEL", feitaEm: T0 },
+    });
+    assert.equal(transicionar(ativa, { tipo: "PLIN_CLICADO", registro }, T0 + MIN).estado, ativa);
+  });
+
+  it("em REQUISITOS, o convite não gasta a cota de perguntas", () => {
+    const e = { ...estadoInicial(), fase: "REQUISITOS" as const, faseIniciadaEm: T0 };
+    const r = transicionar(e, { tipo: "PLIN_CLICADO", registro }, T0 + MIN);
+    assert.equal(r.estado.perguntasFeitas, 0);
+    assert.equal(r.estado.conviteFeito, true);
   });
 });

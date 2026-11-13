@@ -85,5 +85,11 @@ export const EsquemaRespostaAnalise = z.object({
    * Ausente = false.
    */
   avancar_fase: z.boolean().optional(),
+  /**
+   * O candidato terminou uma parte coerente do desenho (ex.: o fluxo de escrita inteiro, a escolha do armazenamento
+   * com o porquê, o caminho de leitura) e há informação para uma pergunta sobre a parte inteira. Sem isso, em
+   * ALTO_NIVEL e APROFUNDAMENTO a pergunta só sai no teto (ver `motivoDoConteudo`, sessao/politica.ts). Ausente = false.
+   */
+  parteFechada: z.boolean().default(false),
 });
 export type RespostaAnalise = z.infer<typeof EsquemaRespostaAnalise>;

@@ -27,3 +27,20 @@ describe("desenho e a saída de REQUISITOS", () => {
     assert.deepEqual(eventosDaMaquina("desenho", {}), [{ tipo: "CANDIDATO_DESENHOU" }]);
   });
 });
+
+describe("evento 'pergunta' da linha do tempo", () => {
+  it("leva o texto que o quadro falou, com nota, elementos e status", () => {
+    assert.deepEqual(
+      eventosDaMaquina("pergunta", { numero: 3, pergunta: "  Como você lida com X?  ", nota: "X?", elementos: ["e1", 7], status: "dica" }),
+      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "Como você lida com X?", nota: "X?", elementos: ["e1"], status: "dica" } }],
+    );
+  });
+
+  it("status inválido não entra; sem texto, o clique segue sem registro", () => {
+    assert.deepEqual(
+      eventosDaMaquina("pergunta", { pergunta: "Por quê?", status: "outro" }),
+      [{ tipo: "PLIN_CLICADO", registro: { pergunta: "Por quê?", nota: null, elementos: [] } }],
+    );
+    assert.deepEqual(eventosDaMaquina("pergunta", { numero: 1 }), [{ tipo: "PLIN_CLICADO" }]);
+  });
+});

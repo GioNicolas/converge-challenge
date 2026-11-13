@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../../contracts";
-import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO } from "../../../interrupcao/politica";
+import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../../interrupcao/politica";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
+  desenhoNovoDesdePergunta,
   extrairIdsDoGrafo,
   filtrarResposta,
   motivoBloqueio,
+  motivoDoConteudo,
   falaQueContaParaABola,
   motivoBloqueioPlin,
   pedidoDeTempoPendente,
@@ -29,7 +31,7 @@ function estadoEm(fase: Fase, extra: Partial<EstadoSessao> = {}): EstadoSessao {
 
 function resposta(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
   return {
-    status: "duvida",
+    status: "duvida", parteFechada: true,
     pergunta: "Onde fica o gargalo?",
     nota: "Gargalo?",
     elementos: ["e1"],
@@ -383,5 +385,91 @@ describe("intervalo entre perguntas: referência de tempo", () => {
     delete (antigo as { ultimaRespostaEm?: number | null }).ultimaRespostaEm;
     assert.equal(motivoBloqueioPlin(antigo, AGORA), "INTERVALO_ENTRE_PERGUNTAS");
     assert.equal(motivoBloqueioPlin(antigo, AGORA - 10_000 + INTERVALO), null);
+  });
+});
+
+describe("ritmo por conteúdo do quadro (#129, bloco B)", () => {
+  const PISO = RITMO_QUADRO.pisoEntrePerguntasMs;
+  const TETO = RITMO_QUADRO.tetoSemPerguntaMs;
+  const fechada = { status: "duvida" as const, parteFechada: true };
+  const aberta = { status: "duvida" as const, parteFechada: false };
+  const alto = (extra: Partial<EstadoSessao> = {}) => estadoEm("ALTO_NIVEL", extra);
+
+  it("piso: parte fechada só sai com 2 min desde a última pergunta", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA });
+    assert.equal(motivoDoConteudo(e, fechada, AGORA + PISO - 1), "PISO_ENTRE_PERGUNTAS");
+    assert.equal(motivoDoConteudo(e, fechada, AGORA + PISO), null);
+  });
+
+  it("sem pergunta anterior, a parte fechada sai sem esperar o piso", () => {
+    assert.equal(motivoDoConteudo(alto(), fechada, AGORA), null);
+  });
+
+  it("sem parte fechada e antes do teto, a pergunta vira SEM_PARTE_FECHADA", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 4 * MIN });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
+  });
+
+  it("teto: 5 min sem pergunta e com desenho novo sai mesmo sem parte fechada", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1"] });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1", "e1"] }), null);
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO - 1, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
+  });
+
+  it("teto sem desenho novo não libera: o mesmo desenho não gera pergunta sem parte fechada", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
+  });
+
+  it("sem pergunta anterior, o teto conta desde o começo da fase", () => {
+    const e = alto({ faseIniciadaEm: AGORA, ultimaPerguntaEm: null });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO - 1, { pecas: ["r1"] }), "SEM_PARTE_FECHADA");
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1"] }), null);
+  });
+
+  it("grafo cortado (peças desconhecidas) não conta como desenho novo", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1"] });
+    assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: null }), "SEM_PARTE_FECHADA");
+  });
+
+  it("quebra de silêncio fura o piso, com ou sem parte fechada", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 30_000 });
+    assert.equal(motivoDoConteudo(e, fechada, AGORA, { paradoHaS: SILENCIO_SEM_ACAO_S }), null);
+    assert.equal(motivoDoConteudo(e, aberta, AGORA, { paradoHaS: SILENCIO_SEM_ACAO_S }), null);
+    assert.equal(motivoDoConteudo(e, fechada, AGORA, { paradoHaS: SILENCIO_SEM_ACAO_S - 1 }), "PISO_ENTRE_PERGUNTAS");
+  });
+
+  it("marco de conclusão ('terminei') fura o piso", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 30_000, ultimaConclusaoEm: AGORA - 10_000 });
+    assert.equal(motivoDoConteudo(e, fechada, AGORA), null);
+  });
+
+  it("só se aplica a duvida e dica em ALTO_NIVEL e APROFUNDAMENTO", () => {
+    const e = alto({ ultimaPerguntaEm: AGORA - 1000 });
+    assert.equal(motivoDoConteudo(estadoEm("REQUISITOS", { ultimaPerguntaEm: AGORA - 1000 }), aberta, AGORA), null);
+    assert.equal(motivoDoConteudo(e, { status: "redirecionar", parteFechada: false }, AGORA), null);
+    assert.equal(motivoDoConteudo(e, { status: "ok", parteFechada: false }, AGORA), null);
+    assert.equal(
+      motivoDoConteudo(estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 1000 }), { status: "dica", parteFechada: false }, AGORA),
+      "SEM_PARTE_FECHADA",
+    );
+  });
+
+  it("desenhoNovoDesdePergunta: só peça que não estava no grafo da última pergunta", () => {
+    const e = alto({ desenhoNaUltimaPergunta: ["r1", "e1"] });
+    assert.equal(desenhoNovoDesdePergunta(e, ["r1", "e1"]), false);
+    assert.equal(desenhoNovoDesdePergunta(e, ["r1", "e1", "s2"]), true);
+    assert.equal(desenhoNovoDesdePergunta(alto(), ["r1"]), true, "sem pergunta anterior, qualquer peça conta");
+    assert.equal(desenhoNovoDesdePergunta(alto(), []), false);
+    assert.equal(desenhoNovoDesdePergunta(e, null), false);
+  });
+
+  it("PLIN_CLICADO grava as peças da análise que fez a pergunta (base do teto)", () => {
+    const pendente = transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: resposta(), pecas: ["r1", "e1"] }, AGORA).estado;
+    assert.equal(pendente.plin, "PLIN_PENDENTE");
+    const feita = transicionar(pendente, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
+    assert.deepEqual(feita.desenhoNaUltimaPergunta, ["r1", "e1"]);
+    const semPecas = transicionar(transicionar(alto(), { tipo: "ANALISE_RECEBIDA", resposta: resposta() }, AGORA).estado, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
+    assert.equal(semPecas.desenhoNaUltimaPergunta, undefined, "sem peças na análise, o campo fica ausente");
   });
 });

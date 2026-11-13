@@ -20,12 +20,14 @@ import { avaliacaoDaConfig } from "../kits/questao-da-vaga";
 import { perguntar, type PassoNaSessao } from "../perguntar";
 import { gatilhoDoFechamento, iniciarFechamento, proximoPasso, type EtapaDoFechamento } from "../../totti/fechamento";
 import { candidatasDoQuadro, perguntasJaOuvidas } from "../fechamento";
+import { pecasDoGrafo } from "../sessao/fechamento";
 import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
   EsquemaImagemOpcional,
   EsquemaFase,
   EsquemaPedidoAnalise,
+  STATUS_ANALISE,
   type PedidoAnalise,
   type RespostaAnalise,
 } from "../sessao/tipos";
@@ -255,7 +257,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     const fim = ctx.agora();
     resposta = refiltrarComEstadoAtual(novo, resposta, pedido, t0, fim);
     const anteriores = novo.observacoes.length;
-    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta }, fim).estado;
+    novo = transicionar(novo, { tipo: "ANALISE_RECEBIDA", resposta, pecas: pecasDoGrafo(pedido.grafo) }, fim).estado;
     novo = {
       ...novo,
       ultimaAnalise: { assinatura, bloqueada: bloqueadaAgora },
@@ -281,6 +283,7 @@ export async function analisarHandler(req: Request, { params }: ParamsId): Promi
     degrau: resposta.degrau,
     observacoes: resposta.observacoes,
     ...(resposta.avancar_fase ? { avancar_fase: true } : {}),
+    parteFechada: resposta.parteFechada,
   } satisfies RespostaAnalise;
   // Mais a etapa do fechamento comum, quando ele está em andamento: sem ela, o quadro sabe que ele foi suspenso.
   const fechamento = etapaDoFechamento(novo);
@@ -586,8 +589,22 @@ export function eventosDaMaquina(tipo: string, dados: unknown): EventoSessao[] {
       const fase = EsquemaFase.safeParse(d.fase);
       return fase.success ? [{ tipo: "SINCRONIZAR_FASE", fase: fase.data }] : [];
     }
-    case "pergunta":
-      return [{ tipo: "PLIN_CLICADO" }];
+    case "pergunta": {
+      // O quadro manda o texto que falou. Sem texto, o clique segue como antes (só vale com dúvida pendente).
+      const pergunta = typeof d.pergunta === "string" ? d.pergunta.trim().slice(0, 2000) : "";
+      if (!pergunta) return [{ tipo: "PLIN_CLICADO" }];
+      const status = STATUS_ANALISE.find((s) => s === d.status);
+      const elementos = Array.isArray(d.elementos) ? d.elementos.filter((x): x is string => typeof x === "string") : [];
+      return [{
+        tipo: "PLIN_CLICADO",
+        registro: {
+          pergunta,
+          nota: typeof d.nota === "string" ? d.nota : null,
+          elementos,
+          ...(status ? { status } : {}),
+        },
+      }];
+    }
     case "resposta":
       return [
         {

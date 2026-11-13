@@ -26,8 +26,11 @@ export const TEMPOS_PADRAO: Tempos = {
   FECHAMENTO: 300,
 };
 
-/** Dúvida esperando o clique do candidato. */
-export type PlinPendente = RespostaAnalise & { criadoEm: number };
+/**
+ * Dúvida esperando o clique do candidato. `pecas`: as peças do desenho na análise que a fez (ver
+ * `desenhoNaUltimaPergunta`); ausente em estados e chamadas antigas.
+ */
+export type PlinPendente = RespostaAnalise & { criadoEm: number; pecas?: string[] | null };
 
 /** Pergunta que o candidato está respondendo (ou já respondeu, no registro). */
 export type PerguntaFeita = {
@@ -108,6 +111,11 @@ export type EstadoSessao = {
   /** Quando o candidato terminou de responder a última pergunta. */
   ultimaRespostaEm: number | null;
   /**
+   * As peças do desenho na análise que gerou a última pergunta feita (ver `desenhoNovoDesdePergunta`, sessao/politica.ts).
+   * Ausente/null: nenhuma pergunta feita ainda, ou o grafo veio cortado.
+   */
+  desenhoNaUltimaPergunta?: string[] | null;
+  /**
    * Quando o agente disse a última fala solta (resposta a uma dúvida, comentário, continuação). Uma pergunta nova
    * não sai logo depois dela. Ausente em estados guardados antes desse campo.
    */
@@ -151,6 +159,18 @@ export type EstadoSessao = {
   quadroAindaNoFechamento?: boolean;
 };
 
+/**
+ * A pergunta que o quadro disse que fez (evento "pergunta" da linha do tempo). Usada quando o servidor não tem a
+ * dúvida pendente (ela foi cancelada numa corrida com uma análise mais nova): registra mesmo assim, para o piso
+ * entre perguntas contar a pergunta que o candidato ouviu.
+ */
+export type RegistroDaPergunta = {
+  pergunta: string;
+  nota?: string | null;
+  elementos?: string[];
+  status?: RespostaAnalise["status"];
+};
+
 export type EventoSessao =
   | { tipo: "COMECAR" }
   | { tipo: "APRESENTACAO_TERMINOU" }
@@ -163,11 +183,12 @@ export type EventoSessao =
   | { tipo: "ENCERRAR" }
   /** O quadro é dono da fase: o servidor acompanha. Só avança (alvo anterior ou igual é ignorado). */
   | { tipo: "SINCRONIZAR_FASE"; fase: Fase }
-  /** Resultado do /analisar (já passado por `filtrarResposta`). */
-  | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise }
+  /** Resultado do /analisar (já passado por `filtrarResposta`). `pecas`: as peças do desenho daquela análise. */
+  | { tipo: "ANALISE_RECEBIDA"; resposta: RespostaAnalise; pecas?: string[] | null }
   /** O candidato mexeu nestes elementos (ids curtos do grafo). */
   | { tipo: "ELEMENTOS_ALTERADOS"; ids: string[] }
-  | { tipo: "PLIN_CLICADO" }
+  /** `registro`: a pergunta que o quadro disse ter feito, para quando não há dúvida pendente aqui (ver RegistroDaPergunta). */
+  | { tipo: "PLIN_CLICADO"; registro?: RegistroDaPergunta }
   | { tipo: "CANDIDATO_FALOU"; texto: string; fimDeResposta: boolean }
   /** Ele pediu tempo para pensar. `reagiu`: o Totti respondeu com a reação curta (a primeira vez na entrevista). */
   | { tipo: "CANDIDATO_PEDIU_TEMPO"; reagiu: boolean }
@@ -208,6 +229,39 @@ export type Efeito =
   | { tipo: "SESSAO_ENCERRADA" };
 
 export type Transicao = { estado: EstadoSessao; efeitos: Efeito[] };
+
+/**
+ * Registra a pergunta que o quadro disse ter feito, sem dúvida pendente no servidor. Mesma conta do clique com
+ * pendente (número, cota, hora, histórico), com o texto que o quadro mandou. Não mexe em `desenhoNaUltimaPergunta`:
+ * sem a análise que a gerou, não há como saber as peças dela.
+ */
+function registrarPerguntaDoQuadro(estado: EstadoSessao, r: RegistroDaPergunta, agora: number): Transicao {
+  const pergunta: PerguntaFeita = {
+    numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
+    status: r.status ?? "duvida",
+    pergunta: r.pergunta.trim(),
+    nota: r.nota ?? null,
+    elementos: r.elementos ?? [],
+    degrau: null,
+    fase: estado.fase,
+    feitaEm: agora,
+  };
+  return {
+    estado: {
+      ...estado,
+      plin: "PERGUNTA_ATIVA",
+      perguntaAtiva: pergunta,
+      perguntaPendente: null,
+      perguntasFeitas: estado.fase === "REQUISITOS" ? estado.perguntasFeitas : estado.perguntasFeitas + 1,
+      perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
+      conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
+      ultimaPerguntaEm: agora,
+      perguntas: [...estado.perguntas, pergunta],
+      conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
+    },
+    efeitos: [{ tipo: "PERGUNTA_INICIADA", pergunta }],
+  };
+}
 
 /** Quanto da resposta do candidato fica guardado junto da pergunta (vai aos prompts). */
 const MAX_CARACTERES_RESPOSTA = 300;
@@ -416,7 +470,7 @@ export function transicionar(
 
       if (resposta.pergunta?.trim() && podeLevantarPlin(comObservacoes, resposta.status, agora, regras)) {
         // Uma dúvida nova substitui a pendente: a mais recente é a mais relevante.
-        const pendente: PlinPendente = { ...resposta, criadoEm: agora };
+        const pendente: PlinPendente = { ...resposta, criadoEm: agora, ...(evento.pecas !== undefined ? { pecas: evento.pecas } : {}) };
         return {
           estado: { ...comObservacoes, plin: "PLIN_PENDENTE", perguntaPendente: pendente },
           efeitos: [
@@ -455,7 +509,13 @@ export function transicionar(
 
     case "PLIN_CLICADO": {
       const pendente = estado.perguntaPendente;
-      if (estado.plin !== "PLIN_PENDENTE" || !pendente) return nada;
+      // Sem dúvida pendente aqui: o quadro disse que fez a pergunta (numa corrida, o servidor já cancelou a pendente).
+      // Registra o que ele mandou. Sem texto, ou com outra resposta ativa, nada muda.
+      if (estado.plin !== "PLIN_PENDENTE" || !pendente) {
+        const r = evento.registro;
+        if (!r?.pergunta.trim() || estado.plin === "PERGUNTA_ATIVA") return nada;
+        return registrarPerguntaDoQuadro(estado, r, agora);
+      }
       const pergunta: PerguntaFeita = {
         // Número único: o convite de REQUISITOS não conta na cota, mas ocupa um número.
         numero: estado.perguntasFeitas + (estado.perguntas.some((p) => p.fase === "REQUISITOS") ? 1 : 0) + 1,
@@ -479,6 +539,8 @@ export function transicionar(
           perguntaFinalFeita: estado.perguntaFinalFeita || estado.fase === "FECHAMENTO",
           conviteFeito: estado.conviteFeito || estado.fase === "REQUISITOS",
           ultimaPerguntaEm: agora,
+          // O desenho que gerou esta pergunta: a próxima só pelo teto se houver peça nova depois dele.
+          ...(pendente.pecas !== undefined ? { desenhoNaUltimaPergunta: pendente.pecas } : {}),
           perguntas: [...estado.perguntas, pergunta],
           conversa: [...estado.conversa, { quem: "agente", texto: pergunta.pergunta, em: agora }],
         },

@@ -9,14 +9,15 @@ import { criteriosSemEvidencia, tempoDaEntrevista, type EstadoSessao } from "../
 import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
-import { orcamentoDeInterrupcoes, RITMO } from "../../interrupcao/politica";
-import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, perguntaAtrasada, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
+import { orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../interrupcao/politica";
+import { pecasDoGrafo } from "../sessao/fechamento";
+import { LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, ritmoDoEstado, statusPermitidoNoEstado, tetoDaPergunta } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
 
 export const PRINCIPIOS = `PRINCÍPIOS (siga todos):
-1. O candidato desenha; você conduz a conversa para entender o raciocínio dele, ENQUANTO ele desenha. Não espere ele terminar o desenho para perguntar: a entrevista é a conversa sobre o que ele está fazendo, e quem desenha minutos sem ouvir pergunta não mostra como pensa. Sempre que uma pergunta nova é permitida e "O que mudou" traz uma peça, uma ligação ou uma anotação nova que ele ainda não explicou (por que ela existe, o que passa por ela, por que essa e não outra), pergunte sobre ELA, citando-a pelo nome: no ALTO_NIVEL, uma pergunta curta sobre a parte que ele acabou de colocar; no APROFUNDAMENTO, um ponto do plano da vaga ou da rubrica ainda sem evidência, ligado ao desenho. "ok" só quando ele está no meio de uma fala, quando a parte nova ainda está pela metade (um texto incompleto, uma caixa sem nome) ou quando não há nada novo nem pendente.
+1. O candidato desenha; você conduz a conversa para entender o raciocínio dele, ENQUANTO ele desenha. Pergunte quando ele FECHOU UMA PARTE do desenho: um pedaço coerente (o fluxo de escrita inteiro, a escolha do armazenamento com o porquê, o caminho de leitura) sobre o qual você já tem informação para uma pergunta com conteúdo sobre a parte inteira: o que ela resolve, a decisão principal dentro dela e como ela se liga ao resto. Nesse caso, marque "parteFechada": true e pergunte sobre a parte, citando as peças pelo nome. Nunca pergunte sobre uma peça que acabou de ser colocada, nem com o desenho pela metade: peça solta, texto solto, caixa sem nome, fluxo que ainda para no meio ou seta sem destino pedem "ok", com "parteFechada": false. "ok" também quando ele está no meio de uma fala ou quando não há nada novo nem pendente. No APROFUNDAMENTO, a parte fechada pode ser o caminho que ele já desenhou, e a pergunta é um ponto do plano da vaga ou da rubrica ainda sem evidência, ligado a ela.
 2. O problema é vago de propósito. Perguntar requisitos antes de desenhar é o primeiro sinal avaliado.
 3. Requisitos só pela ficha: responda com os números da ficha; fora dela, peça para o candidato assumir algo razoável e declarar a suposição.
 4. Não valide nem corrija. Nunca diga que algo está certo, errado, bom, ótimo, excelente ou perfeito; não elogie nem parabenize; não ensine a resposta. Vale para qualquer palavra ou expressão que valide, elogie ou corrija, não só as citadas: julgue pelo sentido. Reaja de forma neutra, inclusive em "pergunta" e "nota".
@@ -58,7 +59,7 @@ export const NOTACAO_GRAFO = `COMO LER O GRAFO (o quadro do candidato, descrito 
 
 export const TABELA_ACOES = `AÇÕES (escolha UMA em "status"):
 - "ok": ainda não há o que perguntar, ou uma pergunta nova não é permitida agora. Nada aparece para o candidato; as observações são só registradas.
-- "duvida": há uma parte nova do desenho que ele não explicou, uma escolha a justificar, uma armadilha presente no desenho, um critério da rubrica ainda sem evidência, ou o candidato ficou em silêncio total (princípio 13). Vale em qualquer fase em que uma pergunta seja permitida; em REQUISITOS, é o único status que vira pergunta, só para o convite do silêncio inicial.
+- "duvida": há uma parte fechada do desenho (princípio 1) que ele não explicou, uma escolha a justificar, uma armadilha presente no desenho, um critério da rubrica ainda sem evidência, ou o candidato ficou em silêncio total (princípio 13). Vale em qualquer fase em que uma pergunta seja permitida; em REQUISITOS, é o único status que vira pergunta, só para o convite do silêncio inicial.
 - "redirecionar": SÓ quando o candidato entra em detalhe demais cedo demais, quando o desenho foge do que o problema pede (princípio 8), ou quando a fase precisa avançar por causa do tempo. Não use para puxar conversa nem para quebrar silêncio.
 - "dica": o candidato continua travado depois de você já ter quebrado o silêncio ou pedido que ele pensasse em voz alta; dê o próximo degrau da escada.
 Só use um status que a fase atual permite (veja "Status permitidos agora"). Se o status permitido não se aplica, use "ok".`;
@@ -121,7 +122,8 @@ REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
 - "degrau": 1, 2 ou 3 conforme a escada de ajuda; senão null.
 - "observacoes": 0 a 3 itens, cada um com "criterio" (id da rubrica), "sinal" (positivo, negativo ou neutro), "espontaneo" (true/false) e "evidencia" (curta, citando o elemento do desenho ou um trecho da fala). Registre só o que é novo desde as análises anteriores: nunca repita, com outras palavras, uma observação que você já fez. Registre também o que ele FEZ e PENSOU (sinal neutro ou positivo): que peças colocou, como ligou uma à outra, que motivo deu. O relatório precisa contar a solução dele, não só o que faltou. Pedido de repetição ou esclarecimento ("como é?", "não entendi", "repete"), correção ao entrevistador ("não tem interrogação aí") e pedido para encerrar NÃO viram observação: não dizem nada sobre o candidato, e a falha pode ter sido da pergunta.
 - "avancar_fase": true somente quando a fase atual é ALTO_NIVEL e o candidato já mostrou o suficiente dela: as peças principais do desenho estão no quadro e ligadas entre si (o caminho principal do problema aparece de ponta a ponta), de modo que o próximo passo natural é aprofundar. É um sinal de progresso, independente de "status": pode vir com "ok". Em qualquer outra fase, ou se o desenho ainda está incompleto ou o candidato acabou de começar, false. Não use para apressar nem para punir; na dúvida, false.
-- Na dúvida entre perguntar e ficar quieto: com pergunta permitida e uma parte nova do desenho sem explicação (ALTO_NIVEL) ou um ponto do plano ou da rubrica sem evidência (APROFUNDAMENTO), pergunte; em REQUISITOS e FECHAMENTO, fique quieto ("ok").
+- "parteFechada": true somente quando a fase atual é ALTO_NIVEL ou APROFUNDAMENTO, o candidato fechou uma parte do desenho (princípio 1) e você tem o que perguntar sobre a parte inteira. Parte pela metade, peça solta ou texto solto: false. Em REQUISITOS e FECHAMENTO, false. Na dúvida, false.
+- Na dúvida entre perguntar e ficar quieto: com pergunta permitida, uma parte fechada do desenho ainda sem explicação (ALTO_NIVEL, com "parteFechada": true) ou um ponto do plano ou da rubrica sem evidência (APROFUNDAMENTO), pergunte; em REQUISITOS e FECHAMENTO, fique quieto ("ok").
 - Não repita uma pergunta já feita nem uma dúvida já pendente com outras palavras.`;
 }
 
@@ -199,7 +201,7 @@ Candidato sem mexer no desenho nem falar há: ${
 ${pedidoDeTempoPendente(estado, agora, pedido.parado_ha_s) ? blocoDoPedidoDeTempo(Math.round((agora - (estado.pediuTempoEm ?? agora)) / 1000)) : ""}Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
-` : ""}${perguntaAtrasada(estado, agora) ? `PERGUNTA EM ATRASO: faz tempo que você não pergunta nada. Se houver qualquer ponto que valha (uma decisão sem justificativa, um requisito sem resposta no desenho, um trade-off não dito), pergunte agora em vez de "ok".
+` : ""}${tetoDaPergunta(estado, agora, pecasDoGrafo(pedido.grafo)) ? `PERGUNTA EM ATRASO: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta e o desenho mudou desde então. Pergunte agora sobre a parte mais forte do desenho, citando as peças pelo nome, mesmo que ela ainda não esteja fechada, em vez de "ok".
 ` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${semEvidencia.length ? semEvidencia.join(", ") : "nenhum"}

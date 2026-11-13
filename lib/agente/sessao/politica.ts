@@ -2,7 +2,7 @@
 // resposta pode virar plin. O quadro já aplica intervalo e limite; aqui o servidor repete a checagem
 // como defesa barata (evita gastar uma chamada ao LLM que o quadro ia descartar de qualquer jeito).
 import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "../../contracts";
-import { interrupcaoAtrasada, motivoDoRitmo, RITMO, type Ritmo } from "../../interrupcao/politica";
+import { motivoDoRitmo, RITMO, RITMO_QUADRO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import type { EstadoSessao } from "./estado";
 import { fechamentoAtivo } from "./fechamento";
@@ -59,10 +59,64 @@ export function ritmoDoEstado(estado: EstadoSessao, agora: number): Ritmo {
   };
 }
 
-/** Faz tempo demais que o Totti não pergunta nada (e a cota deixa): o prompt pede para ele não ficar só no "ok". */
-export function perguntaAtrasada(estado: EstadoSessao, agora: number): boolean {
-  if (estado.fase !== "ALTO_NIVEL" && estado.fase !== "APROFUNDAMENTO") return false;
-  return interrupcaoAtrasada(ritmoDoEstado(estado, agora));
+/** Fases em que a pergunta sobre o desenho passa pelo ritmo por conteúdo (`motivoDoConteudo`). */
+const FASES_DO_CONTEUDO: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO"];
+/** Status que fazem pergunta sobre o desenho e passam pelo ritmo por conteúdo. */
+const STATUS_DO_CONTEUDO: StatusAnalise[] = ["duvida", "dica"];
+
+/**
+ * Há desenho novo desde a última pergunta? Peça que não estava no grafo da análise que a fez (`desenhoNaUltimaPergunta`).
+ * Sem pergunta anterior, qualquer peça do quadro conta. Grafo cortado (`pecas` null) não se compara: não conta como novo.
+ */
+export function desenhoNovoDesdePergunta(estado: EstadoSessao, pecas: string[] | null | undefined): boolean {
+  if (!pecas) return false;
+  const antes = estado.desenhoNaUltimaPergunta;
+  if (!antes) return pecas.length > 0;
+  const conhecidas = new Set(antes);
+  return pecas.some((id) => !conhecidas.has(id));
+}
+
+/**
+ * O teto do ritmo por conteúdo venceu: faz `tetoSemPerguntaMs` desde a última pergunta da análise (ou, sem nenhuma, desde
+ * o começo da fase) e há desenho novo. Aí a pergunta sai mesmo sem parte fechada.
+ */
+export function tetoDaPergunta(estado: EstadoSessao, agora: number, pecas: string[] | null | undefined): boolean {
+  const referencia = estado.ultimaPerguntaEm ?? estado.faseIniciadaEm;
+  if (referencia === null || referencia === undefined) return false;
+  return agora - referencia >= RITMO_QUADRO.tetoSemPerguntaMs && desenhoNovoDesdePergunta(estado, pecas);
+}
+
+export type ContextoDoConteudo = {
+  /** Há quantos segundos ele não mexe no desenho nem fala (vem no pedido de análise). */
+  paradoHaS?: number;
+  /** Ids das peças do desenho agora (`pecasDoGrafo`); null quando o grafo veio cortado. */
+  pecas?: string[] | null;
+};
+
+export type MotivoConteudo = "PISO_ENTRE_PERGUNTAS" | "SEM_PARTE_FECHADA";
+
+/**
+ * Ritmo por conteúdo (#129, bloco B): por que uma resposta "duvida" ou "dica" de ALTO_NIVEL/APROFUNDAMENTO NÃO vira
+ * pergunta agora (null = pode). Vira pergunta quando:
+ * (a) o candidato fechou uma parte (`parteFechada`) e o piso entre perguntas (`RITMO_QUADRO`) passou; ou
+ * (b) o teto venceu e há desenho novo, mesmo sem parte fechada; ou
+ * (c) é quebra de silêncio (parado há `LIMITE_SILENCIO_S`; não respeita o piso) ou marco de conclusão ("terminei").
+ * Os portões do ritmo comum (orçamento, cota, intervalo) continuam valendo por cima, em `filtrarResposta`.
+ */
+export function motivoDoConteudo(
+  estado: EstadoSessao,
+  resposta: Pick<RespostaAnalise, "status" | "parteFechada">,
+  agora: number,
+  contexto: ContextoDoConteudo = {},
+): MotivoConteudo | null {
+  if (!FASES_DO_CONTEUDO.includes(estado.fase) || !STATUS_DO_CONTEUDO.includes(resposta.status)) return null;
+  const quebraDeSilencio = contexto.paradoHaS !== undefined && contexto.paradoHaS >= LIMITE_SILENCIO_S;
+  const marco = estado.ultimaConclusaoEm != null && agora - estado.ultimaConclusaoEm < RITMO.marcoDeConclusaoMs;
+  if (quebraDeSilencio || marco) return null;
+  const pisoPassou = estado.ultimaPerguntaEm == null || agora - estado.ultimaPerguntaEm >= RITMO_QUADRO.pisoEntrePerguntasMs;
+  if (resposta.parteFechada && pisoPassou) return null;
+  if (tetoDaPergunta(estado, agora, contexto.pecas)) return null;
+  return resposta.parteFechada ? "PISO_ENTRE_PERGUNTAS" : "SEM_PARTE_FECHADA";
 }
 
 const CODIGO_DO_RITMO = {

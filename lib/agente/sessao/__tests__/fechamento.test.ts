@@ -57,7 +57,7 @@ describe("o desenho: caminho principal e volta a desenhar", () => {
 describe("fechamento na sessão do quadro", () => {
   it("começar leva a sessão a FECHAMENTO, guarda a fase de antes e solta a pergunta que esperava a vez", () => {
     const pendente: EstadoSessao["perguntaPendente"] = {
-      status: "duvida", pergunta: "Por que o cliente fala direto com o banco?", nota: "Direto no banco?", elementos: ["s3"], degrau: null, observacoes: [], criadoEm: AGORA - 5_000,
+      status: "duvida", parteFechada: true, pergunta: "Por que o cliente fala direto com o banco?", nota: "Direto no banco?", elementos: ["s3"], degrau: null, observacoes: [], criadoEm: AGORA - 5_000,
     };
     const antes = estadoEm("ALTO_NIVEL", { plin: "PLIN_PENDENTE", perguntaPendente: pendente });
     const r = transicionar(antes, { tipo: "FECHAMENTO_ATUALIZADO", inicio: true, nucleo: nucleoIniciado(), antes: null, grafo: GRAFO }, AGORA);
@@ -88,7 +88,7 @@ describe("fechamento na sessão do quadro", () => {
     const e = emFechamento();
     assert.equal(motivoBloqueioPlin(e, AGORA + 30_000, undefined, { paradoHaS: 60 }), "FECHAMENTO");
     const comAnalise = transicionar(e, { tipo: "ANALISE_RECEBIDA", resposta: {
-      status: "ok", pergunta: null, nota: null, elementos: [], degrau: null,
+      status: "ok", parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [{ criterio: "escalabilidade", sinal: "positivo", espontaneo: true, evidencia: "Disse que escalaria os servidores de conexão." }],
     } }, AGORA + 30_000).estado;
     assert.equal(comAnalise.observacoes.length, 1);

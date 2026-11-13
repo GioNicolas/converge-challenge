@@ -125,7 +125,7 @@ describe("#84: fechamento do quadro na sessão 4e38b42f", () => {
   const antesDeTerminar = () => estadoEm("ALTO_NIVEL", {
     iniciadaEm: AGORA - 12 * 60_000,
     plin: "PLIN_PENDENTE",
-    perguntaPendente: { status: "duvida", pergunta: PENDENTE, nota: "Entre servidores?", elementos: ["r2"], visual: [{ tipo: "circular", alvo: "r2" }], degrau: null, observacoes: [], criadoEm: AGORA - 20_000 },
+    perguntaPendente: { status: "duvida", parteFechada: true, pergunta: PENDENTE, nota: "Entre servidores?", elementos: ["r2"], visual: [{ tipo: "circular", alvo: "r2" }], degrau: null, observacoes: [], criadoEm: AGORA - 20_000 },
   });
 
   it("\"terminei\" → anúncio e primeira pergunta → respostas → última palavra → despedida", async () => {
@@ -300,7 +300,7 @@ describe("peça citada é marcada", () => {
 
   it("a análise que devolve visual vazio com elementos sai com a marca", () => {
     const r = filtrarResposta(estadoEm("ALTO_NIVEL"), {
-      status: "duvida", pergunta: "Por que os contatos ficam nesse banco?", nota: "Contatos no banco?", elementos: ["r3"], visual: [], degrau: null, observacoes: [],
+      status: "duvida", parteFechada: true, pergunta: "Por que os contatos ficam nesse banco?", nota: "Contatos no banco?", elementos: ["r3"], visual: [], degrau: null, observacoes: [],
     }, extrairIdsDoGrafo(GRAFO), AGORA);
     assert.deepEqual(r.visual, [{ tipo: "marcar", alvo: "r3" }]);
   });
@@ -314,7 +314,7 @@ describe("peça citada é marcada", () => {
 
 describe("livro de observações", () => {
   it("a mesma observação com outras palavras não entra de novo", () => {
-    const obs = (evidencia: string, criterio = "requisitos") => ({ status: "ok" as const, pergunta: null, nota: null, elementos: [], degrau: null,
+    const obs = (evidencia: string, criterio = "requisitos") => ({ status: "ok" as const, parteFechada: false, pergunta: null, nota: null, elementos: [], degrau: null,
       observacoes: [{ criterio, sinal: "negativo" as const, espontaneo: false, evidencia }] });
     let e = estadoEm("ALTO_NIVEL");
     for (const evidencia of [

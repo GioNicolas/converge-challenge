@@ -9,7 +9,8 @@
 // --llm sempre: sem créditos; mostra o teto da política (o modelo quer perguntar em toda análise).
 // --llm real (padrão): usa créditos (papel "quadro", ~US$ 0,0005 por análise).
 import "./_gasto";
-import { analisar } from "../lib/agente/analisar";
+import { analisar, refiltrarComEstadoAtual } from "../lib/agente/analisar";
+import { eventosDaMaquina } from "../lib/agente/rotas/handlers";
 import { KIT_SYSTEM_DESIGN as kit } from "../lib/agente/kits/system-design";
 import type { LlmCliente } from "../lib/agente/llm/cliente";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
@@ -21,7 +22,7 @@ import {
   type EstadoSessao,
   type EventoSessao,
 } from "../lib/agente/sessao/estado";
-import type { PedidoAnalise } from "../lib/agente/sessao/tipos";
+import type { PedidoAnalise, RespostaAnalise as RespostaDoAgente } from "../lib/agente/sessao/tipos";
 import { podeTomarTurno } from "../lib/conversa/turnos";
 import type { Fase, RespostaAnalise } from "../lib/sessao/cliente";
 import { contarComponentes, esperaDoEmpecilho } from "../lib/sessao/empecilho";
@@ -113,6 +114,8 @@ function llmSempre(): LlmCliente {
         degrau: 1,
         observacoes: [],
         avancar_fase: false,
+        // Sempre "parte fechada": o piso entre perguntas (RITMO_QUADRO) é o que segura o modelo que quer perguntar sempre.
+        parteFechada: true,
       };
       return { dados: dados as T, ms: 3_500 };
     },
@@ -182,7 +185,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
   let empecilhoEm = -Infinity;
   let licencaDeNovoEm = 0;
   let ultimoPedidoEmpecilho = -Infinity;
-  type Rodando = { fimEm: number; resposta: RespostaAnalise; valeu: boolean; falaAoAnalisar: number; motivo: string; ajustes: string[] };
+  type Rodando = { fimEm: number; resposta: RespostaDoAgente; pedido: PedidoAnalise; inicio: number; valeu: boolean; falaAoAnalisar: number; motivo: string; ajustes: string[] };
   const voo: { rodando: Rodando | null } = { rodando: null };
   let esperando: { forcar: boolean; motivo: string } | null = null;
   const agendado: { em: number; motivo: string; forcar: boolean }[] = [];
@@ -193,7 +196,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
   let respondendo: { falaAte: number } | null = null;
 
   const interrupcoes: Interrupcao[] = [];
-  const contagem = { analises: 0, querPerguntar: 0, barradasServidor: 0, barradasQuadro: 0, descartadasPorFala: 0, lentas: 0, canceladasPorFala: 0, licencas: 0 };
+  const contagem = { analises: 0, querPerguntar: 0, barradasServidor: 0, barradasConteudo: 0, barradasQuadro: 0, descartadasPorFala: 0, lentas: 0, canceladasPorFala: 0, licencas: 0 };
 
   const grafo = () => `COMPONENTES E CONEXÕES\n${LINHAS.slice(0, desenhadas).join("\n")}`;
 
@@ -227,13 +230,16 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
     const ms = r.diagnostico.ms ?? 0;
     voo.rodando = {
       fimEm: t + Math.min(ms, LIMITE_PADRAO_MS),
-      resposta: r.resposta as unknown as RespostaAnalise,
+      resposta: r.resposta,
+      pedido,
+      inicio: t,
       valeu: ms <= LIMITE_PADRAO_MS && r.diagnostico.origem !== "erro",
       falaAoAnalisar: ultimaFalaEm,
       motivo,
       ajustes: r.diagnostico.ajustes,
     };
     if (r.diagnostico.ajustes.includes("rebaixada_pela_politica")) contagem.barradasServidor++;
+    if (r.diagnostico.ajustes.some((a) => a === "piso_entre_perguntas" || a === "sem_parte_fechada")) contagem.barradasConteudo++;
     if (r.resposta.status !== "ok" || r.diagnostico.ajustes.includes("rebaixada_pela_politica")) contagem.querPerguntar++;
     servidor = r.estado;
   }
@@ -350,9 +356,12 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
       else if (ultimaFalaEm > r.falaAoAnalisar) {
         if (r.resposta.status !== "ok") contagem.descartadasPorFala++;
       } else {
+        // Como a rota (lib/agente/rotas/handlers.ts): a resposta é refiltrada com o estado de agora, para o piso e o
+        // ritmo valerem contra o que o candidato ouviu durante a análise.
+        const resposta = refiltrarComEstadoAtual(servidor, r.resposta, r.pedido, r.inicio, t) as unknown as RespostaAnalise;
         const antes = cliente.plin;
-        if (r.resposta.status !== "ok" && r.resposta.pergunta && !aceitaPlin(cliente, r.resposta, t)) contagem.barradasQuadro++;
-        cli({ tipo: "ANALISE_RECEBIDA", resposta: r.resposta });
+        if (resposta.status !== "ok" && resposta.pergunta && !aceitaPlin(cliente, resposta, t)) contagem.barradasQuadro++;
+        cli({ tipo: "ANALISE_RECEBIDA", resposta });
         if (cliente.plin === "PLIN_PENDENTE" && antes !== "PLIN_PENDENTE") motivoDaPendente = r.motivo;
       }
       if (esperando) {
@@ -384,7 +393,10 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
       const p = cliente.perguntaPendente;
       const fase = cliente.fase;
       cli({ tipo: "PLIN_CLICADO" });
-      srv({ tipo: "PLIN_CLICADO" });
+      // O mesmo caminho da linha do tempo (POST de eventos): o quadro manda o texto da pergunta que falou.
+      for (const ev of eventosDaMaquina("pergunta", { numero: cliente.perguntasFeitas, pergunta: p.pergunta, nota: p.nota, elementos: p.elementos, status: p.status })) {
+        servidor = transicionarServidor(servidor, ev, t).estado;
+      }
       agenteFalandoAte = t + FALA_DA_PERGUNTA_MS;
       ultimaFalaDoAgenteEm = t;
       passo = null;
@@ -423,7 +435,7 @@ export function resumo(r: Awaited<ReturnType<typeof simularQuadro>>): string {
   return [
     `${r.persona} (${r.duracaoMin} min): ${r.interrupcoes.length} interrupções · ${[...porFase].map(([f, n]) => `${f} ${n}`).join(", ")}`,
     `  intervalo entre elas: mín ${gaps[0] ?? "–"} s, mediana ${mediana ?? "–"} s · no meio do desenho: ${r.interrupcoes.filter((i) => i.desenhando).length}`,
-    `  análises ${r.contagem.analises}, quis perguntar ${r.contagem.querPerguntar}, barradas no servidor ${r.contagem.barradasServidor}, no quadro ${r.contagem.barradasQuadro}, descartadas por fala ${r.contagem.descartadasPorFala}, canceladas por fala ${r.contagem.canceladasPorFala}, lentas ${r.contagem.lentas}, licenças pedidas ${r.contagem.licencas}`,
+    `  análises ${r.contagem.analises}, quis perguntar ${r.contagem.querPerguntar}, barradas no servidor ${r.contagem.barradasServidor}, pelo conteúdo (sem parte fechada ou piso) ${r.contagem.barradasConteudo}, no quadro ${r.contagem.barradasQuadro}, descartadas por fala ${r.contagem.descartadasPorFala}, canceladas por fala ${r.contagem.canceladasPorFala}, lentas ${r.contagem.lentas}, licenças pedidas ${r.contagem.licencas}`,
   ].join("\n");
 }
 

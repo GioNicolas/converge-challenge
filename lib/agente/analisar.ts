@@ -11,9 +11,11 @@ import {
   type Efeito,
   type EstadoSessao,
 } from "./sessao/estado";
+import { pecasDoGrafo } from "./sessao/fechamento";
 import {
   extrairIdsDoGrafo,
   filtrarResposta,
+  motivoDoConteudo,
   podeAnalisar,
   podeLevantarPlin,
   REGRAS_PADRAO,
@@ -55,7 +57,7 @@ export const CONVITES_SILENCIO_INICIAL = [
 ] as const;
 
 export function respostaSilencio(): RespostaAnalise {
-  return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+  return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false };
 }
 
 /** Hash estável do grafo e quantidade de falas; conteúdo da conversa não é persistido nesta assinatura. */
@@ -83,6 +85,8 @@ export function perguntaBloqueadaNaAnalise(
  * e, nesse intervalo, o agente pode ter falado (`ultimaFalaDoAgenteEm`): o estado lido no início não enxerga
  * isso. Conservador: o tempo decorrido desde o início soma-se ao `parado_ha_s`, ou seja, assume que o
  * candidato não agiu durante a análise. Idempotente para resposta já silenciada (nada é ressuscitado).
+ * O ritmo por conteúdo (#129) também vale contra o estado atual: uma pergunta que ele ouviu durante a análise
+ * conta para o piso entre perguntas.
  */
 export function refiltrarComEstadoAtual(
   atual: EstadoSessao,
@@ -93,7 +97,11 @@ export function refiltrarComEstadoAtual(
   regras: Regras = REGRAS_PADRAO,
 ): RespostaAnalise {
   const paradoHaS = pedido.parado_ha_s === undefined ? undefined : pedido.parado_ha_s + Math.max(0, agora - inicio) / 1000;
-  return filtrarResposta(atual, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS });
+  const pecas = pecasDoGrafo(pedido.grafo);
+  const porConteudo = resposta.status !== "ok" && motivoDoConteudo(atual, resposta, agora, { paradoHaS, pecas })
+    ? { ...resposta, status: "ok" as const }
+    : resposta;
+  return filtrarResposta(atual, porConteudo, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS });
 }
 
 export async function analisar(
@@ -217,10 +225,21 @@ export async function analisar(
     }
   }
 
+  // Ritmo por conteúdo (#129, bloco B): a pergunta sobre o desenho só sai com uma parte fechada (ou no teto).
+  // Sem isso vira "ok" e as observações ficam. Os portões do ritmo comum ainda valem em `filtrarResposta`.
+  const pecas = pecasDoGrafo(pedido.grafo);
+  if (resposta.status !== "ok") {
+    const motivo = motivoDoConteudo(estado, resposta, agora, { paradoHaS: pedido.parado_ha_s, pecas });
+    if (motivo) {
+      ajustes.push(motivo === "PISO_ENTRE_PERGUNTAS" ? "piso_entre_perguntas" : "sem_parte_fechada");
+      resposta = { ...resposta, status: "ok" };
+    }
+  }
+
   const filtrada = filtrarResposta(estado, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS: pedido.parado_ha_s });
   if (resposta.status !== "ok" && filtrada.status === "ok") ajustes.push("rebaixada_pela_politica");
 
-  const t = transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta: filtrada }, agora, regras);
+  const t = transicionar(estado, { tipo: "ANALISE_RECEBIDA", resposta: filtrada, pecas }, agora, regras);
   log("analise_ok", {
     sessao_id: pedido.sessao_id,
     fase: estado.fase,

@@ -6,7 +6,7 @@ import type { RespostaAnalise } from "../tipos";
 
 const T0 = 1_000_000;
 const duvida: RespostaAnalise = {
-  status: "duvida", pergunta: "Quer começar por onde?", nota: "Por onde?", elementos: [], degrau: null, observacoes: [],
+  status: "duvida", parteFechada: true, pergunta: "Quer começar por onde?", nota: "Por onde?", elementos: [], degrau: null, observacoes: [],
 };
 
 function aplicar(estado: EstadoSessao, ...passos: [EventoSessao, number][]): EstadoSessao {

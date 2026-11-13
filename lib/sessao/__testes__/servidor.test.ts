@@ -75,7 +75,7 @@ test("analisar envia o pedido completo, codifica o ID, repassa o sinal e usa val
   assert.equal(chamadas[0].opcoes.method, "POST");
   assert.equal(chamadas[0].opcoes.signal, controlador.signal);
   assert.deepEqual(corpo(chamadas[0]), p);
-  assert.deepEqual(resultado, { status: "duvida", pergunta: "Onde fica o gargalo?", nota: "Onde fica o gargalo?", elementos: ["r1"], degrau: null, observacoes: [], avancar_fase: false });
+  assert.deepEqual(resultado, { status: "duvida", pergunta: "Onde fica o gargalo?", nota: "Onde fica o gargalo?", elementos: ["r1"], degrau: null, observacoes: [], avancar_fase: false, parteFechada: false });
 });
 
 test("analisar preserva a normalização de resposta sem pergunta", async (t) => {

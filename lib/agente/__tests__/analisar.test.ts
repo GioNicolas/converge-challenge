@@ -42,6 +42,8 @@ function duvida(extra: Partial<RespostaAnalise> = {}): RespostaAnalise {
     elementos: ["e1"],
     degrau: null,
     observacoes: [{ criterio: "escalabilidade", sinal: "negativo", espontaneo: false, evidencia: "banco único" }],
+    // A pergunta fala do banco, uma parte fechada do desenho (ritmo por conteúdo, #129 bloco B).
+    parteFechada: true,
     ...extra,
   };
 }
@@ -86,13 +88,13 @@ describe("analisar", () => {
     const json = JSON.stringify(r.resposta);
     for (const f of problema.ficha) assert.ok(!json.includes(f.resposta));
     for (const c of kitDemo.criterios) for (const n of [1, 2, 3, 4] as const) assert.ok(!json.includes(c.niveis[n]));
-    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "pergunta", "status", "visual"]);
+    assert.deepEqual(Object.keys(r.resposta).sort(), ["avancar_fase", "degrau", "elementos", "nota", "observacoes", "parteFechada", "pergunta", "status", "visual"]);
   });
 
   it("ok cancela a dúvida pendente", async () => {
     const pend = transicionar(estadoEm("APROFUNDAMENTO"), { tipo: "ANALISE_RECEBIDA", resposta: duvida() }, AGORA).estado;
     assert.equal(pend.plin, "PLIN_PENDENTE");
-    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [] };
+    const ok: RespostaAnalise = { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false };
     const r = await analisar(deps(criarClienteFalso([ok])), pend, pedido(), AGORA + 1000);
     assert.equal(r.estado.plin, "LIVRE");
     assert.deepEqual(r.efeitos, [{ tipo: "PLIN_CANCELADO", motivo: "ok" }]);
@@ -307,5 +309,67 @@ describe("refiltrarComEstadoAtual", () => {
     assert.deepEqual(refiltrarComEstadoAtual(livre, silenciada, ped(30), AGORA, AGORA + 2000), silenciada);
     const filtrada = refiltrarComEstadoAtual(livre, duvida(), ped(), AGORA, AGORA + 2000);
     assert.deepEqual(refiltrarComEstadoAtual(livre, filtrada, ped(), AGORA, AGORA + 2000), filtrada);
+  });
+});
+
+describe("analisar: ritmo por conteúdo do quadro (#129, bloco B)", () => {
+  const MIN = 60_000;
+
+  it("parte não fechada vira ok (sem_parte_fechada) e as observações ficam", async () => {
+    const llm = criarClienteFalso([duvida({ parteFechada: false })]);
+    const r = await analisar(deps(llm), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.resposta.pergunta, null);
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("sem_parte_fechada"));
+    assert.equal(r.resposta.observacoes.length, 1);
+    assert.equal(r.estado.cobertura.escalabilidade.negativo, 1);
+  });
+
+  it("parte fechada dentro do piso (2 min) vira ok (piso_entre_perguntas) e as observações ficam", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - MIN });
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("piso_entre_perguntas"));
+    assert.equal(r.estado.cobertura.escalabilidade.negativo, 1);
+  });
+
+  it("parte fechada depois do piso continua virando pergunta", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 3 * MIN });
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.includes("piso_entre_perguntas"), false);
+  });
+
+  it("teto: sem parte fechada, 5 min sem pergunta e desenho novo, a pergunta sai", async () => {
+    // O grafo do pedido tem r1, e1 e s1; a última pergunta foi feita com só r1 no quadro: há peça nova.
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 5 * MIN, desenhoNaUltimaPergunta: ["r1"] });
+    const r = await analisar(deps(criarClienteFalso([duvida({ parteFechada: false })])), estado, pedido(), AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.includes("sem_parte_fechada"), false);
+  });
+
+  it("quebra de silêncio (60 s parado) fura o piso mesmo com a pergunta anterior há 30 s", async () => {
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 30_000 });
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estado, { ...pedido(), parado_ha_s: 60 }, AGORA);
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+  });
+
+  it("refiltrar com o estado de agora: pergunta ouvida durante a análise conta para o piso", () => {
+    const resposta = duvida();
+    const ouviuAgora = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 30_000 });
+    assert.equal(refiltrarComEstadoAtual(ouviuAgora, resposta, pedido(), AGORA - 1000, AGORA).status, "ok");
+    assert.equal(refiltrarComEstadoAtual(estadoEm("APROFUNDAMENTO"), resposta, pedido(), AGORA - 1000, AGORA).status, "duvida");
+  });
+
+  it("o desenho da análise vira o snapshot da pergunta que ela gera", async () => {
+    const r = await analisar(deps(criarClienteFalso([duvida()])), estadoEm("APROFUNDAMENTO"), pedido(), AGORA);
+    assert.deepEqual(r.estado.perguntaPendente?.pecas, ["r1", "e1", "s1"]);
+    const feita = transicionar(r.estado, { tipo: "PLIN_CLICADO" }, AGORA + 1000).estado;
+    assert.deepEqual(feita.desenhoNaUltimaPergunta, ["r1", "e1", "s1"]);
   });
 });
