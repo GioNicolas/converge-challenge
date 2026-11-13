@@ -265,7 +265,7 @@ describe("responder: as travas obedecem ao movimento", () => {
     const r = await responder(sessao, { tipo: "resumo_final" }, { chat: chatFalso(saida("Vai ser live coding pra nível pleno. Vou olhar a qualidade do código.")).chat });
     assert.match(r.texto, /^Vai ser live coding pra nível pleno\. Vou olhar a qualidade do código\. /);
     assert.match(r.texto, /minutos/);
-    assert.match(r.texto, /posso finalizar( assim| com isso)?\?$/i);
+    assert.match(r.texto, /quer (mudar|ajustar)( mais)? alguma coisa\?$/i);
   });
 
   it("texto puro, sem JSON, segue valendo como fala", async () => {
@@ -642,8 +642,8 @@ describe("perguntas de fechamento e de ajuste (issue #127)", () => {
   it("o fechamento do resumo tem uma alternativa só: não oferece 'ou' entre ajustar e finalizar", () => {
     for (let v = 0; v < 6; v++) {
       const fala = fechamentoDoResumo(v);
-      assert.match(fala, /^Posso finalizar( assim| com isso)?\?$/);
-      assert.doesNotMatch(fala, /\bou\b|quer/i);
+      assert.match(fala, /^Quer (mudar|ajustar)/);
+      assert.doesNotMatch(fala, /\bou\b|finalizar/i);
     }
   });
 

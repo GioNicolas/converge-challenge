@@ -893,7 +893,8 @@ function fraseLinguagem(p: Preferencias): string {
  * Perguntas de fechamento do resumo. Cada uma tem uma alternativa só ("posso finalizar?"): "sim" é aprovar, e "quero"
  * não responde a ela. "Quer ajustar alguma coisa ou posso finalizar?" fazia um "quero" valer como aprovação (issue #127).
  */
-const FECHAMENTOS = ["Posso finalizar assim?", "Posso finalizar?", "Posso finalizar com isso?"];
+// Uma alternativa só, com resposta de sim/não sem ambiguidade: "quero" = ajustar; "não" ou "pode finalizar" = aprovar.
+const FECHAMENTOS = ["Quer mudar alguma coisa?", "Quer ajustar alguma coisa?", "Quer mudar mais alguma coisa?"];
 
 /** Pergunta final do resumo, em uma das variações. */
 export function fechamentoDoResumo(variante = Math.floor(Math.random() * FECHAMENTOS.length)): string {

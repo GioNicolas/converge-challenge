@@ -44,7 +44,7 @@ describe("conduzirTurno: sem movimento, nada muda", () => {
     assert.equal(resultados[1].passo.tipo, "resumo_final");
     assert.equal(sessao.plano.resumos, 1);
     assert.equal(sessao.resumo?.texto, resultados[1].fala);
-    assert.match(resultados[1].fala, /posso finalizar( assim| com isso)?\?$/i);
+    assert.match(resultados[1].fala, /quer (mudar|ajustar)( mais)? alguma coisa\?$/i);
   });
 });
 
