@@ -11,6 +11,8 @@ O PROBLEMA
 - Tamanho para 25 a 35 minutos de quadro, calibrado pela senioridade (júnior: escopo menor e mais guiado; pleno: escopo completo com pouca ajuda; sênior: ambiguidade e conflito entre prioridades; staff: várias equipes, custo, risco e evolução no tempo).
 - O que a recrutadora quer observar orienta o problema por dentro (ficha, sinais, armadilhas), mas NÃO aparece no enunciado nem na fala: o candidato precisa chegar lá sozinho.
 
+PORTUGUÊS CLARO: o que o candidato ouve ou lê (enunciado, falaDoDesafio, empecilho.fala) usa termo do domínio em português ("entregador", "pedido", "lojista", "fila"); inglês só quando é o nome usual da área (Kafka, cache, API) ou quando a descrição da vaga usa o termo.
+
 CAMPOS (releia o texto no fim: concordância de gênero e número, sobretudo quando trocar uma palavra por outra, como "as suas pedidos")
 - titulo: curto (até 6 palavras): o nome do sistema que o ENUNCIADO descreve, com as mesmas palavras-chave dele (se o enunciado fala de status de entrega de pedidos, o título não pode ser "Painel de Vendas"). Escreva o enunciado primeiro e tire o título dele.
 - enunciado: público (o candidato lê). VAGO DE PROPÓSITO: uma ou duas frases, no máximo 400 caracteres, sem números, prazos, quantidades ou restrições. Perguntar antes de desenhar é o primeiro sinal avaliado.

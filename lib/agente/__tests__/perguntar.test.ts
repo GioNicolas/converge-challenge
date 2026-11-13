@@ -597,3 +597,29 @@ describe("quando o quadro fecha: vaga com plano e mudança de cenário (#129, de
     assert.equal(r.fechamento, "encerrada");
   });
 });
+
+describe("português claro: a fala do quadro não sai com termo em inglês (#129, decisão H)", () => {
+  const v2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ ...deps(llm), versao: "v2" as const });
+  const comVaga = (descricaoVaga?: string): EstadoSessao => ({
+    ...estado,
+    plano: { cargo: "Engenheiro de logística", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30, ...(descricaoVaga ? { descricaoVaga } : {}) },
+  });
+
+  it("o termo em inglês da fala vira o português (courier → entregador), sem a descrição da vaga", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Esse courier passa pela fila?", requisito: null, concluiu: false }]);
+    const r = await perguntar(v2(llm), comVaga(), { fase: "REQUISITOS", texto: "Vou usar uma fila." }, AGORA);
+    assert.equal(r.texto, "Esse entregador passa pela fila?");
+  });
+
+  it("o termo que a descrição da vaga usa fica como está; o outro é trocado", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "O courier e o rider chegam juntos?", requisito: null, concluiu: false }]);
+    const r = await perguntar(v2(llm), comVaga("Experiência com courier próprio."), { fase: "REQUISITOS", texto: "Vou usar uma fila." }, AGORA);
+    assert.equal(r.texto, "O courier e o entregador chegam juntos?");
+  });
+
+  it("o prompt do quadro (v2) manda o português claro", async () => {
+    const llm = criarClienteFalso([{ responder: true, texto: "Certo.", requisito: null, concluiu: false }]);
+    await perguntar(v2(llm), estado, { fase: "REQUISITOS", texto: "Oi" }, AGORA);
+    assert.match(llm.chamadas[0].sistema.estatico, /Português claro: termo do domínio em português \("entregador"/);
+  });
+});

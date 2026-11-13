@@ -10,6 +10,7 @@ import {
   type DepsAnalisar,
 } from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
+import type { PlanoDaSessao } from "../plano";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
 import { criarClienteFalso, ErroLlm } from "../llm/cliente";
 import { duracaoTotalS, estadoInicial, transicionar, type EstadoSessao } from "../sessao/estado";
@@ -415,5 +416,24 @@ describe("brecha da mudança depois dos 60% (#129, decisão G)", () => {
     assert.equal(r.resposta.status, "duvida");
     assert.equal(r.diagnostico.ajustes.includes("abre_brecha_empecilho"), false);
     assert.equal(r.estado.brechaEmpecilhoEm, undefined);
+  });
+});
+
+describe("analisar: a pergunta da análise sai em português claro (#129, decisão H)", () => {
+  const comVaga = (descricaoVaga?: string) => estadoEm("APROFUNDAMENTO", {
+    plano: { cargo: "Engenheiro de logística", senioridade: "pleno", tom: "amigavel", dicas: "livres", foco: [], notas: "", duracaoMin: 30, ...(descricaoVaga ? { descricaoVaga } : {}) } as PlanoDaSessao,
+  });
+
+  it("a pergunta com courier vira entregador antes de virar plin", async () => {
+    const llm = criarClienteFalso([duvida({ pergunta: "Quando o courier perde o sinal, o que acontece com a entrega?" })]);
+    const r = await analisar(deps(llm), comVaga(), pedido(), AGORA);
+    assert.equal(r.resposta.pergunta, "Quando o entregador perde o sinal, o que acontece com a entrega?");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+  });
+
+  it("com o termo na descrição da vaga, a pergunta mantém o termo", async () => {
+    const llm = criarClienteFalso([duvida({ pergunta: "Quando o courier perde o sinal, o que acontece?" })]);
+    const r = await analisar(deps(llm), comVaga("Entregas com courier próprio."), pedido(), AGORA);
+    assert.equal(r.resposta.pergunta, "Quando o courier perde o sinal, o que acontece?");
   });
 });

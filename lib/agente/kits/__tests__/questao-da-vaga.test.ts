@@ -90,6 +90,23 @@ describe("questão do quadro gerada para a vaga", () => {
     assert.equal("empecilho" in r.problema, false, "o campo bruto do modelo não fica no problema");
   });
 
+  it("termo em inglês no texto gerado vira português (courier → entregador), salvo o que a vaga usa", async () => {
+    const llm = criarClienteFalso([{
+      ...problemaDoModelo(),
+      enunciado: "Desenhe a roteirização dos couriers para a última milha.",
+      empecilho: { ...EMPECILHO_DO_MODELO, fala: "Uma mudança: os couriers perderam o sinal por dez minutos. Onde isso pega primeiro?" },
+    }]);
+    const repositorio = criarRepositorioAvaliacoesEmMemoria();
+    const id = await gerarQuestaoDaVaga(configDe({ jobDescription: "Roteirização para couriers próprios e rastreio em tempo real." }), { llm, repositorio });
+    const r = await repositorio.obter(id!);
+    assert.equal(r?.problema.enunciado, "Desenhe a roteirização dos couriers para a última milha.");
+    assert.match(r?.problema.empecilho?.fala ?? "", /os couriers perderam/);
+    const semVaga = await gerarQuestaoDaVaga(configDe({ id: "cfg-sem-termo", jobDescription: "Roteirização de entregas de última milha." }), { llm, repositorio });
+    const r2 = await repositorio.obter(semVaga!);
+    assert.equal(r2?.problema.enunciado, "Desenhe a roteirização dos entregadores para a última milha.");
+    assert.match(r2?.problema.empecilho?.fala ?? "", /os entregadores perderam/);
+  });
+
   it("a vaga e o que a recrutadora combinou vão na mensagem ao gerador", async () => {
     const llm = criarClienteFalso([problemaDoModelo()]);
     await gerarQuestaoDaVaga(configDe(), { llm, repositorio: criarRepositorioAvaliacoesEmMemoria() });
@@ -171,6 +188,7 @@ describe("gerador da questão: a mudança no problema faz parte do pedido", () =
     const chamada = llm.chamadas[0];
     assert.match(chamada.sistema.estatico, /empecilho/);
     assert.match(chamada.sistema.estatico, /requisito_muda/);
+    assert.match(chamada.sistema.estatico, /PORTUGUÊS CLARO: o que o candidato ouve ou lê/);
     const json = paraJsonSchema(chamada.schema) as { required: string[]; properties: { empecilho: { required: string[] } } };
     assert.ok(json.required.includes("empecilho"));
     assert.deepEqual([...json.properties.empecilho.required].sort(), ["exige", "fala", "requisito", "tipo"]);

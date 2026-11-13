@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FalaRecente } from "../../sessao/tipos";
 import type { PlanoDaSessao } from "../../plano";
-import { blocoDoRitmo, blocosDoSistemaDinamicoPerguntarV2 } from "../entrevistador-v2";
+import { blocoDoRitmo, blocosDoSistemaDinamicoPerguntarV2, montarSistemaEstaticoPerguntarV2 } from "../entrevistador-v2";
 import { KIT_SYSTEM_DESIGN as kit } from "../../kits/system-design";
 import { estadoInicial } from "../../sessao/estado";
 
@@ -71,5 +71,13 @@ describe("critérios do plano em 'Ainda sem nenhum sinal' (#129, bloco D)", () =
   it("sem plano, a lista é a da rubrica (sem nomes de plano)", () => {
     const linha = semSinal(textoDo(estadoInicial({ criterios: kit.criterios.map((c) => c.id) })));
     assert.ok(!linha.includes("Idempotência"));
+  });
+});
+
+describe("português claro no prompt do quadro (#129, decisão H)", () => {
+  it("a regra fica na lista do quadro: termo em português, inglês só o nome usual ou o que a vaga usa", () => {
+    const estatico = montarSistemaEstaticoPerguntarV2(kit, kit.problemas[0]);
+    assert.match(estatico, /Português claro: termo do domínio em português \("entregador", "pedido", "lojista", "fila"\)/);
+    assert.match(estatico, /Kafka, cache, API\) ou quando a descrição da vaga usa o termo/);
   });
 });

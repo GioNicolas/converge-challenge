@@ -8,7 +8,7 @@ import {
   gatilhoDoFechamento, iniciarFechamento, proximoPasso,
   type EstadoFechamento, type EtapaDoFechamento, type PassoDoFechamento,
 } from "../totti/fechamento";
-import { devolveAVez, ePerguntaDePorque, perguntaDePorque, reacaoAoPensar, reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
+import { devolveAVez, emPortugues, ePerguntaDePorque, perguntaDePorque, reacaoAoPensar, reacaoNeutra, semConviteDeSeguir } from "../totti/guardas";
 import { frasesSemPergunta } from "../totti/texto";
 import {
   avisoDePerguntaSemResposta, avisosDeQueVaiOlhar, comRespostaDeReserva, decidirTurno, deSaidaDoQuadro, ficouSemResposta, pedePorque, perguntouComClareza,
@@ -351,7 +351,7 @@ async function responderFala(
       const lido = await gerar(PRAZO_DA_LEITURA_NO_FECHAMENTO_MS);
       const guardada = aplicarGuardas(lido.texto, { falaDoCandidato: entrada.texto, falasDoTotti: jaDitas });
       if (guardada.travas.length) log("perguntar_travas", { sessao_id: entrada.sessao_id, fase: entrada.fase, travas: guardada.travas });
-      lida = deSaidaDoQuadro({ ...lido, texto: limitarFrases(guardada.texto, MAX_FRASES_FALA) }, situacao);
+      lida = deSaidaDoQuadro({ ...lido, texto: limitarFrases(emPortugues(guardada.texto, estado.plano?.descricaoVaga), MAX_FRASES_FALA) }, situacao);
     } catch (e) {
       // O fechamento não para por causa do modelo: sem leitura, o núcleo decide pelo que a fala mostra.
       registrarFalha(e);
@@ -430,7 +430,8 @@ async function responderFala(
   if (porque) log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["pede_porque"] });
   const perguntaBarrada = guardada.travas.includes("pergunta_repetida") || guardada.travas.includes("pergunta_de_conducao");
   // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
-  const curto = limitarFrases(guardada.texto, MAX_FRASES_FALA);
+  // Português claro (decisão H): termo em inglês que a vaga não usa sai antes de a fala ir ao candidato.
+  const curto = limitarFrases(emPortugues(guardada.texto, estado.plano?.descricaoVaga), MAX_FRASES_FALA);
 
   // Pediu para encerrar e fez uma pergunta na mesma fala ("pode encerrar, mas o que é courier?"): a pergunta não cai.
   // O Totti responde e pergunta se tem mais alguma coisa, e o fechamento começa já na última palavra (ele não pediu o

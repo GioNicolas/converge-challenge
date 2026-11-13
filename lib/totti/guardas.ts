@@ -383,6 +383,33 @@ export function perguntaDePorque(falasDoTotti: string[]): string {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Português claro
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * Termos em inglês que o Totti troca pelo português na fala (decisão H, #129). Só estes: o resto (Kafka, cache, API)
+ * é o nome usual da área e fica como está.
+ */
+const TROCAS_DE_TERMO: Record<string, string> = {
+  courier: "entregador", couriers: "entregadores", rider: "entregador", riders: "entregadores",
+};
+
+/**
+ * A fala com os termos da tabela trocados pelo português ("courier" → "entregador"). Palavra inteira, sem diferença
+ * de maiúscula, e a inicial maiúscula da palavra é mantida. Não troca um termo que a descrição da vaga usa
+ * (`termosDaVaga`): ali o nome é o que a empresa escreveu. Sem a descrição, troca todos.
+ */
+export function emPortugues(texto: string, termosDaVaga = ""): string {
+  const daVaga = new Set(normalizar(termosDaVaga).split(" "));
+  return texto.replace(/[\p{L}\p{N}_]+/gu, (palavra) => {
+    const minuscula = palavra.toLowerCase();
+    const troca = TROCAS_DE_TERMO[minuscula];
+    if (!troca || daVaga.has(minuscula)) return palavra;
+    return palavra[0] !== palavra[0].toLowerCase() ? comMaiuscula(troca) : troca;
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Todas juntas
 // ---------------------------------------------------------------------------------------------------------------
 

@@ -3,6 +3,7 @@
 // qualquer jeito). Só metadados vão para o log (nada de grafo, fala ou chave).
 import { PRAZO_ANALISE_DO_DESENHO_MS } from "../contracts";
 import { aplicarGuardas, eQuaseDuplicada, eSoReacao, sobreposicao, LIMIAR_DUPLICADA, trocarIdsPorNomes } from "./guardas";
+import { emPortugues } from "../totti/guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import { temMudancaPrevista } from "./kits/empecilhos-genericos";
@@ -266,6 +267,9 @@ export async function analisar(
     ajustes.push("abre_brecha_empecilho");
     resposta = { ...resposta, status: "ok" };
   }
+
+  // Português claro (decisão H, #129): a pergunta vai ao candidato, então o termo em inglês que a vaga não usa sai aqui.
+  if (resposta.pergunta) resposta = { ...resposta, pergunta: emPortugues(resposta.pergunta, estado.plano?.descricaoVaga) };
 
   const filtrada = filtrarResposta(estado, resposta, extrairIdsDoGrafo(pedido.grafo), agora, regras, { paradoHaS: pedido.parado_ha_s });
   if (resposta.status !== "ok" && filtrada.status === "ok") ajustes.push("rebaixada_pela_politica");

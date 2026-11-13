@@ -18,6 +18,7 @@ import type { InterviewConfig } from "@/lib/contracts";
 import { kvPadrao, type Kv } from "@/lib/storage/kv";
 import type { LlmCliente } from "../llm/cliente";
 import { ErroLlm } from "../llm/cliente";
+import { emPortugues } from "../../totti/guardas";
 import { avaliacaoDoPlano } from "../plano";
 import {
   montarMensagemCorrecaoProblema,
@@ -94,6 +95,21 @@ function kitBase(config: InterviewConfig): Kit {
   return alvo.kit;
 }
 
+/**
+ * Português claro (decisão H, #129): todo texto do problema (enunciado, fala, ficha, empecilho) sai sem termo em
+ * inglês que a vaga não usa. O id não se mexe (é o da config); o resto é texto, lista ou objeto de texto.
+ */
+function emPortuguesNoProblema<T>(valor: T, descricaoVaga = ""): T {
+  if (typeof valor === "string") return emPortugues(valor, descricaoVaga) as T;
+  if (Array.isArray(valor)) return valor.map((v) => emPortuguesNoProblema(v, descricaoVaga)) as T;
+  if (valor && typeof valor === "object") {
+    return Object.fromEntries(
+      Object.entries(valor).map(([k, v]) => [k, k === "id" ? v : emPortuguesNoProblema(v, descricaoVaga)]),
+    ) as T;
+  }
+  return valor;
+}
+
 /** Só vale gerar para system design com uma vaga de verdade (as configs de vitrine não têm descrição). */
 export function geraQuestao(config: InterviewConfig): boolean {
   return config.mode === "system_design" && !!config.jobDescription?.trim();
@@ -162,7 +178,7 @@ export async function gerarQuestaoDaVaga(config: InterviewConfig, deps: DepsQues
   const gerado = await gerarProblema(config, deps.llm);
   // Revisão de texto (português, título, fala curta). Nunca falha nem bloqueia: sem revisão, vale o texto gerado.
   const rev = await revisarProblema(gerado.problema, deps.llm);
-  const r = { ...gerado, problema: rev.problema };
+  const r = { ...gerado, problema: emPortuguesNoProblema(rev.problema, config.jobDescription?.trim()) };
   console.warn("[agente] questao_da_vaga_revisada", {
     config_id: config.id,
     aceita: rev.aceita,

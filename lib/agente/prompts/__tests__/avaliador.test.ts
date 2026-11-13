@@ -323,3 +323,11 @@ describe("conclusão barrada no prompt da análise (#129, decisão F)", () => {
     assert.doesNotMatch(dinamico(pode), /CONCLUSÃO BARRADA/);
   });
 });
+
+describe("português claro no prompt da análise (#129, decisão H)", () => {
+  it("o campo pergunta pede o português claro, com o termo do domínio e a exceção de nome usual", () => {
+    const sistema = montarSistemaEstatico(kitDemo, problema);
+    assert.match(sistema, /Português claro: termo do domínio em português \("entregador"/);
+    assert.match(sistema, /inglês só quando é o nome usual da área ou quando a descrição da vaga usa o termo/);
+  });
+});
