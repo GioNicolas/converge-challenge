@@ -607,14 +607,20 @@ export const CASOS: Caso[] = [
       terminaEmPergunta(r),
     ],
   },
-  // "Não" para "posso finalizar?" também escolhe ajustar.
+  // "Não" para "quer mudar alguma coisa?" aprova.
   {
-    id: "nao-ao-posso-finalizar",
+    id: "nao-ao-fechamento",
     vaga: "backend-senior-pagamentos",
     historico: ATE_O_RESUMO,
     situacao: NO_RESUMO,
-    fala: "não, ainda não",
-    conferir: (r) => [naoEncerra(r), semOutroResumo(r), passoE(r, "perguntar_ajuste")],
+    fala: "não, tá ótimo",
+    conferir: (r) => [
+      {
+        nome: "encerra",
+        ok: r.passo.tipo === "encerrar" || r.depois.ultimoPasso?.tipo === "encerrar",
+        detalhe: `passo: ${descrever(r.passo)}`,
+      },
+    ],
   },
   {
     id: "pode-finalizar-ao-fechamento",

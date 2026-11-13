@@ -191,7 +191,10 @@ export default function RevisaoPlano({ rascunho, enviando, publicado = false, er
 
   // O que ela mudou em relação ao que chegou (null: nada). Só vale com algum critério e peso, como no publicar.
   const tela = rascunhoDaTela();
-  const mudou = camposMudados(rascunho, tela).length > 0 || tela.roleTitle !== rascunho.roleTitle;
+  const mudou =
+    camposMudados(rascunho, tela).length > 0 ||
+    tela.roleTitle !== rascunho.roleTitle ||
+    tela.conducao.join("\n") !== rascunho.conducao.join("\n");
   const editado = mudou && soma > 0 && tela.criteria.length > 0 ? tela : null;
   const chaveEditado = JSON.stringify(editado);
   useEffect(() => {
