@@ -18,6 +18,7 @@ import type { Blip, ChatMessage, ChatResponse, EditorCommand } from "@/lib/contr
 import { postChat } from "./api";
 import { falaInterrompida } from "@/lib/totti/interrupcao";
 import type { EventInput } from "./useSession";
+import { disseQueTerminou } from "@/lib/agents/conclusao";
 
 /** Fala na conversa: a mensagem do contrato mais o horário em que aconteceu (Date.now()). */
 export type Fala = ChatMessage & { at: number };
@@ -212,7 +213,8 @@ export function useConversa(deps: ConversaDeps) {
       terminarPedido();
     }
     repeticoesRef.current = 0;
-    if (blip || palavras(texto) >= MIN_PALAVRAS_FALA) void d.sendEvent({ type: "speech", role: "candidate", text: texto, blipId: blip?.id });
+    // Um "terminei" solto também vai para a linha do tempo: o segundo, noutra conversa, precisa saber do primeiro.
+    if (blip || palavras(texto) >= MIN_PALAVRAS_FALA || disseQueTerminou(texto)) void d.sendEvent({ type: "speech", role: "candidate", text: texto, blipId: blip?.id });
     if (lista === livresRef.current) aparar();
     if (res.despedida) {
       d.onDespedida?.(res.reply);

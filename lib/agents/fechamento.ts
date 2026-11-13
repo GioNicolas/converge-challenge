@@ -1,5 +1,5 @@
 import { uncoveredCriteria } from "@/lib/agents/coverage";
-import { startClosing } from "@/lib/agents/policy";
+import { abordagemParaRever, PERGUNTA_DE_REVISAO, startClosing } from "@/lib/agents/policy";
 import { aoVoltarATrabalhar } from "@/lib/totti/fechamento";
 import type { PerguntaFinal } from "@/lib/totti/fechamento";
 import type { SessionState } from "@/lib/session/types";
@@ -47,6 +47,9 @@ export function candidatasDoFechamento(session: SessionState, t: number): Pergun
   const closing = blip && copia.queue.find((q) => q.id === blip.id);
   if (!closing) return [];
   const candidatas: PerguntaFinal[] = [];
+  // Abordagem pior que a melhor conhecida ou justificativa fraca: o Totti não redirecionou durante a implementação
+  // (decisão de produto), então pergunta primeiro se ele mudaria algo olhando agora.
+  if (abordagemParaRever(session)) candidatas.push({ pergunta: PERGUNTA_DE_REVISAO, origem: "revisao", prioridade: 1 });
   const cola = copia.queue.find((q) => q.kind === "cola" && q.status === "stale");
   if (cola) candidatas.push({ pergunta: "Você colou esse trecho. De onde veio e como ele funciona?", origem: "colagem", apontar: cola.highlight });
   const prepared = copia.queue.filter((q) => q.kind !== "encerramento" && q.status === "stale" && q.kind !== "cola");

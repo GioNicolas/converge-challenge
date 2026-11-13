@@ -7,7 +7,8 @@ import { buildInterviewerSystem, buildInterviewerUser, candidatoPerguntou, type 
 import { recordOutcome, uncoveredCriteria } from "@/lib/agents/coverage";
 import { empecilhoAnunciado, empecilhoDaQuestao, mudancaParaPrompt, testesIde } from "@/lib/agents/empecilho";
 import { CONVERSA_LIVRE, conversasFeitas, faseDaEntrevista, formatarConversas, linesWrittenBeyondStarter } from "@/lib/agents/fase";
-import { findBlipQuestion, nextHint, perdeuAVez } from "@/lib/agents/policy";
+import { allPassed, findBlipQuestion, nextHint, perdeuAVez } from "@/lib/agents/policy";
+import { disseQueJaTerminou, disseQueTerminou } from "@/lib/agents/conclusao";
 import { checkReply } from "@/lib/agents/spoilerFilter";
 import type { ChatMessage, ChatResponse, EditorCommand, LineRange } from "@/lib/contracts";
 import { FALAS_DE_REPETICAO } from "@/lib/conversa/falasDeReserva";
@@ -171,15 +172,24 @@ async function turno(
     messages: req.messages,
   };
 
-  // Solução funcionando e ele repete que já terminou: é para encerrar, não para mais perguntas.
-  if (!found && input.fase === "funcionando" && querEncerrar(req.messages)) {
+  // A solução passa nos testes visíveis e ele diz que terminou (numa fala livre ou respondendo a uma pergunta, na
+  // primeira vez ou de novo): o fechamento começa na hora, com os pontos que ainda valem (a revisão da abordagem
+  // primeiro) e, sem nenhum, a última palavra e a despedida. Entrevista de 12/11: terminou tudo, respondeu a
+  // complexidade, disse "terminei" e ouviu "Continua daí.".
+  if (!session.fechamento && question?.kind !== "encerramento" && terminouComSolucaoPronta(session, req.messages)) {
     const t = elapsedMs(session);
     const tempoRestanteMs = Math.max(0, session.config.durationMin * 60_000 - t);
-    session.fechamento = iniciarFechamento({ sala: "codigo", gatilho: "pediu_encerrar", candidatas: candidatasDoFechamento(session, t), tempoRestanteMs, perguntasJaFeitas: falasDoAgente(session, req.messages) });
+    session.conclusoes = (session.conclusoes ?? 0) + 1;
+    session.etapaConcluidaEm = t;
+    session.fechamento = iniciarFechamento({ sala: "codigo", gatilho: "concluiu", candidatas: candidatasDoFechamento(session, t), tempoRestanteMs, perguntasJaFeitas: falasDoAgente(session, req.messages) });
+    session.fechamentoCodigoInicial = latestCode(session);
     session.fechamentoIniciadoEm = t;
-    const passo = proximoPasso(session.fechamento);
+    // Numa conversa aberta, o fechamento segue nela, sem abrir outro balão por cima.
+    session.fechamentoBlipId = req.blipId;
+    const passo = proximoPasso(session.fechamento, undefined, "", { tempoRestanteMs });
     session.fechamento = passo.estado;
-    return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, despedida: true };
+    if (passo.encerrar) return { reply: passo.fala, commands: [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa, despedida: true };
+    return { reply: passo.fala, commands: passo.apontar ? highlightCommands(passo.apontar as LineRange) : [{ type: "clear_highlights" }], end: false, fechamento: passo.etapa };
   }
   const perguntou = candidatoPerguntou(req.messages);
   const system = buildInterviewerSystem(session.config, problem);
@@ -215,10 +225,12 @@ async function turno(
   // A leitura do turno é a do Totti único (lib/totti/turno.ts), a mesma do quadro: a saída do modelo vira a
   // leitura comum, as decisões comuns agem sobre ela (sinal de conclusão, sem pergunta nova depois de "não sei",
   // vez devolvida depois de uma resposta) e ela volta para a saída desta sala.
+  const falaDoCandidato = req.messages.findLast((m) => m.role === "candidate")?.text ?? "";
   const situacao: SituacaoDoTurno = {
     sala: "codigo",
-    falaDoCandidato: req.messages.findLast((m) => m.role === "candidate")?.text ?? "",
-    respondiaAoTotti: found !== undefined || respondendoAoTotti(req.messages),
+    falaDoCandidato,
+    // "Terminei" não é resposta a uma pergunta: a vez não volta para o código com um "Continua daí.".
+    respondiaAoTotti: !disseQueTerminou(falaDoCandidato) && (found !== undefined || respondendoAoTotti(req.messages)),
     falasDoTotti: falasDoAgente(session, req.messages),
     // Há quanto tempo ele não digita: a última versão do código que a sessão recebeu.
     paradoHaS: Math.max(0, elapsedMs(session) - (session.codeHistory.at(-1)?.t ?? 0)) / 1000,
@@ -248,10 +260,11 @@ async function turno(
     const conclusoesAntes = session.conclusoes ?? 0;
     const gatilho = session.fechamento ? null : gatilhoDoFechamento({
       concluiu: leituraFechamento.concluiu,
-      conclusoesAntes,
       materialPronto: faseDaEntrevista(session) === "funcionando",
       tempoRestanteMs,
       pediuEncerrar: leituraFechamento.encerrar || querEncerrar(req.messages),
+      // Um "terminei" de outra conversa da sessão conta como conclusão anterior.
+      conclusoesAntes: Math.max(conclusoesAntes, falasDoCandidatoNaSessao(session).some(disseQueTerminou) ? 1 : 0),
     });
     if (gatilho) {
       if (leituraFechamento.concluiu) {
@@ -547,6 +560,8 @@ export function limitarPerguntas(
   opening: boolean,
 ): InterviewerOutput {
   if (opening || output.respond === false || output.finish === true || !output.reply.trim().endsWith("?")) return output;
+  // Ele disse que terminou: devolver a vez para o código ("Continua daí.") seria ignorar o que ele disse.
+  if (disseQueTerminou(messages.findLast((m) => m.role === "candidate")?.text ?? "")) return output;
   // Perguntou algo ou está travado: a pergunta do Totti ali é ajuda (o que ele está vendo, onde travou), não
   // interrogatório. Cortar deixava um "Pode seguir." seco para quem acabou de dizer que não sabe seguir.
   const encerramento = question?.kind === "encerramento";
@@ -564,13 +579,31 @@ export function travado(messages: ChatMessage[]): boolean {
   return ultima?.role === "candidate" && /\b(n[ãa]o sei (como|o que|o porqu[êe]|porque|por que|mais)|n[ãa]o entendi|n[ãa]o t[ôo] entendendo|travei|t[ôo] travad[oa]|n[ãa]o (t[ôo]|estou) conseguindo)\b/i.test(ultima.text);
 }
 
-/** Com a solução funcionando, ele diz que já terminou (ou repete que terminou): quer encerrar. */
-export function querEncerrar(messages: ChatMessage[]): boolean {
+/**
+ * Ele diz que já terminou, ou repete que terminou: quer encerrar. `anteriores`: as falas dele em conversas anteriores
+ * da sessão (a pergunta da complexidade abre outra conversa, e o primeiro "terminei" ficava de fora).
+ */
+export function querEncerrar(messages: ChatMessage[], anteriores: string[] = []): boolean {
   const doCandidato = messages.filter((m) => m.role === "candidate");
   const ultima = doCandidato.at(-1)?.text ?? "";
-  const terminou = /\b(terminei|acabei|finalizei)\b/i;
-  if (!terminou.test(ultima)) return false;
-  return /\bj[áa]\b/i.test(ultima) || doCandidato.slice(0, -1).some((m) => terminou.test(m.text));
+  if (!disseQueTerminou(ultima)) return false;
+  return disseQueJaTerminou(ultima) || [...anteriores, ...doCandidato.slice(0, -1).map((m) => m.text)].some(disseQueTerminou);
+}
+
+/** As falas do candidato já gravadas na sessão (todas as conversas), mais antigas primeiro. */
+export function falasDoCandidatoNaSessao(session: SessionState): string[] {
+  return session.events.flatMap((e) => (e.type === "speech" && e.role === "candidate" ? [e.text] : []));
+}
+
+/**
+ * A última fala diz que ele terminou e o último run passou em todos os testes visíveis: é o fim, não uma etapa.
+ * Sem solução pronta, "terminei" segue a regra comum (lib/totti/fechamento.ts `gatilhoDoFechamento`): fecha na
+ * segunda vez, contando as conversas anteriores.
+ */
+export function terminouComSolucaoPronta(session: SessionState, messages: ChatMessage[]): boolean {
+  if (!disseQueTerminou(messages.findLast((m) => m.role === "candidate")?.text ?? "")) return false;
+  const ultimoRun = session.events.findLast((e) => e.type === "run");
+  return ultimoRun?.type === "run" && allPassed(ultimoRun.result);
 }
 
 /** A fala segura quando a geração foi barrada: resposta neutra se ele perguntou algo, senão uma pergunta aberta. */

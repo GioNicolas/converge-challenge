@@ -117,6 +117,23 @@ const COLA_FRACAO_JA_EXISTENTE = 0.7;
 /** Das linhas coladas, a fração que precisa continuar no código para a pergunta ainda valer. */
 const COLA_FRACAO_QUE_FICOU = 0.5;
 
+/**
+ * Depois de um run que falhou, o Totti sempre fala alguma coisa na pausa seguinte (entrevista de 12/11: rodou, falhou
+ * em alguns testes, a pergunta sobre o resultado sumiu e ele não disse nada). Curta, sobre o raciocínio dele diante do
+ * resultado, sem nomear erro, linha ou caso (GUIA_DA_FASE.depurando). Varia para não soar como gravação.
+ */
+export const FALAS_DO_RUN_FALHOU = [
+  "Rodou e não passou. O que você esperava que saísse?",
+  "Não passou dessa vez. O que você está olhando agora?",
+  "Rodou e ainda não passou. O que você acha que aconteceu?",
+];
+
+/**
+ * Pergunta de revisão do fechamento: com uma abordagem pior que a melhor conhecida ou uma justificativa fraca, o Totti
+ * não redireciona durante a implementação (decisão de produto), mas pergunta no fim se ele mudaria algo.
+ */
+export const PERGUNTA_DE_REVISAO = "Olhando o código agora, você mudaria alguma coisa na abordagem? Por quê?";
+
 const NO_BOOST = { boost: 0, reason: "" };
 
 // Em globalThis, como o store e o Analyst: o Next em dev recarrega o módulo e zeraria o WeakMap.
@@ -191,7 +208,8 @@ export function lastBlipDecision(session: SessionState): string | undefined {
 /**
  * Decide se a fila vira um blip agora (t em ms de sessão). Só levanta blip com o candidato parado
  * e sem outro blip pendente. Efeito colateral: marca a pergunta como blipped, stale ou ignored.
- * `dismissBlipId`: o balão anterior expirou nesta chamada e a IDE deve tirá-lo da tela.
+ * `dismissBlipId`: o balão anterior foi substituído por outro nesta chamada e a IDE deve tirá-lo da tela. Um balão
+ * pendente nunca some sozinho, sem fala: o que expirou fica na tela até ser dito ou até outro tomar o lugar dele.
  */
 export function decideBlip(session: SessionState, t: number): { blip?: Blip; dismissBlipId?: string } {
   if (session.fechamento) {
@@ -201,18 +219,22 @@ export function decideBlip(session: SessionState, t: number): { blip?: Blip; dis
   const expirado = expireBlip(session, t);
   const { blip, reason, dismissBlipId: cedeu } = pickBlip(session, t);
   decisions.set(session, expirado ? `balão ${expirado.slice(0, 8)} expirou · ${reason}` : reason);
-  return { blip, dismissBlipId: expirado ?? cedeu };
+  return { blip, dismissBlipId: cedeu ?? (blip && expirado !== blip.id ? expirado : undefined) };
 }
 
-/** Balão aberto e nunca clicado há BLIP_EXPIRY_MS vira ignorado. Devolve o id que sai da tela, se houver. */
+/**
+ * Balão nunca aberto há BLIP_EXPIRY_MS vira ignorado e libera a vez de outro (pendingBlipId). Ele não sai da tela
+ * aqui: a IDE ainda pode dizê-lo na próxima pausa, ou ele cede o lugar quando outro balão subir.
+ */
 function expireBlip(session: SessionState, t: number): string | undefined {
   const pendingId = session.pendingBlipId;
   if (pendingId === undefined) return undefined;
   const found = findBlipQuestion(session, pendingId);
   if (!found || found.question.status !== "blipped") return undefined;
   if (t - found.blip.createdAt < BLIP_EXPIRY_MS) return undefined;
-  // O empecilho e a pergunta da colagem não expiram: a IDE abre a conversa deles sozinha.
-  if (found.question.kind === "empecilho" || found.question.kind === "cola") return undefined;
+  // O empecilho, a pergunta da colagem e a fala do run com falha não expiram: a IDE abre a conversa deles sozinha
+  // (a do run perde o sentido sozinha quando ele roda de novo ou o Totti fala depois).
+  if (found.question.kind === "empecilho" || found.question.kind === "cola" || found.question.kind === "run_falhou") return undefined;
 
   found.question.status = "ignored";
   session.pendingBlipId = undefined;
@@ -240,6 +262,10 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
   const cola = session.queue.find((q) => q.kind === "cola" && q.status === "queued");
   const daCola = cola ? colaNaVez(session, cola, t) : undefined;
   if (daCola) return daCola;
+  // Rodou e falhou: a fala curta sobre o resultado passa na frente das perguntas da análise (ver `runFalhouNaVez`).
+  const runFalhou = session.queue.find((q) => q.kind === "run_falhou" && q.status === "queued");
+  const doRun = runFalhou ? runFalhouNaVez(session, runFalhou, t) : undefined;
+  if (doRun) return doRun;
   if (session.pendingBlipId) return { reason: "esperando: outro blip já aberto ou pendente" };
 
   const kickoff = session.queue.find((q) => q.kickoff && q.status === "queued");
@@ -284,7 +310,7 @@ function pickBlip(session: SessionState, t: number): { blip?: Blip; reason: stri
 
   const { boost, reason: boostReason } = momentBoost(session);
   const candidates = session.queue
-    .filter((q) => q.status === "queued" && !isSnoozed(q, t) && q.kind !== "cola")
+    .filter((q) => q.status === "queued" && !isSnoozed(q, t) && q.kind !== "cola" && q.kind !== "run_falhou")
     .filter((q) => !overLimit || q.kind === "retorno")
     .filter((q) => q.priority + boost + agendaBoost(session, q, t) >= threshold)
     // Momento-chave primeiro (o candidato tem certeza que há o que falar), depois a prioridade.
@@ -355,10 +381,10 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
 
   const onScreen = session.pendingBlipId ? findBlipQuestion(session, session.pendingBlipId)?.question : undefined;
   const fromQueue = session.queue
-    .filter((q) => q.status === "queued" && !q.kickoff && q !== onScreen && !isStale(session, q, t))
+    .filter((q) => q.status === "queued" && !q.kickoff && q.kind !== "run_falhou" && q !== onScreen && !isStale(session, q, t))
     .sort((a, b) => b.priority - a.priority);
   // A pergunta que estava na tela só entra se ainda faz sentido (um teste que já passou, um trecho que mudou: não).
-  const pending = onScreen?.status === "blipped" && !onScreen.kickoff && !isStale(session, onScreen, t) ? [onScreen, ...fromQueue] : fromQueue;
+  const pending = onScreen?.status === "blipped" && !onScreen.kickoff && onScreen.kind !== "run_falhou" && !isStale(session, onScreen, t) ? [onScreen, ...fromQueue] : fromQueue;
   // Os poucos pontos do encerramento vão para o que ainda não foi explorado: uma pergunta preparada sobre um
   // critério já coberto repetia o assunto (medido: complexidade perguntada três vezes, bordas nenhuma).
   const naoCobertos = new Set(uncoveredCriteria(session));
@@ -376,7 +402,10 @@ export function startClosing(session: SessionState, t: number): Blip | undefined
       const jaMostrou = session.evidence.filter((e) => e.criterionId === c.id).slice(-2).map((e) => e.note);
       return `critério ${c.id} (${c.name}): ${c.description}${jaMostrou.length ? ` [ele já mostrou: ${jaMostrou.join("; ")}. Não pergunte isso de novo: pergunte outra coisa do critério, sobre o código de agora]` : ""}`;
     });
+  // Abordagem pior que a melhor conhecida ou justificativa fraca: a pergunta de revisão é o primeiro ponto.
+  const revisao = abordagemParaRever(session) ? [`revisão da abordagem [sem linhas]: ${PERGUNTA_DE_REVISAO}`] : [];
   const topics = [
+    ...revisao,
     ...colas.map((q) => `trecho colado${q.highlight ? ` [linhas ${q.highlight.startLine}-${q.highlight.endLine}]` : " [sem linhas]"}: ele colou ${q.cola?.linhas ?? "várias"} linhas de uma vez${q.cola?.substituiu ? ", no lugar do que vinha escrevendo," : ""} e ainda não explicou. Pergunte de onde veio e peça para ele explicar o que o trecho faz.`),
     // Cada ponto leva as próprias linhas: com uma linha só para a conversa toda, o grifo da pergunta seguinte
     // aparecia na primeira (que não era sobre código) e a seguinte falava de "esse trecho grifado" sem grifar.
@@ -506,6 +535,97 @@ function enqueueDueCheckIns(session: SessionState, t: number): void {
       checkInId: checkIn.id,
     });
   }
+}
+
+type RunEvent = Extract<SessionEvent, { type: "run" }>;
+
+/**
+ * Rodou e falhou: entra na fila, sem LLM, a fala curta sobre o resultado (uma por run; um run novo troca a anterior,
+ * que ainda não saiu). Fora do orçamento e do intervalo: o candidato acabou de ver o resultado. Devolve true se entrou.
+ */
+export function enqueueRunFalhou(session: SessionState, event: RunEvent): boolean {
+  if (session.ended || allPassed(event.result) || session.fechamento) return false;
+  if (session.queue.some((q) => q.kind === "encerramento")) return false;
+  for (const q of session.queue) if (q.kind === "run_falhou" && q.status === "queued") q.status = "stale";
+  // Uma frase diferente a cada vez que uma delas foi dita (ou está na tela).
+  const ditas = session.queue.filter((q) => q.kind === "run_falhou" && (q.status === "asked" || q.status === "blipped")).length;
+  session.queue.push({
+    id: `q-${session.queue.length + 1}`,
+    question: FALAS_DO_RUN_FALHOU[ditas % FALAS_DO_RUN_FALHOU.length],
+    followUpTopic: "o que ele esperava do resultado e o que está olhando para entender a diferença, sem apontar erro, linha ou caso",
+    topicLabel: "o resultado do teste",
+    priority: 1,
+    createdAt: event.t,
+    status: "queued",
+    kind: "run_falhou",
+    fase: "depurando",
+  });
+  return true;
+}
+
+/** A fala do run com falha perdeu o sentido: ele rodou de novo, ou o Totti já falou alguma coisa depois do run. */
+function runFalhouPassou(session: SessionState, q: QueuedQuestion): string | undefined {
+  if (session.events.some((e) => e.type === "run" && e.t > q.createdAt)) return "rodou de novo depois";
+  if (session.events.some((e) => e.type === "speech" && e.role === "agent" && e.t > q.createdAt)) return "o Totti já falou depois do run";
+  return undefined;
+}
+
+/**
+ * A fala do run com falha na vez dela: só espera ele tirar a mão do teclado e não estar falando (como a colagem).
+ * Um balão ainda não aberto cede o lugar (sai da tela pelo `dismissBlipId` e volta para a fila); com uma conversa
+ * aberta ela espera, porque o Totti já está falando com ele. Devolve undefined quando não é com ela.
+ */
+function runFalhouNaVez(session: SessionState, q: QueuedQuestion, t: number): { blip?: Blip; reason: string; dismissBlipId?: string } | undefined {
+  if (runFalhouPassou(session, q)) {
+    q.status = "stale";
+    return undefined;
+  }
+  if (session.queue.some((x) => x.kind === "encerramento")) return undefined;
+  const naTela = session.pendingBlipId ? findBlipQuestion(session, session.pendingBlipId)?.question : undefined;
+  if (naTela && (naTela.status !== "blipped" || naTela.kind === "empecilho" || naTela.kind === "cola")) {
+    return { reason: "esperando (fala do run com falha): conversa aberta" };
+  }
+  const momento = motivoDoMomento({ ...momentoDaSessao(session, t), marco: true });
+  if (momento) return { reason: `esperando (fala do run com falha): ${momento}` };
+  let dismissBlipId: string | undefined;
+  if (naTela) {
+    naTela.status = "queued";
+    dismissBlipId = naTela.id;
+  }
+  session.pendingBlipId = undefined;
+  return { blip: raise(session, q, t), dismissBlipId, reason: `blip ${q.id} (run com falha)` };
+}
+
+/** Ordem das complexidades de tempo ("O(n log n)", "O(n²)"), da melhor (1) para a pior. Sem reconhecer: undefined. */
+export function ordemDaComplexidade(texto: string | undefined): number | undefined {
+  const m = texto?.toLowerCase().replace(/\s+/g, "").replace(/²/g, "^2").replace(/³/g, "^3").match(/o\(((?:[^()]|\([^()]*\))*)\)/);
+  if (!m) return undefined;
+  const dentro = m[1].replace(/[*·×]/g, "").replace(/log\(([a-z])\)/g, "log$1");
+  const tabela: [RegExp, number][] = [
+    [/^(2\^n|n!|k\^n)$/, 7],
+    [/^n\^3$/, 6],
+    [/^(n\^2|nn|n\^2logn|nm|mn)$/, 5],
+    [/^(nlogn|nlogk|klogn)$/, 4],
+    [/^(n|n\+k|n\+m|m\+n|k\+n)$/, 3],
+    [/^logn$/, 2],
+    [/^1$/, 1],
+  ];
+  return tabela.find(([re]) => re.test(dentro))?.[1];
+}
+
+/**
+ * Vale a pergunta de revisão no fechamento: a análise viu uma complexidade de tempo pior que a da melhor abordagem
+ * conhecida da questão, ou a justificativa dele sobre a abordagem saiu fraca (parcial, errada, sem conseguir). Se a
+ * pergunta já foi feita, não.
+ */
+export function abordagemParaRever(session: SessionState): boolean {
+  const jaFeita = session.events.some((e) => e.type === "speech" && e.role === "agent" && /mudaria alguma coisa na abordagem/i.test(e.text));
+  if (jaFeita) return false;
+  const melhor = Math.min(...getProblem(session.config.problemId).private.approaches.map((a) => ordemDaComplexidade(a.time) ?? Infinity));
+  const dele = ordemDaComplexidade(session.analyst.insights?.timeComplexity);
+  if (dele !== undefined && Number.isFinite(melhor) && dele > melhor) return true;
+  const fracos = new Set(["parcial", "errou", "nao_conseguiu"]);
+  return (session.coverage.abordagem?.outcomes ?? []).some((o) => fracos.has(o.kind));
 }
 
 type PasteEvent = Extract<SessionEvent, { type: "paste" }>;
@@ -670,6 +790,7 @@ function waitReason(session: SessionState, t: number, q: QueuedQuestion): string
 function isStale(session: SessionState, q: QueuedQuestion, t: number): boolean {
   // A pergunta da colagem só perde o sentido se ele tirou o trecho do código.
   if (q.kind === "cola") return colaSumiu(session, q);
+  if (q.kind === "run_falhou") return runFalhouPassou(session, q) !== undefined;
   const ageless = q.kind === "retorno" || q.focusArea !== undefined || q.snoozedUntil !== undefined;
   if (!ageless) {
     const momentPassed = (q.fase === "depurando" || q.fase === "entendendo") && q.fase !== faseDaEntrevista(session);
@@ -703,11 +824,11 @@ function jaFoiPerguntada(session: SessionState, q: QueuedQuestion): boolean {
   });
 }
 
-/** Balões que contam no orçamento: fora abertura, encerramento, mudança no problema e pergunta de colagem. */
+/** Balões que contam no orçamento: fora abertura, encerramento, mudança no problema, colagem e run com falha. */
 function baloesNoOrcamento(session: SessionState): number {
   return session.blips.filter((b) => {
     const q = session.queue.find((x) => x.id === b.id);
-    return !q?.kickoff && q?.kind !== "encerramento" && q?.kind !== "empecilho" && q?.kind !== "cola";
+    return !q?.kickoff && q?.kind !== "encerramento" && q?.kind !== "empecilho" && q?.kind !== "cola" && q?.kind !== "run_falhou";
   }).length;
 }
 
@@ -781,7 +902,7 @@ function raise(session: SessionState, q: QueuedQuestion, t: number): Blip {
   };
   const empecilho = q.kind === "empecilho" ? empecilhoDaQuestao(session) : undefined;
   if (empecilho) blip.empecilho = empecilhoPublico(session, empecilho);
-  if (q.kind !== "retorno" && q.kind !== "encerramento" && q.kind !== "empecilho" && q.kind !== "cola") blip.perdeAVez = true;
+  if (q.kind !== "retorno" && q.kind !== "encerramento" && q.kind !== "empecilho" && q.kind !== "cola" && q.kind !== "run_falhou") blip.perdeAVez = true;
   if (q.kind === "cola") blip.passaNaFrente = true;
   session.blips.push(blip);
   session.pendingBlipId = blip.id;
@@ -795,6 +916,7 @@ function previewFor(q: QueuedQuestion): string {
   if (q.kind === "retorno") return q.topicLabel === "como ficou a mudança" ? "E aí, como ficou a mudança?" : "E aí, como foi o desafio?";
   if (q.kind === "encerramento") return "Antes de encerrar, uns pontos rápidos";
   if (q.kind === "cola") return "Quero entender o trecho que você colou";
+  if (q.kind === "run_falhou") return "Quero entender o resultado do teste";
   return q.topicLabel ? `Quero entender ${q.topicLabel}` : "Tenho uma pergunta sobre seu código";
 }
 
@@ -805,6 +927,12 @@ function previewFor(q: QueuedQuestion): string {
  * pergunta duas vezes. Retorno, mudança no problema e encerramento sempre valem.
  */
 export function perdeuAVez(session: SessionState, q: QueuedQuestion, blipCreatedAt: number): string | undefined {
+  // A fala do run com falha vale até ele rodar de novo ou o Totti falar depois do run (uma fala dele explicando não
+  // a cancela: o ponto é o Totti não deixar o run passar em silêncio).
+  if (q.kind === "run_falhou") {
+    const passou = runFalhouPassou(session, q);
+    return passou ? `fala do run com falha descartada: ${passou}` : undefined;
+  }
   if (q.kind === "retorno" || q.kind === "empecilho" || q.kind === "encerramento" || q.kind === "cola") return undefined;
   if (q.kickoff) {
     // O entrevistador já fez uma pergunta (numa fala livre, ex.: "como você pretende começar?"): a abertura sobra.

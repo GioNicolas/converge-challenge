@@ -16,7 +16,8 @@ import type { EstadoFechamento } from "@/lib/totti/fechamento";
  * empecilho: o Totti traz uma mudança no problema (lib/agents/empecilho.ts); a primeira fala é o anúncio.
  * cola: ele colou um bloco de código de uma vez; o Totti sempre pede para explicar (lib/agents/policy.ts).
  */
-export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento" | "empecilho" | "cola";
+/** run_falhou: a fala curta do Totti depois de um run que falhou (lib/agents/policy.ts `enqueueRunFalhou`). */
+export type QuestionKind = "explicar" | "sondar" | "desafio" | "retorno" | "encerramento" | "empecilho" | "cola" | "run_falhou";
 
 /** O bloco que o candidato colou, guardado com a pergunta sobre ele. */
 export interface Cola {
