@@ -267,7 +267,8 @@ export const DESPEDIDAS = [
 
 /**
  * Resposta curta que não traz assunto novo ("nada", "pode", "não quero", "já falei tudo"), ou o pedido de encerrar.
- * Quando o modelo leu que ele perguntou (`candidatoPerguntou`), a fala não encerra: a pergunta vem antes.
+ * Reserva para quando não há leitura da intenção pelo modelo (ver a última palavra em `proximoPasso`). Quando o modelo
+ * leu que ele perguntou (`candidatoPerguntou`), a fala não encerra: a pergunta vem antes.
  */
 export function aceitaEncerrar(fala: string, leitura?: LeituraDoTurno | null): boolean {
   if (leitura?.candidatoPerguntou === true) return false;
@@ -401,8 +402,12 @@ export function proximoPasso(
     return avancar(atual, reacaoDe(leitura) || reacaoNeutra(atual.ditas));
   }
 
-  // Última palavra: resposta curta, "não" ou "pode" vai para a despedida.
-  if (aceitaEncerrar(falaDoCandidato, leitura)) return despedir(atual);
+  // Última palavra. Quando o modelo leu a intenção da fala (a sala traz `candidatoPerguntou`, como o quadro), é ele quem
+  // decide: "encerrar" já se despediu lá em cima, a pergunta já foi respondida, e o que sobra é um assunto novo. A
+  // lista de respostas curtas ("não", "pode", "nada") só decide sem essa leitura: o modelo falhou, ou a sala não a
+  // pede (o live coding hoje).
+  const leuAIntencao = leitura?.candidatoPerguntou !== undefined;
+  if (!leuAIntencao && aceitaEncerrar(falaDoCandidato, leitura)) return despedir(atual);
   // Assunto novo recebe uma resposta e volta para a última palavra, uma vez só.
   const resposta = respostaDe(leitura) || reacaoNeutra(atual.ditas);
   if (atual.voltouDaUltimaPalavra) return despedir(atual, resposta);

@@ -301,6 +301,38 @@ describe("pergunta dele no fechamento: o modelo leu (candidatoPerguntou), sem re
   });
 });
 
+describe("última palavra: com a leitura da intenção pelo modelo, a lista de palavras não decide", () => {
+  const VOLTA = "Mais alguma coisa antes de encerrar?";
+  const naUltima = () => proximoPasso(iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: [], tempoRestanteMs: 15 * MIN })).estado;
+  /** A leitura do quadro: o modelo sempre diz se ele perguntou (schema estrito). */
+  const doModelo = (extra: Partial<LeituraDoTurno> = {}) => lida({ candidatoPerguntou: false, ...extra });
+
+  it("o modelo leu o fim (encerrar): despede", () => {
+    const passo = proximoPasso(naUltima(), doModelo({ responder: false, texto: "", encerrar: true }), "não, é isso");
+    assert.ok(DESPEDIDAS.includes(passo.fala), passo.fala);
+    assert.equal(passo.encerrar, true);
+  });
+
+  it("uma frase que casa com a lista mas que o modelo leu como pergunta é respondida (\"pode me explicar o que é courier\")", () => {
+    const passo = proximoPasso(naUltima(), doModelo({ texto: "É o entregador.", candidatoPerguntou: true }), "pode me explicar o que é courier");
+    assert.equal(passo.fala, `É o entregador. ${VOLTA}`);
+    assert.equal(passo.encerrar, false);
+  });
+
+  it("uma frase que casa com a lista mas que o modelo leu como assunto novo recebe resposta e volta (\"isso, e eu ainda colocaria um cache\")", () => {
+    const passo = proximoPasso(naUltima(), doModelo({ texto: "Faz sentido para as leituras." }), "isso, e eu ainda colocaria um cache");
+    assert.equal(passo.fala, `Faz sentido para as leituras. ${VOLTA}`);
+    assert.equal(passo.encerrar, false);
+  });
+
+  it("sem a leitura (o modelo falhou ou a sala não a pede), a lista de respostas curtas segue valendo", () => {
+    for (const leitura of [null, lida()]) {
+      const passo = proximoPasso(naUltima(), leitura, "não, é isso");
+      assert.ok(DESPEDIDAS.includes(passo.fala), passo.fala);
+    }
+  });
+});
+
 describe("nenhuma fala do fechamento manda continuar o código ou o desenho", () => {
   it("nem as fixas, nem as que aproveitam a reação do modelo", () => {
     // O modelo, por hábito, termina com o convite: o fechamento tira.
