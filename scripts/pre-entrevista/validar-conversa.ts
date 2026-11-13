@@ -607,6 +607,15 @@ export const CASOS: Caso[] = [
       terminaEmPergunta(r),
     ],
   },
+  // "Não" para "posso finalizar?" também escolhe ajustar.
+  {
+    id: "nao-ao-posso-finalizar",
+    vaga: "backend-senior-pagamentos",
+    historico: ATE_O_RESUMO,
+    situacao: NO_RESUMO,
+    fala: "não, ainda não",
+    conferir: (r) => [naoEncerra(r), semOutroResumo(r), passoE(r, "perguntar_ajuste")],
+  },
   {
     id: "pode-finalizar-ao-fechamento",
     vaga: "backend-senior-pagamentos",
