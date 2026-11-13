@@ -62,7 +62,8 @@ describe("os dois prompts incluem a persona", () => {
   it("o prompt estático não cresceu com a persona (ele vai inteiro em toda fala)", () => {
     // Tamanhos de antes da #94, medidos com este mesmo kit e este mesmo problema. Quem passar daqui precisa cortar
     // em outro lugar ou subir o teto de propósito, com a medida de custo e de latência no PR.
-    const ANTES_DA_PERSONA = { quadro: 11_989, codigo: 26_745 };
+    // #129: +810 caracteres (regras de pedido de tempo, porquê, pergunta no fechamento, português claro), ~+203 tokens e ~US$ 0,006 por entrevista de 30 min (50 falas, entrada sem cache a US$ 0,54/M).
+    const ANTES_DA_PERSONA = { quadro: 12_735, codigo: 26_745 };
     assert.ok(quadro.length <= ANTES_DA_PERSONA.quadro, `quadro: ${quadro.length} caracteres`);
     assert.ok(codigo.length <= ANTES_DA_PERSONA.codigo, `código: ${codigo.length} caracteres`);
   });
