@@ -31,6 +31,8 @@ export const EsquemaSaidaPerguntar = z.object({
   aprofundar: z.boolean().nullable().optional(),
   /** Ele pediu para encerrar a entrevista inteira (item j). */
   encerrar: z.boolean().optional(),
+  /** Ele fez uma pergunta ou pediu esclarecimento que espera resposta, mesmo sem "?" (só o v2 pede; ver entrevistador-v2). */
+  candidatoPerguntou: z.boolean().optional(),
   visual: EsquemaVisualOpcional,
 });
 export type SaidaPerguntar = z.infer<typeof EsquemaSaidaPerguntar>;

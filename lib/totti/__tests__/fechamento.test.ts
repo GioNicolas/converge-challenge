@@ -204,6 +204,76 @@ describe("a máquina de estados", () => {
   });
 });
 
+describe("pergunta dele no fechamento: o modelo leu (candidatoPerguntou), sem regex", () => {
+  const pergunta = (texto: string, extra: Partial<LeituraDoTurno> = {}) => lida({ texto, candidatoPerguntou: true, intencao: "perguntou", ...extra });
+  const VOLTA = "Mais alguma coisa antes de encerrar?";
+  const semCandidatas = () => iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: [], tempoRestanteMs: 15 * MIN });
+  const comPerguntas = () => iniciarFechamento({ sala: "quadro", gatilho: "concluiu", candidatas: CANDIDATAS, tempoRestanteMs: 15 * MIN });
+
+  it("na última palavra, responde e volta a perguntar, várias vezes seguidas, sem despedir", () => {
+    const passos = rodar(semCandidatas(), [
+      ["o que é courier?", pergunta("É o entregador.")],
+      ["e o que ele leva?", pergunta("Encomendas de um lugar para outro.")],
+      ["quem paga o frete?", pergunta("Quem contrata a entrega.")],
+    ]);
+    assert.equal(passos[1].fala, `É o entregador. ${VOLTA}`);
+    assert.equal(passos[2].fala, `Encomendas de um lugar para outro. ${VOLTA}`);
+    assert.equal(passos[3].fala, `Quem contrata a entrega. ${VOLTA}`);
+    assert.deepEqual(passos.slice(1).map((p) => [p.etapa, p.encerrar]), [["ultima_palavra", false], ["ultima_palavra", false], ["ultima_palavra", false]]);
+    // Sem pergunta nova, "não, é isso" despede.
+    const fim = proximoPasso(passos.at(-1)!.estado, quieto, "não, é isso");
+    assert.ok(DESPEDIDAS.includes(fim.fala), fim.fala);
+    assert.equal(fim.encerrar, true);
+  });
+
+  it("nas perguntas finais, responde sem avançar e sem gastar o aprofundamento", () => {
+    const passos = rodar(comPerguntas(), [
+      ["cair como, ficar fora do ar?", pergunta("Isso, fora do ar por alguns minutos.")],
+      ["e quem tenta de novo?", lida({ texto: "Saquei. E o cliente?", perguntou: true })],
+    ]);
+    assert.equal(passos[1].fala, "Isso, fora do ar por alguns minutos.");
+    assert.equal(passos[1].etapa, "perguntas_finais");
+    assert.equal(passos[1].estado.atual?.pergunta, P1, "continua na mesma pergunta final");
+    assert.equal(passos[1].estado.aprofundou, false);
+    assert.equal(passos[2].fala, "Saquei. E o cliente?", "o aprofundamento ainda está disponível");
+    assert.equal(passos[2].estado.aprofundou, true);
+  });
+
+  it("encerrar junto com a pergunta não despede no mesmo passo, na última palavra nem nas perguntas finais", () => {
+    const naUltima = rodar(semCandidatas(), [["pode encerrar, mas o que é courier?", pergunta("É o entregador.", { encerrar: true, responder: true })]]);
+    assert.equal(naUltima[1].fala, `É o entregador. ${VOLTA}`);
+    assert.equal(naUltima[1].encerrar, false);
+    assert.equal(naUltima[1].etapa, "ultima_palavra");
+    const naPergunta = rodar(comPerguntas(), [["pode encerrar, mas o que é courier?", pergunta("É o entregador.", { encerrar: true, responder: true })]]);
+    assert.equal(naPergunta[1].fala, "É o entregador.");
+    assert.equal(naPergunta[1].encerrar, false);
+    assert.equal(naPergunta[1].etapa, "perguntas_finais");
+  });
+
+  it("sem a marca de pergunta (ou com ela falsa), encerrar segue direto para a despedida", () => {
+    for (const marca of [undefined, false]) {
+      const passo = proximoPasso(comPerguntas(), lida({ texto: "É o entregador.", encerrar: true, candidatoPerguntou: marca }), "pode encerrar");
+      assert.ok(DESPEDIDAS.includes(passo.fala), `${marca}: ${passo.fala}`);
+      assert.equal(passo.encerrar, true);
+    }
+  });
+
+  it("uma resposta vazia a uma pergunta dele pede de novo, em vez de ficar calado", () => {
+    const naUltima = rodar(semCandidatas(), [["o que é courier?", pergunta("", { responder: false })]]);
+    assert.equal(naUltima[1].fala, "Não peguei a sua pergunta. Pode repetir?");
+    assert.equal(naUltima[1].etapa, "ultima_palavra");
+    const naPergunta = rodar(comPerguntas(), [["o que é courier?", pergunta("", { responder: false })]]);
+    assert.equal(naPergunta[1].fala, "Não peguei a sua pergunta. Pode repetir?");
+    assert.equal(naPergunta[1].estado.atual?.pergunta, P1);
+  });
+
+  it("aceitaEncerrar: quem o modelo leu como pergunta não encerra; sem a marca, segue como antes", () => {
+    assert.equal(aceitaEncerrar("não", pergunta("É o entregador.")), false);
+    assert.equal(aceitaEncerrar("não", lida({ candidatoPerguntou: false })), true);
+    assert.equal(aceitaEncerrar("não"), true);
+  });
+});
+
 describe("nenhuma fala do fechamento manda continuar o código ou o desenho", () => {
   it("nem as fixas, nem as que aproveitam a reação do modelo", () => {
     // O modelo, por hábito, termina com o convite: o fechamento tira.

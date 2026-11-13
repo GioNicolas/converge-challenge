@@ -302,7 +302,8 @@ async function responderFala(
       imagem: entrada.imagemBase64 ?? null,
       ...(prazoMs !== undefined ? { timeoutMs: prazoMs } : {}),
     };
-    const r = await deps.llm.completarJson(pedido);
+    // No fechamento a leitura tem prazo curto (o teto é deste `gerar`, não do chamador, para a segunda geração ter o seu).
+    const r = prazoMs === undefined ? await deps.llm.completarJson(pedido) : await leituraNoPrazo(deps.llm.completarJson(pedido));
     let dados = r.dados;
     // Quem respondeu de fato este turno: com reserva e disjuntor no `lib/llm`, o modelo configurado nem sempre é
     // o que fala. Sem isso não dá para saber se o Totti "burro" era o modelo forte ou a reserva.
@@ -321,15 +322,16 @@ async function responderFala(
     log("perguntar_llm", { sessao_id: entrada.sessao_id, versao: v2 ? "v2" : "v1", ...medida.uso });
     // Ele fez uma pergunta clara ("o que tu acha", "posso usar um cache?") e o modelo ficou quieto: gera de novo,
     // uma vez, avisando. Se esta falhar, vale a primeira leitura (e a fala de reserva, mais abaixo).
-    if (prazoMs === undefined && r.ms <= MAX_MS_PARA_GERAR_DE_NOVO && ficouSemResposta(deSaidaDoQuadro(dados, situacao), situacao)) {
+    // Também no fechamento (a pergunta que ele fez sem "?" conta, lib/totti/turno.ts): só a reserva vem depois dela.
+    if (r.ms <= MAX_MS_PARA_GERAR_DE_NOVO && ficouSemResposta(deSaidaDoQuadro(dados, situacao), situacao)) {
       log("perguntar_pergunta_sem_resposta", { sessao_id: entrada.sessao_id, fase: entrada.fase });
-      const deNovo = await deps.llm
-        .completarJson({
-          ...pedido,
-          sistema: { ...pedido.sistema, dinamico: `${pedido.sistema.dinamico}\n\n${avisoDePerguntaSemResposta("responder")}` },
-          timeoutMs: PRAZO_SEGUNDA_GERACAO_MS,
-        })
-        .catch(() => null);
+      // O sinal é o da rota (não o do prazo do fechamento, que pode já ter estourado).
+      const deNovo = await leituraNoPrazo(deps.llm.completarJson({
+        ...pedido,
+        sinal,
+        sistema: { ...pedido.sistema, dinamico: `${pedido.sistema.dinamico}\n\n${avisoDePerguntaSemResposta("responder")}` },
+        timeoutMs: PRAZO_SEGUNDA_GERACAO_MS,
+      })).catch(() => null);
       if (deNovo) dados = deNovo.dados;
     }
     return dados;
@@ -346,7 +348,7 @@ async function responderFala(
   if (nucleo) {
     let lida: LeituraDoTurno | null = null;
     try {
-      const lido = await leituraNoPrazo(gerar(PRAZO_DA_LEITURA_NO_FECHAMENTO_MS));
+      const lido = await gerar(PRAZO_DA_LEITURA_NO_FECHAMENTO_MS);
       const guardada = aplicarGuardas(lido.texto, { falaDoCandidato: entrada.texto, falasDoTotti: jaDitas });
       if (guardada.travas.length) log("perguntar_travas", { sessao_id: entrada.sessao_id, fase: entrada.fase, travas: guardada.travas });
       lida = deSaidaDoQuadro({ ...lido, texto: limitarFrases(guardada.texto, MAX_FRASES_FALA) }, situacao);
@@ -429,6 +431,16 @@ async function responderFala(
   const perguntaBarrada = guardada.travas.includes("pergunta_repetida") || guardada.travas.includes("pergunta_de_conducao");
   // Até 3 frases: acolher + reagir + um follow-up curto. O prompt pede falas de uma ou duas.
   const curto = limitarFrases(guardada.texto, MAX_FRASES_FALA);
+
+  // Pediu para encerrar e fez uma pergunta na mesma fala ("pode encerrar, mas o que é courier?"): a pergunta não cai.
+  // O Totti responde e pergunta se tem mais alguma coisa, e o fechamento começa já na última palavra (ele não pediu o
+  // anúncio nem as perguntas finais). Não dispara `pediu_encerrar`, então o quadro não se despede neste turno.
+  if (saida.encerrar === true && saida.candidatoPerguntou === true) {
+    log("perguntar_turno", { sessao_id: entrada.sessao_id, fase: entrada.fase, regras: ["pergunta_ao_encerrar"] });
+    const inicial: EstadoFechamento = { ...iniciarFechamento({ sala: "quadro", gatilho: "pediu_encerrar" }), etapa: "ultima_palavra" };
+    const leituraDaPergunta = deSaidaDoQuadro({ ...saida, responder: true, texto: curto, encerrar: false }, situacao);
+    return comPasso(proximoPasso(inicial, leituraDaPergunta, entrada.texto), { inicio: true, antes: null, base: comConclusao(comFala), concluiu, desfecho });
+  }
 
   // É hora de fechar? Quem decide é o núcleo (lib/totti/fechamento.ts), com o que o quadro sabe do momento: pedido
   // para encerrar vai direto à despedida; "terminei" com o caminho principal desenhado fecha na primeira vez, e sem

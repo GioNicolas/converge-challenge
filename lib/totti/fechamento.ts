@@ -10,7 +10,7 @@
 // Este arquivo não importa nada de `lib/agente` nem de `lib/agents`: as salas é que importam daqui.
 import { falaNaoRepetida, perguntaJaFeita, reacaoNeutra, semConviteDeSeguir } from "./guardas";
 import { frasesDe, normalizar, type Sala } from "./texto";
-import type { LeituraDoTurno } from "./turno";
+import { PEDIDOS_DE_REPETIR_A_PERGUNTA, type LeituraDoTurno } from "./turno";
 
 export const ETAPAS_DO_FECHAMENTO = ["anuncio", "perguntas_finais", "ultima_palavra", "despedida", "encerrada"] as const;
 export type EtapaDoFechamento = (typeof ETAPAS_DO_FECHAMENTO)[number];
@@ -42,7 +42,7 @@ export type EstadoFechamento = {
   aprofundou: boolean;
   /** As perguntas finais que já foram feitas. */
   feitas: string[];
-  /** A última palavra já recebeu um assunto novo: ela só volta uma vez. */
+  /** A última palavra já recebeu um assunto novo: ela só volta uma vez (uma pergunta dele não conta, ver `responderAPergunta`). */
   voltouDaUltimaPalavra: boolean;
   /** O que o Totti disse durante o fechamento, da mais antiga para a mais nova. */
   ditas: string[];
@@ -185,8 +185,12 @@ export const DESPEDIDAS = [
 // O que a fala do candidato mostra, sem modelo
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Resposta curta que não traz assunto novo ("nada", "pode", "não quero", "já falei tudo"), ou o pedido de encerrar. */
-export function aceitaEncerrar(fala: string): boolean {
+/**
+ * Resposta curta que não traz assunto novo ("nada", "pode", "não quero", "já falei tudo"), ou o pedido de encerrar.
+ * Quando o modelo leu que ele perguntou (`candidatoPerguntou`), a fala não encerra: a pergunta vem antes.
+ */
+export function aceitaEncerrar(fala: string, leitura?: LeituraDoTurno | null): boolean {
+  if (leitura?.candidatoPerguntou === true) return false;
   const t = normalizar(fala);
   if (!t) return false;
   if (/\b(encerr\w*|finaliz\w*|fech\w*)\b/.test(t)) return true;
@@ -243,6 +247,19 @@ function respostaDe(leitura: LeituraDoTurno | null | undefined): string {
   return frasesDe(semConviteDeSeguir(leitura.texto)).filter((f) => !f.trim().endsWith("?")).join(" ").trim();
 }
 
+/**
+ * Ele fez uma pergunta no fechamento: a resposta do modelo sai inteira (sem pergunta nova e sem convite). Na última
+ * palavra volta "Mais alguma coisa?", sem limite de voltas. Nas perguntas finais a pergunta atual segue aberta: sem
+ * avançar e sem gastar o aprofundamento. Sem resposta do modelo, pede de novo (a mesma reserva do turno), em vez de
+ * ficar calado.
+ */
+function responderAPergunta(estado: EstadoFechamento, leitura: LeituraDoTurno): PassoDoFechamento {
+  const resposta = respostaDe(leitura);
+  if (!resposta) return passo(estado, falaNaoRepetida(PEDIDOS_DE_REPETIR_A_PERGUNTA, estado.ditas));
+  if (estado.etapa === "ultima_palavra") return passo(estado, `${resposta} ${VOLTA_DA_ULTIMA_PALAVRA}`);
+  return passo(estado, resposta);
+}
+
 /** Sai a próxima pergunta da fila, com a reação na frente; sem fila, a última palavra. */
 function avancar(estado: EstadoFechamento, antes: string): PassoDoFechamento {
   const [proxima, ...resto] = estado.fila;
@@ -270,8 +287,9 @@ export function proximoPasso(
 ): PassoDoFechamento {
   if (estado.etapa === "encerrada") return { fala: "", etapa: "encerrada", encerrar: true, estado };
   if (estado.etapa === "despedida") return despedir(estado);
-  // Pedido para encerrar no meio do fechamento: direto para a despedida.
-  if (leitura?.encerrar) return despedir(estado);
+  // Pedido para encerrar no meio do fechamento: direto para a despedida. Se na mesma fala ele fez uma pergunta, a
+  // pergunta é respondida primeiro (e não se despede no mesmo passo).
+  if (leitura?.encerrar && leitura.candidatoPerguntou !== true) return despedir(estado);
 
   const atual: EstadoFechamento = opcoes.tempoRestanteMs === undefined ? estado
     : { ...estado, fila: estado.fila.slice(0, perguntasQueCabem(opcoes.tempoRestanteMs)) };
@@ -286,6 +304,8 @@ export function proximoPasso(
   // Daqui para baixo o passo responde a um turno do candidato.
   if (!leitura && !falaDoCandidato.trim()) return esperar(atual);
   if (!soltou && aindaPensando(falaDoCandidato)) return esperar(atual);
+  // Ele perguntou (o modelo leu, mesmo sem "?"): responde, em qualquer etapa, antes de qualquer outra coisa.
+  if (leitura?.candidatoPerguntou === true) return responderAPergunta(atual, leitura);
 
   if (atual.etapa === "perguntas_finais") {
     // "Não sei" ou "pula": aceita com leveza e avança.
@@ -299,7 +319,7 @@ export function proximoPasso(
   }
 
   // Última palavra: resposta curta, "não" ou "pode" vai para a despedida.
-  if (aceitaEncerrar(falaDoCandidato)) return despedir(atual);
+  if (aceitaEncerrar(falaDoCandidato, leitura)) return despedir(atual);
   // Assunto novo recebe uma resposta e volta para a última palavra, uma vez só.
   const resposta = respostaDe(leitura) || reacaoNeutra(atual.ditas);
   if (atual.voltouDaUltimaPalavra) return despedir(atual, resposta);

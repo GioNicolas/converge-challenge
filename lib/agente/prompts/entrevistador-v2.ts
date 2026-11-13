@@ -62,8 +62,9 @@ Sinais de um raciocínio forte: ${problema.sinaisEsperados.join("; ")}
 FORMATO
 ${INSTRUCOES_VISUAIS}
 Responda SOMENTE com um objeto JSON, sem nada fora dele:
-{"responder":true,"texto":"sua fala","requisito":null,"concluiu":false,"desfecho":null,"aprofundar":false,"encerrar":false,"visual":[]}
+{"responder":true,"texto":"sua fala","requisito":null,"concluiu":false,"desfecho":null,"aprofundar":false,"encerrar":false,"candidatoPerguntou":false,"visual":[]}
 - responder: false quando o certo é ficar quieto (aí texto "").
+- candidatoPerguntou: true quando ele te faz uma pergunta ou pede esclarecimento que espera resposta (mesmo sem "?", ex.: "não entendi o que é courier"); responda sempre, em qualquer fase, inclusive no fechamento.
 - requisito: quando a sua fala dá um fato novo do problema (ou aceita uma suposição que ele declarou), um item curto de até 50 caracteres para o quadro de requisitos ("Links guardados por 5 anos"); senão null. Nunca repita um que já está em "Requisitos já no quadro".
 - concluiu: true só quando ele indica que terminou a ETAPA.
 - encerrar: true só quando ele pede para encerrar a entrevista inteira; senão false.

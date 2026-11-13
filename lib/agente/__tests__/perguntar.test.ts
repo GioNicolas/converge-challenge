@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { KIT_SYSTEM_DESIGN as kitDemo } from "../kits/system-design";
-import { criarClienteFalso, ErroLlm } from "../llm/cliente";
+import { DESPEDIDAS } from "../../totti/fechamento";
+import { criarClienteFalso, ErroLlm, type LlmArgs } from "../llm/cliente";
 import { perguntar } from "../perguntar";
 import { estadoInicial } from "../sessao/estado";
 
@@ -443,5 +444,85 @@ describe("por quê obrigatório no v2 (escolha curta a uma pergunta com alternat
     const eventos: [string, Record<string, unknown>][] = [];
     await perguntar({ ...depsV2(llm), log: (e, m) => eventos.push([e, m]) }, ativa, { ...perguntada, texto: "back" }, AGORA);
     assert.ok(eventos.some(([e, m]) => e === "perguntar_turno" && (m.regras as string[]).includes("pede_porque")));
+  });
+});
+
+describe("pergunta dele no fechamento do quadro: o modelo lê a pergunta (candidatoPerguntou), sem regex", () => {
+  // Três peças ligadas: "terminei" com isto no quadro fecha na primeira vez.
+  const GRAFO = "COMPONENTES\n- [r1] Cliente (retângulo)\n- [r2] API (retângulo)\n- [r3] Banco (retângulo)\nCONEXÕES\n- [s1] Cliente → API\n- [s2] API → Banco";
+  const VOLTA = "Mais alguma coisa antes de encerrar?";
+  const emALTO = { ...estadoInicial(), fase: "ALTO_NIVEL" as const, faseIniciadaEm: AGORA - 5 * 60_000, iniciadaEm: AGORA - 12 * 60_000 };
+  const comV2 = (llm: ReturnType<typeof criarClienteFalso>) => ({ llm, kit: kitDemo, problema, log: () => {}, versao: "v2" as const });
+  /** O modelo do teste, pela fala: conclui, pede para encerrar com pergunta, pergunta, ou fica quieto ao "só isso". */
+  const modelo = (args: LlmArgs<unknown>) => {
+    const fala = args.mensagens.at(-1)?.content ?? "";
+    if (fala.includes("terminei")) return { responder: false, texto: "", requisito: null, concluiu: true };
+    if (fala.includes("encerrar, mas")) return { responder: true, texto: "É o entregador.", requisito: null, concluiu: false, encerrar: true, candidatoPerguntou: true };
+    if (fala.includes("courier")) return { responder: true, texto: "É o entregador.", requisito: null, concluiu: false, candidatoPerguntou: true };
+    if (fala.includes("só isso")) return { responder: false, texto: "", requisito: null, concluiu: false };
+    return { responder: true, texto: "Certo.", requisito: null, concluiu: false };
+  };
+
+  it("o caso real: anunciado o fechamento, ele pergunta o que é courier sem '?': responde e pergunta se quer mais, sem encerrar; depois 'não, só isso' despede", async () => {
+    const llm = criarClienteFalso(modelo);
+    const d = comV2(llm);
+    let r = await perguntar(d, emALTO, { fase: "ALTO_NIVEL", texto: "Pronto, terminei o desenho.", grafo: GRAFO }, AGORA);
+    for (let i = 0; i < 6 && r.fechamento !== "ultima_palavra"; i++) {
+      r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "Certo, entendi.", grafo: GRAFO }, AGORA);
+    }
+    assert.equal(r.fechamento, "ultima_palavra");
+    r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "não entendi o que é courier", grafo: GRAFO }, AGORA);
+    assert.equal(r.texto, `É o entregador. ${VOLTA}`);
+    assert.equal(r.encerrar, undefined);
+    assert.equal(r.fechamento, "ultima_palavra");
+    r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "não, só isso", grafo: GRAFO }, AGORA);
+    assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
+    assert.equal(r.encerrar, true);
+    assert.equal(r.fechamento, "encerrada");
+  });
+
+  it("pede para encerrar e pergunta na mesma fala: a pergunta é respondida, e o quadro não se despede neste turno", async () => {
+    const r = await perguntar(comV2(criarClienteFalso(modelo)), emALTO, { fase: "ALTO_NIVEL", texto: "pode encerrar, mas o que é courier?", grafo: GRAFO }, AGORA);
+    assert.equal(r.texto, `É o entregador. ${VOLTA}`);
+    assert.equal(r.encerrar, undefined);
+    assert.equal(r.fechamento, "ultima_palavra");
+  });
+
+  it("sem pergunta, pedir para encerrar continua indo direto à despedida", async () => {
+    const llm = criarClienteFalso(() => ({ responder: false, texto: "", requisito: null, concluiu: false, encerrar: true }));
+    const r = await perguntar(comV2(llm), emALTO, { fase: "ALTO_NIVEL", texto: "pode encerrar", grafo: GRAFO }, AGORA);
+    assert.ok(DESPEDIDAS.includes(r.texto), r.texto);
+    assert.equal(r.encerrar, true);
+  });
+
+  it("primeiro modelo calado e a segunda geração responde (pergunta sem \"?\"): sai a resposta, fora do fechamento", async () => {
+    const llm = criarClienteFalso((args) => (args.sistema.dinamico ?? "").includes("ATENÇÃO: ele te fez")
+      ? { responder: true, texto: "É o entregador.", requisito: null, concluiu: false, candidatoPerguntou: true }
+      : { responder: false, texto: "", requisito: null, concluiu: false, candidatoPerguntou: true });
+    const r = await perguntar(comV2(llm), emALTO, { fase: "ALTO_NIVEL", texto: "não entendi o que é courier", grafo: GRAFO }, AGORA);
+    assert.equal(r.texto, "É o entregador.");
+    assert.equal(llm.chamadas.length, 2, "a segunda geração rodou");
+  });
+
+  it("no fechamento, a pergunta sem \"?\" também ganha a segunda geração antes da reserva", async () => {
+    const modeloSegundo = (args: LlmArgs<unknown>) => {
+      if ((args.sistema.dinamico ?? "").includes("ATENÇÃO: ele te fez")) return { responder: true, texto: "É o entregador.", requisito: null, concluiu: false, candidatoPerguntou: true };
+      const fala = args.mensagens.at(-1)?.content ?? "";
+      if (fala.includes("courier")) return { responder: false, texto: "", requisito: null, concluiu: false, candidatoPerguntou: true };
+      return modelo(args);
+    };
+    const llm = criarClienteFalso(modeloSegundo);
+    const d = comV2(llm);
+    let r = await perguntar(d, emALTO, { fase: "ALTO_NIVEL", texto: "Pronto, terminei o desenho.", grafo: GRAFO }, AGORA);
+    for (let i = 0; i < 6 && r.fechamento !== "ultima_palavra"; i++) {
+      r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "Certo, entendi.", grafo: GRAFO }, AGORA);
+    }
+    const antes = llm.chamadas.length;
+    r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "não entendi o que é courier", grafo: GRAFO }, AGORA);
+    assert.equal(r.texto, `É o entregador. ${VOLTA}`);
+    assert.equal(r.encerrar, undefined);
+    assert.equal(llm.chamadas.length - antes, 2, "a primeira leitura veio calada e a segunda respondeu");
+    r = await perguntar(d, r.estado, { fase: "ALTO_NIVEL", texto: "não, só isso", grafo: GRAFO }, AGORA);
+    assert.equal(r.encerrar, true);
   });
 });

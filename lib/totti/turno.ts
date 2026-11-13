@@ -30,6 +30,12 @@ export type LeituraDoTurno = {
   perguntou: boolean;
   /** O gesto da sala (linhas grifadas ou marcas no desenho). O núcleo não lê: só carrega. */
   apontar?: unknown;
+  /**
+   * O modelo leu que o candidato fez uma pergunta (ou pediu esclarecimento) que espera resposta, mesmo sem "?". Só a
+   * sala que pede isso (o quadro, no v2) o traz; ausente, o fechamento segue como antes. Diferente de `intencao`
+   * "perguntou", que sai do regex `candidatoPerguntou` quando o modelo não marcou nada.
+   */
+  candidatoPerguntou?: boolean;
 };
 
 /** O mínimo que as duas salas sabem dizer sobre o momento da conversa. */
@@ -182,6 +188,8 @@ export type SaidaDoQuadro = {
   /** "pensando": ele pediu tempo para pensar (não é resposta; lib/agente/perguntar.ts trata). */
   desfecho?: "respondeu" | "nao_sabe" | "pulou" | "pensando" | null;
   visual?: unknown;
+  /** O modelo leu que ele perguntou (ver `LeituraDoTurno.candidatoPerguntou`). */
+  candidatoPerguntou?: boolean;
 };
 
 /** O que sobra para a intenção depois do que o modelo marcou: o que a fala e o momento mostram. */
@@ -223,7 +231,10 @@ export function deSaidaDoQuadro(saida: SaidaDoQuadro, situacao: SituacaoDoTurno)
     : desfecho === "pulou" ? "pulou"
     : desfecho === "respondeu" ? "respondeu"
     : intencaoSemMarca(responder, situacao);
-  return leitura({ responder, texto: saida.texto, intencao, concluiu: saida.concluiu === true, encerrar: saida.encerrar === true, apontar: saida.visual });
+  return leitura({
+    responder, texto: saida.texto, intencao, concluiu: saida.concluiu === true, encerrar: saida.encerrar === true, apontar: saida.visual,
+    ...(saida.candidatoPerguntou !== undefined ? { candidatoPerguntou: saida.candidatoPerguntou } : {}),
+  });
 }
 
 /** A leitura decidida de volta na saída do live coding: só os campos comuns mudam. */
@@ -256,7 +267,10 @@ const CONVITE_EM_TODA_RESPOSTA: Record<Sala, boolean> = { quadro: true, codigo: 
  */
 export function ficouSemResposta(lida: LeituraDoTurno, situacao: SituacaoDoTurno): boolean {
   const calado = !lida.responder || lida.texto.trim() === "";
-  return !lida.encerrar && calado && perguntouComClareza(situacao.falaDoCandidato);
+  // A pergunta que o modelo leu (`candidatoPerguntou`, sem "?") conta como clara, e não cai no "pediu para encerrar":
+  // a pergunta vem antes do encerramento (lib/agente/perguntar.ts).
+  const marcada = lida.candidatoPerguntou === true;
+  return (!lida.encerrar || marcada) && calado && (marcada || perguntouComClareza(situacao.falaDoCandidato));
 }
 
 /** O recado para a segunda geração. `campo` é o nome do campo de responder no schema da sala. */

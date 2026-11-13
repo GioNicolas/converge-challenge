@@ -95,6 +95,13 @@ describe("adaptadores: a saída de cada sala vira a mesma leitura", () => {
     assert.equal(deSaidaDoQuadro({ responder: false, texto: "" }, situacao()).intencao, "pensando_alto");
   });
 
+  it("a marca de pergunta do modelo chega à leitura do quadro; sem ela, a leitura não ganha o campo", () => {
+    const comMarca = deSaidaDoQuadro({ responder: true, texto: "É o entregador.", candidatoPerguntou: true }, situacao({ falaDoCandidato: "não entendi o que é courier" }));
+    assert.equal(comMarca.candidatoPerguntou, true);
+    assert.equal("candidatoPerguntou" in deSaidaDoQuadro({ responder: true, texto: "Saquei." }, situacao()), false);
+    assert.equal("candidatoPerguntou" in deSaidaDoLiveCoding({ reply: "Saquei." }, situacao()), false);
+  });
+
   it("o desfecho e a sondagem só valem quando havia pergunta do Totti em aberto; a dica mantém o assunto aberto", () => {
     assert.equal(deSaidaDoQuadro({ responder: true, texto: "Tranquilo.", desfecho: "nao_sabe" }, situacao()).intencao, "conversa");
     assert.equal(deSaidaDoLiveCoding({ reply: "Tranquilo.", probeOutcome: { kind: "nao_conseguiu" } }, situacao()).intencao, "conversa");
@@ -228,6 +235,16 @@ describe("pergunta clara nunca fica sem resposta", () => {
     assert.equal(ficouSemResposta(quieto, situacao({ falaDoCandidato: "aí eu ponho o cache aqui, né?" })), false);
     assert.equal(ficouSemResposta(lida(), situacao({ falaDoCandidato: "o que tu acha" })), false);
     assert.equal(ficouSemResposta({ ...quieto, encerrar: true }, situacao({ falaDoCandidato: "posso encerrar?" })), false);
+  });
+
+  it("a pergunta que o modelo leu (sem \"?\") conta, inclusive com pedido de encerrar; sem a marca, a regra é a de antes", () => {
+    const fala = "não entendi o que é courier";
+    const marcada = { ...quieto, candidatoPerguntou: true };
+    assert.equal(ficouSemResposta(marcada, situacao({ falaDoCandidato: fala })), true, "marca do modelo sem \"?\"");
+    assert.equal(ficouSemResposta({ ...marcada, encerrar: true }, situacao({ falaDoCandidato: fala })), true, "marca com encerrar");
+    assert.equal(ficouSemResposta({ ...quieto, encerrar: true }, situacao({ falaDoCandidato: fala })), false, "sem marca, encerrar exclui");
+    assert.equal(ficouSemResposta(quieto, situacao({ falaDoCandidato: fala })), false, "sem marca, sem \"?\" não é pergunta clara");
+    assert.equal(ficouSemResposta({ ...marcada, responder: true, texto: "É o entregador." }, situacao({ falaDoCandidato: fala })), false, "com resposta, nada a fazer");
   });
 
   it("se nem a segunda geração respondeu, o Totti pede para repetir, sem repetir o pedido anterior", () => {
