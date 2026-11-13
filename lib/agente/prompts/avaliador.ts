@@ -6,13 +6,14 @@ import { blocoDoBriefing } from "../briefing";
 import type { Kit, Problema } from "../kits/tipos";
 import { INSTRUCOES_VISUAIS } from "../../presenca/acoesVisuais";
 import { temMudancaPrevista } from "../kits/empecilhos-genericos";
-import { criteriosDoPlanoSemEvidencia, criteriosSemEvidencia, nomesDosCriteriosDoPlano, tempoDaEntrevista, tempoRestanteMs, type EstadoSessao } from "../sessao/estado";
+import { criteriosDoPlanoSemEvidencia, criteriosSemEvidencia, duracaoTotalS, nomesDosCriteriosDoPlano, tempoDaEntrevista, tempoRestanteMs, type EstadoSessao } from "../sessao/estado";
+import { duracaoEfetivaDaFaseS } from "../../totti/fechamento";
 import { conversaEmTexto, historicoDaConversa, INSTRUCAO_IMAGEM, perguntasFeitasEmTexto } from "./contexto";
 import { blocoDoPlano } from "../plano";
 import { dado, dadoEmLinha, REGRA_DADOS } from "../../seguranca/injecao";
 import { orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from "../../interrupcao/politica";
 import { pecasDoGrafo } from "../sessao/fechamento";
-import { conclusaoBarradaRecente, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, ritmoDoEstado, statusPermitidoNoEstado, tetoDaPergunta } from "../sessao/politica";
+import { conclusaoBarradaRecente, LIMITE_REDIRECIONAMENTOS_DE_ESCOPO, LIMITE_SILENCIO_INICIAL_S, LIMITE_SILENCIO_S, motivoBloqueioPlin, pedidoDeTempoPendente, perguntaObrigatoria, ritmoDoEstado, statusPermitidoNoEstado } from "../sessao/politica";
 import { STATUS_ANALISE, type PedidoAnalise } from "../sessao/tipos";
 
 export const NOME_SCHEMA_ANALISE = "analise_quadro";
@@ -130,7 +131,13 @@ REGRAS DE SAÍDA (JSON, exatamente os campos do schema):
 }
 
 function tempoRestante(estado: EstadoSessao, agora: number): string {
-  const total = estado.tempos[estado.fase];
+  // Duração efetiva da fase (#129): no APROFUNDAMENTO, o que resta é até os 85% do tempo total da entrevista.
+  const total = duracaoEfetivaDaFaseS(estado.fase, {
+    faseIniciadaEm: estado.faseIniciadaEm,
+    iniciadaEm: estado.iniciadaEm ?? null,
+    duracaoTotalS: duracaoTotalS(estado),
+    duracaoFaseS: estado.tempos[estado.fase],
+  });
   if (total === undefined || estado.faseIniciadaEm === null) return "sem limite definido para esta fase";
   const restante = Math.max(0, total - Math.floor((agora - estado.faseIniciadaEm) / 1000));
   const min = Math.floor(restante / 60);
@@ -223,6 +230,12 @@ function blocoDoEscopo(estado: EstadoSessao, agora: number): string {
 `;
 }
 
+/**
+ * Recado da segunda chamada (#129, bloco B): o modelo devolveu "ok" com a pergunta obrigatória. Vai no fim do bloco
+ * dinâmico, e só nessa chamada.
+ */
+export const AVISO_DA_PERGUNTA_OBRIGATORIA = `ATENÇÃO: faz tempo que você não pergunta e o desenho mudou. Nesta análise "ok" não vale: devolva uma pergunta concreta sobre a parte mais forte ou mais recente do desenho, citando as peças pelo nome.`;
+
 /** Bloco dinâmico: muda a cada análise. Nada daqui vai ao navegador. */
 export function montarSistemaDinamico(
   estado: EstadoSessao,
@@ -232,9 +245,13 @@ export function montarSistemaDinamico(
   briefing = "",
   /** Linha da conclusão barrada (ver `blocoDaConclusaoBarrada`); vazia quando não há. */
   conclusaoBarrada = "",
+  /** O kit ou o problema tem mudança prevista (ver `temMudancaPrevista`): entra na conta da brecha (decisão G). */
+  mudancaPrevista = false,
 ): string {
   const permitidos = STATUS_ANALISE.filter((s) => statusPermitidoNoEstado(estado, s));
   const bloqueio = motivoBloqueioPlin(estado, agora, undefined, { paradoHaS: pedido.parado_ha_s });
+  // Mesma conta de `analisar` (ver perguntaObrigatoria): o prompt só cobra a pergunta quando a análise vai aceitá-la.
+  const obrigaPergunta = perguntaObrigatoria(estado, agora, pecasDoGrafo(pedido.grafo), { paradoHaS: pedido.parado_ha_s, mudancaPrevista });
   const semEvidencia = criteriosSemEvidencia(estado);
   // A linha da rubrica deixa de fora os critérios do plano (eles têm a própria linha, ver `blocoDosCriteriosDoPlano`).
   const doPlano = nomesDosCriteriosDoPlano(estado.plano);
@@ -257,7 +274,7 @@ Candidato sem mexer no desenho nem falar há: ${
 ${pedidoDeTempoPendente(estado, agora, pedido.parado_ha_s) ? blocoDoPedidoDeTempo(Math.round((agora - (estado.pediuTempoEm ?? agora)) / 1000)) : ""}Requisitos já combinados no quadro: ${pedido.requisitos?.length ? dadoEmLinha("requisitos", pedido.requisitos.join(" | ")) : "(nenhum)"}
 Status permitidos agora: ${permitidos.join(", ")}
 ${blocoDoEscopo(estado, agora)}${blocoDoEmpecilho(estado, agora)}${estado.fase === "FECHAMENTO" && !estado.perguntaFinalFeita ? `PERGUNTA FINAL: ainda falta a pergunta de encerramento (ex.: o que ele mudaria com mais tempo, ou o maior risco do desenho). Faça-a agora como "duvida", ancorada no desenho.
-` : ""}${tetoDaPergunta(estado, agora, pecasDoGrafo(pedido.grafo)) ? `PERGUNTA EM ATRASO: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta e o desenho mudou desde então. Pergunte agora sobre a parte mais forte do desenho, citando as peças pelo nome, mesmo que ela ainda não esteja fechada, em vez de "ok".
+` : ""}${obrigaPergunta ? `PERGUNTA OBRIGATÓRIA: faz ${Math.round(RITMO_QUADRO.tetoSemPerguntaMs / 60_000)} min que você não pergunta e o desenho mudou desde então. Nesta análise "ok" não vale: pergunte agora sobre a parte mais forte ou a mais recente do desenho dele, concreta, citando as peças pelo nome (princípio 1), mesmo que ela ainda não esteja fechada.
 ` : ""}${bloqueio ? `Atenção: uma pergunta nova NÃO pode ser feita agora (${bloqueio}). Responda "ok" e apenas registre observações.` : "Uma pergunta nova pode ser feita agora, se houver motivo."}
 
 Critérios da rubrica ainda SEM evidência: ${rubricaSemEvidencia.length ? rubricaSemEvidencia.join(", ") : "nenhum"}
@@ -301,7 +318,7 @@ export function montarPromptAvaliador(
   return {
     sistema: {
       estatico: `${montarSistemaEstatico(kit, problema)}\n\n${REGRA_DADOS}`,
-      dinamico: montarSistemaDinamico(estado, pedido, agora, blocoDoBriefing(kit, estado, agora), blocoDaConclusaoBarrada(kit, problema, estado, agora)),
+      dinamico: montarSistemaDinamico(estado, pedido, agora, blocoDoBriefing(kit, estado, agora), blocoDaConclusaoBarrada(kit, problema, estado, agora), temMudancaPrevista(kit, problema)),
     },
     mensagens: [{ role: "user", content: "Analise o quadro agora e responda somente com o JSON da decisão." }],
   };

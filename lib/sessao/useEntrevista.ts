@@ -6,7 +6,7 @@ import type { Quadro } from "@/components/Canvas";
 import type { ControleCursor } from "@/components/CursorAgente";
 import type { MensagemConversa } from "@/components/quadro/PainelConversa";
 import { pedirEmpecilho, pedirFechamento, perguntar } from "@/lib/sessao/servidor";
-import { DESPEDIDAS, limiarDoFechamentoNoQuadro } from "@/lib/totti/fechamento";
+import { DESPEDIDAS, duracaoEfetivaDaFaseS, limiarDoFechamentoNoQuadro, msAteFimDaFase } from "@/lib/totti/fechamento";
 import { criarDespedida } from "@/lib/voz/despedida";
 import { semFalaSubstituida } from "@/lib/conversa/substituir";
 import { concluiuHaPouco, contarComponentes, emGarantiaDoEmpecilho, esperaDoEmpecilho, relaxaPreChecagens } from "@/lib/sessao/empecilho";
@@ -614,14 +614,21 @@ export function useEntrevista(
     };
   }, [quadro, sessao, enviar, registrar]);
 
-  // Tempo de cada fase.
+  // Tempo de cada fase. O APROFUNDAMENTO acaba no instante em que faltam 15% do tempo total (#129, decisão F), contado
+  // do começo da entrevista: o reinício deste efeito não empurra o fim (msAteFimDaFase). O servidor usa a mesma conta
+  // (duracaoEfetivaDaFaseS, lib/agente/sessao/estado.ts TICK).
   useEffect(() => {
     if (estado.fechamento || estado.fase === "FECHAMENTO" || encerrandoRef.current) return;
-    const segundos = sessao?.tempos[estado.fase];
-    if (!segundos) return;
-    const t = setTimeout(() => { if (!encerrandoRef.current) enviar({ tipo: "TEMPO_DA_FASE_ACABOU" }); }, segundos * 1000);
+    const ms = msAteFimDaFase(estado.fase, Date.now(), {
+      faseIniciadaEm: estado.faseIniciadaEm,
+      iniciadaEm: estado.iniciadaEm ?? null,
+      duracaoTotalS: (estado.duracaoMin ?? DURACAO_PADRAO_MIN) * 60,
+      duracaoFaseS: sessao?.tempos[estado.fase],
+    });
+    if (ms === undefined) return;
+    const t = setTimeout(() => { if (!encerrandoRef.current) enviar({ tipo: "TEMPO_DA_FASE_ACABOU" }); }, ms);
     return () => clearTimeout(t);
-  }, [estado.fase, estado.fechamento, sessao, enviar]);
+  }, [estado.fase, estado.fechamento, estado.faseIniciadaEm, estado.iniciadaEm, estado.duracaoMin, sessao, enviar]);
 
   // Apresentação: o agente fala e escreve o enunciado no quadro.
   useEffect(() => {
@@ -814,7 +821,9 @@ export function useEntrevista(
       if ((relaxa ? e.plin === "PERGUNTA_ATIVA" : e.plin !== "LIVRE") || preparandoVozRef.current || !podeTomarTurno({ agora, ultimaFalaEm: ultimaFalaEm.current,
         falaParcial: falaParcial.current, agenteFalando: agenteFalandoRef.current,
         aguardandoResposta: pedidosEmAndamento.current > 0 })) return;
-      const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS: sessao.tempos[e.fase],
+      // A fração da fase (esperaDoEmpecilho) usa a mesma duração efetiva do timer da fase (#129, decisão F).
+      const duracaoDaFaseS = duracaoEfetivaDaFaseS(e.fase, { faseIniciadaEm: e.faseIniciadaEm, iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, duracaoFaseS: sessao.tempos[e.fase] });
+      const base = { agora, fase: e.fase, faseIniciadaEm: e.faseIniciadaEm, duracaoDaFaseS,
         jaAnunciado: false, respondendoPergunta: false, ultimaFalaDoAgenteEm: ultimaFalaDoAgenteEm.current,
         iniciadaEm: e.iniciadaEm ?? null, duracaoTotalS, ultimaPerguntaEm: e.ultimaPerguntaEm ?? null,
         // Ele disse que terminou há pouco: a conclusão conta como brecha para a mudança (decisão F).

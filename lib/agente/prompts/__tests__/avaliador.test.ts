@@ -198,23 +198,32 @@ describe("ritmo por conteúdo no prompt (#129, bloco B)", () => {
     assert.ok(e.includes("\"parteFechada\": true somente quando a fase atual é ALTO_NIVEL ou APROFUNDAMENTO"));
   });
 
-  it("o teto avisa o modelo quando faz 5 min sem pergunta e há desenho novo", () => {
-    const atrasado = { ...estado, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1"] };
+  it("o teto obriga a pergunta quando faz 3 min sem pergunta e há desenho novo", () => {
+    const atrasado = { ...estado, ultimaPerguntaEm: AGORA - 4 * MIN, desenhoNaUltimaPergunta: ["r1"] };
     const d = montarPromptAvaliador(kitDemo, problema, atrasado, pedido(), AGORA).sistema.dinamico;
-    assert.ok(d.includes("PERGUNTA EM ATRASO: faz 5 min que você não pergunta e o desenho mudou"));
-    assert.ok(d.includes("parte mais forte do desenho"));
+    assert.ok(d.includes("PERGUNTA OBRIGATÓRIA: faz 3 min que você não pergunta e o desenho mudou"));
+    assert.ok(d.includes("\"ok\" não vale"));
+    assert.ok(d.includes("parte mais forte ou a mais recente do desenho"));
+    assert.ok(!d.includes("PERGUNTA EM ATRASO"));
   });
 
   it("sem desenho novo, o aviso do teto não aparece", () => {
     const parado = { ...estado, ultimaPerguntaEm: AGORA - 6 * MIN, desenhoNaUltimaPergunta: ["r1", "e1", "s1"] };
     const d = montarPromptAvaliador(kitDemo, problema, parado, pedido(), AGORA).sistema.dinamico;
-    assert.ok(!d.includes("PERGUNTA EM ATRASO"));
+    assert.ok(!d.includes("PERGUNTA OBRIGATÓRIA"));
   });
 
-  it("antes dos 5 min, o aviso do teto não aparece", () => {
+  it("antes dos 3 min, o aviso do teto não aparece", () => {
     const recente = { ...estado, ultimaPerguntaEm: AGORA - 2 * MIN, desenhoNaUltimaPergunta: ["r1"] };
     const d = montarPromptAvaliador(kitDemo, problema, recente, pedido(), AGORA).sistema.dinamico;
-    assert.ok(!d.includes("PERGUNTA EM ATRASO"));
+    assert.ok(!d.includes("PERGUNTA OBRIGATÓRIA"));
+  });
+
+  it("com o teto vencido mas uma pergunta pendente, o aviso obrigatório não aparece (outro portão)", () => {
+    const pendente = { ...estado, ultimaPerguntaEm: AGORA - 4 * MIN, desenhoNaUltimaPergunta: ["r1"],
+      perguntaPendente: { status: "duvida" as const, pergunta: "Por que o cache?", nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: true, escopo: false, visual: [], criadoEm: AGORA - 1000 } };
+    const d = montarPromptAvaliador(kitDemo, problema, pendente, pedido(), AGORA).sistema.dinamico;
+    assert.ok(!d.includes("PERGUNTA OBRIGATÓRIA"));
   });
 });
 

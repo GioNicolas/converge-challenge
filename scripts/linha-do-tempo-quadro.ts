@@ -15,6 +15,7 @@ import { KIT_SYSTEM_DESIGN as kit } from "../lib/agente/kits/system-design";
 import type { LlmCliente } from "../lib/agente/llm/cliente";
 import { criarClientePrincipal } from "../lib/agente/llm/principal";
 import { escalarTempos } from "../lib/agente/plano";
+import { duracaoEfetivaDaFaseS } from "../lib/totti/fechamento";
 import {
   estadoInicial as estadoServidorInicial,
   TEMPOS_PADRAO,
@@ -150,6 +151,11 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
     criterios: kit.criterios.map((c) => c.id),
     plano: { cargo: "Desenvolvedor Backend Pleno", senioridade: "pleno", tom: "amigavel", dicas: "leves", foco: [{ area: "tecnico", peso: 1 }], notas: "", duracaoMin: opcoes.duracaoMin },
   });
+  // Mesma conta do navegador (useEntrevista.ts): a duração total é a da simulação, como o COMECAR a manda.
+  const duracaoDaFaseSim = (c: EstadoEntrevista) => duracaoEfetivaDaFaseS(c.fase, {
+    faseIniciadaEm: c.faseIniciadaEm, iniciadaEm: c.iniciadaEm ?? null, duracaoTotalS: opcoes.duracaoMin * 60,
+    duracaoFaseS: tempos[c.fase as keyof typeof tempos],
+  });
   const cli = (ev: EventoEntrevista) => {
     const antes = cliente.fase;
     cliente = transicionar(cliente, ev, t);
@@ -254,8 +260,9 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
 
   while (cliente.fase !== "ENCERRADA" && t < fimDaEntrevista) {
     t += TICK_MS;
-    // Tempo da fase.
-    const dur = cliente.faseIniciadaEm !== null ? tempos[cliente.fase as keyof typeof tempos] : undefined;
+    // Tempo da fase, como o navegador (useEntrevista.ts): a duração efetiva (o APROFUNDAMENTO vai até 85% do tempo total,
+    // #129) e nenhum timer no FECHAMENTO ou com o fechamento em andamento: a entrevista acaba pela duração total.
+    const dur = cliente.faseIniciadaEm !== null && cliente.fase !== "FECHAMENTO" && !cliente.fechamento ? duracaoDaFaseSim(cliente) : undefined;
     if (dur !== undefined && cliente.faseIniciadaEm !== null && t - cliente.faseIniciadaEm >= dur * 1000) cli({ tipo: "TEMPO_DA_FASE_ACABOU" });
     if ((cliente.fase as Fase) === "ENCERRADA") break;
 
@@ -415,7 +422,7 @@ export async function simularQuadro(persona: Persona, opcoes: { llm: LlmCliente;
     if (!empecilhoFeito && plinOk && podeFalar && pausaOk && t - ultimoPedidoEmpecilho >= 15_000) {
       ultimoPedidoEmpecilho = t;
       const espera = esperaDoEmpecilho({
-        agora: t, fase: cliente.fase, faseIniciadaEm: cliente.faseIniciadaEm, duracaoDaFaseS: tempos[cliente.fase as keyof typeof tempos],
+        agora: t, fase: cliente.fase, faseIniciadaEm: cliente.faseIniciadaEm, duracaoDaFaseS: duracaoDaFaseSim(cliente),
         jaAnunciado: false, respondendoPergunta: false, componentes: contarComponentes(grafo()), ultimaFalaDoAgenteEm,
         iniciadaEm: cliente.iniciadaEm ?? null, duracaoTotalS: opcoes.duracaoMin * 60, ultimaPerguntaEm: cliente.ultimaPerguntaEm ?? null,
       });

@@ -5,6 +5,7 @@ import { SILENCIO_INICIAL_S, SILENCIO_REQUISITOS_S, SILENCIO_SEM_ACAO_S } from "
 import { motivoDoRitmo, orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO, type Ritmo } from "../../interrupcao/politica";
 import { garantirMarca, mapearAcoesVisuais } from "../../presenca/acoesVisuais";
 import { limiarDoFechamentoNoQuadro } from "../../totti/fechamento";
+import { emGarantiaDoEmpecilho } from "../../sessao/empecilho";
 import type { Kit, Problema } from "../kits/tipos";
 import { temMudancaPrevista } from "../kits/empecilhos-genericos";
 import { criteriosDoPlanoSemEvidencia, duracaoTotalS, tempoRestanteMs, type EstadoSessao } from "./estado";
@@ -174,6 +175,50 @@ export function motivoDoConteudo(
   if (resposta.parteFechada && pisoPassou) return null;
   if (tetoDaPergunta(estado, agora, contexto.pecas)) return null;
   return resposta.parteFechada ? "PISO_ENTRE_PERGUNTAS" : "SEM_PARTE_FECHADA";
+}
+
+/**
+ * Um ciclo de brecha por vez: depois da garantia dos 60% (ver `precisaAbrirBrechaDaMudanca`), a análise volta a
+ * abrir espaço para a mudança só depois desse intervalo. Não bloqueia perguntas indefinidamente.
+ */
+export const INTERVALO_BRECHA_EMPECILHO_MS = 60_000;
+
+/**
+ * A mudança devida ainda não entrou e a entrevista já passou da fração da garantia (decisão G): a análise responde
+ * "ok" por um ciclo para abrir a brecha. Só no meio da entrevista (ALTO_NIVEL e APROFUNDAMENTO) e com a mudança
+ * prevista (do problema ou genérica do kit). Função pura.
+ */
+export function precisaAbrirBrechaDaMudanca(estado: EstadoSessao, agora: number, mudancaPrevista: boolean): boolean {
+  if (!mudancaPrevista || estado.empecilho) return false;
+  if (estado.fase !== "ALTO_NIVEL" && estado.fase !== "APROFUNDAMENTO") return false;
+  if (!emGarantiaDoEmpecilho({ agora, iniciadaEm: estado.iniciadaEm ?? null, duracaoTotalS: duracaoTotalS(estado) })) return false;
+  const ultima = estado.brechaEmpecilhoEm;
+  return ultima === undefined || ultima === null || agora - ultima >= INTERVALO_BRECHA_EMPECILHO_MS;
+}
+
+/** Contexto da pergunta obrigatória: o tempo parado do candidato e se o kit/problema tem mudança prevista. */
+export type ContextoDaPerguntaObrigatoria = {
+  paradoHaS?: number;
+  /** A mudança prevista (do problema ou genérica do kit); ver `temMudancaPrevista`. */
+  mudancaPrevista: boolean;
+};
+
+/**
+ * O teto venceu e nenhum portão bloqueia a pergunta (#129, bloco B): a análise do desenho é OBRIGADA a perguntar, e
+ * "ok" não vale nela. Portões: fase de conteúdo, sem pergunta pendente, ritmo comum (orçamento, cota, intervalo, bola
+ * com o candidato, fechamento) e sem a brecha da mudança (decisão G), que é um "ok" de propósito.
+ */
+export function perguntaObrigatoria(
+  estado: EstadoSessao,
+  agora: number,
+  pecas: string[] | null | undefined,
+  contexto: ContextoDaPerguntaObrigatoria,
+): boolean {
+  if (!FASES_DO_CONTEUDO.includes(estado.fase)) return false;
+  if (!tetoDaPergunta(estado, agora, pecas)) return false;
+  if (estado.perguntaPendente) return false;
+  if (motivoBloqueioPlin(estado, agora, undefined, { paradoHaS: contexto.paradoHaS }) !== null) return false;
+  return !precisaAbrirBrechaDaMudanca(estado, agora, contexto.mudancaPrevista);
 }
 
 /** Quantos redirecionamentos de escopo a entrevista aceita (#129, decisão I). */

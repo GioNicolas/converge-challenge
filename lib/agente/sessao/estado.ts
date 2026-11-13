@@ -9,7 +9,7 @@
 // Os nomes (fases, ciclo do plin, eventos) seguem os de `lib/sessao/estados.ts` do quadro.
 import { sobreposicao } from "../guardas";
 import type { PlanoDaSessao } from "../plano";
-import type { EstadoFechamento } from "../../totti/fechamento";
+import { duracaoEfetivaDaFaseS, type EstadoFechamento } from "../../totti/fechamento";
 import { fechamentoPodeSerSuspenso, pecasDoGrafo, voltouADesenhar, type DesenhoConcluido, type FechamentoDaSessao } from "./fechamento";
 import { podeLevantarPlin, REGRAS_PADRAO, statusPermitido, type Regras } from "./politica";
 import { FASES, type Fase, type FalaRecente, type Observacao, type RespostaAnalise } from "./tipos";
@@ -488,7 +488,13 @@ export function transicionar(
 
     case "TICK": {
       const proxima = PROXIMA_FASE[estado.fase];
-      const duracao = estado.tempos[estado.fase];
+      // Duração efetiva (#129): o APROFUNDAMENTO acaba com 85% do tempo total, não com o tempo de `tempos`.
+      const duracao = duracaoEfetivaDaFaseS(estado.fase, {
+        faseIniciadaEm: estado.faseIniciadaEm,
+        iniciadaEm: estado.iniciadaEm ?? null,
+        duracaoTotalS: duracaoTotalS(estado),
+        duracaoFaseS: estado.tempos[estado.fase],
+      });
       // Fase sem tempo configurado não acaba sozinha.
       if (!proxima || duracao === undefined || estado.faseIniciadaEm === null) return nada;
       return agora - estado.faseIniciadaEm >= duracao * 1000

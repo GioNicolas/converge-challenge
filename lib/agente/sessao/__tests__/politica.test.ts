@@ -5,6 +5,8 @@ import { intervaloMinimoMs, orcamentoDeInterrupcoes, RITMO, RITMO_QUADRO } from 
 import type { PlanoDaSessao } from "../../plano";
 import { estadoInicial, transicionar, type EstadoSessao } from "../estado";
 import {
+  perguntaObrigatoria,
+  precisaAbrirBrechaDaMudanca,
   conclusaoBarradaRecente,
   desenhoNovoDesdePergunta,
   extrairIdsDoGrafo,
@@ -413,11 +415,11 @@ describe("ritmo por conteúdo do quadro (#129, bloco B)", () => {
   });
 
   it("sem parte fechada e antes do teto, a pergunta vira SEM_PARTE_FECHADA", () => {
-    const e = alto({ ultimaPerguntaEm: AGORA - 4 * MIN });
+    const e = alto({ ultimaPerguntaEm: AGORA - 2 * MIN });
     assert.equal(motivoDoConteudo(e, aberta, AGORA, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
   });
 
-  it("teto: 5 min sem pergunta e com desenho novo sai mesmo sem parte fechada", () => {
+  it("teto: 3 min sem pergunta e com desenho novo sai mesmo sem parte fechada", () => {
     const e = alto({ ultimaPerguntaEm: AGORA, desenhoNaUltimaPergunta: ["r1"] });
     assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO, { pecas: ["r1", "e1"] }), null);
     assert.equal(motivoDoConteudo(e, aberta, AGORA + TETO - 1, { pecas: ["r1", "e1"] }), "SEM_PARTE_FECHADA");
@@ -614,5 +616,60 @@ describe("cota e escopo (#129, decisão I, revisado)", () => {
     assert.equal(motivoBloqueioPlin(cedo, AGORA, REGRAS_PADRAO, { escopo: true }), null);
     const cheio = estadoEm("ALTO_NIVEL", { iniciadaEm: AGORA, perguntasFeitas: LIMITE });
     assert.equal(motivoBloqueioPlin(cheio, AGORA, REGRAS_PADRAO, { escopo: true }), "LIMITE_DE_PERGUNTAS");
+  });
+});
+
+describe("pergunta obrigatória do teto (#129, bloco B)", () => {
+  const TETO = RITMO_QUADRO.tetoSemPerguntaMs;
+  const AGORA_OB = 10_000_000;
+  const PECAS = ["r1", "e1"];
+  const ctx = { mudancaPrevista: false };
+  // Teto vencido: a última pergunta foi há mais que o teto, com a peça e1 nova desde então.
+  const vencida = (extra: Partial<EstadoSessao> = {}) => estadoEm("APROFUNDAMENTO", {
+    iniciadaEm: AGORA_OB - 10 * 60_000, faseIniciadaEm: AGORA_OB - 60_000,
+    ultimaPerguntaEm: AGORA_OB - TETO - 1, desenhoNaUltimaPergunta: ["r1"], ...extra,
+  });
+
+  it("o teto de RITMO_QUADRO é de 3 min", () => {
+    assert.equal(TETO, 180_000);
+  });
+
+  it("com o teto vencido, em fase de conteúdo e sem bloqueio, a pergunta é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida(), AGORA_OB, PECAS, ctx), true);
+  });
+
+  it("antes do teto, não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ ultimaPerguntaEm: AGORA_OB - TETO + 1 }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("sem desenho novo, não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ desenhoNaUltimaPergunta: ["r1", "e1"] }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("fora das fases de conteúdo (REQUISITOS), não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ fase: "REQUISITOS" }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("uma pergunta pendente é outro portão: não é obrigatória", () => {
+    const pendente = { status: "duvida" as const, pergunta: "x?", nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: true, escopo: false, visual: [], criadoEm: AGORA_OB - 1 };
+    assert.equal(perguntaObrigatoria(vencida({ perguntaPendente: pendente }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("orçamento de perguntas esgotado é outro portão: não é obrigatória", () => {
+    assert.equal(perguntaObrigatoria(vencida({ perguntasFeitas: 50 }), AGORA_OB, PECAS, ctx), false);
+  });
+
+  it("a brecha da mudança (decisão G) é um \"ok\" de propósito: não é obrigatória", () => {
+    // Garantia dos 60% já passou (23 min de 35), a mudança prevista ainda não entrou e a brecha está aberta.
+    const comBrecha = vencida({ iniciadaEm: AGORA_OB - 23 * 60_000 });
+    assert.equal(perguntaObrigatoria(comBrecha, AGORA_OB, PECAS, { mudancaPrevista: true }), false);
+    assert.equal(precisaAbrirBrechaDaMudanca(comBrecha, AGORA_OB, true), true);
+    assert.equal(perguntaObrigatoria(comBrecha, AGORA_OB, PECAS, { mudancaPrevista: false }), true);
+  });
+
+  it("a brecha de INTERVALO_BRECHA_EMPECILHO_MS: ciclo recente, sem brecha; depois, de novo", () => {
+    const recente = vencida({ iniciadaEm: AGORA_OB - 23 * 60_000, brechaEmpecilhoEm: AGORA_OB - 1000 });
+    assert.equal(precisaAbrirBrechaDaMudanca(recente, AGORA_OB, true), false);
+    assert.equal(perguntaObrigatoria(recente, AGORA_OB, PECAS, { mudancaPrevista: true }), true);
   });
 });

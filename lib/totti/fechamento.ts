@@ -78,6 +78,54 @@ export function limiarDoFechamentoNoQuadro(duracaoTotalMs: number): number {
   return duracaoTotalMs > 0 ? FRACAO_PARA_FECHAR * duracaoTotalMs : TEMPO_PARA_FECHAR_MS;
 }
 
+/** Quando o APROFUNDAMENTO acaba, como fração do tempo total: faltam FRACAO_PARA_FECHAR para o fim (#129, decisão F). */
+export const FRACAO_DO_FIM_DO_APROFUNDAMENTO = 1 - FRACAO_PARA_FECHAR;
+/** Um APROFUNDAMENTO que começa depois do fim previsto ainda tem este tempo (s). */
+export const MIN_APROFUNDAMENTO_S = 60;
+
+/** O que a duração efetiva da fase precisa saber (tudo em ms, exceto as durações em segundos). */
+export type DadosDaDuracaoDaFase = {
+  /** Quando a fase atual começou (ms). */
+  faseIniciadaEm: number | null;
+  /** Quando a entrevista começou (ms). Ausente ou null (estado antigo): vale a duração de `tempos`. */
+  iniciadaEm?: number | null;
+  /** Duração total da entrevista em segundos (a mesma conta da garantia dos 60%). */
+  duracaoTotalS?: number;
+  /** Duração da fase em `tempos` (s). */
+  duracaoFaseS?: number;
+};
+
+/**
+ * Duração efetiva de uma fase, em segundos, contada do começo dela. Só o APROFUNDAMENTO muda: ele vai até o instante
+ * em que faltam FRACAO_PARA_FECHAR do tempo total da entrevista (iniciadaEm + total × 0,85), independente de quando a
+ * fase começou. Se esse instante já tinha passado quando a fase começou, vale MIN_APROFUNDAMENTO_S. As demais fases, e
+ * o APROFUNDAMENTO sem dados de início, valem `duracaoFaseS`. Sem duração: undefined (fase sem limite).
+ */
+export function duracaoEfetivaDaFaseS(fase: string, dados: DadosDaDuracaoDaFase): number | undefined {
+  const { faseIniciadaEm, iniciadaEm, duracaoTotalS, duracaoFaseS } = dados;
+  if (fase !== "APROFUNDAMENTO" || faseIniciadaEm === null || iniciadaEm === undefined || iniciadaEm === null || !duracaoTotalS) {
+    return duracaoFaseS;
+  }
+  const fimMs = iniciadaEm + duracaoTotalS * FRACAO_DO_FIM_DO_APROFUNDAMENTO * 1000;
+  return fimMs > faseIniciadaEm ? (fimMs - faseIniciadaEm) / 1000 : MIN_APROFUNDAMENTO_S;
+}
+
+/**
+ * Quanto falta, em ms, para o timer da fase disparar, contado de `agora` (o timer do navegador usa esta conta). Para o
+ * APROFUNDAMENTO é o instante absoluto do fim (iniciadaEm + total × 0,85): um reinício do timer não empurra o fim além
+ * dos 85%. Se esse instante já tinha passado quando a fase começou, espera MIN_APROFUNDAMENTO_S a partir de agora. As
+ * demais fases (e o APROFUNDAMENTO sem dados de início) valem a duração cheia de `tempos`, como antes.
+ */
+export function msAteFimDaFase(fase: string, agora: number, dados: DadosDaDuracaoDaFase): number | undefined {
+  const { faseIniciadaEm, iniciadaEm, duracaoTotalS, duracaoFaseS } = dados;
+  if (fase !== "APROFUNDAMENTO" || faseIniciadaEm === null || iniciadaEm === undefined || iniciadaEm === null || !duracaoTotalS) {
+    return duracaoFaseS === undefined ? undefined : duracaoFaseS * 1000;
+  }
+  const fimMs = iniciadaEm + duracaoTotalS * FRACAO_DO_FIM_DO_APROFUNDAMENTO * 1000;
+  if (fimMs <= faseIniciadaEm) return Math.max(fimMs - agora, MIN_APROFUNDAMENTO_S * 1000);
+  return Math.max(fimMs - agora, 0);
+}
+
 /** Quanto uma pergunta final leva, contando a resposta e a reação. */
 export const TEMPO_POR_PERGUNTA_FINAL_MS = 60_000;
 /** O que a última palavra e a despedida precisam. */

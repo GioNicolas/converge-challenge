@@ -7,6 +7,7 @@ import {
   INTERVALO_BRECHA_EMPECILHO_MS,
   precisaAbrirBrechaDaMudanca,
   refiltrarComEstadoAtual,
+  respostaSilencio,
   type DepsAnalisar,
 } from "../analisar";
 import { eQuaseDuplicada, limitarFrases } from "../guardas";
@@ -491,5 +492,61 @@ describe("analisar: redirecionamento de escopo (#129, decisão I)", () => {
     const atual = estadoEm("APROFUNDAMENTO", { escopoRedirecionamentos: 2, escopoProvocadoEm: AGORA - 60 * 60_000 });
     const r = refiltrarComEstadoAtual(atual, redireciona(), pedido(), AGORA, AGORA);
     assert.equal(r.status, "ok");
+  });
+});
+
+describe("analisar: pergunta obrigatória no teto (#129, bloco B)", () => {
+  const MIN = 60_000;
+  // 4 min sem pergunta e uma peça nova no grafo (r1 já estava na última pergunta): o teto (3 min) venceu.
+  const comTetoVencido = () => estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 4 * MIN, desenhoNaUltimaPergunta: ["r1"] });
+
+  it("o teto vencido e um \"ok\" do modelo geram uma segunda chamada, com o aviso, e a pergunta sai", async () => {
+    const llm = criarClienteFalso([respostaSilencio(), duvida()]);
+    const r = await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.ok(llm.chamadas[1]?.sistema.dinamico?.includes("ATENÇÃO: faz tempo que você não pergunta"));
+    assert.ok(!llm.chamadas[0]?.sistema.dinamico?.includes("ATENÇÃO: faz tempo que você não pergunta"));
+    assert.equal(r.resposta.status, "duvida");
+    assert.equal(r.estado.plin, "PLIN_PENDENTE");
+    assert.equal(r.diagnostico.ajustes.includes("teto_sem_pergunta"), false);
+  });
+
+  it("se a segunda chamada também devolve \"ok\", fica \"ok\" e a análise registra teto_sem_pergunta", async () => {
+    const llm = criarClienteFalso([respostaSilencio(), respostaSilencio()]);
+    const r = await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.estado.plin, "LIVRE");
+    assert.ok(r.diagnostico.ajustes.includes("teto_sem_pergunta"));
+  });
+
+  it("se a segunda chamada falha, fica \"ok\" com teto_sem_pergunta (sem lançar)", async () => {
+    const llm = criarClienteFalso([respostaSilencio(), new ErroLlm("timeout", "prazo")]);
+    const r = await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+    assert.equal(r.resposta.status, "ok");
+    assert.equal(r.diagnostico.origem, "llm");
+    assert.ok(r.diagnostico.ajustes.includes("teto_sem_pergunta"));
+  });
+
+  it("no máximo uma segunda chamada por análise", async () => {
+    const llm = criarClienteFalso([respostaSilencio()]);
+    await analisar(deps(llm), comTetoVencido(), pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 2);
+  });
+
+  it("com outro portão fechado (orçamento de perguntas), o \"ok\" não ganha segunda chamada", async () => {
+    const llm = criarClienteFalso([respostaSilencio()]);
+    const estado = { ...comTetoVencido(), perguntasFeitas: 50 };
+    const r = await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 1);
+    assert.equal(r.diagnostico.ajustes.includes("teto_sem_pergunta"), false);
+  });
+
+  it("sem teto vencido, o \"ok\" é o da primeira chamada (nenhuma segunda)", async () => {
+    const llm = criarClienteFalso([respostaSilencio()]);
+    const estado = estadoEm("APROFUNDAMENTO", { ultimaPerguntaEm: AGORA - 2 * MIN, desenhoNaUltimaPergunta: ["r1"] });
+    await analisar(deps(llm), estado, pedido(), AGORA);
+    assert.equal(llm.chamadas.length, 1);
   });
 });

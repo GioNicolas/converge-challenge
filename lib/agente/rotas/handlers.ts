@@ -23,6 +23,7 @@ import { gatilhoDoFechamento, iniciarFechamento, proximoPasso, type EtapaDoFecha
 import { candidatasDoQuadro, perguntasJaOuvidas } from "../fechamento";
 import { pecasDoGrafo } from "../sessao/fechamento";
 import { parametrosDoFechamentoNoQuadro } from "../sessao/politica";
+import { duracaoEfetivaDaFaseS } from "../../totti/fechamento";
 import { transicionar, estadoInicial, TEMPOS_PADRAO, tempoDaEntrevista, tempoRestanteMs, criteriosSemEvidencia, duracaoTotalS, type Desfecho, type EstadoSessao, type EventoSessao } from "../sessao/estado";
 import {
   EsquemaFalaRecente,
@@ -500,7 +501,13 @@ function motivoDoEmpecilho(estado: EstadoSessao, grafo: string, forcar: boolean,
     agora,
     fase: estado.fase,
     faseIniciadaEm: estado.faseIniciadaEm,
-    duracaoDaFaseS: estado.tempos[estado.fase],
+    // Duração efetiva da fase (#129): no APROFUNDAMENTO, a fração é sobre o tempo até os 85% do total.
+    duracaoDaFaseS: duracaoEfetivaDaFaseS(estado.fase, {
+      faseIniciadaEm: estado.faseIniciadaEm,
+      iniciadaEm: estado.iniciadaEm ?? null,
+      duracaoTotalS: duracaoTotalS(estado),
+      duracaoFaseS: estado.tempos[estado.fase],
+    }),
     jaAnunciado,
     respondendoPergunta: estado.plin === "PERGUNTA_ATIVA",
     componentes: contarComponentes(grafo),

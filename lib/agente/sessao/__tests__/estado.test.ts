@@ -105,7 +105,9 @@ describe("fases: orçamento de tempo", () => {
     let e = aplicar(estadoInicial({ tempos }), { tipo: "COMECAR" }, { tipo: "APRESENTACAO_TERMINOU" });
     let t = e.faseIniciadaEm!;
     const esperado: Fase[] = ["ALTO_NIVEL", "APROFUNDAMENTO", "FECHAMENTO", "ENCERRADA"];
-    const duracoes = [10, 20, 30, 5];
+    // O APROFUNDAMENTO acaba com 85% do tempo total (65 s = 55,25 s desde o COMECAR). Ele começa aos 31 s (a apresentação
+    // e cada evento do `aplicar` andam 1 s), então dura 24,25 s (#129, decisão F).
+    const duracoes = [10, 20, 24.25, 5];
     esperado.forEach((fase, i) => {
       // Um instante antes: nada acontece.
       assert.equal(transicionar(e, { tipo: "TICK" }, t + duracoes[i] * 1000 - 1).estado.fase, e.fase);
@@ -115,6 +117,25 @@ describe("fases: orçamento de tempo", () => {
       assert.equal(r.estado.faseIniciadaEm, t);
       e = r.estado;
     });
+  });
+
+  it("APROFUNDAMENTO começa cedo: acaba com 85% do tempo total, não com o tempo de `tempos` (#129, decisão F)", () => {
+    // Entrevista padrão, 35 min (2100 s). Começo aos 10 min: o APROFUNDAMENTO vai até 1785 s, ou seja 1185 s.
+    let e = transicionar(estadoInicial(), { tipo: "COMECAR" }, T0).estado;
+    e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
+    e = transicionar(e, { tipo: "APROFUNDAR" }, T0 + 10 * MIN).estado;
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 10 * MIN + 1185_000 - 1).estado.fase, "APROFUNDAMENTO");
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 10 * MIN + 1185_000).estado.fase, "FECHAMENTO");
+  });
+
+  it("APROFUNDAMENTO começa tarde: vale o mínimo de 60 s (#129, decisão F)", () => {
+    let e = transicionar(estadoInicial(), { tipo: "COMECAR" }, T0).estado;
+    e = transicionar(e, { tipo: "APRESENTACAO_TERMINOU" }, T0 + 1000).estado;
+    e = transicionar(e, { tipo: "CANDIDATO_DESENHOU" }, T0 + 2000).estado;
+    e = transicionar(e, { tipo: "APROFUNDAR" }, T0 + 30 * MIN).estado;
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 30 * MIN + 60_000 - 1).estado.fase, "APROFUNDAMENTO");
+    assert.equal(transicionar(e, { tipo: "TICK" }, T0 + 30 * MIN + 60_000).estado.fase, "FECHAMENTO");
   });
 
   it("fase sem tempo configurado não acaba sozinha", () => {

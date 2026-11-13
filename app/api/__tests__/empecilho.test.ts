@@ -95,7 +95,8 @@ describe("POST /api/sessoes/[id]/empecilho", () => {
   it("no aprofundamento só enquanto sobra tempo para adaptar", async () => {
     const id = await novaSessao();
     await irParaFase(id, "APROFUNDAMENTO");
-    relogio += 700_000; // 78% de 900 s
+    // O APROFUNDAMENTO acaba com 85% do tempo total (#129, decisão F): 20 min de 35 deixam 1/3 da janela até lá.
+    relogio += 1_200_000;
     assert.equal((await pedir(id, { fase: "APROFUNDAMENTO" })).corpo.motivo, "pouco tempo para adaptar");
   });
 

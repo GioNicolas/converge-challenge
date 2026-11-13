@@ -7,27 +7,31 @@ import { emPortugues } from "../totti/guardas";
 import type { LlmCliente } from "./llm/cliente";
 import type { Kit, Problema } from "./kits/tipos";
 import { temMudancaPrevista } from "./kits/empecilhos-genericos";
-import { montarPromptAvaliador, NOME_SCHEMA_ANALISE } from "./prompts/avaliador";
+import { AVISO_DA_PERGUNTA_OBRIGATORIA, montarPromptAvaliador, NOME_SCHEMA_ANALISE } from "./prompts/avaliador";
 import {
-  duracaoTotalS,
   transicionar,
   type Efeito,
   type EstadoSessao,
 } from "./sessao/estado";
-import { emGarantiaDoEmpecilho } from "../sessao/empecilho";
 import { pecasDoGrafo } from "./sessao/fechamento";
 import {
   aplicarRegraDoEscopo,
   extrairIdsDoGrafo,
   filtrarResposta,
   motivoDoConteudo,
+  perguntaObrigatoria,
   podeAnalisar,
   podeLevantarPlin,
+  precisaAbrirBrechaDaMudanca,
   REGRAS_PADRAO,
   motivoBloqueioPlin,
   type Regras,
 } from "./sessao/politica";
 import { EsquemaRespostaAnalise, type PedidoAnalise, type RespostaAnalise } from "./sessao/tipos";
+
+// As regras da brecha da mudança (decisão G) moram em sessao/politica.ts (o prompt do avaliador também as usa; importar
+// daqui criaria um ciclo). Re-exportadas para quem já importa daqui.
+export { INTERVALO_BRECHA_EMPECILHO_MS, precisaAbrirBrechaDaMudanca } from "./sessao/politica";
 
 export type LogMeta = (evento: string, meta: Record<string, unknown>) => void;
 
@@ -60,25 +64,6 @@ export const CONVITES_SILENCIO_INICIAL = [
   "Quando quiser, me conta como está pensando em começar. Pode tirar dúvidas comigo.",
   "Pode me contar por onde está pensando em começar. Se tiver alguma dúvida, pode perguntar.",
 ] as const;
-
-/**
- * Um ciclo de brecha por vez: depois da garantia dos 60% (ver `precisaAbrirBrechaDaMudanca`), a análise volta a
- * abrir espaço para a mudança só depois desse intervalo. Não bloqueia perguntas indefinidamente.
- */
-export const INTERVALO_BRECHA_EMPECILHO_MS = 60_000;
-
-/**
- * A mudança devida ainda não entrou e a entrevista já passou da fração da garantia (decisão G): a análise responde
- * "ok" por um ciclo para abrir a brecha. Só no meio da entrevista (ALTO_NIVEL e APROFUNDAMENTO) e com a mudança
- * prevista (do problema ou genérica do kit). Função pura.
- */
-export function precisaAbrirBrechaDaMudanca(estado: EstadoSessao, agora: number, mudancaPrevista: boolean): boolean {
-  if (!mudancaPrevista || estado.empecilho) return false;
-  if (estado.fase !== "ALTO_NIVEL" && estado.fase !== "APROFUNDAMENTO") return false;
-  if (!emGarantiaDoEmpecilho({ agora, iniciadaEm: estado.iniciadaEm ?? null, duracaoTotalS: duracaoTotalS(estado) })) return false;
-  const ultima = estado.brechaEmpecilhoEm;
-  return ultima === undefined || ultima === null || agora - ultima >= INTERVALO_BRECHA_EMPECILHO_MS;
-}
 
 export function respostaSilencio(): RespostaAnalise {
   return { status: "ok", pergunta: null, nota: null, elementos: [], degrau: null, observacoes: [], parteFechada: false, escopo: false };
@@ -151,22 +136,27 @@ export async function analisar(
   }
 
   const prompt = montarPromptAvaliador(deps.kit, deps.problema, estado, pedido, agora);
+  const pecas = pecasDoGrafo(pedido.grafo);
+  // Teto da pergunta obrigatória (#129, bloco B): o prompt já cobra a pergunta; se o modelo mesmo assim devolver "ok", há
+  // uma segunda chamada (ver abaixo). Mesma conta do prompt (montarSistemaDinamico), então os dois não divergem.
+  const obrigada = perguntaObrigatoria(estado, agora, pecas, { paradoHaS: pedido.parado_ha_s, mudancaPrevista: temMudancaPrevista(deps.kit, deps.problema) });
+  const chamar = (sistema: { estatico: string; dinamico: string }, timeoutMs: number) => deps.llm.completarJson({
+    sistema,
+    mensagens: prompt.mensagens,
+    schema: EsquemaRespostaAnalise,
+    nomeSchema: NOME_SCHEMA_ANALISE,
+    modelo: deps.modelo,
+    maxTokens: deps.maxTokens,
+    timeoutMs,
+    sinal,
+    imagem: pedido.imagem_base64 ?? null,
+    semReserva: bloqueadaAgora,
+  });
   let bruta: RespostaAnalise;
   let ms: number | undefined;
   let uso: ResultadoAnalise["diagnostico"]["uso"];
   try {
-    const r = await deps.llm.completarJson({
-      sistema: prompt.sistema,
-      mensagens: prompt.mensagens,
-      schema: EsquemaRespostaAnalise,
-      nomeSchema: NOME_SCHEMA_ANALISE,
-      modelo: deps.modelo,
-      maxTokens: deps.maxTokens,
-      timeoutMs: PRAZO_ANALISE_DO_DESENHO_MS,
-      sinal,
-      imagem: pedido.imagem_base64 ?? null,
-      semReserva: bloqueadaAgora,
-    });
+    const r = await chamar(prompt.sistema, PRAZO_ANALISE_DO_DESENHO_MS);
     bruta = EsquemaRespostaAnalise.parse(r.dados);
     ms = r.ms;
     uso = r.uso;
@@ -184,6 +174,23 @@ export async function analisar(
   }
 
   const ajustes: string[] = [];
+  // Pergunta obrigatória sem pergunta (#129, bloco B): UMA segunda chamada, com um aviso curto. O prazo é o da análise,
+  // descontado o que a primeira gastou. Se ainda vier "ok" (ou a segunda falhar), fica "ok" e a análise registra o motivo.
+  if (bruta.status === "ok" && obrigada) {
+    const restanteMs = PRAZO_ANALISE_DO_DESENHO_MS - (ms ?? 0);
+    let segunda: RespostaAnalise | null = null;
+    if (restanteMs > 0) {
+      try {
+        const r2 = await chamar({ ...prompt.sistema, dinamico: `${prompt.sistema.dinamico}\n\n${AVISO_DA_PERGUNTA_OBRIGATORIA}` }, restanteMs);
+        const validada = EsquemaRespostaAnalise.safeParse(r2.dados);
+        if (validada.success) segunda = validada.data;
+      } catch {
+        // Sem segunda resposta vale o "ok" da primeira: o registro abaixo diz que a pergunta ficou de fora.
+      }
+    }
+    if (segunda) bruta = segunda;
+    if (bruta.status === "ok") ajustes.push("teto_sem_pergunta");
+  }
   let resposta: RespostaAnalise = bruta;
 
   if (resposta.status !== "ok") {
@@ -253,7 +260,6 @@ export async function analisar(
 
   // Ritmo por conteúdo (#129, bloco B): a pergunta sobre o desenho só sai com uma parte fechada (ou no teto).
   // Sem isso vira "ok" e as observações ficam. Os portões do ritmo comum ainda valem em `filtrarResposta`.
-  const pecas = pecasDoGrafo(pedido.grafo);
   if (resposta.status !== "ok") {
     const motivo = motivoDoConteudo(estado, resposta, agora, { paradoHaS: pedido.parado_ha_s, pecas });
     if (motivo) {

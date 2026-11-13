@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   aceitaEncerrar, aindaPensando, aoVoltarATrabalhar, DESPEDIDAS, escolherPerguntasFinais, FRACAO_PARA_FECHAR, gatilhoDoFechamento, iniciarFechamento,
-  limiarDoFechamentoNoQuadro, perguntasQueCabem, proximoPasso, TEMPO_PARA_FECHAR_MS, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
+  duracaoEfetivaDaFaseS, FRACAO_DO_FIM_DO_APROFUNDAMENTO, msAteFimDaFase, limiarDoFechamentoNoQuadro, MIN_APROFUNDAMENTO_S, perguntasQueCabem, proximoPasso, TEMPO_PARA_FECHAR_MS, type EstadoFechamento, type PassoDoFechamento, type PerguntaFinal,
 } from "../fechamento";
 import { comVezDevolvida, convitesPara, escolherConvite, semConviteDeSeguir, semPerguntaNoFim, semPerguntaNoFimSeSobrar } from "../guardas";
 import type { LeituraDoTurno } from "../turno";
@@ -370,5 +370,114 @@ describe("o núcleo não depende das salas", () => {
       const fonte = fs.readFileSync(path.join(pasta, arquivo), "utf8");
       assert.doesNotMatch(fonte, /from\s+["'][^"']*(\/agente\/|\/agents\/|\/agente["']|\/agents["'])/, arquivo);
     }
+  });
+});
+
+describe("duração efetiva da fase (#129, decisão F): o APROFUNDAMENTO acaba com 85% do tempo total", () => {
+  // Entrevista de 35 min (2100 s) que começou em t = 0: o APROFUNDAMENTO acaba em 0,85 × 2100 s = 1785 s (29,75 min).
+  const TOTAL_S = 35 * 60;
+  const INICIO = 0;
+  const base = { iniciadaEm: INICIO, duracaoTotalS: TOTAL_S, duracaoFaseS: 900 };
+
+  it("a fração que vale é 1 - FRACAO_PARA_FECHAR (0,85)", () => {
+    assert.equal(FRACAO_DO_FIM_DO_APROFUNDAMENTO, 0.85);
+    assert.equal(MIN_APROFUNDAMENTO_S, 60);
+  });
+
+  it("começo cedo (ALTO_NIVEL terminou aos 10 min): o APROFUNDAMENTO dura até os 85%, ou seja 1185 s", () => {
+    const dur = duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 10 * 60_000 });
+    assert.equal(dur, 1785 - 600);
+  });
+
+  it("começo no tempo previsto (aos 20 min): dura até os 85%, 585 s, e não os 900 de `tempos`", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 20 * 60_000 }), 585);
+  });
+
+  it("começo tarde (aos 25 min): sobram 285 s até os 85%", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 25 * 60_000 }), 285);
+  });
+
+  it("instante já passado ao entrar (começo depois dos 85%): vale o mínimo de 60 s", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 30 * 60_000 }), MIN_APROFUNDAMENTO_S);
+  });
+
+  it("começo exatamente no instante dos 85%: também vale o mínimo de 60 s", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: 1785 * 1000 }), MIN_APROFUNDAMENTO_S);
+  });
+
+  it("a conta segue a entrevista, não a fase: com outra duração total, o fim muda", () => {
+    // 20 min de entrevista: 85% = 17 min. Começo aos 10 min: sobram 7 min.
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, duracaoTotalS: 20 * 60, faseIniciadaEm: 10 * 60_000 }), 420);
+  });
+
+  it("as outras fases não mudam: a duração de `tempos`", () => {
+    assert.equal(duracaoEfetivaDaFaseS("ALTO_NIVEL", { ...base, faseIniciadaEm: 5 * 60_000, duracaoFaseS: 600 }), 600);
+    assert.equal(duracaoEfetivaDaFaseS("REQUISITOS", { ...base, faseIniciadaEm: 0, duracaoFaseS: 300 }), 300);
+    assert.equal(duracaoEfetivaDaFaseS("FECHAMENTO", { ...base, faseIniciadaEm: 0, duracaoFaseS: 300 }), 300);
+  });
+
+  it("estado antigo, sem iniciadaEm: vale a duração de `tempos` (como antes)", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { faseIniciadaEm: 10 * 60_000, duracaoFaseS: 900 }), 900);
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { faseIniciadaEm: 10 * 60_000, iniciadaEm: null, duracaoFaseS: 900 }), 900);
+  });
+
+  it("sem duração total, ou sem a fase iniciada: vale a duração de `tempos`", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { iniciadaEm: 0, faseIniciadaEm: 10 * 60_000, duracaoFaseS: 900 }), 900);
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { ...base, faseIniciadaEm: null }), 900);
+  });
+
+  it("sem nenhuma duração conhecida, a fase não tem limite (undefined)", () => {
+    assert.equal(duracaoEfetivaDaFaseS("APROFUNDAMENTO", { faseIniciadaEm: 0 }), undefined);
+  });
+});
+
+describe("espera até o fim da fase, contada de agora (#129, decisão F): o timer do navegador", () => {
+  // Entrevista de 35 min (2100 s) iniciada em t = 0: o APROFUNDAMENTO acaba em 1785 s (29,75 min).
+  const TOTAL_S = 35 * 60;
+  const base = { iniciadaEm: 0, duracaoTotalS: TOTAL_S, duracaoFaseS: 900 };
+  const FIM = 1785 * 1000;
+
+  it("começo cedo: a espera é o instante absoluto do fim menos agora", () => {
+    const faseIniciadaEm = 10 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm, { ...base, faseIniciadaEm }), FIM - faseIniciadaEm);
+  });
+
+  it("um reinício do timer depois de 5 min da fase não empurra o fim: a espera cai 5 min", () => {
+    const faseIniciadaEm = 10 * 60_000;
+    const agora = faseIniciadaEm + 5 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", agora, { ...base, faseIniciadaEm }), FIM - agora);
+  });
+
+  it("o fim absoluto é o mesmo com qualquer agora: fim = agora + espera", () => {
+    const faseIniciadaEm = 12 * 60_000;
+    for (const agora of [faseIniciadaEm, faseIniciadaEm + 60_000, faseIniciadaEm + 400_000]) {
+      assert.equal(agora + msAteFimDaFase("APROFUNDAMENTO", agora, { ...base, faseIniciadaEm })!, FIM);
+    }
+  });
+
+  it("começo tarde, com o instante do fim ainda no futuro: a espera segue o fim", () => {
+    const faseIniciadaEm = 25 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm, { ...base, faseIniciadaEm }), FIM - faseIniciadaEm);
+  });
+
+  it("instante já passado ao entrar na fase: espera o mínimo de 60 s a partir de agora", () => {
+    const faseIniciadaEm = 30 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm, { ...base, faseIniciadaEm }), MIN_APROFUNDAMENTO_S * 1000);
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", faseIniciadaEm + 20_000, { ...base, faseIniciadaEm }), MIN_APROFUNDAMENTO_S * 1000);
+  });
+
+  it("fim já alcançado por um reinício atrasado (o fim passou, a fase começou antes): espera zero", () => {
+    const faseIniciadaEm = 20 * 60_000;
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", FIM + 1000, { ...base, faseIniciadaEm }), 0);
+  });
+
+  it("as outras fases valem a duração cheia de `tempos`, em ms, sem contar de agora", () => {
+    assert.equal(msAteFimDaFase("ALTO_NIVEL", 5 * 60_000, { ...base, faseIniciadaEm: 0, duracaoFaseS: 600 }), 600_000);
+    assert.equal(msAteFimDaFase("REQUISITOS", 1000, { ...base, faseIniciadaEm: 0, duracaoFaseS: 300 }), 300_000);
+  });
+
+  it("sem dados de início, o APROFUNDAMENTO vale a duração de `tempos`; sem nada, sem timer", () => {
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", 0, { faseIniciadaEm: 0, duracaoFaseS: 900 }), 900_000);
+    assert.equal(msAteFimDaFase("APROFUNDAMENTO", 0, { faseIniciadaEm: 0 }), undefined);
   });
 });
